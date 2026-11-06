@@ -58,6 +58,17 @@ Third read, 18:44 UTC: 361 pass, 47 fail, 40 no checks, 14 running. Embedded (ad
 - Progress: 60 of the last 100 built when the disk allowance ran out (swift-uri hit it; to rebuild). institute's own 6.9G .build was removed to free space. Before that, 54 of the last 100 built; 6 failed, all on Linux. effects, email, email-html, stores: the suites test trait-gated targets that a default-trait build leaves out, so the original fails the same way; to rebuild with all traits. github: the moved suites used the old extension's nested types bare (`Client`, `Request`, `Page`); typealiases added in each namespace. pdf-render: the namespace already existed in another file as a suite; reused. cpu and bifunctor were done earlier.
 - No lint rule: whether T is declared in the test module is a question across files, which a per-file rule can't answer.
 
+## Manifests: literal names and typed target dependencies (19:21 UTC)
+
+Coen's rulings (6 Nov): no `extension Target.Dependency` or `extension String` name constants in manifests; names are string literals; a target dependency is `.target(name: "X")` or `.product(name: "X", package: "y")`, never a plain string, test targets included. The settings loop stays.
+- Aliases: 7 swift-ietf manifests wrote their Target.Dependency aliases out, then 8 dropped their String constants (rfc-1034 39ce81e, rfc-3596 5078a1c, rfc-5280 4fa0f3f, rfc-6066 509d415, rfc-6455 33ac90e, rfc-6891 1b2c14b, rfc-7301 3bb9c42, rfc-8200 08c2143). No public manifest on latest main has either extension.
+- Enforcement: institute 0b70b0b. `declarative manifest` names both extensions, with controls firing and quiet; `bare string dependency` drops the control that blessed accessors. 58 tests pass on Linux; the two new ones fail on the old rule. Reaches CI with the next runner publish.
+- Plain-string target dependencies: 516 sites in 59 public manifests at latest main, counted from `swift package dump-package` (byName entries). Every one names a target of its own manifest, so each becomes `.target(name:)`; none needed `.product`. Each rewritten manifest's dump equals the old one except byName -> target for the same name. Pushed in batches: institute df8ad29, then 17, then the rest.
+- One slip, caught: running the manifest edit four at a time shared its temporary files, so 8 committed blobs came out wrong. Each failed its dump check and none was committed. Every touched checkout's local manifest was rebuilt from its index and checked by dump.
+- Next, once the sweep is at zero: raise `bare string dependency` to error in the Institute policy, with the next runner publish.
+
+institute's Windows build (run 42265145525) stopped in `Institute.CI.Validation.Gitignore Tests.swift`, which imported Path without File_System: fixed in 0b70b0b (`String` there is now `Swift.String`, since File System has its own). Windows not compiled here.
+
 ## 5. Private portable packages: all seven pass on Linux
 
 | Package | Tests | Change |
