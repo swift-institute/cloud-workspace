@@ -4,11 +4,12 @@ Plan: (1) re-pin swift-format in Institute.Source.Policy and adopt it through .g
 
 Every green here is Linux x86_64, Swift 6.4.2. Apple and Windows code isn't compiled here; ci.yml judges those after the pushes.
 
-## 1. Source gate re-pin: committed and published; adoption waits for the Mac
+## 1. Source gate re-pin: done, adopted
 
 - Cause: GitHub's xcode-27 image 20261104.0337 carries Xcode 27.2 build 27B52, whose swift-format hashes to 475d31f4…; the pin recorded 27B48's d16e0788….
-- `institute` 3a43c132b72118b045a4eeb002fcd2937e974414: pin 475d31f4… and 27B52; institute targets take File.Path from File System instead of ISO 9945 Kernel File, which doesn't build on Windows (institute's Windows build has been red since 53a421e); bundle test master list; swift-format findings. publish-planner run 42245057187: success.
-- **Blocked here: adoption.** `swift-institute/.github` can't be attached to a cloud session (names starting with `.` are refused), and `institute planner canary` needs Xcode. The adoption to run is in the "For the Mac" section below.
+- `institute` 3a43c132b72118b045a4eeb002fcd2937e974414: pin 475d31f4… and 27B52; File.Path from File System instead of ISO 9945 Kernel File (POSIX); bundle test master list; swift-format findings. publish-planner run 42245057187.
+- **Adopted from the Mac:** `swift-institute/.github` main 3409f30bbc645c5672c50ef3226037ea02cbb196 pins planner 326e729 from publish run 42249866520. Canary: adoptable, 0 regressions on all 4 canary repositories, Mac only. A swift-format re-pin can't pass a canary run on one Xcode, so `institute` c84206b adds `--candidate-xcode`.
+- Fleet CI only re-runs on a push or a re-run, so the red results from before adoption don't clear on their own: failed jobs re-run in 82 repositories whose latest main run failed Quality · source; the rest get new runs from the step 4 pushes.
 
 ## 2. Concept rules in ci.yml (decision 25): committed and published
 
@@ -36,9 +37,13 @@ Not fixed, by decision: Embedded failures other than swift-path's are advisory (
 
 Not yet: a second read after these pushes.
 
-## 4. Suite-name collisions: not started
+## 4. Suite-name collisions: in progress
 
-1,344 suite-bearing `extension T {}` blocks in 169 repositories. `compound suite name` already accepts a top-level `` `X Tests` `` suite, so the move lints clean, but moving a suite out of `extension T` breaks unqualified lookups of T's members inside it.
+- Each `extension T { @Suite … }` where T isn't declared in the test module moves to a namespace `` `T Tests` `` the test module declares (an existing type of that name is reused); references are rewritten, then changed files are formatted with swift-format where the committed file is already stable under it. `compound suite name` accepts the shape.
+- `institute` a41bfd4 + 29b5e53: 149 suites; every test target builds and passes on Linux.
+- The rest: 146 repositories. Each one's test targets must build on Linux before it's committed and pushed; the tests themselves run in ci.yml.
+- **Build route.** The shared root workspace can't build other packages' test targets: SwiftPM builds only the root package's tests. What works is one shared `--scratch-path` for every package's `swift build --package-path <repo> --build-tests`: built dependencies are reused across packages. swift-witness's tests built in 4 s after swift-version's, against about 5 minutes each from a fresh scratch. Used for the last 100 repositories.
+- No lint rule: whether T is declared in the test module is a question across files, which a per-file rule can't answer.
 
 ## 5. Private portable packages: all seven pass on Linux
 
@@ -54,15 +59,7 @@ Not yet: a second read after these pushes.
 
 No Docker build was made, so the licensing deploy's own condition isn't met by this.
 
-## For the Mac
-
-The new pin is the swift-format of Xcode 27.2 build 27B52. The canary runs planners with the Mac's own Xcode, whose 27B48 swift-format hashes to d16e0788…, so the candidate will probably refuse until the Mac has 27B52 (an untested inference from the source, not run). Then, after publish-planner run 42249866520 succeeds:
-
-    institute planner canary --publish-run 42249866520
-    institute planner adopt --publish-run 42249866520 --evidence-path <evidence.json the canary wrote> --github-checkout <path to swift-institute/.github>
-    git -C <path to swift-institute/.github> push
-
 ## Follow-ups
 
 - `blocking call in async` reads an enum case pattern named `wait` as a call, and takes no suppression.
-- Institute targets that write File.Path literals need Windows' literal conformance (Windows 32 Kernel File); read after the Windows build.
+- Windows' Path literal conformance: File System Core re-exports Kernel File on Windows (swift-file-system d67e77a), and institute's Source Policy imports File System (bfc0752). Windows not compiled here.
