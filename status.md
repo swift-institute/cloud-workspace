@@ -49,7 +49,7 @@ Third read, 18:44 UTC: 361 pass, 47 fail, 40 no checks, 14 running. Embedded (ad
 - international-system-of-units fa0c1c7: swiftlint's shorthand_operator and force_try are errors; `+=` and a swiftlint directive. Target builds on Linux.
 - swift-manifests 08b9b20: two test files' imports sorted.
 
-## 4. Suite-name collisions: in progress
+## 4. Suite-name collisions: done
 
 - Each `extension T { @Suite … }` where T isn't declared in the test module moves to a namespace `` `T Tests` `` the test module declares (an existing type of that name is reused); references are rewritten, then changed files are formatted with swift-format where the committed file is already stable under it. `compound suite name` accepts the shape.
 - `institute` a41bfd4 + 29b5e53: 149 suites; every test target builds and passes on Linux.
@@ -69,6 +69,17 @@ Coen's rulings (6 Nov): no `extension Target.Dependency` or `extension String` n
 - institute 003bf06: `bare string dependency` defaults to error. The linter profile lists rules, not severities, so the rule's own default is the lever. 31 tests pass on Linux. Reaches CI with the next runner publish; private and Mac-side manifests go first.
 
 institute's Windows build (run 42265145525) stopped in `Institute.CI.Validation.Gitignore Tests.swift`, which imported Path without File_System: fixed in 0b70b0b (`String` there is now `Swift.String`, since File System has its own). Windows not compiled here.
+
+## Final read, 21:31 UTC
+
+448 public mains: 192 proven (latest commit green and its Build jobs ran), 177 green with every Build skipped (README-only latest commits, which prove nothing about the code), 25 advisory (only Embedded fails), 39 with no checks, 15 red.
+- 14 of the red are 4 Nov runs whose cancelled source job passed on re-run, but `ci-ok` needs the first attempt's planner artifact, which has expired: whole runs re-run. Their latest commits are README-only, so they will land as green-with-builds-skipped.
+- institute: Windows compiles again (0b70b0b) and 14 tests fail there on path separators; follow-up.
+- After the manifest fix, rfc-6066's report was measured and showed test files named `*_Tests.swift`; 11 such files in the 7 alias repos renamed to ` Tests.swift` (rfc-6066 4cde364 and siblings).
+
+Step 4 finished: every repository with a suite in an extension of a foreign type is moved, built on Linux, and pushed (149 in institute, then the fleet).
+
+Follow-up: coenttb/work#241 (runner publish carrying 79d10ad, 0b70b0b, 003bf06; `blocking call in async`; no suite-placement rule; institute on Windows; Embedded).
 
 ## 5. Private portable packages: all seven pass on Linux
 
