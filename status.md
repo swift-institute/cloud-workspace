@@ -35,7 +35,12 @@ Fixed and pushed:
 
 Not fixed, by decision: Embedded failures other than swift-path's are advisory (`ci-ok` passes without them) and structural (swift-syntax's precondition, key paths, Foundation, Task). swift-witnesses' source failure is a 5 Nov run, before the re-pin.
 
-Not yet: a second read after these pushes.
+Second read, 19:00 UTC: 338 pass, 69 fail, 41 no checks, 11 running. Every red is Quality · source (24 repositories) or advisory Embedded (22); no build or test job fails.
+- 14 ran the old pin (institute 8cf32d7) before adoption: failed jobs re-run.
+- swift-stores: artifact upload failed (ENOTFOUND), re-run.
+- swift-witnesses: UNMEASURED, a duplicate finding. `macro expansion short name` read `"\n\n    "` as two key paths to a type `n`. Rule fixed at its source, institute 79d10ad (two new tests that fail without it); CI runs the published runner, so the fleet gets it at the next runner publish and re-pin. Until then swift-witnesses moves that literal out of `expansion` (commit pending its test build in step 4).
+- swift-format findings fixed and pushed, each linted clean locally: international-system-of-units d76e3dc, rfc-6066 4fb92c0 (`try!` with a reason takes `swift-format-ignore: NeverUseForceTry`), linter-rules 4143528, package-graph 8c474cc, swift-institute.org 53920ce, iso-21320 61f9fb6 (its test file goes with its suite move), github-standard b6971f3, rss-standard fddce42.
+- Not fixed: swift-linter-rules' `comment` message has no citation, so `diagnostic message format` (unsuppressible) fails it. Nothing on file cites the 2 Nov decision; it needs one from Coen.
 
 ## 4. Suite-name collisions: in progress
 
@@ -43,6 +48,7 @@ Not yet: a second read after these pushes.
 - `institute` a41bfd4 + 29b5e53: 149 suites; every test target builds and passes on Linux.
 - The rest: 146 repositories. Each one's test targets must build on Linux before it's committed and pushed; the tests themselves run in ci.yml.
 - **Build route.** The shared root workspace can't build other packages' test targets: SwiftPM builds only the root package's tests. What works is one shared `--scratch-path` for every package's `swift build --package-path <repo> --build-tests`: built dependencies are reused across packages. swift-witness's tests built in 4 s after swift-version's, against about 5 minutes each from a fresh scratch. Used for the last 100 repositories.
+- Progress: 54 of the last 100 built; 6 failed, all on Linux. effects, email, email-html, stores: the suites test trait-gated targets that a default-trait build leaves out, so the original fails the same way; to rebuild with all traits. github: the moved suites used the old extension's nested types bare (`Client`, `Request`, `Page`); typealiases added in each namespace. pdf-render: the namespace already existed in another file as a suite; reused. cpu and bifunctor were done earlier.
 - No lint rule: whether T is declared in the test module is a question across files, which a per-file rule can't answer.
 
 ## 5. Private portable packages: all seven pass on Linux
