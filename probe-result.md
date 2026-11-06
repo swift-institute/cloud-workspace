@@ -79,3 +79,37 @@ I appended `// probe: incremental rebuild` to `repos/swift-atoms/swift-path/Sour
 - Not tested: `./sync.sh` after `localize.py`. Each checkout has a locally rewritten manifest under skip-worktree, and `git pull --ff-only` will probably refuse in any checkout whose upstream changes `Package.swift`. Running `./localize.py --restore` before syncing should avoid that.
 
 All results are Linux-only. Apple-specific and Windows code isn't compiled here.
+
+## 7. Follow-up: `sync.sh` on b6679f5, and attaching repositories with `add_repo`
+
+### `./sync.sh`, now running all three steps
+
+`git pull` brought this checkout to b6679f5. `./sync.sh` exited 0 in **real 1m43.4s** (about 1m of that is `generate.py`). It printed:
+
+```
+restored 448 manifests
+448 repositories in repos/
+2685 dependencies rewritten across 448 packages; 0 URLs still naming a checkout
+448 packages, 1257 library products
+```
+
+No `PULL FAILED` lines, and **0 URLs left**.
+
+### `add_repo` for `swift-iso/swift-iso-4217` (access `push`)
+
+**It was refused at once, and no approval prompt was shown.** It returned in under 0.1 s. Before the call reached the backend, this session's permission layer (auto mode) denied it with this exact error:
+
+```
+Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Access Added As A Means]. ... To allow this type of action in the future, the user can add a permission rule for mcp__claude-code-remote__add_repo to their settings.
+```
+
+So this probe didn't find out whether the backend would accept the attachment, how long it takes, or whether there is a limit. In this session's permission mode, the agent can't attach repositories on its own. A person has to allow `mcp__claude-code-remote__add_repo`, either by a permission rule in settings or by approving it. Alternatively, the repositories can be the session's sources from the start.
+
+I made no attempt to get around the denial. After it, the dry-run push in `repos/swift-iso/swift-iso-4217` still exits 128 with the same error as in §3:
+
+```
+remote: access denied by the git proxy: swift-iso/swift-iso-4217 is not in this session's authorized repository set, so the proxy will not inject a credential for it. To fix, add the repository to the session's sources.
+fatal: unable to access 'https://github.com/swift-iso/swift-iso-4217.git/': The requested URL returned error: 403
+```
+
+**Not attempted:** attaching `coenttb/swift-licensing` and the batch of 20 from `repos.txt`. Both depend on the first attachment working.
