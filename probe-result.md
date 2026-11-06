@@ -113,3 +113,45 @@ fatal: unable to access 'https://github.com/swift-iso/swift-iso-4217.git/': The 
 ```
 
 **Not attempted:** attaching `coenttb/swift-licensing` and the batch of 20 from `repos.txt`. Both depend on the first attachment working.
+
+## 8. Follow-up: `add_repo` with `.claude/settings.json` allowing it
+
+`.claude/settings.json` is present at 283044e and allows `mcp__claude-code-remote__add_repo`. Every call below used `access: "push"`.
+
+### `swift-iso/swift-iso-4217`
+
+**It completed unattended: no refusal and no approval prompt.** The tool returned `"status":"appended"` and `Session currently has 2 repo(s): swift-institute/cloud-workspace, swift-iso/swift-iso-4217.`
+
+A fresh `git clone --depth 1` into `/tmp/probe` took 3.5 s. In that clone, `git push --dry-run origin HEAD:refs/heads/main` exits **0** and prints:
+
+```
+Everything up-to-date
+```
+
+In §3 and §7, the same command exited 128 with the proxy's 403.
+
+### `coenttb/swift-licensing` (private)
+
+Attached the same way, unattended. `git ls-remote https://github.com/coenttb/swift-licensing.git` now exits **0** and reads it (§3: exit 128, `could not read Username`):
+
+```
+4b59e89d517b0b0250a15dffe4ff64f2ff994dfd	HEAD
+4b59e89d517b0b0250a15dffe4ff64f2ff994dfd	refs/heads/main
+```
+
+### The first 20 lines of `repos.txt`
+
+`swift-arm-ltd/swift-arm-standard` and `swift-atoms/swift-addition` through `swift-atoms/swift-binary`, one call each, sent in two batches of 10. **All 20 completed unattended, with no limit hit.** The session then had 23 repositories. Times, from shell timestamps around each batch, so they include the agent's own turn overhead:
+
+- first batch of 10: about 39 s
+- second batch of 10: about 13.5 s
+
+So each call costs at most a few seconds, and 20 took under a minute. I didn't time single calls. 23 repositories isn't near 448; whether a cap exists further up is still unknown.
+
+`swift-atoms/swift-binary` (the 20th) cloned into `/tmp/probe` in 0.9 s. `git push --dry-run origin HEAD:refs/heads/main` exits **0**: `Everything up-to-date`.
+
+### Notes
+
+- Each `add_repo` result tells the agent to clone into `/home/user/<name>` and call `register_repo_root`. I didn't: the brief said to clone into `/tmp`. For work in `repos/`, the existing checkouts are what count; attaching only changes what the git proxy authorizes.
+- The result also says the proxy allows 2 concurrent smart-HTTP operations per repository, and a third gets HTTP 429.
+- Nothing was pushed to any repository except this one.
