@@ -56,11 +56,11 @@ No Docker build was made, so the licensing deploy's own condition isn't met by t
 
 ## For the Mac
 
-After publish-planner run 42249866520 succeeds, in a checkout of swift-institute/.github:
+The new pin is the swift-format of Xcode 27.2 build 27B52. The canary runs planners with the Mac's own Xcode, whose 27B48 swift-format hashes to d16e0788…, so the candidate will probably refuse until the Mac has 27B52 (an untested inference from the source, not run). Then, after publish-planner run 42249866520 succeeds:
 
     institute planner canary --publish-run 42249866520
-    institute planner adopt --publish-run 42249866520 --evidence-path <the evidence.json canary wrote>
-    git push
+    institute planner adopt --publish-run 42249866520 --evidence-path <evidence.json the canary wrote> --github-checkout <path to swift-institute/.github>
+    git -C <path to swift-institute/.github> push
 
 ## Follow-ups
 
