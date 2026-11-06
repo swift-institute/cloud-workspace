@@ -12,7 +12,11 @@ To really change a manifest: `./localize.py --restore`, edit, commit, then `./lo
 
 1. Edit in `repos/<owner>/<name>`.
 2. `swift build --target <Target>` from this folder: builds that target and what it needs, on the local copies. Each run costs about a minute before it compiles anything, so build several targets in one command with `--target` per batch rather than one by one. Give long commands a timeout over 10 minutes.
-3. Commit in that repository and push to main. A repository has to be attached to the session before you can push to it or read it if private: the proxy says so otherwise. Never force-push. Never push to pointfreeco/TCA26.
+3. Commit in that repository and push to main. Attach a repository with `add_repo` before pushing to it or, if private, reading it: this runs without a prompt here. 23 attached at once worked; a cap above that is unknown. The git proxy allows 2 operations at once per repository. Never force-push. Never push to pointfreeco/TCA26.
 4. Tests: public repositories get them from `ci.yml` after the push, so don't wait for it; read the results later. For a repository without CI, `swift test --package-path repos/<owner>/<name>`.
 
 State what each green covers: this is Linux only. Apple-specific and Windows code isn't compiled here; `ci.yml` covers those.
+
+## Results
+
+Nobody can read a cloud session's transcript from outside, and it can't message back. Whatever matters goes in a file on main of this repository, or on the issue it belongs to. Never open personal data or `*.local.json`; test data is invented.
