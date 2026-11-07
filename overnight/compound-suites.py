@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """For `compound suite name`: moves suites to where the rule wants them, keeping their names.
 
-- A top-level narrative suite goes into `extension <Host> { ... }`, Host taken from the test file's name
-  (`Observer.Registrar Tests.swift` -> `Observer.Registrar`). Only when every component of Host is declared as a
-  non-generic struct/enum/class/actor in the package's Sources. `extension Name` elsewhere in Tests/ becomes
+- A top-level narrative suite goes into `extension \`<Stem> Tests\` { ... }`, the test module's own namespace named
+  after the test file (`Observer.Registrar Tests.swift` -> `enum \`Observer.Registrar Tests\` {}`, declared if
+  missing): #239's layout, never an extension of a library type. `extension Name` elsewhere in the target becomes
   `extension Host.Name`; a suite referenced any other way is skipped.
 - A non-category suite nested directly in a @Suite type moves to `extension <Path>.<Parent> { ... }` right after
   the parent, which keeps the type nesting, so Swift Testing's IDs and trait inheritance are unchanged.
@@ -157,13 +157,11 @@ def process(p, rel, lines, tests, types):
     offs = [0]
     for l in L: offs.append(offs[-1] + len(l) + 1)
     stem = os.path.basename(rel)[:-len(" Tests.swift")] if rel.endswith(" Tests.swift") else None
+    # #239's layout: the host is the test module's own namespace `Stem Tests`, never a library type (Xcode's
+    # ⌘U loops on suites in extensions of types other modules declare).
     host = None
-    if stem and "+" in stem:
-        stem = stem.split("+")[0]
-    if stem and re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*", stem):
-        comps = stem.split(".")
-        if all(c in types and not types[c] for c in comps):
-            host = stem
+    if stem and "`" not in stem and "\n" not in stem:
+        host = "`" + stem + " Tests`"
     tops, nested = [], {}  # tops: (start, end, name); nested: parent open -> [(start,end)]
     for ln in sorted(set(lines)):
         if ln > len(L): continue
@@ -251,13 +249,18 @@ def process(p, rel, lines, tests, types):
         if body:
             text = "\n\n" + indent + "extension " + target + " {\n" + "\n\n".join(body) + "\n" + indent + "}"
             edits.append((pe, pe, text, 1))
+    if tops:
+        decl = re.compile(r"\b(?:enum|struct)\s+" + re.escape(host) + r"\s*\{")
+        if not any(decl.search(x) for x in tests.values()):
+            first = min(s for s, _, _ in tops)
+            edits.append((first, first, "enum " + host + " {}\n\n", -1))
     for s, e, name in tops:
         edits.append((s, s, "extension " + host + " {\n", 0))
         edits.append((e, e, "\n}", 0))
         edits.append(("indent", s, e))
     # Indentation: done on the final text by marking ranges; simplest is to apply in order with an indent pass.
     out, last = [], 0
-    marks = sorted([x for x in edits if x[0] != "indent"], key=lambda x: (x[0], x[1], x[3]))
+    marks = sorted([x for x in edits if x[0] != "indent"], key=lambda x: (x[0], x[3], x[1]))
     indents = [(x[1], x[2]) for x in edits if x[0] == "indent"]
     for s, e, rep, _ in marks:
         if s < last: return []
@@ -268,6 +271,8 @@ def process(p, rel, lines, tests, types):
     out.append(seg_indent(t[last:], last, indents, t))
     new = "".join(out)
     tests[path] = new
+    if host and tops and "enum " + host not in new and not any("enum " + host in x for x in tests.values()):
+        pass
     # `extension Name` -> `extension Host.Name` in the target's tests.
     for name in wrapped_names:
         pat = re.compile(r"(\bextension\s+)" + re.escape(name) + r"(?![\w`])")
