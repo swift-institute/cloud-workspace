@@ -1,0 +1,322 @@
+From 0e378d48881bab224a9c99cf7e1f8774874ddcb1 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:33:31 +0000
+Subject: [PATCH 7/7] Runner repairs: minimal type body, counter loop
+ iteration, test display name string, swift protocol qualification, comment in
+ source (overnight/apply-repairs.py); type-checked against the root build,
+ directories that failed it left out (coenttb/work#242)
+
+---
+ .../SQL Macros Implementation/BindMacro.swift |   6 +-
+ .../ColumnCheckMacro.swift                    | 174 +++++++++---------
+ .../ColumnMacro.swift                         |   6 +-
+ .../EphemeralMacro.swift                      |   6 +-
+ .../Internal/MemberwiseInitializer.swift      |  25 +--
+ 5 files changed, 116 insertions(+), 101 deletions(-)
+
+diff --git a/Sources/SQL Macros Implementation/BindMacro.swift b/Sources/SQL Macros Implementation/BindMacro.swift
+index b699026..e7f2c47 100644
+--- a/Sources/SQL Macros Implementation/BindMacro.swift	
++++ b/Sources/SQL Macros Implementation/BindMacro.swift	
+@@ -3,6 +3,9 @@ import SwiftSyntaxBuilder
+ public import SwiftSyntaxMacros
+ 
+ public enum BindMacro: ExpressionMacro {
++}
++
++extension BindMacro {
+     public static func expansion<N: FreestandingMacroExpansionSyntax, C: MacroExpansionContext>(
+         of node: N,
+         in context: C
+@@ -10,5 +13,4 @@ public enum BindMacro: ExpressionMacro {
+         guard let argument = node.arguments.first?.expression else { fatalError() }
+         let `as` = node.arguments.dropFirst().first
+         return "\(moduleName)::BindQueryExpression(\(argument)\(raw: `as`.map { ", \($0)" } ?? ""))"
+-    }
+-}
++    }}
+diff --git a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift
+index dcf4902..9e38e7f 100644
+--- a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
++++ b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
+@@ -4,40 +4,12 @@ import SwiftSyntaxBuilder
+ package import SwiftSyntaxMacros
+ 
+ package enum ColumnCheckPassMacro: PeerMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        []
+-    }
+ }
+ 
+ package enum ColumnCheckFailMacro: PeerMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        diagnoseUnrepresentableColumn(of: node, on: declaration, suggesting: .none, in: context)
+-        return []
+-    }
+ }
+ 
+ package enum ColumnCheckFailRawRepresentableMacro: PeerMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        diagnoseUnrepresentableColumn(
+-            of: node,
+-            on: declaration,
+-            suggesting: .rawRepresentation,
+-            in: context
+-        )
+-        return []
+-    }
+ }
+ 
+ #if CasePaths
+@@ -85,61 +57,6 @@ package enum ColumnCheckFailRawRepresentableMacro: PeerMacro {
+ #endif
+ 
+ package enum ColumnCheckGroupMacro: PeerMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        guard let property = declaration.as(VariableDeclSyntax.self) else { return [] }
+-        for attribute in property.attributes {
+-            guard
+-                let attribute = attribute.as(AttributeSyntax.self),
+-                let attributeName = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name
+-                    .text,
+-                attributeName == "Column",
+-                case .argumentList(let arguments) = attribute.arguments
+-            else { continue }
+-
+-            for argumentIndex in arguments.indices {
+-                let argument = arguments[argumentIndex]
+-                let message: String
+-                switch argument.label?.text {
+-                case nil:
+-                    message = "Column name cannot be applied to a column group"
+-                case "generated":
+-                    message = "Argument 'generated' cannot be applied to a column group"
+-                default:
+-                    continue
+-                }
+-                var newAttribute = attribute
+-                var newArguments = arguments
+-                newArguments.remove(at: argumentIndex)
+-                if newArguments.isEmpty {
+-                    newAttribute.leftParen = nil
+-                    newAttribute.arguments = nil
+-                    newAttribute.rightParen = nil
+-                } else {
+-                    newArguments[newArguments.index(before: newArguments.endIndex)].trailingComma =
+-                        nil
+-                    newAttribute.arguments = .argumentList(newArguments)
+-                }
+-                context.diagnose(
+-                    Diagnostic(
+-                        node: argument,
+-                        message: MacroExpansionErrorMessage(message),
+-                        fixIt: .replace(
+-                            message: MacroExpansionFixItMessage(
+-                                "Remove '\(argument.trimmed.with(\.trailingComma, nil))'"
+-                            ),
+-                            oldNode: attribute,
+-                            newNode: newAttribute
+-                        )
+-                    )
+-                )
+-            }
+-        }
+-        return []
+-    }
+ }
+ 
+ private enum UnrepresentableSuggestion {
+@@ -268,3 +185,94 @@ extension DeclSyntaxProtocol {
+         return DeclSyntax(self)
+     }
+ }
++
++extension ColumnCheckPassMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        []
++    }}
++
++extension ColumnCheckFailMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        diagnoseUnrepresentableColumn(of: node, on: declaration, suggesting: .none, in: context)
++        return []
++    }}
++
++extension ColumnCheckFailRawRepresentableMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        diagnoseUnrepresentableColumn(
++            of: node,
++            on: declaration,
++            suggesting: .rawRepresentation,
++            in: context
++        )
++        return []
++    }}
++
++extension ColumnCheckGroupMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        guard let property = declaration.as(VariableDeclSyntax.self) else { return [] }
++        for attribute in property.attributes {
++            guard
++                let attribute = attribute.as(AttributeSyntax.self),
++                let attributeName = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name
++                    .text,
++                attributeName == "Column",
++                case .argumentList(let arguments) = attribute.arguments
++            else { continue }
++
++            for argumentIndex in arguments.indices {
++                let argument = arguments[argumentIndex]
++                let message: String
++                switch argument.label?.text {
++                case nil:
++                    message = "Column name cannot be applied to a column group"
++                case "generated":
++                    message = "Argument 'generated' cannot be applied to a column group"
++                default:
++                    continue
++                }
++                var newAttribute = attribute
++                var newArguments = arguments
++                newArguments.remove(at: argumentIndex)
++                if newArguments.isEmpty {
++                    newAttribute.leftParen = nil
++                    newAttribute.arguments = nil
++                    newAttribute.rightParen = nil
++                } else {
++                    newArguments[newArguments.index(before: newArguments.endIndex)].trailingComma =
++                        nil
++                    newAttribute.arguments = .argumentList(newArguments)
++                }
++                context.diagnose(
++                    Diagnostic(
++                        node: argument,
++                        message: MacroExpansionErrorMessage(message),
++                        fixIt: .replace(
++                            message: MacroExpansionFixItMessage(
++                                "Remove '\(argument.trimmed.with(\.trailingComma, nil))'"
++                            ),
++                            oldNode: attribute,
++                            newNode: newAttribute
++                        )
++                    )
++                )
++            }
++        }
++        return []
++    }}
+diff --git a/Sources/SQL Macros Implementation/ColumnMacro.swift b/Sources/SQL Macros Implementation/ColumnMacro.swift
+index 5cdff49..69e18fb 100644
+--- a/Sources/SQL Macros Implementation/ColumnMacro.swift	
++++ b/Sources/SQL Macros Implementation/ColumnMacro.swift	
+@@ -2,11 +2,13 @@ public import SwiftSyntax
+ public import SwiftSyntaxMacros
+ 
+ public enum ColumnMacro: PeerMacro {
++}
++
++extension ColumnMacro {
+     public static func expansion<D: DeclSyntaxProtocol, C: MacroExpansionContext>(
+         of node: AttributeSyntax,
+         providingPeersOf declaration: D,
+         in context: C
+     ) throws -> [DeclSyntax] {
+         []
+-    }
+-}
++    }}
+diff --git a/Sources/SQL Macros Implementation/EphemeralMacro.swift b/Sources/SQL Macros Implementation/EphemeralMacro.swift
+index 4058b23..998c944 100644
+--- a/Sources/SQL Macros Implementation/EphemeralMacro.swift	
++++ b/Sources/SQL Macros Implementation/EphemeralMacro.swift	
+@@ -2,11 +2,13 @@ public import SwiftSyntax
+ public import SwiftSyntaxMacros
+ 
+ public enum EphemeralMacro: PeerMacro {
++}
++
++extension EphemeralMacro {
+     public static func expansion<D: DeclSyntaxProtocol, C: MacroExpansionContext>(
+         of node: AttributeSyntax,
+         providingPeersOf declaration: D,
+         in context: C
+     ) throws -> [DeclSyntax] {
+         []
+-    }
+-}
++    }}
+diff --git a/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift b/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift
+index 215179c..773f531 100644
+--- a/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift	
++++ b/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift	
+@@ -51,18 +51,6 @@ struct MemberwiseInitializer {
+             assignments.append("self.\(identifier.text) = \(identifier.text)")
+         }
+     }
+-
+-    var declaration: DeclSyntax {
+-        guard !parameters.isEmpty
+-        else { return "\(TokenSyntax.keyword(access)) init() {\n}" }
+-        return """
+-            \(TokenSyntax.keyword(access)) init(
+-            \(raw: parameters.joined(separator: ",\n"))
+-            ) {
+-            \(raw: assignments.joined(separator: "\n"))
+-            }
+-            """
+-    }
+ }
+ 
+ extension ExprSyntax {
+@@ -86,3 +74,16 @@ extension TypeSyntax {
+             || self.as(AttributedTypeSyntax.self)?.baseType.is(FunctionTypeSyntax.self) == true
+     }
+ }
++
++extension MemberwiseInitializer {
++    var declaration: DeclSyntax {
++        guard !parameters.isEmpty
++        else { return "\(TokenSyntax.keyword(access)) init() {\n}" }
++        return """
++            \(TokenSyntax.keyword(access)) init(
++            \(raw: parameters.joined(separator: ",\n"))
++            ) {
++            \(raw: assignments.joined(separator: "\n"))
++            }
++            """
++    }}
+-- 
+2.43.0
+

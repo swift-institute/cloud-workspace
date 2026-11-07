@@ -1,0 +1,261 @@
+From a559be6b4a4d0899ea89db2a5a2abe5e374fe969 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:33:32 +0000
+Subject: [PATCH 10/10] Runner repairs: minimal type body, counter loop
+ iteration, test display name string, swift protocol qualification, comment in
+ source (overnight/apply-repairs.py); type-checked against the root build,
+ directories that failed it left out (coenttb/work#242)
+
+---
+ ...Lint.Rule.Idiom.ExistentialParameter.swift | 42 +++++++-------
+ ...nt.Rule.Idiom.FatalErrorOutsideTests.swift |  1 -
+ .../Lint.Rule.Idiom.StringUTF8Scanning.swift  |  1 -
+ .../Lint.Rule.Manifest.TraitConsistency.swift | 43 +++++++-------
+ .../Institute.Planner.Evidence.swift          |  5 +-
+ ...stitute.Repository.Policy.Capability.swift | 56 +++++++++----------
+ 6 files changed, 74 insertions(+), 74 deletions(-)
+
+diff --git a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift
+index 92a99b3..f862dc3 100644
+--- a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift	
++++ b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift	
+@@ -133,6 +133,27 @@ internal func idiomExistentialParameterUnwrapped(_ type: TypeSyntax) -> TypeSynt
+ }
+ 
+ internal enum IdiomExistentialParameterCodableWitness {
++}
++
++internal final class IdiomExistentialParameterFinder: SyntaxVisitor {
++    var positions: [AbsolutePosition] = []
++
++    override func visit(_ node: SomeOrAnyTypeSyntax) -> SyntaxVisitorContinueKind {
++        let constraint = node.constraint.trimmedDescription
++        if node.someOrAnySpecifier.tokenKind == .keyword(.any),
++            constraint != "Error", constraint != "Swift.Error", constraint != "Swift::Error"
++        {
++            positions.append(node.positionAfterSkippingLeadingTrivia)
++        }
++        return .visitChildren
++    }
++
++    override func visit(_ node: FunctionTypeSyntax) -> SyntaxVisitorContinueKind {
++        .skipChildren
++    }
++}
++
++extension IdiomExistentialParameterCodableWitness {
+     static func matches(_ parameter: FunctionParameterSyntax) -> Bool {
+         guard let list = parameter.parent?.as(FunctionParameterListSyntax.self), list.count == 1,
+             let signature = list.parent?.parent?.as(FunctionSignatureSyntax.self),
+@@ -172,23 +193,4 @@ internal enum IdiomExistentialParameterCodableWitness {
+         return group.inheritanceClause?.inheritedTypes.contains {
+             accepted.contains($0.type.trimmedDescription)
+         } ?? false
+-    }
+-}
+-
+-internal final class IdiomExistentialParameterFinder: SyntaxVisitor {
+-    var positions: [AbsolutePosition] = []
+-
+-    override func visit(_ node: SomeOrAnyTypeSyntax) -> SyntaxVisitorContinueKind {
+-        let constraint = node.constraint.trimmedDescription
+-        if node.someOrAnySpecifier.tokenKind == .keyword(.any),
+-            constraint != "Error", constraint != "Swift.Error", constraint != "Swift::Error"
+-        {
+-            positions.append(node.positionAfterSkippingLeadingTrivia)
+-        }
+-        return .visitChildren
+-    }
+-
+-    override func visit(_ node: FunctionTypeSyntax) -> SyntaxVisitorContinueKind {
+-        .skipChildren
+-    }
+-}
++    }}
+diff --git a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.FatalErrorOutsideTests.swift b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.FatalErrorOutsideTests.swift
+index b3c90b0..8386dcf 100644
+--- a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.FatalErrorOutsideTests.swift	
++++ b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.FatalErrorOutsideTests.swift	
+@@ -145,7 +145,6 @@ extension Lint.Rule {
+             guard path.hasPrefix("Sources/") || path.contains("/Sources/") else {
+                 return []
+             }
+-            // A '* Test Support' target exists only for tests.
+             if path.split(separator: "/").contains(where: { $0.hasSuffix("Test Support") }) {
+                 return []
+             }
+diff --git a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.StringUTF8Scanning.swift b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.StringUTF8Scanning.swift
+index 6c148ee..2c0aa02 100644
+--- a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.StringUTF8Scanning.swift	
++++ b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.StringUTF8Scanning.swift	
+@@ -99,7 +99,6 @@ internal final class IdiomStringUTF8ScanningVisitor: SyntaxVisitor {
+ 
+     override func visit(_ node: MemberAccessExprSyntax) -> SyntaxVisitorContinueKind {
+         guard node.declName.baseName.text == "unicodeScalars" else { return .visitChildren }
+-        // `s.unicodeScalars.append(...)` writes; this rule is about scanning.
+         if let outer = node.parent?.as(MemberAccessExprSyntax.self),
+             ["append", "insert", "removeAll", "reserveCapacity"].contains(outer.declName.baseName.text)
+         {
+diff --git a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift b/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift
+index 5da0cf0..2642e55 100644
+--- a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift	
++++ b/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift	
+@@ -117,13 +117,6 @@ internal func manifestTraitConsistencyFixture(condition: Swift::String) -> Swift
+ /// It reads the target's imports from the package facts, so it checks the files the run
+ /// walked; a module the product vends under a name other than the product's is not seen.
+ internal struct ManifestTraitConsistency {
+-
+-    struct Issue {
+-        let position: AbsolutePosition
+-        let message: Swift::String
+-        let insertion: (offset: Swift::Int, text: Swift::String)?
+-    }
+-
+     private(set) var issues: [Issue] = []
+ 
+     private(set) var unhandledSourceShape: Swift::String?
+@@ -183,24 +176,9 @@ internal struct ManifestTraitConsistency {
+             }
+         }
+     }
+-
+-    private static func closure(of trait: Swift::String, in traits: [Swift::String: [Swift::String]]) -> Swift::Set<Swift::String> {
+-        var pending = [trait]
+-        var seen: Swift::Set<Swift::String> = []
+-        while let next = pending.popLast() {
+-            guard seen.insert(next).inserted else { continue }
+-            pending.append(contentsOf: traits[next] ?? [])
+-        }
+-        return seen
+-    }
+-
+-    private static func list(_ traits: Swift::Set<Swift::String>) -> Swift::String {
+-        "[" + traits.sorted().map { "\"\($0)\"" }.joined(separator: ", ") + "]"
+-    }
+ }
+ 
+ internal final class ManifestTraitConsistencyCollector: SyntaxVisitor {
+-
+     struct Dependency {
+         let name: Swift::String
+         let position: AbsolutePosition
+@@ -330,3 +308,24 @@ private final class ManifestTraitConsistencyDefineCollector: SyntaxVisitor {
+         return .visitChildren
+     }
+ }
++
++extension ManifestTraitConsistency {
++    struct Issue {
++        let position: AbsolutePosition
++        let message: Swift::String
++        let insertion: (offset: Swift::Int, text: Swift::String)?
++    }
++
++    private static func closure(of trait: Swift::String, in traits: [Swift::String: [Swift::String]]) -> Swift::Set<Swift::String> {
++        var pending = [trait]
++        var seen: Swift::Set<Swift::String> = []
++        while let next = pending.popLast() {
++            guard seen.insert(next).inserted else { continue }
++            pending.append(contentsOf: traits[next] ?? [])
++        }
++        return seen
++    }
++
++    private static func list(_ traits: Swift::Set<Swift::String>) -> Swift::String {
++        "[" + traits.sorted().map { "\"\($0)\"" }.joined(separator: ", ") + "]"
++    }}
+diff --git a/Sources/Institute Planner/Institute.Planner.Evidence.swift b/Sources/Institute Planner/Institute.Planner.Evidence.swift
+index 14971b4..0c94891 100644
+--- a/Sources/Institute Planner/Institute.Planner.Evidence.swift	
++++ b/Sources/Institute Planner/Institute.Planner.Evidence.swift	
+@@ -6,8 +6,6 @@ extension Institute.Planner {
+     /// two binaries it ran, every canary comparison, and the verdict.
+     /// `adopt` admits only an adoptable record for its own publish run.
+     public struct Evidence: Sendable, Equatable {
+-        public static let schema = 2
+-
+         public let verdict: Canary.Verdict
+         public let run: Swift.String
+         /// The candidate revision; empty when the publication was refused
+@@ -145,3 +143,6 @@ extension Institute.Planner.Evidence: JSON.Serializable {
+         )
+     }
+ }
++
++extension Institute.Planner.Evidence {
++        public static let schema = 2}
+diff --git a/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift b/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift
+index d3f0170..ffb9120 100644
+--- a/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift	
++++ b/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift	
+@@ -27,7 +27,34 @@ extension Institute.Repository.Policy {
+             self.namespace = namespace
+             self.forbiddenDuplicate = forbiddenDuplicate
+         }
++    }
++}
++
++extension Institute.Repository.Policy.Capability: JSON.Serializable {
++    public static func serialize(_ value: Self) -> JSON {
++        [
++            "id": value.id.json,
++            "concept": value.concept.json,
++            "domainOwner": value.domainOwner.json,
++            "target": value.target.json,
++            "namespace": value.namespace.json,
++            "forbiddenDuplicate": value.forbiddenDuplicate.json,
++        ]
++    }
+ 
++    public static func deserialize(_ json: JSON) throws(JSON.Error) -> Self {
++        Self(
++            id: try Swift.String(json: json["id"]),
++            concept: try Swift.String(json: json["concept"]),
++            domainOwner: try Swift.String(json: json["domainOwner"]),
++            target: try Swift.String(json: json["target"]),
++            namespace: try Swift.String(json: json["namespace"]),
++            forbiddenDuplicate: try Swift.String(json: json["forbiddenDuplicate"])
++        )
++    }
++}
++
++extension Institute.Repository.Policy.Capability {
+         public static let records: [Capability] = [
+             Capability(
+                 id: "D-01",
+@@ -127,31 +154,4 @@ extension Institute.Repository.Policy {
+                 namespace: "Institute.CI.Control.Application.*",
+                 forbiddenDuplicate: "control libraries in ordinary/fork closure"
+             ),
+-        ]
+-
+-    }
+-}
+-
+-extension Institute.Repository.Policy.Capability: JSON.Serializable {
+-    public static func serialize(_ value: Self) -> JSON {
+-        [
+-            "id": value.id.json,
+-            "concept": value.concept.json,
+-            "domainOwner": value.domainOwner.json,
+-            "target": value.target.json,
+-            "namespace": value.namespace.json,
+-            "forbiddenDuplicate": value.forbiddenDuplicate.json,
+-        ]
+-    }
+-
+-    public static func deserialize(_ json: JSON) throws(JSON.Error) -> Self {
+-        Self(
+-            id: try Swift.String(json: json["id"]),
+-            concept: try Swift.String(json: json["concept"]),
+-            domainOwner: try Swift.String(json: json["domainOwner"]),
+-            target: try Swift.String(json: json["target"]),
+-            namespace: try Swift.String(json: json["namespace"]),
+-            forbiddenDuplicate: try Swift.String(json: json["forbiddenDuplicate"])
+-        )
+-    }
+-}
++        ]}
+-- 
+2.43.0
+
