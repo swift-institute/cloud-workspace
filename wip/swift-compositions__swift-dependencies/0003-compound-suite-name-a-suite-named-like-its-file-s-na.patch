@@ -1,0 +1,937 @@
+From 23c209efdbee611da511d2ec5e53dbdef55ae7ab Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:43:42 +0000
+Subject: [PATCH 3/3] compound suite name: a suite named like its file's
+ namespace stays in place (overnight/compound-suites.py) (coenttb/work#242)
+
+---
+ .../Context Resolution Tests.swift            | 204 +++++++------
+ .../Dependency.Values Clock Tests.swift       |  18 +-
+ .../Key Path Access Tests.swift               | 138 +++++----
+ .../Task Propagation Tests.swift              | 286 +++++++++---------
+ .../Wrapper Parity Tests.swift                |  30 +-
+ .../prepareDependencies Tests.swift           |  14 +-
+ .../withDependencies Tests.swift              |  14 +-
+ 7 files changed, 345 insertions(+), 359 deletions(-)
+
+diff --git a/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift b/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift
+index a8da440..8a3c050 100644
+--- a/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift	
+@@ -2,131 +2,129 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-extension `Context Resolution Tests`.`Context Resolution Tests` {
+-    @Suite
+-    struct `Context Resolution Tests` {
++@Suite
++struct `Context Resolution Tests` {
+ 
+-        @Test(arguments: [
+-            (Dependency<Never>.Context.Mode.live, "live greeting"),
+-            (Dependency<Never>.Context.Mode.test, "test greeting"),
+-            (Dependency<Never>.Context.Mode.preview, "preview greeting"),
+-        ])
+-        func `A fully specified key resolves the value of the context`(
+-            mode: Dependency<Never>.Context.Mode,
+-            expected: String
+-        ) {
++    @Test(arguments: [
++        (Dependency<Never>.Context.Mode.live, "live greeting"),
++        (Dependency<Never>.Context.Mode.test, "test greeting"),
++        (Dependency<Never>.Context.Mode.preview, "preview greeting"),
++    ])
++    func `A fully specified key resolves the value of the context`(
++        mode: Dependency<Never>.Context.Mode,
++        expected: String
++    ) {
++        withDependencies(
++            mode: mode,
++            operation: {
++                @Dependency(\.greeting) var greeting
++                #expect(greeting == expected)
++            }
++        )
++    }
++
++    @Test
++    func `A live only key serves its live value in every context`() {
++        for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
+             withDependencies(
+                 mode: mode,
+                 operation: {
+-                    @Dependency(\.greeting) var greeting
+-                    #expect(greeting == expected)
++                    @Dependency(\.liveOnly) var liveOnly
++                    #expect(liveOnly == "only live")
+                 }
+             )
+         }
++    }
+ 
+-        @Test
+-        func `A live only key serves its live value in every context`() {
+-            for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
+-                withDependencies(
+-                    mode: mode,
+-                    operation: {
+-                        @Dependency(\.liveOnly) var liveOnly
+-                        #expect(liveOnly == "only live")
+-                    }
+-                )
++    @Test
++    func `A test value defaults to the preview value`() {
++        withDependencies(
++            mode: .test,
++            operation: {
++                @Dependency(\.liveAndPreview) var value
++                #expect(value == "preview half")
+             }
+-        }
++        )
++        withDependencies(
++            mode: .live,
++            operation: {
++                @Dependency(\.liveAndPreview) var value
++                #expect(value == "live half")
++            }
++        )
++    }
+ 
+-        @Test
+-        func `A test value defaults to the preview value`() {
+-            withDependencies(
+-                mode: .test,
+-                operation: {
+-                    @Dependency(\.liveAndPreview) var value
+-                    #expect(value == "preview half")
+-                }
+-            )
+-            withDependencies(
+-                mode: .live,
+-                operation: {
+-                    @Dependency(\.liveAndPreview) var value
+-                    #expect(value == "live half")
+-                }
+-            )
+-        }
++    @Test
++    func `A test only key serves its test value in previews`() {
++        withDependencies(
++            mode: .preview,
++            operation: {
++                @Dependency(\.testOnly) var testOnly
++                #expect(testOnly == "only test")
++            }
++        )
++    }
+ 
+-        @Test
+-        func `A test only key serves its test value in previews`() {
+-            withDependencies(
+-                mode: .preview,
+-                operation: {
+-                    @Dependency(\.testOnly) var testOnly
+-                    #expect(testOnly == "only test")
+-                }
+-            )
+-        }
++    @Test(arguments: [Dependency<Never>.Context.Mode.live, .test, .preview])
++    func `The context is readable as a dependency value`(mode: Dependency<Never>.Context.Mode) {
++        withDependencies(
++            mode: mode,
++            operation: {
++                @Dependency(\.context) var context
++                #expect(context == mode)
++            }
++        )
++    }
+ 
+-        @Test(arguments: [Dependency<Never>.Context.Mode.live, .test, .preview])
+-        func `The context is readable as a dependency value`(mode: Dependency<Never>.Context.Mode) {
+-            withDependencies(
+-                mode: mode,
+-                operation: {
+-                    @Dependency(\.context) var context
+-                    #expect(context == mode)
+-                }
+-            )
++    @Test
++    func `Setting the context in the update closure selects that context`() {
++        withDependencies {
++            $0.context = .preview
++        } operation: {
++            @Dependency(\.context) var context
++            @Dependency(\.greeting) var greeting
++            #expect(context == .preview)
++            #expect(greeting == "preview greeting")
+         }
++    }
+ 
+-        @Test
+-        func `Setting the context in the update closure selects that context`() {
+-            withDependencies {
+-                $0.context = .preview
+-            } operation: {
+-                @Dependency(\.context) var context
+-                @Dependency(\.greeting) var greeting
+-                #expect(context == .preview)
+-                #expect(greeting == "preview greeting")
+-            }
++    @Test
++    func `Reads in the update closure follow a context set earlier in it`() {
++        withDependencies {
++            $0.context = .test
++            $0.greeting += "!"
++        } operation: {
++            @Dependency(\.greeting) var greeting
++            #expect(greeting == "test greeting!")
+         }
++    }
+ 
+-        @Test
+-        func `Reads in the update closure follow a context set earlier in it`() {
++    @Test
++    func `An explicit value wins over every context`() {
++        for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
+             withDependencies {
+-                $0.context = .test
+-                $0.greeting += "!"
++                $0.context = mode
++                $0.greeting = "explicit"
+             } operation: {
+                 @Dependency(\.greeting) var greeting
+-                #expect(greeting == "test greeting!")
+-            }
+-        }
+-
+-        @Test
+-        func `An explicit value wins over every context`() {
+-            for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
+-                withDependencies {
+-                    $0.context = mode
+-                    $0.greeting = "explicit"
+-                } operation: {
+-                    @Dependency(\.greeting) var greeting
+-                    #expect(greeting == "explicit")
+-                }
++                #expect(greeting == "explicit")
+             }
+         }
++    }
+ 
+-        @Test
+-        func `Without a scope the context is live`() async {
+-            let context = await Task.detached {
+-                Dependency<Never>.Context.current.context
+-            }.value
+-            #expect(context == .live)
+-        }
++    @Test
++    func `Without a scope the context is live`() async {
++        let context = await Task.detached {
++            Dependency<Never>.Context.current.context
++        }.value
++        #expect(context == .live)
++    }
+ 
+-        @Test(.dependencies)
+-        func `The dependencies trait enters the test context`() {
+-            @Dependency(\.context) var context
+-            @Dependency(\.greeting) var greeting
+-            #expect(context == .test)
+-            #expect(greeting == "test greeting")
+-        }
++    @Test(.dependencies)
++    func `The dependencies trait enters the test context`() {
++        @Dependency(\.context) var context
++        @Dependency(\.greeting) var greeting
++        #expect(context == .test)
++        #expect(greeting == "test greeting")
+     }
+ }
+diff --git a/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift b/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift
+index 83dab15..cd94888 100644
+--- a/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift	
+@@ -3,16 +3,14 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests` {
+-    @Suite
+-    struct `Dependency.Values Clock Tests` {
+-        @Suite struct Unit {}
+-        @Suite struct `Edge Case` {}
+-        @Suite struct Integration {}
+-    }
++@Suite
++struct `Dependency.Values Clock Tests` {
++    @Suite struct Unit {}
++    @Suite struct `Edge Case` {}
++    @Suite struct Integration {}
+ }
+ 
+-extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.Unit {
++extension `Dependency.Values Clock Tests`.Unit {
+     @Test
+     func `test mode resolves the clock to an immediate clock`() async throws {
+ 
+@@ -46,7 +44,7 @@ extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.Unit {
+     }
+ }
+ 
+-extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.`Edge Case` {
++extension `Dependency.Values Clock Tests`.`Edge Case` {
+     @Test
+     func `sleeping for a zero duration returns immediately`() async throws {
+         @Dependency(\.clock) var clock
+@@ -59,7 +57,7 @@ extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.`Edge
+     }
+ }
+ 
+-extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.Integration {
++extension `Dependency.Values Clock Tests`.Integration {
+     @Test(.dependency(\.clock, Clock.`Any`(Clock.Immediate())))
+     func `the dependency trait overrides the clock for a test`() async throws {
+         @Dependency(\.clock) var clock
+diff --git a/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift b/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift
+index 5d913e4..d0deb57 100644
+--- a/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift	
+@@ -2,95 +2,93 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-extension `Key Path Access Tests`.`Key Path Access Tests` {
+-    @Suite(.dependencies)
+-    struct `Key Path Access Tests` {
++@Suite(.dependencies)
++struct `Key Path Access Tests` {
+ 
+-        @Test
+-        func `A key path property wrapper reads the key's value`() {
++    @Test
++    func `A key path property wrapper reads the key's value`() {
++        @Dependency(\.greeting) var greeting
++        #expect(greeting == "test greeting")
++    }
++
++    @Test
++    func `A write through a key path is visible inside the operation`() {
++        withDependencies {
++            $0.greeting = "written"
++        } operation: {
+             @Dependency(\.greeting) var greeting
+-            #expect(greeting == "test greeting")
++            #expect(greeting == "written")
+         }
++    }
+ 
+-        @Test
+-        func `A write through a key path is visible inside the operation`() {
+-            withDependencies {
+-                $0.greeting = "written"
+-            } operation: {
+-                @Dependency(\.greeting) var greeting
+-                #expect(greeting == "written")
+-            }
++    @Test
++    func `The update closure reads back its own writes`() {
++        withDependencies {
++            $0.number = 20
++            $0.number += 1
++            $0.number *= 2
++        } operation: {
++            @Dependency(\.number) var number
++            #expect(number == 42)
+         }
++    }
+ 
+-        @Test
+-        func `The update closure reads back its own writes`() {
++    @Test
++    func `The update closure starts from the enclosing values`() {
++        withDependencies {
++            $0.greeting = "enclosing"
++        } operation: {
+             withDependencies {
+-                $0.number = 20
+-                $0.number += 1
+-                $0.number *= 2
++                $0.greeting += " and nested"
+             } operation: {
+-                @Dependency(\.number) var number
+-                #expect(number == 42)
++                @Dependency(\.greeting) var greeting
++                #expect(greeting == "enclosing and nested")
+             }
+         }
++    }
+ 
+-        @Test
+-        func `The update closure starts from the enclosing values`() {
+-            withDependencies {
+-                $0.greeting = "enclosing"
+-            } operation: {
+-                withDependencies {
+-                    $0.greeting += " and nested"
+-                } operation: {
+-                    @Dependency(\.greeting) var greeting
+-                    #expect(greeting == "enclosing and nested")
+-                }
+-            }
++    @Test
++    func `Type form and key path form resolve the same value`() {
++        withDependencies {
++            $0.greeting = "shared"
++        } operation: {
++            @Dependency(GreetingKey.self) var byType
++            @Dependency(\.greeting) var byKeyPath
++            #expect(byType == byKeyPath)
++            #expect(byType == "shared")
+         }
++    }
+ 
+-        @Test
+-        func `Type form and key path form resolve the same value`() {
+-            withDependencies {
+-                $0.greeting = "shared"
+-            } operation: {
+-                @Dependency(GreetingKey.self) var byType
+-                @Dependency(\.greeting) var byKeyPath
+-                #expect(byType == byKeyPath)
+-                #expect(byType == "shared")
+-            }
++    @Test
++    func `A chained key path reads a member of the value`() {
++        withDependencies {
++            $0.greeting = "12345"
++        } operation: {
++            @Dependency(\.greeting.count) var length
++            #expect(length == 5)
+         }
++    }
+ 
+-        @Test
+-        func `A chained key path reads a member of the value`() {
+-            withDependencies {
+-                $0.greeting = "12345"
+-            } operation: {
+-                @Dependency(\.greeting.count) var length
+-                #expect(length == 5)
+-            }
++    @Test
++    func `The subscript and the key path address the same storage`() {
++        withDependencies {
++            $0[GreetingKey.self] = "via subscript"
++        } operation: {
++            #expect(Dependency<Never>.Context.current.greeting == "via subscript")
+         }
++    }
+ 
+-        @Test
+-        func `The subscript and the key path address the same storage`() {
+-            withDependencies {
+-                $0[GreetingKey.self] = "via subscript"
++    @Test
++    func `A throwing update closure propagates its error and runs no operation`() {
++        let ran = Recorder<Bool>()
++        #expect(throws: Failure.expected) {
++            try withDependencies {
++                $0.greeting = "never used"
++                throw Failure.expected
+             } operation: {
+-                #expect(Dependency<Never>.Context.current.greeting == "via subscript")
+-            }
+-        }
+-
+-        @Test
+-        func `A throwing update closure propagates its error and runs no operation`() {
+-            let ran = Recorder<Bool>()
+-            #expect(throws: Failure.expected) {
+-                try withDependencies {
+-                    $0.greeting = "never used"
+-                    throw Failure.expected
+-                } operation: {
+-                    ran.append(true)
+-                }
++                ran.append(true)
+             }
+-            #expect(ran.elements.isEmpty)
+         }
++        #expect(ran.elements.isEmpty)
+     }
+ }
+diff --git a/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift b/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift
+index 74135ca..c062df4 100644
+--- a/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift	
+@@ -2,184 +2,182 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-extension `Task Propagation Tests`.`Task Propagation Tests` {
+-    @Suite(.dependencies)
+-    struct `Task Propagation Tests` {
++@Suite(.dependencies)
++struct `Task Propagation Tests` {
+ 
+-        @Test
+-        func `An unstructured task inherits the scope it was created in`() async {
+-            let value = await withDependencies {
+-                $0.greeting = "scoped"
+-            } operation: {
+-                await Task {
+-                    Dependency<Never>.Context.current.greeting
+-                }.value
+-            }
+-            #expect(value == "scoped")
++    @Test
++    func `An unstructured task inherits the scope it was created in`() async {
++        let value = await withDependencies {
++            $0.greeting = "scoped"
++        } operation: {
++            await Task {
++                Dependency<Never>.Context.current.greeting
++            }.value
+         }
++        #expect(value == "scoped")
++    }
+ 
+-        @Test
+-        func `An unstructured task keeps its scope after the scope has ended`() async {
+-            let task = withDependencies {
+-                $0.greeting = "captured at creation"
+-            } operation: {
+-                Task {
+-                    await Task.yield()
+-                    return Dependency<Never>.Context.current.greeting
+-                }
+-            }
+-            let value = await withDependencies {
+-                $0.greeting = "awaited elsewhere"
+-            } operation: {
+-                await task.value
++    @Test
++    func `An unstructured task keeps its scope after the scope has ended`() async {
++        let task = withDependencies {
++            $0.greeting = "captured at creation"
++        } operation: {
++            Task {
++                await Task.yield()
++                return Dependency<Never>.Context.current.greeting
+             }
+-            #expect(value == "captured at creation")
+         }
+-
+-        @Test
+-        func `An unstructured task inherits the context`() async {
+-            let context = await withDependencies(
+-                mode: .preview,
+-                operation: {
+-                    await Task {
+-                        Dependency<Never>.Context.current.context
+-                    }.value
+-                }
+-            )
+-            #expect(context == .preview)
++        let value = await withDependencies {
++            $0.greeting = "awaited elsewhere"
++        } operation: {
++            await task.value
+         }
++        #expect(value == "captured at creation")
++    }
+ 
+-        @Test
+-        func `A detached task does not inherit the scope`() async {
+-            let observed = await withDependencies {
+-                $0.greeting = "scoped"
+-            } operation: {
+-                await Task.detached {
+-                    (
+-                        Dependency<Never>.Context.current.greeting,
+-                        Dependency<Never>.Context.current.context
+-                    )
++    @Test
++    func `An unstructured task inherits the context`() async {
++        let context = await withDependencies(
++            mode: .preview,
++            operation: {
++                await Task {
++                    Dependency<Never>.Context.current.context
+                 }.value
+             }
+-            #expect(observed.0 == "live greeting")
+-            #expect(observed.1 == .live)
+-        }
++        )
++        #expect(context == .preview)
++    }
+ 
+-        @Test
+-        func `A detached task can adopt a scope through an escaped continuation`() async {
+-            let value = await withDependencies {
+-                $0.greeting = "escaped"
+-            } operation: {
+-                await withEscapedDependencies { continuation in
+-                    await Task.detached {
+-                        continuation.yield {
+-                            Dependency<Never>.Context.current.greeting
+-                        }
+-                    }.value
+-                }
+-            }
+-            #expect(value == "escaped")
++    @Test
++    func `A detached task does not inherit the scope`() async {
++        let observed = await withDependencies {
++            $0.greeting = "scoped"
++        } operation: {
++            await Task.detached {
++                (
++                    Dependency<Never>.Context.current.greeting,
++                    Dependency<Never>.Context.current.context
++                )
++            }.value
+         }
++        #expect(observed.0 == "live greeting")
++        #expect(observed.1 == .live)
++    }
+ 
+-        @Test
+-        func `Task group children inherit the scope`() async {
+-            let values = await withDependencies {
+-                $0.greeting = "grouped"
+-            } operation: {
+-                await withTaskGroup(of: String.self) { group in
+-                    for _ in 0..<8 {
+-                        group.addTask {
+-                            Dependency<Never>.Context.current.greeting
+-                        }
+-                    }
+-                    var values: [String] = []
+-                    for await value in group {
+-                        values.append(value)
++    @Test
++    func `A detached task can adopt a scope through an escaped continuation`() async {
++        let value = await withDependencies {
++            $0.greeting = "escaped"
++        } operation: {
++            await withEscapedDependencies { continuation in
++                await Task.detached {
++                    continuation.yield {
++                        Dependency<Never>.Context.current.greeting
+                     }
+-                    return values
+-                }
++                }.value
+             }
+-            #expect(values == Array(repeating: "grouped", count: 8))
+         }
++        #expect(value == "escaped")
++    }
+ 
+-        @Test
+-        func `Task group children override independently`() async {
+-            let values = await withTaskGroup(of: Int.self) { group in
+-                for index in 0..<8 {
++    @Test
++    func `Task group children inherit the scope`() async {
++        let values = await withDependencies {
++            $0.greeting = "grouped"
++        } operation: {
++            await withTaskGroup(of: String.self) { group in
++                for _ in 0..<8 {
+                     group.addTask {
+-                        await withDependencies {
+-                            $0.number = index
+-                        } operation: {
+-                            await Task.yield()
+-                            return Dependency<Never>.Context.current.number
+-                        }
++                        Dependency<Never>.Context.current.greeting
+                     }
+                 }
+-                var values: [Int] = []
++                var values: [String] = []
+                 for await value in group {
+                     values.append(value)
+                 }
+-                return values.sorted()
++                return values
+             }
+-            #expect(values == Array(0..<8))
+         }
++        #expect(values == Array(repeating: "grouped", count: 8))
++    }
+ 
+-        @Test
+-        func `Async let children inherit the scope`() async {
+-            let (first, second) = await withDependencies {
+-                $0.greeting = "bound"
+-                $0.number = 3
+-            } operation: {
+-                async let first = Dependency<Never>.Context.current.greeting
+-                async let second = Dependency<Never>.Context.current.number
+-                return await (first, second)
++    @Test
++    func `Task group children override independently`() async {
++        let values = await withTaskGroup(of: Int.self) { group in
++            for index in 0..<8 {
++                group.addTask {
++                    await withDependencies {
++                        $0.number = index
++                    } operation: {
++                        await Task.yield()
++                        return Dependency<Never>.Context.current.number
++                    }
++                }
+             }
+-            #expect(first == "bound")
+-            #expect(second == 3)
++            var values: [Int] = []
++            for await value in group {
++                values.append(value)
++            }
++            return values.sorted()
++        }
++        #expect(values == Array(0..<8))
++    }
++
++    @Test
++    func `Async let children inherit the scope`() async {
++        let (first, second) = await withDependencies {
++            $0.greeting = "bound"
++            $0.number = 3
++        } operation: {
++            async let first = Dependency<Never>.Context.current.greeting
++            async let second = Dependency<Never>.Context.current.number
++            return await (first, second)
+         }
++        #expect(first == "bound")
++        #expect(second == 3)
++    }
+ 
+-        @Test
+-        func `Async let children see a scope entered inside them`() async {
+-            await withDependencies {
+-                $0.number = 1
++    @Test
++    func `Async let children see a scope entered inside them`() async {
++        await withDependencies {
++            $0.number = 1
++        } operation: {
++            async let inner: Int = withDependencies {
++                $0.number += 1
+             } operation: {
+-                async let inner: Int = withDependencies {
+-                    $0.number += 1
+-                } operation: {
+-                    Dependency<Never>.Context.current.number
+-                }
+-                async let outer = Dependency<Never>.Context.current.number
+-                let values = await (inner, outer)
+-                #expect(values.0 == 2)
+-                #expect(values.1 == 1)
++                Dependency<Never>.Context.current.number
+             }
++            async let outer = Dependency<Never>.Context.current.number
++            let values = await (inner, outer)
++            #expect(values.0 == 2)
++            #expect(values.1 == 1)
+         }
++    }
+ 
+-        @Test
+-        func `A stream element is produced in the consumer's scope unless escaped`() async {
+-            let (plain, escaped) = withDependencies {
+-                $0.greeting = "producer"
+-            } operation: {
+-                let plain = AsyncStream<String>(unfolding: {
+-                    Dependency<Never>.Context.current.greeting
++    @Test
++    func `A stream element is produced in the consumer's scope unless escaped`() async {
++        let (plain, escaped) = withDependencies {
++            $0.greeting = "producer"
++        } operation: {
++            let plain = AsyncStream<String>(unfolding: {
++                Dependency<Never>.Context.current.greeting
++            })
++            let escaped = withEscapedDependencies { continuation in
++                AsyncStream<String>(unfolding: {
++                    continuation.yield {
++                        Dependency<Never>.Context.current.greeting
++                    }
+                 })
+-                let escaped = withEscapedDependencies { continuation in
+-                    AsyncStream<String>(unfolding: {
+-                        continuation.yield {
+-                            Dependency<Never>.Context.current.greeting
+-                        }
+-                    })
+-                }
+-                return (plain, escaped)
+-            }
+-            await withDependencies {
+-                $0.greeting = "consumer"
+-            } operation: {
+-                var plainIterator = plain.makeAsyncIterator()
+-                var escapedIterator = escaped.makeAsyncIterator()
+-                #expect(await plainIterator.next() == "consumer")
+-                #expect(await escapedIterator.next() == "producer")
+             }
++            return (plain, escaped)
++        }
++        await withDependencies {
++            $0.greeting = "consumer"
++        } operation: {
++            var plainIterator = plain.makeAsyncIterator()
++            var escapedIterator = escaped.makeAsyncIterator()
++            #expect(await plainIterator.next() == "consumer")
++            #expect(await escapedIterator.next() == "producer")
+         }
+     }
+ }
+diff --git a/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift b/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift
+index 6cd112a..00ac3f5 100644
+--- a/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift	
++++ b/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift	
+@@ -4,22 +4,20 @@ import Dependencies_Test_Support
+ import Foundation
+ import Testing
+ 
+-extension `Wrapper Parity Tests`.`Wrapper Parity Tests` {
+-    @Suite(.dependency(\.calendar, Calendar(identifier: .gregorian)))
+-    struct `Wrapper Parity Tests` {
+-        @Test func `the eight optional wrappers forward the explicit-calendar helper results`() throws {
+-            @Dependency(\.calendar) var calendar
+-            let saturday = try #require(Date(year: 2024, month: 1, day: 6))
+-            let birth = try #require(Date(year: 1990, month: 5, day: 15))
++@Suite(.dependency(\.calendar, Calendar(identifier: .gregorian)))
++struct `Wrapper Parity Tests` {
++    @Test func `the eight optional wrappers forward the explicit-calendar helper results`() throws {
++        @Dependency(\.calendar) var calendar
++        let saturday = try #require(Date(year: 2024, month: 1, day: 6))
++        let birth = try #require(Date(year: 1990, month: 5, day: 15))
+ 
+-            #expect(saturday.nextWeekday == saturday.nextWeekday(in: calendar))
+-            #expect(saturday.ifWeekendThenNextWorkday() == saturday.ifWeekendThenNextWorkday(in: calendar))
+-            #expect(saturday.ifWeekendThenPreviousWorkday() == saturday.ifWeekendThenPreviousWorkday(in: calendar))
+-            #expect(saturday.daysBetween(birth) == saturday.daysBetween(birth, in: calendar))
+-            #expect(saturday.addingBusinessDays(3) == saturday.addingBusinessDays(3, in: calendar))
+-            #expect(saturday.firstDayOfMonth == saturday.firstDayOfMonth(in: calendar))
+-            #expect(saturday.lastDayOfMonth == saturday.lastDayOfMonth(in: calendar))
+-            #expect(birth.age(at: saturday) == birth.age(at: saturday, in: calendar))
+-        }
++        #expect(saturday.nextWeekday == saturday.nextWeekday(in: calendar))
++        #expect(saturday.ifWeekendThenNextWorkday() == saturday.ifWeekendThenNextWorkday(in: calendar))
++        #expect(saturday.ifWeekendThenPreviousWorkday() == saturday.ifWeekendThenPreviousWorkday(in: calendar))
++        #expect(saturday.daysBetween(birth) == saturday.daysBetween(birth, in: calendar))
++        #expect(saturday.addingBusinessDays(3) == saturday.addingBusinessDays(3, in: calendar))
++        #expect(saturday.firstDayOfMonth == saturday.firstDayOfMonth(in: calendar))
++        #expect(saturday.lastDayOfMonth == saturday.lastDayOfMonth(in: calendar))
++        #expect(birth.age(at: saturday) == birth.age(at: saturday, in: calendar))
+     }
+ }
+diff --git a/Tests/Dependencies Tests/prepareDependencies Tests.swift b/Tests/Dependencies Tests/prepareDependencies Tests.swift
+index 2c18917..d29c43f 100644
+--- a/Tests/Dependencies Tests/prepareDependencies Tests.swift	
++++ b/Tests/Dependencies Tests/prepareDependencies Tests.swift	
+@@ -3,13 +3,11 @@ import Witnesses
+ 
+ @testable import Dependencies
+ 
+-extension `prepareDependencies Tests`.`prepareDependencies Tests` {
+-    @Suite
+-    struct `prepareDependencies Tests` {
+-    }
++@Suite
++struct `prepareDependencies Tests` {
+ }
+ 
+-extension `prepareDependencies Tests`.`prepareDependencies Tests`.`prepareDependencies Tests` {
++extension `prepareDependencies Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -17,7 +15,7 @@ extension `prepareDependencies Tests`.`prepareDependencies Tests`.`prepareDepend
+     }
+ }
+ 
+-extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.Unit {
++extension `prepareDependencies Tests`.Test.Unit {
+     @Test
+     func `Sync preparation runs without error`() {
+         let result = prepareDependencies { store in
+@@ -70,7 +68,7 @@ extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.Unit {
+     }
+ }
+ 
+-extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.`Edge Case` {
++extension `prepareDependencies Tests`.Test.`Edge Case` {
+     @Test
+     func `Empty preparation works`() {
+         let result = prepareDependencies { _ in
+@@ -98,7 +96,7 @@ extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.`Edge Cas
+     }
+ }
+ 
+-extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.Integration {
++extension `prepareDependencies Tests`.Test.Integration {
+     @Test
+     func `withDependencies works inside prepareDependencies`() {
+         prepareDependencies { _ in
+diff --git a/Tests/Dependencies Tests/withDependencies Tests.swift b/Tests/Dependencies Tests/withDependencies Tests.swift
+index 0903900..a25d179 100644
+--- a/Tests/Dependencies Tests/withDependencies Tests.swift	
++++ b/Tests/Dependencies Tests/withDependencies Tests.swift	
+@@ -2,13 +2,11 @@ import Testing
+ 
+ @testable import Dependencies
+ 
+-extension `withDependencies Tests`.`withDependencies Tests` {
+-    @Suite
+-    struct `withDependencies Tests` {
+-    }
++@Suite
++struct `withDependencies Tests` {
+ }
+ 
+-extension `withDependencies Tests`.`withDependencies Tests`.`withDependencies Tests` {
++extension `withDependencies Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -16,7 +14,7 @@ extension `withDependencies Tests`.`withDependencies Tests`.`withDependencies Te
+     }
+ }
+ 
+-extension `withDependencies Tests`.`withDependencies Tests`.Test.Unit {
++extension `withDependencies Tests`.Test.Unit {
+     @Test
+     func `Basic override works`() throws {
+         let result = withDependencies {
+@@ -57,7 +55,7 @@ extension `withDependencies Tests`.`withDependencies Tests`.Test.Unit {
+     }
+ }
+ 
+-extension `withDependencies Tests`.`withDependencies Tests`.Test.`Edge Case` {
++extension `withDependencies Tests`.Test.`Edge Case` {
+     @Test
+     func `Nested scopes work correctly`() throws {
+         try withDependencies {
+@@ -100,7 +98,7 @@ extension `withDependencies Tests`.`withDependencies Tests`.Test.`Edge Case` {
+     }
+ }
+ 
+-extension `withDependencies Tests`.`withDependencies Tests`.Test.Integration {
++extension `withDependencies Tests`.Test.Integration {
+     @Test
+     func `Async variant works`() async throws {
+         let result = await withDependencies {
+-- 
+2.43.0
+
