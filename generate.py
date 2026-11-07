@@ -84,6 +84,7 @@ def setting(st):
     return None
 
 
+FALLBACK = set(l.strip() for l in open("overnight/tests-fallback.txt") if l.strip() and not l.startswith("#")) if os.path.exists("overnight/tests-fallback.txt") else set()
 _pkg_decls = {}
 
 
@@ -116,6 +117,8 @@ for path, name, libs, m in dumped:
     for t in m["targets"]:
         if t["type"] != "test": continue
         tdir = os.path.join(path, t.get("path") or f"Tests/{t['name']}")
+        if (path + "|" + t["name"]) in FALLBACK:
+            skipped.append((path, t["name"], "listed in overnight/tests-fallback.txt")); continue
         if uses_package_access(path, tdir):
             skipped.append((path, t["name"], "uses package-access declarations (the root can't give it its package's -package-name)")); continue
         if apple_only([tdir]):
