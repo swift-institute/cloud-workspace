@@ -48,3 +48,25 @@ Second session, 7 Nov, stopped as its context ran low. Linux x86_64, Swift 6.4.2
 - **Not changed, by decision:** `existential parameter` (tests pin `[any P]` and conformance-less witness shapes deliberately); `extension file naming`'s foreign-type case and `closure typed throws`'s cross-file callees need a package type index the runner lacks.
 - **Remains, in order:** the rest of `audit/rules-table.md` verdict `fix` (next: `result wrapper for rethrows shim`, `foundation import`, `configuration before content`, `manifest naming grammar`, `extension noncopyable constraint`, `optionset shell pattern`, `tagged extension public init`, `macro expansion short name`, `unlabeled lifecycle closure`, `unsafe storage visibility`, `architecture foundation type`, `unchecked sendable noncopyable`, `raw concept`, `tag suffix`, `property named flags`, `phantom suppression`, `apache license`, `ad hoc box class`, `for loop in result builder`, `comment in source`'s repair); the 8 new rules; Core renames (37 + 21); the 11 atom→molecule edges; unused dependencies; the generated root test package; the semantic pass; remaining lint. The two `target import edge` findings (swift-environment, swift-pdf-standard) still need dependency edges.
 - **Tooling note:** the swift-format configuration is generated from `Institute.Source.Policy+swiftFormat.swift` into `/home/user/tools/swift-format.json` (not in the repository; a new container must regenerate it).
+
+## Findings session (BRIEF-findings.md), 7 Nov
+
+Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (`/home/user/tools/runner-main`; a new container must rebuild it and regenerate `/home/user/tools/swift-format.json`).
+
+- **Baseline:** one lint of 438 packages: **30,436 findings** (`overnight/findings-start.json`).
+- **Batch 1, `minimal type body`, by the runner's repair:** 116 files changed. On the 49 packages it touched, the rule went from 2,179 to 1,738 findings: **441 fixed**, so 30,436 → about 29,995 (1.4%). The repair can't fix the remaining 1,738. They wait for hand fixes or the semantic pass.
+  - **Committed locally, not pushed:** in 44 package repositories, each with the message "repair applied; root and test builds not yet run". **Unverified:** neither the root build nor the test builds have run on the final state.
+  - **Backed up:** as patches on branch `findings-wip` (`wip/<owner>__<name>/`). To restore, `git am` each folder onto that repository's origin/main.
+  - **Reverted, because the repair broke them:**
+    - All of swift-tree-column, swift-tree-keyed and swift-tree-n: `package` members were moved into extensions of an internal type, which doesn't compile.
+    - swift-rfc-4648 `RFC_4648.Strictness.swift` and swift-iso-14496-22 `HeadTable.swift`: sibling names were left out of scope.
+    - swift-dependencies `Dependency.swift`, swift-sql `Select.swift` and two swift-rfc-8446 test files: they appeared in the error output of the failed builds.
+  - **Kept, by hand:** swift-iterator `Iterator.Buffered.swift`, where the moved extension gets the missing `Base.Element: ~Copyable` constraint.
+  - **Pre-existing?** swift-rfc-8446 test errors may predate this batch. Check them against origin/main.
+- **Root build:** swift-motion, added 3 Nov, imports AppKit, and that stopped the Linux root build at step 766 of 7,833. `generate.py` now gives products whose targets import Apple-only frameworks outside `#if` a `.when(platforms:)` Apple condition: swift-motion's 3 products.
+- **Next:**
+  1. Verify batch 1: run the root build, then test builds for the failed packages and swift-iterator.
+  2. Batch 2 is ready: `overnight/suite-display-names.py` renames 140 `@Suite("…")` types to raw identifiers. It skips dotted names, because Swift Testing builds test IDs from dotted type paths.
+  3. Then work by size, per Coen's target of at least 12,000 findings. Plan for `compound suite name`: 2,295 findings are top-level narrative suites and 2,138 are non-category suites nested under a `@Suite`. Wrap the top-level ones in `extension <Host>`, with the host taken from the file name. Move the nested ones to `extension Host.Parent`, which keeps the type nesting, so Swift Testing's trait inheritance is unchanged.
+- **Tools added:** `overnight/dependents.py`, `overnight/backup-wip.sh`, `overnight/suite-display-names.py`.
+- **Disk:** the per-session allowance filled up. Deleting institute's and swift-linter-rules' `.build` freed about 11 GB.
