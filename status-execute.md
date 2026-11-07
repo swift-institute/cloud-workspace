@@ -71,12 +71,20 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 - **Tools added:** `overnight/dependents.py`, `overnight/backup-wip.sh`, `overnight/suite-display-names.py`.
 - **Disk:** the per-session allowance filled up. Deleting institute's and swift-linter-rules' `.build` freed about 11 GB.
 
-### Findings session 2, 7 Nov (running; updated 20:15 UTC)
+### Findings session 2, 7 Nov (running; verified 20:55 UTC)
 
-Linux x86_64, Swift 6.4.2. All local commits backed up to `findings-wip` (338 repositories, 19:34).
+Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as the baseline). Backed up to `findings-wip`.
 
-- **Batch 1, `minimal type body` (441):** root library build green after two fixes (swift-tests `Counters` fileprivate; institute `Institute.Repository.Policy.Capability.swift` reverted).
-- **Batch 2, `test display name string` (147 suites):** committed, backed up.
-- **Batch 3, `compound suite name` (about 4,450 of 4,730):** redone in #239's layout: narrative suites move into the test module's own namespace `` `<File> Tests` `` (declared if missing), never an extension of a library type (Xcode's ⌘U loops on those); nested suites into `extension <Path>.<Parent>`. Committed, backed up; root test build in progress, any file still failing it is reverted to origin/main.
-- **Root test package:** `generate.py` (main) declares 682 test targets in the root; 136 go to `tests-skipped.json` (macro plugins, Apple-only, non-product dependencies, `package`-access tests: SwiftPM ignores a per-target `-package-name`).
-- **Running total, unverified:** about 5,040 of 30,436 (16.5%). Verified count follows the first green root build and a re-lint of the changed packages.
+**Verified by re-lint of the 338 changed packages (28,215 → 23,556): 4,659 net fixed; ecosystem 30,436 → 25,777 (15.3%).**
+
+| Rule | Before → after (changed packages) |
+|---|---|
+| compound suite name | 4,691 → 402 (−4,289) |
+| minimal type body | 3,380 → 3,020 (−360) |
+| test display name string | 503 → 358 (−145) |
+| compound type name | 882 → 867 (−15, side effect) |
+| target import edge | 5 → 125 (+120): packages with no Sources change in this session; upstream commits pulled by sync.sh, not this batch |
+| single type per file | 1,476 → 1,502 (+26): the batch-1 repair's new extension files |
+
+- **Build:** root build with 682 test targets in one plan (`generate.py` on main): libraries green; test targets type-checked with `overnight/typecheck-tests.py` (2 s per target, shown to fail on a deliberate error); targets failing only through this session's changes reverted to origin/main (svg-render, rfc-8446 Extension tests, 2 more). Fallback list `overnight/tests-fallback.txt`: swift-slab `Slab Tests` (trait-gated `Slab.Inline`), swift-rfc-8446 `Standard Library Integration Tests` (fails on origin/main). 136 targets the root can't take are in `tests-skipped.json` (macro plugins, Apple-only, non-product deps, `package` access). The last root test build stopped on the rfc-8446 target, now on the fallback list; the next batch's build confirms green.
+- **Next batch, prepared:** `overnight/merge-extension-files.py` (799 `extension file naming` merges) and `overnight/split-types.py` (1,037 `single type per file` moves), applied together, type-check sweep, one root build.
