@@ -23,7 +23,7 @@ WHAT = {
 }
 per_repo = collections.defaultdict(collections.Counter)
 for log in logs:
-    what = os.path.basename(log)[len("apply-"):-len(".txt")].replace("-am", "").replace("-up", "")
+    what = os.path.basename(log)[len("apply-"):-len(".txt")].replace("-am", "").replace("-up", "").replace("-std", "")
     for line in open(log):
         parts = line.split()
         if len(parts) < 2 or "/" not in parts[0] or parts[0].startswith("SKIP"):

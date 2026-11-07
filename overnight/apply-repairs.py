@@ -7,7 +7,7 @@ Only a file whose working copy still equals what was linted is rewritten. Source
 (Examples, Benchmarks, Package.swift) are left alone unless the rule is a manifest rule. A changed file is then
 formatted with the Institute policy's swift-format configuration if its committed version is already stable under
 it; otherwise only blank lines left behind are tidied (no leading blank lines, at most one in a row). A file the
-repair empties is removed. Prints one line per file changed."""
+repair would empty is left alone: it may be its target's only source. Prints one line per file changed."""
 import argparse, glob, json, os, re, subprocess, sys, tempfile
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -53,6 +53,7 @@ a.add_argument("--package", action="append")
 a.add_argument("--dry-run", action="store_true")
 a.add_argument("--no-format", action="store_true")
 a.add_argument("--require-format", action="store_true", help="skip a file whose committed version isn't swift-format-stable")
+a.add_argument("--skip-containing", action="append", default=[], help="skip a file whose text contains this")
 args = a.parse_args()
 os.makedirs("/home/user/tools/tmp", exist_ok=True)
 
@@ -90,6 +91,9 @@ for f in sorted(glob.glob(os.path.join(args.lint, "*.json"))):
             if current is None or current != linted:
                 print("SKIP changed since lint", p, rel, file=sys.stderr)
                 continue
+            if any(token in current for token in args.skip_containing):
+                print("SKIP contains", p, rel, file=sys.stderr)
+                continue
             new = e["contents"]
             if not args.no_format:
                 head = git(repo, "show", f"HEAD:{rel}").stdout
@@ -106,7 +110,7 @@ for f in sorted(glob.glob(os.path.join(args.lint, "*.json"))):
             if args.dry_run:
                 continue
             if not new.strip():
-                git(repo, "rm", "-q", "--", rel)
+                print("SKIP would empty the file (a target may have no other source)", p, rel, file=sys.stderr)
                 continue
             if manifest:
                 git(repo, "update-index", "--no-skip-worktree", "Package.swift")
