@@ -70,3 +70,12 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
   3. Then work by size, per Coen's target of at least 12,000 findings. Plan for `compound suite name`: 2,295 findings are top-level narrative suites and 2,138 are non-category suites nested under a `@Suite`. Wrap the top-level ones in `extension <Host>`, with the host taken from the file name. Move the nested ones to `extension Host.Parent`, which keeps the type nesting, so Swift Testing's trait inheritance is unchanged.
 - **Tools added:** `overnight/dependents.py`, `overnight/backup-wip.sh`, `overnight/suite-display-names.py`.
 - **Disk:** the per-session allowance filled up. Deleting institute's and swift-linter-rules' `.build` freed about 11 GB.
+
+### Findings session 2, 7 Nov (running)
+
+Linux x86_64, Swift 6.4.2. Patches from `findings-wip` applied; all local commits backed up to `findings-wip` (207 repositories).
+
+- **Batch 1, `minimal type body` (441):** root build passes after two fixes: swift-tests `Counters` made `fileprivate` (its operator moved to an extension), institute `Institute.Repository.Policy.Capability.swift` reverted (sibling name out of scope). Test builds pending.
+- **Batch 2, `test display name string` (147 suites, 39 repositories):** display strings became raw-identifier suite names. Guarded against names declared more than once (a first run renamed every `Test`; reverted).
+- **Batch 3, `compound suite name` (2,672 of 4,730, about 200 repositories):** `overnight/compound-suites.py`: 1,020 top-level suites into `extension <Host>`, 1,652 nested into `extension <Path>.<Parent>`. Parse-checked; builds pending. Skipped: 1,824 with no usable host type from the file name (generic, protocol, or not declared in the package), 163 concatenated names, 47 nested under a non-suite type, 17 nested deeper, 4 stale lines, 1 referenced elsewhere.
+- **Running total (unverified, not re-linted):** about 441 + 147 + 2,672 = **3,260 of 30,436 (10.7%)**.
