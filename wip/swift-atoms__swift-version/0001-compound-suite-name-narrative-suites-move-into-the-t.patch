@@ -1,0 +1,1181 @@
+From 6c5287cd32ba792d2cba7027fb165add76f67691 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:09 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Version.Calendar Tests.swift              |  14 +-
+ .../Version.Description Tests.swift           |  55 ++--
+ Tests/Version Tests/Version.Range Tests.swift | 112 +++----
+ .../Version.Range.Algebra Tests.swift         | 274 +++++++++---------
+ .../Version.Semantic Tests.swift              |  80 ++---
+ .../Version.Serializer Tests.swift            |  48 +--
+ Tests/Version Tests/Version.Set Tests.swift   |  88 +++---
+ .../Version.Set.Algebra Tests.swift           | 176 +++++------
+ Tests/Version Tests/Version.Tools Tests.swift |  84 +++---
+ .../Version.Tools.Parser Tests.swift          |  58 ++--
+ 10 files changed, 517 insertions(+), 472 deletions(-)
+
+diff --git a/Tests/Version Calendar Parser Tests/Version.Calendar Tests.swift b/Tests/Version Calendar Parser Tests/Version.Calendar Tests.swift
+index 161177f..63b1042 100644
+--- a/Tests/Version Calendar Parser Tests/Version.Calendar Tests.swift	
++++ b/Tests/Version Calendar Parser Tests/Version.Calendar Tests.swift	
+@@ -6,13 +6,19 @@
+ 
+     extension Version.Calendar {
+         @Suite struct `Calendar version` {
+-            @Suite struct `Construction` {}
+-            @Suite struct `Comparison` {}
+-            @Suite struct `Round trip` {}
+-            @Suite struct `Error cases` {}
+         }
+     }
+ 
++    extension Version.Calendar.`Calendar version` {
++        @Suite struct `Construction` {}
++
++        @Suite struct `Comparison` {}
++
++        @Suite struct `Round trip` {}
++
++        @Suite struct `Error cases` {}
++    }
++
+     extension Version.Calendar.`Calendar version`.`Construction` {
+         @Test
+         func `Parses year-only`() throws(Version.Calendar.Error) {
+diff --git a/Tests/Version Tests/Version.Description Tests.swift b/Tests/Version Tests/Version.Description Tests.swift
+index c1de75a..9020ed0 100644
+--- a/Tests/Version Tests/Version.Description Tests.swift	
++++ b/Tests/Version Tests/Version.Description Tests.swift	
+@@ -1,36 +1,47 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Version range bounds describe their inclusion and stored values` {
+-    @Test
+-    func `Unbounded prints as 'unbounded'`() {
+-        let bound: Version.Range<Version.Semantic>.Bound = .unbounded
+-        #expect(bound.description == "unbounded")
+-    }
+-
+-    @Test
+-    func `Inclusive prints wrapping value`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let bound: Version.Range<Version.Semantic>.Bound = .inclusive(v)
+-        #expect(bound.description == "inclusive(1.0.0)")
++enum `Version.Description Tests` {}
++
++extension `Version.Description Tests` {
++    @Suite struct `Version range bounds describe their inclusion and stored values` {
++        @Test
++        func `Unbounded prints as 'unbounded'`() {
++            let bound: Version.Range<Version.Semantic>.Bound = .unbounded
++            #expect(bound.description == "unbounded")
++        }
++
++        @Test
++        func `Inclusive prints wrapping value`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let bound: Version.Range<Version.Semantic>.Bound = .inclusive(v)
++            #expect(bound.description == "inclusive(1.0.0)")
++        }
++
++        @Test
++        func `Exclusive prints wrapping value`() {
++            let v = Version.Semantic(major: 2, minor: 0, patch: 0)
++            let bound: Version.Range<Version.Semantic>.Bound = .exclusive(v)
++            #expect(bound.description == "exclusive(2.0.0)")
++        }
+     }
++}
+ 
+-    @Test
+-    func `Exclusive prints wrapping value`() {
+-        let v = Version.Semantic(major: 2, minor: 0, patch: 0)
+-        let bound: Version.Range<Version.Semantic>.Bound = .exclusive(v)
+-        #expect(bound.description == "exclusive(2.0.0)")
++extension `Version.Description Tests` {
++    @Suite
++    struct `Version ranges sets and phases preserve their textual representations` {
+     }
+ }
+ 
+-@Suite
+-struct `Version ranges sets and phases preserve their textual representations` {
++extension `Version.Description Tests`.`Version ranges sets and phases preserve their textual representations` {
+     @Suite struct `Version range descriptions preserve interval bounds` {}
++
+     @Suite struct `Version set descriptions preserve member notation and debug structure` {}
++
+     @Suite struct `Version phases expose their names in descriptions and debug output` {}
+ }
+ 
+-extension `Version ranges sets and phases preserve their textual representations`.`Version range descriptions preserve interval bounds` {
++extension `Version.Description Tests`.`Version ranges sets and phases preserve their textual representations`.`Version range descriptions preserve interval bounds` {
+     @Test
+     func `Unbounded range prints interval notation`() {
+         let range: Version.Range<Version.Semantic> = .all
+@@ -77,7 +88,7 @@ extension `Version ranges sets and phases preserve their textual representations
+     }
+ }
+ 
+-extension `Version ranges sets and phases preserve their textual representations`.`Version set descriptions preserve member notation and debug structure` {
++extension `Version.Description Tests`.`Version ranges sets and phases preserve their textual representations`.`Version set descriptions preserve member notation and debug structure` {
+     @Test
+     func `Empty prints as set-theoretic empty symbol`() {
+         let set: Version.Set<Version.Semantic> = .empty
+@@ -135,7 +146,7 @@ extension `Version ranges sets and phases preserve their textual representations
+     }
+ }
+ 
+-extension `Version ranges sets and phases preserve their textual representations`.`Version phases expose their names in descriptions and debug output` {
++extension `Version.Description Tests`.`Version ranges sets and phases preserve their textual representations`.`Version phases expose their names in descriptions and debug output` {
+     @Test
+     func `Initial prints simple name`() {
+         #expect(Version.Semantic.Phase.initial.description == "initial")
+diff --git a/Tests/Version Tests/Version.Range Tests.swift b/Tests/Version Tests/Version.Range Tests.swift
+index 6e923d4..9f09259 100644
+--- a/Tests/Version Tests/Version.Range Tests.swift	
++++ b/Tests/Version Tests/Version.Range Tests.swift	
+@@ -1,64 +1,68 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Version ranges include exactly the versions permitted by their bounds` {
+-    @Test
+-    func `Unbounded range contains every version`() {
+-        let range: Version.Range<Version.Semantic> = .all
+-        #expect(range.contains(Version.Semantic(major: 0, minor: 0, patch: 0)))
+-        #expect(range.contains(Version.Semantic(major: 999, minor: 999, patch: 999)))
+-    }
++enum `Version.Range Tests` {}
+ 
+-    @Test
+-    func `Exact range contains only the exact version`() {
+-        let target = Version.Semantic(major: 1, minor: 2, patch: 3)
+-        let range: Version.Range<Version.Semantic> = .exact(target)
+-        #expect(range.contains(target))
+-        #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
+-        #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 4)))
+-    }
++extension `Version.Range Tests` {
++    @Suite struct `Version ranges include exactly the versions permitted by their bounds` {
++        @Test
++        func `Unbounded range contains every version`() {
++            let range: Version.Range<Version.Semantic> = .all
++            #expect(range.contains(Version.Semantic(major: 0, minor: 0, patch: 0)))
++            #expect(range.contains(Version.Semantic(major: 999, minor: 999, patch: 999)))
++        }
+ 
+-    @Test
+-    func `Inclusive lower / exclusive upper is half-open`() {
+-        let range = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
+-            upperBound: .exclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
+-        )
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
+-        #expect(!range.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
+-        #expect(!range.contains(Version.Semantic(major: 0, minor: 99, patch: 99)))
+-    }
++        @Test
++        func `Exact range contains only the exact version`() {
++            let target = Version.Semantic(major: 1, minor: 2, patch: 3)
++            let range: Version.Range<Version.Semantic> = .exact(target)
++            #expect(range.contains(target))
++            #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
++            #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 4)))
++        }
+ 
+-    @Test
+-    func `Exclusive lower excludes the lower bound itself`() {
+-        let range = Version.Range<Version.Semantic>(
+-            lowerBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
+-            upperBound: .unbounded
+-        )
+-        #expect(!range.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 0, patch: 1)))
+-    }
++        @Test
++        func `Inclusive lower / exclusive upper is half-open`() {
++            let range = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++                upperBound: .exclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
++            )
++            #expect(range.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
++            #expect(range.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
++            #expect(!range.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
++            #expect(!range.contains(Version.Semantic(major: 0, minor: 99, patch: 99)))
++        }
+ 
+-    @Test
+-    func `A next major version range includes its start and excludes the next major version`() {
+-        let range: Version.Range<Version.Semantic> = .upToNextMajor(
+-            from: Version.Semantic(major: 1, minor: 2, patch: 3)
+-        )
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 2, patch: 3)))
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
+-        #expect(!range.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
+-        #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
+-    }
++        @Test
++        func `Exclusive lower excludes the lower bound itself`() {
++            let range = Version.Range<Version.Semantic>(
++                lowerBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++                upperBound: .unbounded
++            )
++            #expect(!range.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
++            #expect(range.contains(Version.Semantic(major: 1, minor: 0, patch: 1)))
++        }
++
++        @Test
++        func `A next major version range includes its start and excludes the next major version`() {
++            let range: Version.Range<Version.Semantic> = .upToNextMajor(
++                from: Version.Semantic(major: 1, minor: 2, patch: 3)
++            )
++            #expect(range.contains(Version.Semantic(major: 1, minor: 2, patch: 3)))
++            #expect(range.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
++            #expect(!range.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
++            #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
++        }
+ 
+-    @Test
+-    func `A next minor version range includes its start and excludes the next minor version`() {
+-        let range: Version.Range<Version.Semantic> = .upToNextMinor(
+-            from: Version.Semantic(major: 1, minor: 2, patch: 3)
+-        )
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 2, patch: 3)))
+-        #expect(range.contains(Version.Semantic(major: 1, minor: 2, patch: 99)))
+-        #expect(!range.contains(Version.Semantic(major: 1, minor: 3, patch: 0)))
+-        #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
++        @Test
++        func `A next minor version range includes its start and excludes the next minor version`() {
++            let range: Version.Range<Version.Semantic> = .upToNextMinor(
++                from: Version.Semantic(major: 1, minor: 2, patch: 3)
++            )
++            #expect(range.contains(Version.Semantic(major: 1, minor: 2, patch: 3)))
++            #expect(range.contains(Version.Semantic(major: 1, minor: 2, patch: 99)))
++            #expect(!range.contains(Version.Semantic(major: 1, minor: 3, patch: 0)))
++            #expect(!range.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
++        }
+     }
+ }
+diff --git a/Tests/Version Tests/Version.Range.Algebra Tests.swift b/Tests/Version Tests/Version.Range.Algebra Tests.swift
+index 3f65cd4..3875a8f 100644
+--- a/Tests/Version Tests/Version.Range.Algebra Tests.swift	
++++ b/Tests/Version Tests/Version.Range.Algebra Tests.swift	
+@@ -1,140 +1,144 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Version range algebra preserves intersections emptiness and containment` {
+-    @Test
+-    func `Unbounded range is not empty`() {
+-        let range: Version.Range<Version.Semantic> = .all
+-        #expect(!range.isEmpty)
+-    }
+-
+-    @Test
+-    func `Crossed bounds are empty`() {
+-        let range = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(Version.Semantic(major: 2, minor: 0, patch: 0)),
+-            upperBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0))
+-        )
+-        #expect(range.isEmpty)
+-    }
+-
+-    @Test
+-    func `Equal bounds, both inclusive, are non-empty singletons`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let range = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(v),
+-            upperBound: .inclusive(v)
+-        )
+-        #expect(!range.isEmpty)
+-    }
+-
+-    @Test
+-    func `Equal bounds with one exclusive are empty`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let range = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(v),
+-            upperBound: .exclusive(v)
+-        )
+-        #expect(range.isEmpty)
+-    }
+-
+-    @Test
+-    func `Overlapping version ranges intersect at their shared bounds`() {
+-        let a = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
+-            upperBound: .exclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
+-        )
+-        let b = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(Version.Semantic(major: 1, minor: 5, patch: 0)),
+-            upperBound: .exclusive(Version.Semantic(major: 3, minor: 0, patch: 0))
+-        )
+-        let intersected = a.intersection(b)
+-
+-        #expect(intersected.contains(Version.Semantic(major: 1, minor: 5, patch: 0)))
+-        #expect(intersected.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
+-        #expect(!intersected.contains(Version.Semantic(major: 1, minor: 4, patch: 99)))
+-        #expect(!intersected.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
+-    }
+-
+-    @Test
+-    func `Disjoint ranges intersect to empty`() {
+-        let a = Version.Range<Version.Semantic>.upToNextMajor(
+-            from: Version.Semantic(major: 1, minor: 0, patch: 0)
+-        )
+-        let b = Version.Range<Version.Semantic>.upToNextMajor(
+-            from: Version.Semantic(major: 3, minor: 0, patch: 0)
+-        )
+-
+-        #expect(a.intersection(b).isEmpty)
+-        #expect(!a.overlaps(b))
+-    }
+-
+-    @Test
+-    func `A next major version range is strictly contained within a wider version interval`() {
+-        let inner = Version.Range<Version.Semantic>.upToNextMajor(
+-            from: Version.Semantic(major: 1, minor: 0, patch: 0)
+-        )
+-        let outer = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
+-            upperBound: .exclusive(Version.Semantic(major: 3, minor: 0, patch: 0))
+-        )
+-        #expect(inner.isSubset(of: outer))
+-        #expect(outer.isSuperset(of: inner))
+-        #expect(outer.contains(inner))
+-        #expect(!inner.contains(outer))
+-    }
+-
+-    @Test
+-    func `Identical ranges are mutual subsets`() {
+-        let r = Version.Range<Version.Semantic>.upToNextMajor(
+-            from: Version.Semantic(major: 1, minor: 0, patch: 0)
+-        )
+-        #expect(r.isSubset(of: r))
+-        #expect(r.isSuperset(of: r))
+-        #expect(r.contains(r))
+-    }
+-
+-    @Test
+-    func `Empty range is subset of every range`() {
+-        let empty = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(Version.Semantic(major: 2, minor: 0, patch: 0)),
+-            upperBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0))
+-        )
+-        let any: Version.Range<Version.Semantic> = .all
+-        let caret = Version.Range<Version.Semantic>.upToNextMajor(
+-            from: Version.Semantic(major: 1, minor: 0, patch: 0)
+-        )
+-        #expect(empty.isSubset(of: any))
+-        #expect(empty.isSubset(of: caret))
+-        #expect(empty.isSubset(of: empty))
+-    }
+-
+-    @Test
+-    func `Unbounded is superset of any bounded range`() {
+-        let any: Version.Range<Version.Semantic> = .all
+-        let caret = Version.Range<Version.Semantic>.upToNextMajor(
+-            from: Version.Semantic(major: 1, minor: 0, patch: 0)
+-        )
+-        #expect(any.isSuperset(of: caret))
+-        #expect(caret.isSubset(of: any))
+-        #expect(!any.isSubset(of: caret))
+-    }
+-
+-    @Test
+-    func `Inclusive vs exclusive boundary distinguishes coverage`() {
+-        let one = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let two = Version.Semantic(major: 2, minor: 0, patch: 0)
+-
+-        let halfOpen = Version.Range<Version.Semantic>(
+-            lowerBound: .inclusive(one),
+-            upperBound: .exclusive(two)
+-        )
+-
+-        let openClosed = Version.Range<Version.Semantic>(
+-            lowerBound: .exclusive(one),
+-            upperBound: .inclusive(two)
+-        )
+-
+-        #expect(!halfOpen.isSubset(of: openClosed))
+-        #expect(!openClosed.isSubset(of: halfOpen))
++enum `Version.Range.Algebra Tests` {}
++
++extension `Version.Range.Algebra Tests` {
++    @Suite struct `Version range algebra preserves intersections emptiness and containment` {
++        @Test
++        func `Unbounded range is not empty`() {
++            let range: Version.Range<Version.Semantic> = .all
++            #expect(!range.isEmpty)
++        }
++
++        @Test
++        func `Crossed bounds are empty`() {
++            let range = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(Version.Semantic(major: 2, minor: 0, patch: 0)),
++                upperBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0))
++            )
++            #expect(range.isEmpty)
++        }
++
++        @Test
++        func `Equal bounds, both inclusive, are non-empty singletons`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let range = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(v),
++                upperBound: .inclusive(v)
++            )
++            #expect(!range.isEmpty)
++        }
++
++        @Test
++        func `Equal bounds with one exclusive are empty`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let range = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(v),
++                upperBound: .exclusive(v)
++            )
++            #expect(range.isEmpty)
++        }
++
++        @Test
++        func `Overlapping version ranges intersect at their shared bounds`() {
++            let a = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++                upperBound: .exclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
++            )
++            let b = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(Version.Semantic(major: 1, minor: 5, patch: 0)),
++                upperBound: .exclusive(Version.Semantic(major: 3, minor: 0, patch: 0))
++            )
++            let intersected = a.intersection(b)
++
++            #expect(intersected.contains(Version.Semantic(major: 1, minor: 5, patch: 0)))
++            #expect(intersected.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
++            #expect(!intersected.contains(Version.Semantic(major: 1, minor: 4, patch: 99)))
++            #expect(!intersected.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
++        }
++
++        @Test
++        func `Disjoint ranges intersect to empty`() {
++            let a = Version.Range<Version.Semantic>.upToNextMajor(
++                from: Version.Semantic(major: 1, minor: 0, patch: 0)
++            )
++            let b = Version.Range<Version.Semantic>.upToNextMajor(
++                from: Version.Semantic(major: 3, minor: 0, patch: 0)
++            )
++
++            #expect(a.intersection(b).isEmpty)
++            #expect(!a.overlaps(b))
++        }
++
++        @Test
++        func `A next major version range is strictly contained within a wider version interval`() {
++            let inner = Version.Range<Version.Semantic>.upToNextMajor(
++                from: Version.Semantic(major: 1, minor: 0, patch: 0)
++            )
++            let outer = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++                upperBound: .exclusive(Version.Semantic(major: 3, minor: 0, patch: 0))
++            )
++            #expect(inner.isSubset(of: outer))
++            #expect(outer.isSuperset(of: inner))
++            #expect(outer.contains(inner))
++            #expect(!inner.contains(outer))
++        }
++
++        @Test
++        func `Identical ranges are mutual subsets`() {
++            let r = Version.Range<Version.Semantic>.upToNextMajor(
++                from: Version.Semantic(major: 1, minor: 0, patch: 0)
++            )
++            #expect(r.isSubset(of: r))
++            #expect(r.isSuperset(of: r))
++            #expect(r.contains(r))
++        }
++
++        @Test
++        func `Empty range is subset of every range`() {
++            let empty = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(Version.Semantic(major: 2, minor: 0, patch: 0)),
++                upperBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0))
++            )
++            let any: Version.Range<Version.Semantic> = .all
++            let caret = Version.Range<Version.Semantic>.upToNextMajor(
++                from: Version.Semantic(major: 1, minor: 0, patch: 0)
++            )
++            #expect(empty.isSubset(of: any))
++            #expect(empty.isSubset(of: caret))
++            #expect(empty.isSubset(of: empty))
++        }
++
++        @Test
++        func `Unbounded is superset of any bounded range`() {
++            let any: Version.Range<Version.Semantic> = .all
++            let caret = Version.Range<Version.Semantic>.upToNextMajor(
++                from: Version.Semantic(major: 1, minor: 0, patch: 0)
++            )
++            #expect(any.isSuperset(of: caret))
++            #expect(caret.isSubset(of: any))
++            #expect(!any.isSubset(of: caret))
++        }
++
++        @Test
++        func `Inclusive vs exclusive boundary distinguishes coverage`() {
++            let one = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let two = Version.Semantic(major: 2, minor: 0, patch: 0)
++
++            let halfOpen = Version.Range<Version.Semantic>(
++                lowerBound: .inclusive(one),
++                upperBound: .exclusive(two)
++            )
++
++            let openClosed = Version.Range<Version.Semantic>(
++                lowerBound: .exclusive(one),
++                upperBound: .inclusive(two)
++            )
++
++            #expect(!halfOpen.isSubset(of: openClosed))
++            #expect(!openClosed.isSubset(of: halfOpen))
++        }
+     }
+ }
+diff --git a/Tests/Version Tests/Version.Semantic Tests.swift b/Tests/Version Tests/Version.Semantic Tests.swift
+index c2f47c2..27dee03 100644
+--- a/Tests/Version Tests/Version.Semantic Tests.swift	
++++ b/Tests/Version Tests/Version.Semantic Tests.swift	
+@@ -1,46 +1,48 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Semantic versions preserve representation and compare semantic precedence` {
+-    @Test
+-    func `Component initializer retains the semantic representation`() {
+-        let version = Version.Semantic(
+-            major: 1,
+-            minor: 2,
+-            patch: 3,
+-            preReleaseIdentifiers: [.alphanumeric("rc"), .numeric(1)],
+-            buildMetadataIdentifiers: ["build", "42"]
+-        )
+-        #expect(version.description == "1.2.3-rc.1+build.42")
+-    }
++extension `Version.Semantic Tests` {
++    @Suite struct `Semantic versions preserve representation and compare semantic precedence` {
++        @Test
++        func `Component initializer retains the semantic representation`() {
++            let version = Version.Semantic(
++                major: 1,
++                minor: 2,
++                patch: 3,
++                preReleaseIdentifiers: [.alphanumeric("rc"), .numeric(1)],
++                buildMetadataIdentifiers: ["build", "42"]
++            )
++            #expect(version.description == "1.2.3-rc.1+build.42")
++        }
+ 
+-    @Test
+-    func `Build metadata is excluded from semantic equality and hashing`() {
+-        let lhs = Version.Semantic(
+-            major: 1,
+-            minor: 0,
+-            patch: 0,
+-            buildMetadataIdentifiers: ["a"]
+-        )
+-        let rhs = Version.Semantic(
+-            major: 1,
+-            minor: 0,
+-            patch: 0,
+-            buildMetadataIdentifiers: ["b"]
+-        )
+-        #expect(lhs == rhs)
+-        #expect(lhs.hashValue == rhs.hashValue)
+-    }
++        @Test
++        func `Build metadata is excluded from semantic equality and hashing`() {
++            let lhs = Version.Semantic(
++                major: 1,
++                minor: 0,
++                patch: 0,
++                buildMetadataIdentifiers: ["a"]
++            )
++            let rhs = Version.Semantic(
++                major: 1,
++                minor: 0,
++                patch: 0,
++                buildMetadataIdentifiers: ["b"]
++            )
++            #expect(lhs == rhs)
++            #expect(lhs.hashValue == rhs.hashValue)
++        }
+ 
+-    @Test
+-    func `Prerelease identifiers determine precedence`() {
+-        let prerelease = Version.Semantic(
+-            major: 1,
+-            minor: 0,
+-            patch: 0,
+-            preReleaseIdentifiers: [.alphanumeric("rc"), .numeric(1)]
+-        )
+-        let release = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        #expect(prerelease < release)
++        @Test
++        func `Prerelease identifiers determine precedence`() {
++            let prerelease = Version.Semantic(
++                major: 1,
++                minor: 0,
++                patch: 0,
++                preReleaseIdentifiers: [.alphanumeric("rc"), .numeric(1)]
++            )
++            let release = Version.Semantic(major: 1, minor: 0, patch: 0)
++            #expect(prerelease < release)
++        }
+     }
+ }
+diff --git a/Tests/Version Tests/Version.Serializer Tests.swift b/Tests/Version Tests/Version.Serializer Tests.swift
+index 74c6b07..9ed2e22 100644
+--- a/Tests/Version Tests/Version.Serializer Tests.swift	
++++ b/Tests/Version Tests/Version.Serializer Tests.swift	
+@@ -4,31 +4,35 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite struct `Version Serializer Tests` {
+-        @Test
+-        func `Semantic serializer emits canonical bytes`() {
+-            let version = Version.Semantic(
+-                major: 1,
+-                minor: 2,
+-                patch: 3,
+-                preReleaseIdentifiers: [.alphanumeric("rc"), .numeric(1)],
+-                buildMetadataIdentifiers: ["build", "42"]
+-            )
+-            var bytes: [Byte] = []
+-            Version.Semantic.Serializer().serialize(version, into: &bytes)
+-            #expect(Swift::String(decoding: bytes.map(\.bitPattern), as: Swift::UTF8.self) == "1.2.3-rc.1+build.42")
+-        }
++enum `Version.Serializer Tests` {}
+ 
+-        @Test
+-        func `Tools serializer preserves omitted patch`() {
+-            let version = Version.Tools(major: 6, minor: 4)
+-            var bytes: [Byte] = []
+-            Version.Tools.Serializer().serialize(version, into: &bytes)
+-            #expect(Swift::String(decoding: bytes.map(\.bitPattern), as: Swift::UTF8.self) == "6.4")
++extension `Version.Serializer Tests` {
++        @Suite struct `Version Serializer Tests` {
++            @Test
++            func `Semantic serializer emits canonical bytes`() {
++                let version = Version.Semantic(
++                    major: 1,
++                    minor: 2,
++                    patch: 3,
++                    preReleaseIdentifiers: [.alphanumeric("rc"), .numeric(1)],
++                    buildMetadataIdentifiers: ["build", "42"]
++                )
++                var bytes: [Byte] = []
++                Version.Semantic.Serializer().serialize(version, into: &bytes)
++                #expect(Swift::String(decoding: bytes.map(\.bitPattern), as: Swift::UTF8.self) == "1.2.3-rc.1+build.42")
++            }
++
++            @Test
++            func `Tools serializer preserves omitted patch`() {
++                let version = Version.Tools(major: 6, minor: 4)
++                var bytes: [Byte] = []
++                Version.Tools.Serializer().serialize(version, into: &bytes)
++                #expect(Swift::String(decoding: bytes.map(\.bitPattern), as: Swift::UTF8.self) == "6.4")
++            }
+         }
+-    }
++}
+ 
+-    extension `Version Serializer Tests` {
++    extension `Version.Serializer Tests`.`Version Serializer Tests` {
+         @Test func calendarSerializerAppendsCanonicalUTF8WithoutReplacingPrefix() throws {
+             let value = Version.Calendar.full(
+                 year: -1,
+diff --git a/Tests/Version Tests/Version.Set Tests.swift b/Tests/Version Tests/Version.Set Tests.swift
+index 61fd53c..d4c5e7b 100644
+--- a/Tests/Version Tests/Version.Set Tests.swift	
++++ b/Tests/Version Tests/Version.Set Tests.swift	
+@@ -1,52 +1,56 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Version sets preserve exact range and union membership` {
+-    @Test
+-    func `Empty set contains no version`() {
+-        let set: Version.Set<Version.Semantic> = .empty
+-        #expect(!set.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
+-    }
++enum `Version.Set Tests` {}
+ 
+-    @Test
+-    func `Any set contains every version`() {
+-        let set: Version.Set<Version.Semantic> = .any
+-        #expect(set.contains(Version.Semantic(major: 0, minor: 0, patch: 0)))
+-        #expect(set.contains(Version.Semantic(major: 999, minor: 999, patch: 999)))
+-    }
++extension `Version.Set Tests` {
++    @Suite struct `Version sets preserve exact range and union membership` {
++        @Test
++        func `Empty set contains no version`() {
++            let set: Version.Set<Version.Semantic> = .empty
++            #expect(!set.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
++        }
+ 
+-    @Test
+-    func `Exact set matches one version`() {
+-        let target = Version.Semantic(major: 1, minor: 2, patch: 3)
+-        let set: Version.Set<Version.Semantic> = .exact(target)
+-        #expect(set.contains(target))
+-        #expect(!set.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
+-    }
++        @Test
++        func `Any set contains every version`() {
++            let set: Version.Set<Version.Semantic> = .any
++            #expect(set.contains(Version.Semantic(major: 0, minor: 0, patch: 0)))
++            #expect(set.contains(Version.Semantic(major: 999, minor: 999, patch: 999)))
++        }
+ 
+-    @Test
+-    func `Range set matches the interval`() {
+-        let set: Version.Set<Version.Semantic> = .range(
+-            .upToNextMajor(from: Version.Semantic(major: 1, minor: 0, patch: 0))
+-        )
+-        #expect(set.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
+-        #expect(!set.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
+-    }
++        @Test
++        func `Exact set matches one version`() {
++            let target = Version.Semantic(major: 1, minor: 2, patch: 3)
++            let set: Version.Set<Version.Semantic> = .exact(target)
++            #expect(set.contains(target))
++            #expect(!set.contains(Version.Semantic(major: 1, minor: 2, patch: 2)))
++        }
+ 
+-    @Test
+-    func `Union matches any member`() {
+-        let set: Version.Set<Version.Semantic> = .union([
+-            .exact(Version.Semantic(major: 1, minor: 0, patch: 0)),
+-            .range(.upToNextMajor(from: Version.Semantic(major: 3, minor: 0, patch: 0))),
+-        ])
+-        #expect(set.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
+-        #expect(set.contains(Version.Semantic(major: 3, minor: 5, patch: 0)))
+-        #expect(!set.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
+-        #expect(!set.contains(Version.Semantic(major: 4, minor: 0, patch: 0)))
+-    }
++        @Test
++        func `Range set matches the interval`() {
++            let set: Version.Set<Version.Semantic> = .range(
++                .upToNextMajor(from: Version.Semantic(major: 1, minor: 0, patch: 0))
++            )
++            #expect(set.contains(Version.Semantic(major: 1, minor: 99, patch: 99)))
++            #expect(!set.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
++        }
++
++        @Test
++        func `Union matches any member`() {
++            let set: Version.Set<Version.Semantic> = .union([
++                .exact(Version.Semantic(major: 1, minor: 0, patch: 0)),
++                .range(.upToNextMajor(from: Version.Semantic(major: 3, minor: 0, patch: 0))),
++            ])
++            #expect(set.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
++            #expect(set.contains(Version.Semantic(major: 3, minor: 5, patch: 0)))
++            #expect(!set.contains(Version.Semantic(major: 2, minor: 0, patch: 0)))
++            #expect(!set.contains(Version.Semantic(major: 4, minor: 0, patch: 0)))
++        }
+ 
+-    @Test
+-    func `Empty union matches nothing`() {
+-        let set: Version.Set<Version.Semantic> = .union([])
+-        #expect(!set.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
++        @Test
++        func `Empty union matches nothing`() {
++            let set: Version.Set<Version.Semantic> = .union([])
++            #expect(!set.contains(Version.Semantic(major: 1, minor: 0, patch: 0)))
++        }
+     }
+ }
+diff --git a/Tests/Version Tests/Version.Set.Algebra Tests.swift b/Tests/Version Tests/Version.Set.Algebra Tests.swift
+index 71da419..8c68d55 100644
+--- a/Tests/Version Tests/Version.Set.Algebra Tests.swift	
++++ b/Tests/Version Tests/Version.Set.Algebra Tests.swift	
+@@ -1,104 +1,108 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Version set algebra preserves normalization and intersection membership` {
+-    @Test
+-    func `An empty version set reports that it is empty`() {
+-        let set: Version.Set<Version.Semantic> = .empty
+-        #expect(set.isEmpty)
+-    }
++enum `Version.Set.Algebra Tests` {}
+ 
+-    @Test
+-    func `Empty-union normalizes to empty`() {
+-        let set: Version.Set<Version.Semantic> = .union([])
+-        #expect(set.normalized() == .empty)
+-    }
++extension `Version.Set.Algebra Tests` {
++    @Suite struct `Version set algebra preserves normalization and intersection membership` {
++        @Test
++        func `An empty version set reports that it is empty`() {
++            let set: Version.Set<Version.Semantic> = .empty
++            #expect(set.isEmpty)
++        }
+ 
+-    @Test
+-    func `Singleton union normalizes to the member`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let set: Version.Set<Version.Semantic> = .union([.exact(v)])
+-        #expect(set.normalized() == .exact(v))
+-    }
++        @Test
++        func `Empty-union normalizes to empty`() {
++            let set: Version.Set<Version.Semantic> = .union([])
++            #expect(set.normalized() == .empty)
++        }
+ 
+-    @Test
+-    func `Union containing any collapses to any`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let set: Version.Set<Version.Semantic> = .union([.exact(v), .any])
+-        #expect(set.normalized() == .any)
+-    }
++        @Test
++        func `Singleton union normalizes to the member`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let set: Version.Set<Version.Semantic> = .union([.exact(v)])
++            #expect(set.normalized() == .exact(v))
++        }
+ 
+-    @Test
+-    func `Nested unions flatten`() {
+-        let v1 = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let v2 = Version.Semantic(major: 2, minor: 0, patch: 0)
+-        let set: Version.Set<Version.Semantic> = .union([
+-            .union([.exact(v1), .exact(v2)]),
+-            .exact(Version.Semantic(major: 3, minor: 0, patch: 0)),
+-        ])
+-        let normalized = set.normalized()
+-        guard case .union(let members) = normalized else {
+-            Issue.record("expected union after normalization")
+-            return
++        @Test
++        func `Union containing any collapses to any`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let set: Version.Set<Version.Semantic> = .union([.exact(v), .any])
++            #expect(set.normalized() == .any)
+         }
+-        #expect(members.count == 3)
+-    }
+ 
+-    @Test
+-    func `Empty members are dropped from unions`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let set: Version.Set<Version.Semantic> = .union([.exact(v), .empty, .empty])
+-        #expect(set.normalized() == .exact(v))
+-    }
++        @Test
++        func `Nested unions flatten`() {
++            let v1 = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let v2 = Version.Semantic(major: 2, minor: 0, patch: 0)
++            let set: Version.Set<Version.Semantic> = .union([
++                .union([.exact(v1), .exact(v2)]),
++                .exact(Version.Semantic(major: 3, minor: 0, patch: 0)),
++            ])
++            let normalized = set.normalized()
++            guard case .union(let members) = normalized else {
++                Issue.record("expected union after normalization")
++                return
++            }
++            #expect(members.count == 3)
++        }
+ 
+-    @Test
+-    func `Intersecting an exact version with a containing range preserves that exact version`() {
+-        let v = Version.Semantic(major: 1, minor: 5, patch: 0)
+-        let range: Version.Set<Version.Semantic> = .range(
+-            .upToNextMajor(from: Version.Semantic(major: 1, minor: 0, patch: 0))
+-        )
+-        let exact: Version.Set<Version.Semantic> = .exact(v)
+-        let intersected = exact.intersection(range)
+-        #expect(intersected == .exact(v))
+-    }
++        @Test
++        func `Empty members are dropped from unions`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let set: Version.Set<Version.Semantic> = .union([.exact(v), .empty, .empty])
++            #expect(set.normalized() == .exact(v))
++        }
+ 
+-    @Test
+-    func `Intersection of disjoint exact and range is empty`() {
+-        let outside = Version.Semantic(major: 2, minor: 5, patch: 0)
+-        let range: Version.Set<Version.Semantic> = .range(
+-            .upToNextMajor(from: Version.Semantic(major: 1, minor: 0, patch: 0))
+-        )
+-        let exact: Version.Set<Version.Semantic> = .exact(outside)
+-        #expect(exact.intersection(range) == .empty)
+-    }
++        @Test
++        func `Intersecting an exact version with a containing range preserves that exact version`() {
++            let v = Version.Semantic(major: 1, minor: 5, patch: 0)
++            let range: Version.Set<Version.Semantic> = .range(
++                .upToNextMajor(from: Version.Semantic(major: 1, minor: 0, patch: 0))
++            )
++            let exact: Version.Set<Version.Semantic> = .exact(v)
++            let intersected = exact.intersection(range)
++            #expect(intersected == .exact(v))
++        }
+ 
+-    @Test
+-    func `Intersection with any preserves the other side`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let exact: Version.Set<Version.Semantic> = .exact(v)
+-        #expect(exact.intersection(.any) == .exact(v))
+-        #expect((.any as Version.Set<Version.Semantic>).intersection(exact) == .exact(v))
+-    }
++        @Test
++        func `Intersection of disjoint exact and range is empty`() {
++            let outside = Version.Semantic(major: 2, minor: 5, patch: 0)
++            let range: Version.Set<Version.Semantic> = .range(
++                .upToNextMajor(from: Version.Semantic(major: 1, minor: 0, patch: 0))
++            )
++            let exact: Version.Set<Version.Semantic> = .exact(outside)
++            #expect(exact.intersection(range) == .empty)
++        }
++
++        @Test
++        func `Intersection with any preserves the other side`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let exact: Version.Set<Version.Semantic> = .exact(v)
++            #expect(exact.intersection(.any) == .exact(v))
++            #expect((.any as Version.Set<Version.Semantic>).intersection(exact) == .exact(v))
++        }
+ 
+-    @Test
+-    func `Union of two exacts at same version normalizes to single exact`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let combined = (Version.Set<Version.Semantic>.exact(v)).union(.exact(v))
++        @Test
++        func `Union of two exacts at same version normalizes to single exact`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let combined = (Version.Set<Version.Semantic>.exact(v)).union(.exact(v))
+ 
+-        guard case .union(let members) = combined else {
+-            Issue.record("expected union")
+-            return
++            guard case .union(let members) = combined else {
++                Issue.record("expected union")
++                return
++            }
++            #expect(members.count == 2)
++            #expect(combined.contains(v))
+         }
+-        #expect(members.count == 2)
+-        #expect(combined.contains(v))
+-    }
+ 
+-    @Test
+-    func `Intersection with any normalizes the other side`() {
+-        let v = Version.Semantic(major: 1, minor: 0, patch: 0)
+-        let unnormalized: Version.Set<Version.Semantic> = .union([.empty, .exact(v)])
+-        let any: Version.Set<Version.Semantic> = .any
+-        #expect(any.intersection(unnormalized) == .exact(v))
+-        #expect(unnormalized.intersection(.any) == .exact(v))
++        @Test
++        func `Intersection with any normalizes the other side`() {
++            let v = Version.Semantic(major: 1, minor: 0, patch: 0)
++            let unnormalized: Version.Set<Version.Semantic> = .union([.empty, .exact(v)])
++            let any: Version.Set<Version.Semantic> = .any
++            #expect(any.intersection(unnormalized) == .exact(v))
++            #expect(unnormalized.intersection(.any) == .exact(v))
++        }
+     }
+ }
+diff --git a/Tests/Version Tests/Version.Tools Tests.swift b/Tests/Version Tests/Version.Tools Tests.swift
+index 3a0ca54..a659d36 100644
+--- a/Tests/Version Tests/Version.Tools Tests.swift	
++++ b/Tests/Version Tests/Version.Tools Tests.swift	
+@@ -1,52 +1,54 @@
+ import Testing
+ import Version
+ 
+-@Suite struct `Tools versions preserve omitted patches and compare present patches` {
+-    @Test
+-    func `Component initializer retains omitted patch`() {
+-        let version = Version.Tools(major: 6, minor: 4)
+-        #expect(version.patch == nil)
+-        #expect(version.description == "6.4")
+-    }
++extension `Version.Tools Tests` {
++    @Suite struct `Tools versions preserve omitted patches and compare present patches` {
++        @Test
++        func `Component initializer retains omitted patch`() {
++            let version = Version.Tools(major: 6, minor: 4)
++            #expect(version.patch == nil)
++            #expect(version.description == "6.4")
++        }
+ 
+-    @Test
+-    func `Patch participates in ordering`() {
+-        let lhs = Version.Tools(major: 6, minor: 4, patch: 0)
+-        let rhs = Version.Tools(major: 6, minor: 4, patch: 1)
+-        #expect(lhs < rhs)
+-    }
++        @Test
++        func `Patch participates in ordering`() {
++            let lhs = Version.Tools(major: 6, minor: 4, patch: 0)
++            let rhs = Version.Tools(major: 6, minor: 4, patch: 1)
++            #expect(lhs < rhs)
++        }
+ 
+-    @Test
+-    func `Omitted patch sorts before explicit zero patch`() {
+-        let short = Version.Tools(major: 6, minor: 4)
+-        let full = Version.Tools(major: 6, minor: 4, patch: 0)
+-        #expect(short != full)
+-        #expect(short < full)
+-        #expect(!(full < short))
+-    }
++        @Test
++        func `Omitted patch sorts before explicit zero patch`() {
++            let short = Version.Tools(major: 6, minor: 4)
++            let full = Version.Tools(major: 6, minor: 4, patch: 0)
++            #expect(short != full)
++            #expect(short < full)
++            #expect(!(full < short))
++        }
+ 
+-    @Test
+-    func `Ordering agrees with equality`() {
+-        let versions = [
+-            Version.Tools(major: 6, minor: 4),
+-            Version.Tools(major: 6, minor: 4, patch: 0),
+-            Version.Tools(major: 6, minor: 4, patch: 1),
+-            Version.Tools(major: 6, minor: 3, patch: 2),
+-        ]
+-        for lhs in versions {
+-            for rhs in versions {
+-                let tied = !(lhs < rhs) && !(rhs < lhs)
+-                #expect(tied == (lhs == rhs))
++        @Test
++        func `Ordering agrees with equality`() {
++            let versions = [
++                Version.Tools(major: 6, minor: 4),
++                Version.Tools(major: 6, minor: 4, patch: 0),
++                Version.Tools(major: 6, minor: 4, patch: 1),
++                Version.Tools(major: 6, minor: 3, patch: 2),
++            ]
++            for lhs in versions {
++                for rhs in versions {
++                    let tied = !(lhs < rhs) && !(rhs < lhs)
++                    #expect(tied == (lhs == rhs))
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `Omitted patch still sorts after a lower patch`() {
+-        let short = Version.Tools(major: 6, minor: 4)
+-        let lower = Version.Tools(major: 6, minor: 3, patch: 9)
+-        let higher = Version.Tools(major: 6, minor: 4, patch: 1)
+-        #expect(lower < short)
+-        #expect(short < higher)
++        @Test
++        func `Omitted patch still sorts after a lower patch`() {
++            let short = Version.Tools(major: 6, minor: 4)
++            let lower = Version.Tools(major: 6, minor: 3, patch: 9)
++            let higher = Version.Tools(major: 6, minor: 4, patch: 1)
++            #expect(lower < short)
++            #expect(short < higher)
++        }
+     }
+ }
+diff --git a/Tests/Version Tests/Version.Tools.Parser Tests.swift b/Tests/Version Tests/Version.Tools.Parser Tests.swift
+index c0a00a2..769a68e 100644
+--- a/Tests/Version Tests/Version.Tools.Parser Tests.swift	
++++ b/Tests/Version Tests/Version.Tools.Parser Tests.swift	
+@@ -5,36 +5,40 @@
+     import Tagged
+     import Testing
+ 
+-    @Suite struct `Version.Tools Parser Tests` {
++enum `Version.Tools.Parser Tests` {}
+ 
+-        @Test
+-        func `Parses two- and three-component tools versions`() throws(Version.Tools.ParserError) {
+-            var twoComponent = [Byte](utf8: "6.4")[...]
+-            let first = try Version.Tools.Parser().parse(&twoComponent)
+-            #expect(first.major.underlying == 6)
+-            #expect(first.minor.underlying == 4)
+-            #expect(first.patch == nil)
++extension `Version.Tools.Parser Tests` {
++        @Suite struct `Version.Tools Parser Tests` {
+ 
+-            var threeComponent = [Byte](utf8: "6.4.1")[...]
+-            let second = try Version.Tools.Parser().parse(&threeComponent)
+-            #expect(second.patch?.underlying == 1)
+-        }
++            @Test
++            func `Parses two- and three-component tools versions`() throws(Version.Tools.ParserError) {
++                var twoComponent = [Byte](utf8: "6.4")[...]
++                let first = try Version.Tools.Parser().parse(&twoComponent)
++                #expect(first.major.underlying == 6)
++                #expect(first.minor.underlying == 4)
++                #expect(first.patch == nil)
+ 
+-        @Test
+-        func `Serializer round-trips tools versions`() throws(Version.Tools.ParserError) {
+-            var input = [Byte](utf8: "6.4.1")[...]
+-            let version = try Version.Tools.Parser().parse(&input)
+-            var output: [Byte] = []
+-            Version.Tools.Serializer().serialize(version, into: &output)
+-            #expect(Swift::String(decoding: output.map(\.bitPattern), as: Swift::UTF8.self) == "6.4.1")
+-        }
++                var threeComponent = [Byte](utf8: "6.4.1")[...]
++                let second = try Version.Tools.Parser().parse(&threeComponent)
++                #expect(second.patch?.underlying == 1)
++            }
++
++            @Test
++            func `Serializer round-trips tools versions`() throws(Version.Tools.ParserError) {
++                var input = [Byte](utf8: "6.4.1")[...]
++                let version = try Version.Tools.Parser().parse(&input)
++                var output: [Byte] = []
++                Version.Tools.Serializer().serialize(version, into: &output)
++                #expect(Swift::String(decoding: output.map(\.bitPattern), as: Swift::UTF8.self) == "6.4.1")
++            }
+ 
+-        @Test
+-        func `Default parser uses byte input`() throws(Version.Tools.ParserError) {
+-            var input = [Byte](utf8: "6.4")[...]
+-            let version = try Version.Tools.parser.parse(&input)
+-            #expect(version.major.underlying == 6)
+-            #expect(version.minor.underlying == 4)
++            @Test
++            func `Default parser uses byte input`() throws(Version.Tools.ParserError) {
++                var input = [Byte](utf8: "6.4")[...]
++                let version = try Version.Tools.parser.parse(&input)
++                #expect(version.major.underlying == 6)
++                #expect(version.minor.underlying == 4)
++            }
+         }
+-    }
++}
+ #endif
+-- 
+2.43.0
+

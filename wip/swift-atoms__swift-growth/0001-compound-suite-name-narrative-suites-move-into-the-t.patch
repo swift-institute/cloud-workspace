@@ -1,0 +1,407 @@
+From 94fab73979cb63f9ab301571eb07f520442c9f1f Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:01 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Growth.Policy.Memory Tests.swift          |  98 ++++-----
+ .../Growth.Policy.Carrier Tests.swift         |  44 ++--
+ Tests/Growth Tests/Growth.Policy Tests.swift  | 188 +++++++++---------
+ 3 files changed, 171 insertions(+), 159 deletions(-)
+
+diff --git a/Tests/Absorbed swift-growth-memory Tests/Growth.Policy.Memory Tests.swift b/Tests/Absorbed swift-growth-memory Tests/Growth.Policy.Memory Tests.swift
+index 63d6b54..1806d38 100644
+--- a/Tests/Absorbed swift-growth-memory Tests/Growth.Policy.Memory Tests.swift	
++++ b/Tests/Absorbed swift-growth-memory Tests/Growth.Policy.Memory Tests.swift	
+@@ -2,59 +2,63 @@
+     import Growth
+     import Testing
+ 
+-    @Suite
+-    struct `Paged growth preserves capacity and alignment` {
+-        private typealias Policy = Growth.Policy<UInt8>
++enum `Growth.Policy.Memory Tests` {}
+ 
+-        @Test(arguments: [1, 2, 4, 16, 512, 4096])
+-        func `paged capacities round upward to the least aligned positive count`(_ magnitude: Int) throws {
+-            let alignment = try Memory.Alignment(magnitude)
+-            let policy = Policy.paged(alignment)
+-            for value: UInt in [0, 1, UInt(magnitude), UInt(magnitude) + 1, UInt(magnitude) * 3 - 1] {
+-                let capacity = try policy.capacity(from: .init(Cardinal(value)))
+-                let result = capacity.underlying.rawValue
+-                #expect(result >= max(value, 1))
+-                #expect(alignment.isAligned(result))
+-                #expect(result - max(value, 1) < UInt(magnitude))
+-            }
+-        }
++extension `Growth.Policy.Memory Tests` {
++        @Suite
++        struct `Paged growth preserves capacity and alignment` {
++            private typealias Policy = Growth.Policy<UInt8>
+ 
+-        @Test
+-        func `byte paging preserves the largest unsigned count`() throws {
+-            let capacity = try Policy.paged(.byte).capacity(from: .init(Cardinal(UInt.max)))
+-            #expect(capacity.underlying.rawValue == UInt.max)
+-        }
++            @Test(arguments: [1, 2, 4, 16, 512, 4096])
++            func `paged capacities round upward to the least aligned positive count`(_ magnitude: Int) throws {
++                let alignment = try Memory.Alignment(magnitude)
++                let policy = Policy.paged(alignment)
++                for value: UInt in [0, 1, UInt(magnitude), UInt(magnitude) + 1, UInt(magnitude) * 3 - 1] {
++                    let capacity = try policy.capacity(from: .init(Cardinal(value)))
++                    let result = capacity.underlying.rawValue
++                    #expect(result >= max(value, 1))
++                    #expect(alignment.isAligned(result))
++                    #expect(result - max(value, 1) < UInt(magnitude))
++                }
++            }
+ 
+-        @Test(arguments: [2, 4, 16, 512, 4096])
+-        func `paged growth accepts the last aligned capacity and rejects wrapping`(_ magnitude: Int) throws {
+-            let alignment = try Memory.Alignment(magnitude)
+-            let policy = Policy.paged(alignment)
+-            let last = UInt.max - UInt(magnitude - 1)
+-            let capacity = try policy.capacity(from: .init(Cardinal(last)))
+-            #expect(capacity.underlying.rawValue == last)
+-            #expect(throws: Policy.Error.overflow) {
+-                _ = try policy.capacity(from: .init(Cardinal(last + 1)))
++            @Test
++            func `byte paging preserves the largest unsigned count`() throws {
++                let capacity = try Policy.paged(.byte).capacity(from: .init(Cardinal(UInt.max)))
++                #expect(capacity.underlying.rawValue == UInt.max)
+             }
+-            #expect(throws: Policy.Error.overflow) {
+-                _ = try policy.capacity(from: .init(Cardinal(UInt.max)))
++
++            @Test(arguments: [2, 4, 16, 512, 4096])
++            func `paged growth accepts the last aligned capacity and rejects wrapping`(_ magnitude: Int) throws {
++                let alignment = try Memory.Alignment(magnitude)
++                let policy = Policy.paged(alignment)
++                let last = UInt.max - UInt(magnitude - 1)
++                let capacity = try policy.capacity(from: .init(Cardinal(last)))
++                #expect(capacity.underlying.rawValue == last)
++                #expect(throws: Policy.Error.overflow) {
++                    _ = try policy.capacity(from: .init(Cardinal(last + 1)))
++                }
++                #expect(throws: Policy.Error.overflow) {
++                    _ = try policy.capacity(from: .init(Cardinal(UInt.max)))
++                }
++                let next = try policy.capacity(from: .one)
++                #expect(next.underlying.rawValue == UInt(magnitude))
+             }
+-            let next = try policy.capacity(from: .one)
+-            #expect(next.underlying.rawValue == UInt(magnitude))
+-        }
+ 
+-        @Test
+-        func `paging rounds element counts without introducing a byte stride conversion`() throws {
+-            let policy = Growth.Policy<UInt64>.paged(.`16`)
+-            let capacity = try policy.capacity(from: 17)
+-            #expect(capacity == 32)
+-        }
++            @Test
++            func `paging rounds element counts without introducing a byte stride conversion`() throws {
++                let policy = Growth.Policy<UInt64>.paged(.`16`)
++                let capacity = try policy.capacity(from: 17)
++                #expect(capacity == 32)
++            }
+ 
+-        @Test
+-        func `paging supports noncopyable element domains`() throws {
+-            struct Element: ~Copyable {}
+-            let policy = Growth.Policy<Element>.paged(.`8`)
+-            let capacity = try policy.capacity(from: 9)
+-            #expect(capacity == 16)
++            @Test
++            func `paging supports noncopyable element domains`() throws {
++                struct Element: ~Copyable {}
++                let policy = Growth.Policy<Element>.paged(.`8`)
++                let capacity = try policy.capacity(from: 9)
++                #expect(capacity == 16)
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Growth Checked Factor Migration Tests/Growth.Policy.Carrier Tests.swift b/Tests/Growth Checked Factor Migration Tests/Growth.Policy.Carrier Tests.swift
+index 68d86af..ef79017 100644
+--- a/Tests/Growth Checked Factor Migration Tests/Growth.Policy.Carrier Tests.swift	
++++ b/Tests/Growth Checked Factor Migration Tests/Growth.Policy.Carrier Tests.swift	
+@@ -4,28 +4,32 @@ import Ratio
+ import Tagged
+ import Testing
+ 
+-@Suite struct `Growth Checked Factor Migration Tests` {
+-    @Test
+-    func `factor scales current capacity`() throws {
+-        let scale = Ratio<UInt8, UInt8>(3)
+-        let policy = try Growth.Policy<UInt8>.factor(scale)
+-        let count = Tagged<UInt8, Cardinal>(_unchecked: Cardinal(UInt(4)))
+-        #expect(try policy.capacity(from: count).underlying.rawValue == UInt(12))
+-    }
++enum `Growth.Policy.Carrier Tests` {}
+ 
+-    @Test
+-    func `factor floors capacity at one`() throws {
+-        let scale = Ratio<UInt8, UInt8>(3)
+-        let policy = try Growth.Policy<UInt8>.factor(scale)
+-        let count = Tagged<UInt8, Cardinal>(_unchecked: Cardinal(UInt(0)))
+-        #expect(try policy.capacity(from: count).underlying.rawValue == UInt(1))
+-    }
++extension `Growth.Policy.Carrier Tests` {
++    @Suite struct `Growth Checked Factor Migration Tests` {
++        @Test
++        func `factor scales current capacity`() throws {
++            let scale = Ratio<UInt8, UInt8>(3)
++            let policy = try Growth.Policy<UInt8>.factor(scale)
++            let count = Tagged<UInt8, Cardinal>(_unchecked: Cardinal(UInt(4)))
++            #expect(try policy.capacity(from: count).underlying.rawValue == UInt(12))
++        }
++
++        @Test
++        func `factor floors capacity at one`() throws {
++            let scale = Ratio<UInt8, UInt8>(3)
++            let policy = try Growth.Policy<UInt8>.factor(scale)
++            let count = Tagged<UInt8, Cardinal>(_unchecked: Cardinal(UInt(0)))
++            #expect(try policy.capacity(from: count).underlying.rawValue == UInt(1))
++        }
+ 
+-    @Test
+-    func `zero factor is rejected rather than resetting capacity`() {
+-        let scale = Ratio<UInt8, UInt8>.zero
+-        #expect(throws: Growth.Policy<UInt8>.Error.invalidFactor(scale)) {
+-            try Growth.Policy<UInt8>.factor(scale)
++        @Test
++        func `zero factor is rejected rather than resetting capacity`() {
++            let scale = Ratio<UInt8, UInt8>.zero
++            #expect(throws: Growth.Policy<UInt8>.Error.invalidFactor(scale)) {
++                try Growth.Policy<UInt8>.factor(scale)
++            }
+         }
+     }
+ }
+diff --git a/Tests/Growth Tests/Growth.Policy Tests.swift b/Tests/Growth Tests/Growth.Policy Tests.swift
+index 81ea09c..3a1627b 100644
+--- a/Tests/Growth Tests/Growth.Policy Tests.swift	
++++ b/Tests/Growth Tests/Growth.Policy Tests.swift	
+@@ -1,117 +1,121 @@
+ import Growth_Test_Support
+ import Testing
+ 
+-@Suite
+-struct `Growth policies preserve capacity and report failure` {
+-    private typealias Policy = Growth.Policy<UInt8>
++enum `Growth.Policy Tests` {}
+ 
+-    @Test
+-    func `doubling bootstraps zero and doubles ordinary capacities`() throws {
+-        let zero = try Policy.doubling.capacity(from: .zero)
+-        let four = try Policy.doubling.capacity(from: 4)
+-        #expect(zero == .one)
+-        #expect(four == 8)
+-    }
++extension `Growth.Policy Tests` {
++    @Suite
++    struct `Growth policies preserve capacity and report failure` {
++        private typealias Policy = Growth.Policy<UInt8>
+ 
+-    @Test
+-    func `doubling accepts its last representable result and rejects the next input`() throws {
+-        let last = UInt.max / 2
+-        let capacity = try Policy.doubling.capacity(from: .init(Cardinal(last)))
+-        #expect(capacity.underlying.rawValue == UInt.max - 1)
+-        #expect(throws: Policy.Error.overflow) {
+-            _ = try Policy.doubling.capacity(from: .init(Cardinal(last + 1)))
++        @Test
++        func `doubling bootstraps zero and doubles ordinary capacities`() throws {
++            let zero = try Policy.doubling.capacity(from: .zero)
++            let four = try Policy.doubling.capacity(from: 4)
++            #expect(zero == .one)
++            #expect(four == 8)
+         }
+-        #expect(throws: Policy.Error.overflow) {
+-            _ = try Policy.doubling.capacity(from: .init(Cardinal(UInt.max)))
++
++        @Test
++        func `doubling accepts its last representable result and rejects the next input`() throws {
++            let last = UInt.max / 2
++            let capacity = try Policy.doubling.capacity(from: .init(Cardinal(last)))
++            #expect(capacity.underlying.rawValue == UInt.max - 1)
++            #expect(throws: Policy.Error.overflow) {
++                _ = try Policy.doubling.capacity(from: .init(Cardinal(last + 1)))
++            }
++            #expect(throws: Policy.Error.overflow) {
++                _ = try Policy.doubling.capacity(from: .init(Cardinal(UInt.max)))
++            }
++            let subsequent = try Policy.doubling.capacity(from: 4)
++            #expect(subsequent == 8)
+         }
+-        let subsequent = try Policy.doubling.capacity(from: 4)
+-        #expect(subsequent == 8)
+-    }
+ 
+-    @Test(arguments: [UInt(0), 1, UInt(Int.max), UInt.max])
+-    func `exact policies preserve the entire unsigned count domain`(_ value: UInt) throws {
+-        let capacity = try Policy.exact.capacity(from: .init(Cardinal(value)))
+-        #expect(capacity.underlying.rawValue == value)
+-    }
++        @Test(arguments: [UInt(0), 1, UInt(Int.max), UInt.max])
++        func `exact policies preserve the entire unsigned count domain`(_ value: UInt) throws {
++            let capacity = try Policy.exact.capacity(from: .init(Cardinal(value)))
++            #expect(capacity.underlying.rawValue == value)
++        }
+ 
+-    @Test
+-    func `factors preserve exact scaling and the zero bootstrap`() throws {
+-        let policy = try Policy.factor(.init(numerator: 3, denominator: 2))
+-        let capacity = try policy.capacity(from: 4)
+-        let zero = try policy.capacity(from: .zero)
+-        #expect(capacity == 6)
+-        #expect(zero == .one)
+-    }
++        @Test
++        func `factors preserve exact scaling and the zero bootstrap`() throws {
++            let policy = try Policy.factor(.init(numerator: 3, denominator: 2))
++            let capacity = try policy.capacity(from: 4)
++            let zero = try policy.capacity(from: .zero)
++            #expect(capacity == 6)
++            #expect(zero == .one)
++        }
+ 
+-    @Test
+-    func `fractional results preserve the nested ratio error instead of rounding`() throws {
+-        let policy = try Policy.factor(.init(numerator: 3, denominator: 2))
+-        #expect(throws: Policy.Error.scaling(.inexact)) {
+-            _ = try policy.capacity(from: 3)
++        @Test
++        func `fractional results preserve the nested ratio error instead of rounding`() throws {
++            let policy = try Policy.factor(.init(numerator: 3, denominator: 2))
++            #expect(throws: Policy.Error.scaling(.inexact)) {
++                _ = try policy.capacity(from: 3)
++            }
++            let next = try policy.capacity(from: 6)
++            #expect(next == 9)
+         }
+-        let next = try policy.capacity(from: 6)
+-        #expect(next == 9)
+-    }
+ 
+-    @Test
+-    func `identity scaling retains the largest unsigned capacity exactly`() throws {
+-        let policy = try Policy.factor(.identity)
+-        let capacity = try policy.capacity(from: .init(Cardinal(UInt.max)))
+-        #expect(capacity.underlying.rawValue == UInt.max)
+-    }
++        @Test
++        func `identity scaling retains the largest unsigned capacity exactly`() throws {
++            let policy = try Policy.factor(.identity)
++            let capacity = try policy.capacity(from: .init(Cardinal(UInt.max)))
++            #expect(capacity.underlying.rawValue == UInt.max)
++        }
+ 
+-    @Test
+-    func `unrepresentable scaled results preserve the ratio overflow domain`() throws {
+-        let policy = try Policy.factor(.init(numerator: UInt128(UInt.max)))
+-        let last = try policy.capacity(from: .one)
+-        #expect(last.underlying.rawValue == UInt.max)
+-        #expect(throws: Policy.Error.scaling(.overflow)) {
+-            _ = try policy.capacity(from: 2)
++        @Test
++        func `unrepresentable scaled results preserve the ratio overflow domain`() throws {
++            let policy = try Policy.factor(.init(numerator: UInt128(UInt.max)))
++            let last = try policy.capacity(from: .one)
++            #expect(last.underlying.rawValue == UInt.max)
++            #expect(throws: Policy.Error.scaling(.overflow)) {
++                _ = try policy.capacity(from: 2)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `factor construction rejects negative zero and subunit scales`() throws {
+-        let scales: [Ratio<UInt8, UInt8>] = [Ratio(-1), .zero, try .init(numerator: 1, denominator: 2)]
+-        for scale in scales {
+-            #expect(throws: Policy.Error.invalidFactor(scale)) {
+-                _ = try Policy.factor(scale)
++        @Test
++        func `factor construction rejects negative zero and subunit scales`() throws {
++            let scales: [Ratio<UInt8, UInt8>] = [Ratio(-1), .zero, try .init(numerator: 1, denominator: 2)]
++            for scale in scales {
++                #expect(throws: Policy.Error.invalidFactor(scale)) {
++                    _ = try Policy.factor(scale)
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `custom proposals cannot shrink the current capacity`() throws {
+-        let policy = Policy.custom { _ throws(Policy.Error) in .one }
+-        #expect(throws: Policy.Error.wouldShrink(current: 8, proposed: 1)) {
+-            _ = try policy.capacity(from: 8)
++        @Test
++        func `custom proposals cannot shrink the current capacity`() throws {
++            let policy = Policy.custom { _ throws(Policy.Error) in .one }
++            #expect(throws: Policy.Error.wouldShrink(current: 8, proposed: 1)) {
++                _ = try policy.capacity(from: 8)
++            }
++            let zero = try policy.capacity(from: .zero)
++            let one = try policy.capacity(from: .one)
++            #expect(zero == .one && one == .one)
+         }
+-        let zero = try policy.capacity(from: .zero)
+-        let one = try policy.capacity(from: .one)
+-        #expect(zero == .one && one == .one)
+-    }
+ 
+-    @Test
+-    func `custom policies propagate their typed errors unchanged`() {
+-        let expected = Policy.Error.scaling(.unrepresentable)
+-        let policy = Policy.custom { _ throws(Policy.Error) in throw expected }
+-        #expect(throws: expected) {
+-            _ = try policy.capacity(from: 4)
++        @Test
++        func `custom policies propagate their typed errors unchanged`() {
++            let expected = Policy.Error.scaling(.unrepresentable)
++            let policy = Policy.custom { _ throws(Policy.Error) in throw expected }
++            #expect(throws: expected) {
++                _ = try policy.capacity(from: 4)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `custom nonshrinking policies support noncopyable element domains`() throws {
+-        struct Element: ~Copyable {}
+-        let policy = Growth.Policy<Element>.custom { current throws(Growth.Policy<Element>.Error) in current }
+-        let capacity = try policy.capacity(from: 17)
+-        #expect(capacity == 17)
+-    }
++        @Test
++        func `custom nonshrinking policies support noncopyable element domains`() throws {
++            struct Element: ~Copyable {}
++            let policy = Growth.Policy<Element>.custom { current throws(Growth.Policy<Element>.Error) in current }
++            let capacity = try policy.capacity(from: 17)
++            #expect(capacity == 17)
++        }
+ 
+-    @Test
+-    func `checked policies can be evaluated in another task`() async throws {
+-        let policy = try Policy.factor(.init(numerator: 3, denominator: 2))
+-        let capacity = try await Task.detached { try policy.capacity(from: 8) }.value
+-        #expect(capacity == 12)
++        @Test
++        func `checked policies can be evaluated in another task`() async throws {
++            let policy = try Policy.factor(.init(numerator: 3, denominator: 2))
++            let capacity = try await Task.detached { try policy.capacity(from: 8) }.value
++            #expect(capacity == 12)
++        }
+     }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,1612 @@
+From ebcdae523aee2b0ea2fce1b3102514407ce82abb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:58 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Carrier operations Tests.swift            | 204 +++++-----
+ .../Cardinal Tests/Carrier shifts Tests.swift | 106 +++---
+ Tests/Cardinal Tests/Core Tests.swift         |  10 +-
+ .../Cardinal Tests/Span+Cardinal Tests.swift  |  17 +-
+ .../Cardinal Tests/Storage limits Tests.swift | 150 ++++----
+ .../Storage ownership Tests.swift             | 122 +++---
+ .../Storage regressions Tests.swift           |  90 ++---
+ .../Cardinal Tests/Storage values Tests.swift | 348 +++++++++---------
+ .../Compatibility Tests.swift                 | 204 +++++-----
+ .../Span+Cardinal Tests.swift                 |  10 +-
+ .../Cardinal Property Tests.swift             | 100 ++---
+ 11 files changed, 705 insertions(+), 656 deletions(-)
+
+diff --git a/Tests/Cardinal Tests/Carrier operations Tests.swift b/Tests/Cardinal Tests/Carrier operations Tests.swift
+index 556210a..28108c4 100644
+--- a/Tests/Cardinal Tests/Carrier operations Tests.swift	
++++ b/Tests/Cardinal Tests/Carrier operations Tests.swift	
+@@ -36,121 +36,125 @@
+ 
+     private enum InitializerFailure: Swift::Error { case element }
+ 
+-    @Suite struct `Cardinal operations preserve custom carriers` {
+-        @Test
+-        func `custom carriers preserve counts and arithmetic domains`() throws(Cardinal.Error) {
+-            typealias Size = Count<Elements>
+-            var count = Size.zero
+-            count += .one
+-            #expect(count.cardinal == Cardinal(1 as UInt))
+-            #expect(count.count == Cardinal(1 as UInt))
+-            #expect(count + .one == Size(Cardinal(2 as UInt)))
+-            let addition: Property::Property<Addition, Size> = count.add
+-            let subtraction: Property::Property<Subtraction, Size> = count.subtract
+-            #expect(try addition(.one) == Size(Cardinal(2 as UInt)))
+-            #expect(try subtraction(.one) == .zero)
+-        }
+-
+-        @Test
+-        func `custom carriers retain explicit integer conversion semantics`() {
+-            let large = Count<Elements>(Cardinal(UInt.max))
+-            #expect(Int(bitPattern: large) == -1)
+-            #expect(UInt32(Count<Elements>(Cardinal(UInt(UInt32.max)))) == UInt32.max)
+-        }
+-
+-        @Test
+-        func `signed and unsigned carrier shifts retain their operand types`() {
+-            let count = Count<Elements>(Cardinal(1 as UInt))
+-            var signed = Word(Int8(-4))
+-            var unsigned = Word(UInt8(4))
+-            #expect((signed >> count).underlying == -2)
+-            #expect((unsigned << count).underlying == 8)
+-            signed >>= count
+-            signed <<= count
+-            unsigned <<= count
+-            unsigned >>= count
+-            #expect(signed.underlying == -4)
+-            #expect(unsigned.underlying == 4)
+-        }
+-
+-        @Test
+-        func `compatibility shifts reject a count equal to the integer width`() async {
+-            await #expect(processExitsWith: .failure) {
+-                var value = Word(UInt8(1))
+-                value <<= Count<Elements>(Cardinal(8 as UInt))
+-                precondition(value.underlying == 0)
++enum `Carrier operations Tests` {}
++
++extension `Carrier operations Tests` {
++        @Suite struct `Cardinal operations preserve custom carriers` {
++            @Test
++            func `custom carriers preserve counts and arithmetic domains`() throws(Cardinal.Error) {
++                typealias Size = Count<Elements>
++                var count = Size.zero
++                count += .one
++                #expect(count.cardinal == Cardinal(1 as UInt))
++                #expect(count.count == Cardinal(1 as UInt))
++                #expect(count + .one == Size(Cardinal(2 as UInt)))
++                let addition: Property::Property<Addition, Size> = count.add
++                let subtraction: Property::Property<Subtraction, Size> = count.subtract
++                #expect(try addition(.one) == Size(Cardinal(2 as UInt)))
++                #expect(try subtraction(.one) == .zero)
+             }
+-        }
+ 
+-        @Test
+-        func `collections accept domain typed counts and oversized representable slices`() {
+-            let two = Count<Elements>(Cardinal(2 as UInt))
+-            let large = Count<Elements>(Cardinal(UInt(Int.max)))
+-            var values = Array(repeating: 7, count: two)
+-            #expect(values == [7, 7])
+-            #expect(ContiguousArray(repeating: 7, count: two) == [7, 7])
+-            #expect(Array(values.prefix(large)) == values)
+-            #expect(values.dropFirst(large).isEmpty)
+-            values.reserveCapacity(two)
+-            values.removeFirst(Count<Elements>.one)
+-            values.removeLast(Count<Elements>.one)
+-            #expect(values.isEmpty)
+-            #expect(String(repeating: "a", count: two) == "aa")
+-        }
++            @Test
++            func `custom carriers retain explicit integer conversion semantics`() {
++                let large = Count<Elements>(Cardinal(UInt.max))
++                #expect(Int(bitPattern: large) == -1)
++                #expect(UInt32(Count<Elements>(Cardinal(UInt(UInt32.max)))) == UInt32.max)
++            }
+ 
+-        @Test(arguments: [false, true])
+-        func `typed factories return exactly their initialized prefix`(contiguous: Bool) {
+-            let capacity = Count<Elements>(Cardinal(3 as UInt))
+-            let initialize = {
+-                (buffer: inout UnsafeMutableBufferPointer<Int>, count: inout Count<Elements>) in
+-                unsafe buffer.baseAddress!.initialize(to: 23)
+-                count = .one
++            @Test
++            func `signed and unsigned carrier shifts retain their operand types`() {
++                let count = Count<Elements>(Cardinal(1 as UInt))
++                var signed = Word(Int8(-4))
++                var unsigned = Word(UInt8(4))
++                #expect((signed >> count).underlying == -2)
++                #expect((unsigned << count).underlying == 8)
++                signed >>= count
++                signed <<= count
++                unsigned <<= count
++                unsigned >>= count
++                #expect(signed.underlying == -4)
++                #expect(unsigned.underlying == 4)
+             }
+-            let values: [Int]
+-            if contiguous {
+-                values = unsafe Array(
+-                    ContiguousArray(
+-                        unsafeUninitializedCapacity: capacity,
+-                        initializingWith: initialize
+-                    )
+-                )
+-            } else {
+-                values = unsafe Array(
+-                    unsafeUninitializedCapacity: capacity,
+-                    initializingWith: initialize
+-                )
++
++            @Test
++            func `compatibility shifts reject a count equal to the integer width`() async {
++                await #expect(processExitsWith: .failure) {
++                    var value = Word(UInt8(1))
++                    value <<= Count<Elements>(Cardinal(8 as UInt))
++                    precondition(value.underlying == 0)
++                }
+             }
+-            #expect(values == [23])
+-        }
+ 
+-        @Test(arguments: [false, true])
+-        func `throwing typed factories destroy their initialized prefix`(contiguous: Bool) {
+-            let deaths = Deaths()
+-            let capacity = Count<Elements>(Cardinal(2 as UInt))
+-            let initialize = {
+-                (
+-                    buffer: inout UnsafeMutableBufferPointer<Element>,
+-                    count: inout Count<Elements>
+-                ) throws(InitializerFailure) in
+-                unsafe buffer.baseAddress!.initialize(to: Element(deaths))
+-                count = .one
+-                throw .element
++            @Test
++            func `collections accept domain typed counts and oversized representable slices`() {
++                let two = Count<Elements>(Cardinal(2 as UInt))
++                let large = Count<Elements>(Cardinal(UInt(Int.max)))
++                var values = Array(repeating: 7, count: two)
++                #expect(values == [7, 7])
++                #expect(ContiguousArray(repeating: 7, count: two) == [7, 7])
++                #expect(Array(values.prefix(large)) == values)
++                #expect(values.dropFirst(large).isEmpty)
++                values.reserveCapacity(two)
++                values.removeFirst(Count<Elements>.one)
++                values.removeLast(Count<Elements>.one)
++                #expect(values.isEmpty)
++                #expect(String(repeating: "a", count: two) == "aa")
+             }
+-            #expect(throws: InitializerFailure.element) {
++
++            @Test(arguments: [false, true])
++            func `typed factories return exactly their initialized prefix`(contiguous: Bool) {
++                let capacity = Count<Elements>(Cardinal(3 as UInt))
++                let initialize = {
++                    (buffer: inout UnsafeMutableBufferPointer<Int>, count: inout Count<Elements>) in
++                    unsafe buffer.baseAddress!.initialize(to: 23)
++                    count = .one
++                }
++                let values: [Int]
+                 if contiguous {
+-                    let _ = try unsafe ContiguousArray(
+-                        unsafeUninitializedCapacity: capacity,
+-                        initializingWith: initialize
++                    values = unsafe Array(
++                        ContiguousArray(
++                            unsafeUninitializedCapacity: capacity,
++                            initializingWith: initialize
++                        )
+                     )
+                 } else {
+-                    let _ = try unsafe Array(
++                    values = unsafe Array(
+                         unsafeUninitializedCapacity: capacity,
+                         initializingWith: initialize
+                     )
+                 }
++                #expect(values == [23])
++            }
++
++            @Test(arguments: [false, true])
++            func `throwing typed factories destroy their initialized prefix`(contiguous: Bool) {
++                let deaths = Deaths()
++                let capacity = Count<Elements>(Cardinal(2 as UInt))
++                let initialize = {
++                    (
++                        buffer: inout UnsafeMutableBufferPointer<Element>,
++                        count: inout Count<Elements>
++                    ) throws(InitializerFailure) in
++                    unsafe buffer.baseAddress!.initialize(to: Element(deaths))
++                    count = .one
++                    throw .element
++                }
++                #expect(throws: InitializerFailure.element) {
++                    if contiguous {
++                        let _ = try unsafe ContiguousArray(
++                            unsafeUninitializedCapacity: capacity,
++                            initializingWith: initialize
++                        )
++                    } else {
++                        let _ = try unsafe Array(
++                            unsafeUninitializedCapacity: capacity,
++                            initializingWith: initialize
++                        )
++                    }
++                }
++                #expect(deaths.count == 1)
+             }
+-            #expect(deaths.count == 1)
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Cardinal Tests/Carrier shifts Tests.swift b/Tests/Cardinal Tests/Carrier shifts Tests.swift
+index c188f40..3375bf3 100644
+--- a/Tests/Cardinal Tests/Carrier shifts Tests.swift	
++++ b/Tests/Cardinal Tests/Carrier shifts Tests.swift	
+@@ -22,64 +22,68 @@
+         case left, right, assignLeft, assignRight
+     }
+ 
+-    @Suite(.serialized, .timeLimit(.minutes(1)))
+-    struct `Cardinal shifts preserve integer width boundaries` {
+-        @Test(arguments: Array(UInt(0)..<8))
+-        func `valid shifts match signed and unsigned integer operations`(amount: UInt) {
+-            let count = Shift(Cardinal(amount))
+-            for value: Int8 in [.min, -1, 0, 1, .max] {
+-                verify(value, count: count)
+-            }
+-            for value: UInt8 in [0, 1, 128, .max] {
+-                verify(value, count: count)
++enum `Carrier shifts Tests` {}
++
++extension `Carrier shifts Tests` {
++        @Suite(.serialized, .timeLimit(.minutes(1)))
++        struct `Cardinal shifts preserve integer width boundaries` {
++            @Test(arguments: Array(UInt(0)..<8))
++            func `valid shifts match signed and unsigned integer operations`(amount: UInt) {
++                let count = Shift(Cardinal(amount))
++                for value: Int8 in [.min, -1, 0, 1, .max] {
++                    verify(value, count: count)
++                }
++                for value: UInt8 in [0, 1, 128, .max] {
++                    verify(value, count: count)
++                }
+             }
+-        }
+ 
+-        @Test(arguments: Operation.allCases, [UInt(8), UInt(Int.max) + 1, UInt.max])
+-        private func `oversized shifts reject raw and carrier operands`(
+-            operation: Operation,
+-            amount: UInt
+-        ) async throws {
+-            for carrier in [false, true] {
+-                for signed in [false, true] {
+-                    let result = try await #require(
+-                        processExitsWith: .failure,
+-                        observing: [\.standardErrorContent]
+-                    ) {
+-                        [
+-                            operation = operation as Operation, amount = amount as UInt,
+-                            carrier = carrier as Bool, signed = signed as Bool
+-                        ] in
+-                        let count = Shift(Cardinal(amount))
+-                        if signed {
+-                            _ = perform(
+-                                Int8(-1),
+-                                count: count,
+-                                operation: operation,
+-                                carrier: carrier
+-                            )
+-                        } else {
+-                            _ = perform(
+-                                UInt8.max,
+-                                count: count,
+-                                operation: operation,
+-                                carrier: carrier
+-                            )
++            @Test(arguments: Operation.allCases, [UInt(8), UInt(Int.max) + 1, UInt.max])
++            private func `oversized shifts reject raw and carrier operands`(
++                operation: Operation,
++                amount: UInt
++            ) async throws {
++                for carrier in [false, true] {
++                    for signed in [false, true] {
++                        let result = try await #require(
++                            processExitsWith: .failure,
++                            observing: [\.standardErrorContent]
++                        ) {
++                            [
++                                operation = operation as Operation, amount = amount as UInt,
++                                carrier = carrier as Bool, signed = signed as Bool
++                            ] in
++                            let count = Shift(Cardinal(amount))
++                            if signed {
++                                _ = perform(
++                                    Int8(-1),
++                                    count: count,
++                                    operation: operation,
++                                    carrier: carrier
++                                )
++                            } else {
++                                _ = perform(
++                                    UInt8.max,
++                                    count: count,
++                                    operation: operation,
++                                    carrier: carrier
++                                )
++                            }
+                         }
++                        #if DEBUG
++                            let diagnostic = String(
++                                decoding: result.standardErrorContent,
++                                as: UTF8.self
++                            )
++                            #expect(diagnostic.contains("Shift amount out of range"), "\(diagnostic)")
++                        #else
++                            _ = result
++                        #endif
+                     }
+-                    #if DEBUG
+-                        let diagnostic = String(
+-                            decoding: result.standardErrorContent,
+-                            as: UTF8.self
+-                        )
+-                        #expect(diagnostic.contains("Shift amount out of range"), "\(diagnostic)")
+-                    #else
+-                        _ = result
+-                    #endif
+                 }
+             }
+         }
+-    }
++}
+ 
+     private func verify<Value: FixedWidthInteger>(_ value: Value, count: Shift) {
+         let amount = count.underlying.rawValue
+diff --git a/Tests/Cardinal Tests/Core Tests.swift b/Tests/Cardinal Tests/Core Tests.swift
+index 7a72267..f0c51bd 100644
+--- a/Tests/Cardinal Tests/Core Tests.swift	
++++ b/Tests/Cardinal Tests/Core Tests.swift	
+@@ -1,8 +1,12 @@
+ import Cardinal
+ import Testing
+ 
+-@Suite struct `Core cardinal values` {
+-    @Test func `counts add without domain tagging`() {
+-        #expect(Cardinal(UInt(2)) + Cardinal(UInt(3)) == Cardinal(UInt(5)))
++enum `Core Tests` {}
++
++extension `Core Tests` {
++    @Suite struct `Core cardinal values` {
++        @Test func `counts add without domain tagging`() {
++            #expect(Cardinal(UInt(2)) + Cardinal(UInt(3)) == Cardinal(UInt(5)))
++        }
+     }
+ }
+diff --git a/Tests/Cardinal Tests/Span+Cardinal Tests.swift b/Tests/Cardinal Tests/Span+Cardinal Tests.swift
+index c199982..6270451 100644
+--- a/Tests/Cardinal Tests/Span+Cardinal Tests.swift	
++++ b/Tests/Cardinal Tests/Span+Cardinal Tests.swift	
+@@ -3,14 +3,23 @@
+ 
+     import Cardinal
+ 
+-    @Suite
+-    struct `Spans preserve typed Cardinal counts through construction` {
++enum `Span+Cardinal Tests` {}
++
++extension `Span+Cardinal Tests` {
++        @Suite
++        struct `Spans preserve typed Cardinal counts through construction` {
++        }
++}
++
++    extension `Span+Cardinal Tests`.`Spans preserve typed Cardinal counts through construction` {
+         @Suite struct `Typed Cardinal counts select readable and mutable span extents` {}
++
+         @Suite struct `Zero typed Cardinal counts construct empty spans` {}
++
+         @Suite struct `No typed span construction integration cases are defined` {}
+     }
+ 
+-    extension `Spans preserve typed Cardinal counts through construction`
++    extension `Span+Cardinal Tests`.`Spans preserve typed Cardinal counts through construction`
+         .`Typed Cardinal counts select readable and mutable span extents`
+     {
+         @Test
+@@ -45,7 +54,7 @@
+         }
+     }
+ 
+-    extension `Spans preserve typed Cardinal counts through construction`
++    extension `Span+Cardinal Tests`.`Spans preserve typed Cardinal counts through construction`
+         .`Zero typed Cardinal counts construct empty spans`
+     {
+         @Test
+diff --git a/Tests/Cardinal Tests/Storage limits Tests.swift b/Tests/Cardinal Tests/Storage limits Tests.swift
+index f593597..137f79f 100644
+--- a/Tests/Cardinal Tests/Storage limits Tests.swift	
++++ b/Tests/Cardinal Tests/Storage limits Tests.swift	
+@@ -2,84 +2,88 @@
+     import Cardinal
+     import Testing
+ 
+-    @Suite(.serialized, .timeLimit(.minutes(1)))
+-    struct `Storage counts must be representable before use` {
+-        @Test(
+-            arguments: [
+-                "array-repeating", "contiguous-repeating", "array-capacity", "contiguous-capacity",
+-                "string", "reserve", "remove-first", "remove-last", "prefix", "suffix",
+-                "drop-first", "drop-last",
+-                "set-reserve", "set-capacity", "dictionary-reserve", "dictionary-capacity",
+-                "span-count", "span-first", "span-last", "span-drop-first", "span-drop-last",
+-                "mutable-span-count", "mutable-span-first", "mutable-span-last",
+-                "mutable-span-drop-first", "mutable-span-drop-last",
+-                "raw-span", "mutable-raw-span", "buffer-count", "mutable-buffer-count",
+-                "buffer-allocation",
+-                "raw-buffer-count", "mutable-raw-buffer-count", "raw-allocation-bytes",
+-                "raw-allocation-alignment",
+-                "initialize", "move-initialize", "output-count", "output-remove", "output-append",
+-            ],
+-            [UInt(Int.max) + 1, UInt.max]
+-        )
+-        func `large counts fail at the exact conversion boundary`(
+-            operation: String,
+-            raw: UInt
+-        ) async throws {
+-            let result = try await #require(
+-                processExitsWith: .failure,
+-                observing: [\.standardErrorContent]
+-            ) { [operation = operation as String, raw = raw as UInt] in
+-                perform(operation, count: Cardinal(raw))
++enum `Storage limits Tests` {}
++
++extension `Storage limits Tests` {
++        @Suite(.serialized, .timeLimit(.minutes(1)))
++        struct `Storage counts must be representable before use` {
++            @Test(
++                arguments: [
++                    "array-repeating", "contiguous-repeating", "array-capacity", "contiguous-capacity",
++                    "string", "reserve", "remove-first", "remove-last", "prefix", "suffix",
++                    "drop-first", "drop-last",
++                    "set-reserve", "set-capacity", "dictionary-reserve", "dictionary-capacity",
++                    "span-count", "span-first", "span-last", "span-drop-first", "span-drop-last",
++                    "mutable-span-count", "mutable-span-first", "mutable-span-last",
++                    "mutable-span-drop-first", "mutable-span-drop-last",
++                    "raw-span", "mutable-raw-span", "buffer-count", "mutable-buffer-count",
++                    "buffer-allocation",
++                    "raw-buffer-count", "mutable-raw-buffer-count", "raw-allocation-bytes",
++                    "raw-allocation-alignment",
++                    "initialize", "move-initialize", "output-count", "output-remove", "output-append",
++                ],
++                [UInt(Int.max) + 1, UInt.max]
++            )
++            func `large counts fail at the exact conversion boundary`(
++                operation: String,
++                raw: UInt
++            ) async throws {
++                let result = try await #require(
++                    processExitsWith: .failure,
++                    observing: [\.standardErrorContent]
++                ) { [operation = operation as String, raw = raw as UInt] in
++                    perform(operation, count: Cardinal(raw))
++                }
++                #if DEBUG
++                    let diagnostic = String(decoding: result.standardErrorContent, as: UTF8.self)
++                    #expect(diagnostic.contains("not representable as Int"), "\(diagnostic)")
++                #else
++                    _ = result
++                #endif
+             }
+-            #if DEBUG
+-                let diagnostic = String(decoding: result.standardErrorContent, as: UTF8.self)
+-                #expect(diagnostic.contains("not representable as Int"), "\(diagnostic)")
+-            #else
+-                _ = result
+-            #endif
+-        }
+ 
+-        @Test(
+-            arguments: ["array-return", "array-throw", "contiguous-return", "contiguous-throw"],
+-            [UInt(3), UInt(Int.max) + 1, UInt.max]
+-        )
+-        func `initialized counts are checked on return and throw`(
+-            operation: String,
+-            raw: UInt
+-        ) async throws {
+-            let result = try await #require(
+-                processExitsWith: .failure,
+-                observing: [\.standardErrorContent]
+-            ) { [operation = operation as String, raw = raw as UInt] in
+-                do {
+-                    if operation.hasPrefix("array") {
+-                        let _: [Int] = try unsafe Array(unsafeUninitializedCapacity: Cardinal(2)) {
+-                            (_, initialized) throws(InitializerFailure) in
+-                            initialized = Cardinal(raw)
+-                            if operation.hasSuffix("throw") { throw .element }
+-                        }
+-                    } else {
+-                        let _: ContiguousArray<Int> = try unsafe ContiguousArray(
+-                            unsafeUninitializedCapacity: Cardinal(2)
+-                        ) {
+-                            (_, initialized) throws(InitializerFailure) in
+-                            initialized = Cardinal(raw)
+-                            if operation.hasSuffix("throw") { throw .element }
++            @Test(
++                arguments: ["array-return", "array-throw", "contiguous-return", "contiguous-throw"],
++                [UInt(3), UInt(Int.max) + 1, UInt.max]
++            )
++            func `initialized counts are checked on return and throw`(
++                operation: String,
++                raw: UInt
++            ) async throws {
++                let result = try await #require(
++                    processExitsWith: .failure,
++                    observing: [\.standardErrorContent]
++                ) { [operation = operation as String, raw = raw as UInt] in
++                    do {
++                        if operation.hasPrefix("array") {
++                            let _: [Int] = try unsafe Array(unsafeUninitializedCapacity: Cardinal(2)) {
++                                (_, initialized) throws(InitializerFailure) in
++                                initialized = Cardinal(raw)
++                                if operation.hasSuffix("throw") { throw .element }
++                            }
++                        } else {
++                            let _: ContiguousArray<Int> = try unsafe ContiguousArray(
++                                unsafeUninitializedCapacity: Cardinal(2)
++                            ) {
++                                (_, initialized) throws(InitializerFailure) in
++                                initialized = Cardinal(raw)
++                                if operation.hasSuffix("throw") { throw .element }
++                            }
+                         }
+-                    }
+-                } catch {}
++                    } catch {}
++                }
++                #if DEBUG
++                    let diagnostic = String(decoding: result.standardErrorContent, as: UTF8.self)
++                    let expected =
++                        raw > UInt(Int.max)
++                        ? "not representable as Int" : "Initialized count exceeds capacity"
++                    #expect(diagnostic.contains(expected), "\(diagnostic)")
++                #else
++                    _ = result
++                #endif
+             }
+-            #if DEBUG
+-                let diagnostic = String(decoding: result.standardErrorContent, as: UTF8.self)
+-                let expected =
+-                    raw > UInt(Int.max)
+-                    ? "not representable as Int" : "Initialized count exceeds capacity"
+-                #expect(diagnostic.contains(expected), "\(diagnostic)")
+-            #else
+-                _ = result
+-            #endif
+         }
+-    }
++}
+ 
+     private enum InitializerFailure: Swift::Error { case element }
+ 
+diff --git a/Tests/Cardinal Tests/Storage ownership Tests.swift b/Tests/Cardinal Tests/Storage ownership Tests.swift
+index 57439fd..e7aca2c 100644
+--- a/Tests/Cardinal Tests/Storage ownership Tests.swift	
++++ b/Tests/Cardinal Tests/Storage ownership Tests.swift	
+@@ -23,73 +23,77 @@
+         deinit { deaths.ids.append(id) }
+     }
+ 
+-    @Suite struct `Pointer counts preserve ownership` {
+-        @Test
+-        func `copy initialization retains source objects until both regions are destroyed`() {
+-            let deaths = Deaths()
+-            let source = UnsafeMutablePointer<Object>.allocate(capacity: 2)
+-            let target = UnsafeMutablePointer<Object>.allocate(capacity: 2)
+-            unsafe source.initialize(to: Object(1, deaths: deaths))
+-            unsafe source.advanced(by: 1).initialize(to: Object(2, deaths: deaths))
++enum `Storage ownership Tests` {}
+ 
+-            unsafe target.initialize(
+-                from: UnsafePointer(source),
+-                count: Tagged<Object, Cardinal>(Cardinal(2))
+-            )
+-            #expect(unsafe target.pointee === source.pointee)
+-            #expect(unsafe target.advanced(by: 1).pointee === source.advanced(by: 1).pointee)
+-            unsafe source.deinitialize(count: 2)
+-            unsafe source.deallocate()
+-            #expect(deaths.ids.isEmpty)
++extension `Storage ownership Tests` {
++        @Suite struct `Pointer counts preserve ownership` {
++            @Test
++            func `copy initialization retains source objects until both regions are destroyed`() {
++                let deaths = Deaths()
++                let source = UnsafeMutablePointer<Object>.allocate(capacity: 2)
++                let target = UnsafeMutablePointer<Object>.allocate(capacity: 2)
++                unsafe source.initialize(to: Object(1, deaths: deaths))
++                unsafe source.advanced(by: 1).initialize(to: Object(2, deaths: deaths))
+ 
+-            unsafe target.deinitialize(count: 2)
+-            unsafe target.deallocate()
+-            #expect(deaths.ids.sorted() == [1, 2])
+-        }
++                unsafe target.initialize(
++                    from: UnsafePointer(source),
++                    count: Tagged<Object, Cardinal>(Cardinal(2))
++                )
++                #expect(unsafe target.pointee === source.pointee)
++                #expect(unsafe target.advanced(by: 1).pointee === source.advanced(by: 1).pointee)
++                unsafe source.deinitialize(count: 2)
++                unsafe source.deallocate()
++                #expect(deaths.ids.isEmpty)
+ 
+-        @Test
+-        func `move initialization transfers noncopyable values exactly once`() {
+-            let deaths = Deaths()
+-            let source = UnsafeMutablePointer<Token>.allocate(capacity: 2)
+-            let target = UnsafeMutablePointer<Token>.allocate(capacity: 2)
+-            unsafe source.initialize(to: Token(id: 1, deaths: deaths))
+-            unsafe source.advanced(by: 1).initialize(to: Token(id: 2, deaths: deaths))
++                unsafe target.deinitialize(count: 2)
++                unsafe target.deallocate()
++                #expect(deaths.ids.sorted() == [1, 2])
++            }
+ 
+-            unsafe target.moveInitialize(from: source, count: Tagged<Token, Cardinal>(Cardinal(2)))
+-            #expect(unsafe target.pointee.id == 1)
+-            #expect(unsafe target.advanced(by: 1).pointee.id == 2)
+-            #expect(deaths.ids.isEmpty)
+-            unsafe source.deallocate()
++            @Test
++            func `move initialization transfers noncopyable values exactly once`() {
++                let deaths = Deaths()
++                let source = UnsafeMutablePointer<Token>.allocate(capacity: 2)
++                let target = UnsafeMutablePointer<Token>.allocate(capacity: 2)
++                unsafe source.initialize(to: Token(id: 1, deaths: deaths))
++                unsafe source.advanced(by: 1).initialize(to: Token(id: 2, deaths: deaths))
+ 
+-            unsafe target.deinitialize(count: 2)
+-            unsafe target.deallocate()
+-            #expect(deaths.ids.sorted() == [1, 2])
+-        }
++                unsafe target.moveInitialize(from: source, count: Tagged<Token, Cardinal>(Cardinal(2)))
++                #expect(unsafe target.pointee.id == 1)
++                #expect(unsafe target.advanced(by: 1).pointee.id == 2)
++                #expect(deaths.ids.isEmpty)
++                unsafe source.deallocate()
+ 
+-        @Test
+-        func `zero count copies and moves leave source values initialized`() {
+-            let deaths = Deaths()
+-            let objects = UnsafeMutablePointer<Object>.allocate(capacity: 1)
+-            let copied = UnsafeMutablePointer<Object>.allocate(capacity: 1)
+-            unsafe objects.initialize(to: Object(1, deaths: deaths))
+-            unsafe copied.initialize(from: UnsafePointer(objects), count: Cardinal.zero)
+-            #expect(unsafe objects.pointee.id == 1)
+-            unsafe copied.deallocate()
++                unsafe target.deinitialize(count: 2)
++                unsafe target.deallocate()
++                #expect(deaths.ids.sorted() == [1, 2])
++            }
+ 
+-            let tokens = UnsafeMutablePointer<Token>.allocate(capacity: 1)
+-            let moved = UnsafeMutablePointer<Token>.allocate(capacity: 1)
+-            unsafe tokens.initialize(to: Token(id: 2, deaths: deaths))
+-            unsafe moved.moveInitialize(from: tokens, count: Cardinal.zero)
+-            #expect(unsafe tokens.pointee.id == 2)
+-            #expect(deaths.ids.isEmpty)
+-            unsafe moved.deallocate()
++            @Test
++            func `zero count copies and moves leave source values initialized`() {
++                let deaths = Deaths()
++                let objects = UnsafeMutablePointer<Object>.allocate(capacity: 1)
++                let copied = UnsafeMutablePointer<Object>.allocate(capacity: 1)
++                unsafe objects.initialize(to: Object(1, deaths: deaths))
++                unsafe copied.initialize(from: UnsafePointer(objects), count: Cardinal.zero)
++                #expect(unsafe objects.pointee.id == 1)
++                unsafe copied.deallocate()
+ 
+-            unsafe objects.deinitialize(count: 1)
+-            unsafe tokens.deinitialize(count: 1)
+-            unsafe objects.deallocate()
+-            unsafe tokens.deallocate()
+-            #expect(deaths.ids.sorted() == [1, 2])
++                let tokens = UnsafeMutablePointer<Token>.allocate(capacity: 1)
++                let moved = UnsafeMutablePointer<Token>.allocate(capacity: 1)
++                unsafe tokens.initialize(to: Token(id: 2, deaths: deaths))
++                unsafe moved.moveInitialize(from: tokens, count: Cardinal.zero)
++                #expect(unsafe tokens.pointee.id == 2)
++                #expect(deaths.ids.isEmpty)
++                unsafe moved.deallocate()
++
++                unsafe objects.deinitialize(count: 1)
++                unsafe tokens.deinitialize(count: 1)
++                unsafe objects.deallocate()
++                unsafe tokens.deallocate()
++                #expect(deaths.ids.sorted() == [1, 2])
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Cardinal Tests/Storage regressions Tests.swift b/Tests/Cardinal Tests/Storage regressions Tests.swift
+index 6d6141b..fd6d4da 100644
+--- a/Tests/Cardinal Tests/Storage regressions Tests.swift	
++++ b/Tests/Cardinal Tests/Storage regressions Tests.swift	
+@@ -14,59 +14,63 @@
+ 
+     private enum ElementFailure: Swift.Error { case element }
+ 
+-    @Suite(.timeLimit(.minutes(1)))
+-    struct `Count adapters preserve storage and ownership boundaries` {
+-        @Test
+-        func `reserve capacity cannot reinterpret a positive count`() async {
+-            await #expect(processExitsWith: .failure) {
+-                var collection = RecordingCollection()
+-                collection.reserveCapacity(Cardinal(UInt.max))
+-                precondition(collection.requestedCapacity == -1)
++enum `Storage regressions Tests` {}
++
++extension `Storage regressions Tests` {
++        @Suite(.timeLimit(.minutes(1)))
++        struct `Count adapters preserve storage and ownership boundaries` {
++            @Test
++            func `reserve capacity cannot reinterpret a positive count`() async {
++                await #expect(processExitsWith: .failure) {
++                    var collection = RecordingCollection()
++                    collection.reserveCapacity(Cardinal(UInt.max))
++                    precondition(collection.requestedCapacity == -1)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `throwing array initialization destroys the initialized prefix`() async {
+-            await #expect(processExitsWith: .success) {
+-                let deaths = Deaths()
+-                func build() throws(ElementFailure) -> [Element] {
+-                    try unsafe Array(unsafeUninitializedCapacity: Cardinal(2)) {
+-                        (buffer, count) throws(ElementFailure) in
+-                        unsafe buffer.baseAddress!.initialize(to: Element(deaths))
+-                        count = Cardinal(1)
+-                        throw .element
++            @Test
++            func `throwing array initialization destroys the initialized prefix`() async {
++                await #expect(processExitsWith: .success) {
++                    let deaths = Deaths()
++                    func build() throws(ElementFailure) -> [Element] {
++                        try unsafe Array(unsafeUninitializedCapacity: Cardinal(2)) {
++                            (buffer, count) throws(ElementFailure) in
++                            unsafe buffer.baseAddress!.initialize(to: Element(deaths))
++                            count = Cardinal(1)
++                            throw .element
++                        }
++                    }
++                    do {
++                        _ = try build()
++                        preconditionFailure("The element initializer must throw")
++                    } catch {
++                        precondition(deaths.count == 1)
+                     }
+-                }
+-                do {
+-                    _ = try build()
+-                    preconditionFailure("The element initializer must throw")
+-                } catch {
+-                    precondition(deaths.count == 1)
+                 }
+             }
+-        }
+ 
+-        @Test
+-        func `throwing contiguous initialization destroys the initialized prefix`() async {
+-            await #expect(processExitsWith: .success) {
+-                let deaths = Deaths()
+-                func build() throws(ElementFailure) -> ContiguousArray<Element> {
+-                    try unsafe ContiguousArray(unsafeUninitializedCapacity: Cardinal(2)) {
+-                        (buffer, count) throws(ElementFailure) in
+-                        unsafe buffer.baseAddress!.initialize(to: Element(deaths))
+-                        count = Cardinal(1)
+-                        throw .element
++            @Test
++            func `throwing contiguous initialization destroys the initialized prefix`() async {
++                await #expect(processExitsWith: .success) {
++                    let deaths = Deaths()
++                    func build() throws(ElementFailure) -> ContiguousArray<Element> {
++                        try unsafe ContiguousArray(unsafeUninitializedCapacity: Cardinal(2)) {
++                            (buffer, count) throws(ElementFailure) in
++                            unsafe buffer.baseAddress!.initialize(to: Element(deaths))
++                            count = Cardinal(1)
++                            throw .element
++                        }
++                    }
++                    do {
++                        _ = try build()
++                        preconditionFailure("The element initializer must throw")
++                    } catch {
++                        precondition(deaths.count == 1)
+                     }
+-                }
+-                do {
+-                    _ = try build()
+-                    preconditionFailure("The element initializer must throw")
+-                } catch {
+-                    precondition(deaths.count == 1)
+                 }
+             }
+         }
+-    }
++}
+ 
+     private struct RecordingCollection: RangeReplaceableCollection {
+         var values: [Int] = []
+diff --git a/Tests/Cardinal Tests/Storage values Tests.swift b/Tests/Cardinal Tests/Storage values Tests.swift
+index 37799e6..1040203 100644
+--- a/Tests/Cardinal Tests/Storage values Tests.swift	
++++ b/Tests/Cardinal Tests/Storage values Tests.swift	
+@@ -15,193 +15,197 @@
+         typealias Domain = Scope
+     }
+ 
+-    @Suite struct `Representable storage counts retain existing behavior` {
+-        @Test(arguments: [0 as UInt, 1, 3])
+-        func `repetition accepts bare tagged and custom counts`(raw: UInt) {
+-            let bare = Cardinal(raw)
+-            let tagged = Tagged<StorageDomain, Cardinal>(bare)
+-            let custom = Count<StorageDomain>(bare)
+-            #expect(Array(repeating: 7, count: tagged) == Array(repeating: 7, count: Int(raw)))
+-            #expect(ContiguousArray(repeating: 7, count: custom).count == Int(raw))
+-            #expect(
+-                String(repeating: "ab", count: bare) == String(repeating: "ab", count: Int(raw))
+-            )
+-        }
++enum `Storage values Tests` {}
++
++extension `Storage values Tests` {
++        @Suite struct `Representable storage counts retain existing behavior` {
++            @Test(arguments: [0 as UInt, 1, 3])
++            func `repetition accepts bare tagged and custom counts`(raw: UInt) {
++                let bare = Cardinal(raw)
++                let tagged = Tagged<StorageDomain, Cardinal>(bare)
++                let custom = Count<StorageDomain>(bare)
++                #expect(Array(repeating: 7, count: tagged) == Array(repeating: 7, count: Int(raw)))
++                #expect(ContiguousArray(repeating: 7, count: custom).count == Int(raw))
++                #expect(
++                    String(repeating: "ab", count: bare) == String(repeating: "ab", count: Int(raw))
++                )
++            }
+ 
+-        @Test(arguments: [0 as UInt, 1, 3, UInt(Int.max)])
+-        func `collection slicing preserves representable oversized counts`(raw: UInt) {
+-            let values = [10, 20, 30]
+-            let count = Count<StorageDomain>(Cardinal(raw))
+-            #expect(Array(values.prefix(count)) == Array(values.prefix(Int(raw))))
+-            #expect(Array(values.suffix(count)) == Array(values.suffix(Int(raw))))
+-            #expect(Array(values.dropFirst(count)) == Array(values.dropFirst(Int(raw))))
+-            #expect(Array(values.dropLast(count)) == Array(values.dropLast(Int(raw))))
+-        }
++            @Test(arguments: [0 as UInt, 1, 3, UInt(Int.max)])
++            func `collection slicing preserves representable oversized counts`(raw: UInt) {
++                let values = [10, 20, 30]
++                let count = Count<StorageDomain>(Cardinal(raw))
++                #expect(Array(values.prefix(count)) == Array(values.prefix(Int(raw))))
++                #expect(Array(values.suffix(count)) == Array(values.suffix(Int(raw))))
++                #expect(Array(values.dropFirst(count)) == Array(values.dropFirst(Int(raw))))
++                #expect(Array(values.dropLast(count)) == Array(values.dropLast(Int(raw))))
++            }
+ 
+-        @Test
+-        func `reserve and removal preserve collection values`() {
+-            let two = Tagged<StorageDomain, Cardinal>(Cardinal(2))
+-            var values = [10, 20, 30, 40]
+-            values.reserveCapacity(two)
+-            values.removeFirst(two)
+-            values.removeLast(Cardinal(1))
+-            #expect(values == [30])
+-            var set = Set<Int>(minimumCapacity: two)
+-            set.insert(3)
+-            set.reserveCapacity(Cardinal(4))
+-            #expect(set == Set([3]))
+-            var dictionary = [Int: Int](minimumCapacity: two)
+-            dictionary[3] = 4
+-            dictionary.reserveCapacity(Cardinal(4))
+-            #expect(dictionary == [3: 4])
+-        }
++            @Test
++            func `reserve and removal preserve collection values`() {
++                let two = Tagged<StorageDomain, Cardinal>(Cardinal(2))
++                var values = [10, 20, 30, 40]
++                values.reserveCapacity(two)
++                values.removeFirst(two)
++                values.removeLast(Cardinal(1))
++                #expect(values == [30])
++                var set = Set<Int>(minimumCapacity: two)
++                set.insert(3)
++                set.reserveCapacity(Cardinal(4))
++                #expect(set == Set([3]))
++                var dictionary = [Int: Int](minimumCapacity: two)
++                dictionary[3] = 4
++                dictionary.reserveCapacity(Cardinal(4))
++                #expect(dictionary == [3: 4])
++            }
+ 
+-        @Test(arguments: [0 as UInt, 1, 3])
+-        func `uninitialized factories retain count domains and initialized prefixes`(raw: UInt) {
+-            let count = Count<StorageDomain>(Cardinal(raw))
+-            let values: [Int] = unsafe Array(unsafeUninitializedCapacity: count) {
+-                buffer,
+-                initialized in
+-                #expect(initialized.underlying == .zero)
+-                #expect(buffer.count == Int(raw))
+-                for i in 0..<Int(raw) {
+-                    unsafe buffer.baseAddress!.advanced(by: i).initialize(to: i + 10)
++            @Test(arguments: [0 as UInt, 1, 3])
++            func `uninitialized factories retain count domains and initialized prefixes`(raw: UInt) {
++                let count = Count<StorageDomain>(Cardinal(raw))
++                let values: [Int] = unsafe Array(unsafeUninitializedCapacity: count) {
++                    buffer,
++                    initialized in
++                    #expect(initialized.underlying == .zero)
++                    #expect(buffer.count == Int(raw))
++                    for i in 0..<Int(raw) {
++                        unsafe buffer.baseAddress!.advanced(by: i).initialize(to: i + 10)
++                    }
++                    initialized = Count(Cardinal(raw))
+                 }
+-                initialized = Count(Cardinal(raw))
++                #expect(values == (0..<Int(raw)).map { $0 + 10 })
++
++                let contiguous: ContiguousArray<Int> = unsafe ContiguousArray(
++                    unsafeUninitializedCapacity: Tagged<StorageDomain, Cardinal>(Cardinal(3))
++                ) { buffer, initialized in
++                    unsafe buffer.baseAddress!.initialize(to: 99)
++                    initialized = Tagged<StorageDomain, Cardinal>(Cardinal(1))
++                }
++                #expect(Array(contiguous) == [99])
+             }
+-            #expect(values == (0..<Int(raw)).map { $0 + 10 })
+ 
+-            let contiguous: ContiguousArray<Int> = unsafe ContiguousArray(
+-                unsafeUninitializedCapacity: Tagged<StorageDomain, Cardinal>(Cardinal(3))
+-            ) { buffer, initialized in
+-                unsafe buffer.baseAddress!.initialize(to: 99)
+-                initialized = Tagged<StorageDomain, Cardinal>(Cardinal(1))
++            @Test
++            func `buffers spans and raw storage accept empty and valid counts`() {
++                let zero = Cardinal.zero
++                let empty = unsafe UnsafeBufferPointer<Int>(start: nil, count: zero)
++                let emptyMutable = unsafe UnsafeMutableBufferPointer<Int>(start: nil, count: zero)
++                let emptyRaw = unsafe UnsafeRawBufferPointer(start: nil, count: zero)
++                let emptyMutableRaw = unsafe UnsafeMutableRawBufferPointer(start: nil, count: zero)
++                #expect(empty.count == 0)
++                #expect(emptyMutable.count == 0)
++                #expect(emptyRaw.count == 0)
++                #expect(emptyMutableRaw.count == 0)
++
++                var values: [UInt8] = [10, 20, 30]
++                values.withUnsafeMutableBufferPointer { buffer in
++                    let pointer = buffer.baseAddress!
++                    let rawPointer = UnsafeMutableRawPointer(pointer)
++                    let count = Count<StorageDomain>(Cardinal(3))
++                    let immutable = unsafe UnsafeBufferPointer(
++                        start: UnsafePointer(pointer),
++                        count: count
++                    )
++                    let mutable = unsafe UnsafeMutableBufferPointer(start: pointer, count: count)
++                    let raw = unsafe UnsafeRawBufferPointer(
++                        start: UnsafeRawPointer(rawPointer),
++                        count: count
++                    )
++                    let mutableRaw = unsafe UnsafeMutableRawBufferPointer(
++                        start: rawPointer,
++                        count: count
++                    )
++                    #expect(unsafe immutable[2] == 30)
++                    unsafe mutable[1] = 21
++                    #expect(unsafe raw[1] == 21)
++                    unsafe mutableRaw[0] = 11
++                    let span = unsafe RawSpan(
++                        _unsafeStart: UnsafeRawPointer(rawPointer),
++                        byteCount: count
++                    )
++                    let mutableSpan = unsafe MutableRawSpan(_unsafeStart: rawPointer, byteCount: count)
++                    #expect(span.byteCount == 3)
++                    #expect(mutableSpan.byteCount == 3)
++                }
++                #expect(values == [11, 21, 30])
+             }
+-            #expect(Array(contiguous) == [99])
+-        }
+ 
+-        @Test
+-        func `buffers spans and raw storage accept empty and valid counts`() {
+-            let zero = Cardinal.zero
+-            let empty = unsafe UnsafeBufferPointer<Int>(start: nil, count: zero)
+-            let emptyMutable = unsafe UnsafeMutableBufferPointer<Int>(start: nil, count: zero)
+-            let emptyRaw = unsafe UnsafeRawBufferPointer(start: nil, count: zero)
+-            let emptyMutableRaw = unsafe UnsafeMutableRawBufferPointer(start: nil, count: zero)
+-            #expect(empty.count == 0)
+-            #expect(emptyMutable.count == 0)
+-            #expect(emptyRaw.count == 0)
+-            #expect(emptyMutableRaw.count == 0)
+-
+-            var values: [UInt8] = [10, 20, 30]
+-            values.withUnsafeMutableBufferPointer { buffer in
+-                let pointer = buffer.baseAddress!
+-                let rawPointer = UnsafeMutableRawPointer(pointer)
+-                let count = Count<StorageDomain>(Cardinal(3))
+-                let immutable = unsafe UnsafeBufferPointer(
+-                    start: UnsafePointer(pointer),
+-                    count: count
+-                )
+-                let mutable = unsafe UnsafeMutableBufferPointer(start: pointer, count: count)
+-                let raw = unsafe UnsafeRawBufferPointer(
+-                    start: UnsafeRawPointer(rawPointer),
+-                    count: count
+-                )
+-                let mutableRaw = unsafe UnsafeMutableRawBufferPointer(
+-                    start: rawPointer,
+-                    count: count
++            @Test
++            func `typed allocation preserves capacity and alignment`() {
++                let buffer = unsafe UnsafeMutableBufferPointer<Int>.allocate(capacity: Cardinal(2))
++                #expect(buffer.count == 2)
++                unsafe buffer.deallocate()
++                let raw = unsafe UnsafeMutableRawBufferPointer.allocate(
++                    byteCount: Cardinal(16),
++                    alignment: Cardinal(8)
+                 )
+-                #expect(unsafe immutable[2] == 30)
+-                unsafe mutable[1] = 21
+-                #expect(unsafe raw[1] == 21)
+-                unsafe mutableRaw[0] = 11
+-                let span = unsafe RawSpan(
+-                    _unsafeStart: UnsafeRawPointer(rawPointer),
+-                    byteCount: count
+-                )
+-                let mutableSpan = unsafe MutableRawSpan(_unsafeStart: rawPointer, byteCount: count)
+-                #expect(span.byteCount == 3)
+-                #expect(mutableSpan.byteCount == 3)
++                #expect(raw.count == 16)
++                let address = UInt(bitPattern: raw.baseAddress!)
++                #expect(address % 8 == 0)
++                unsafe raw.deallocate()
+             }
+-            #expect(values == [11, 21, 30])
+-        }
+-
+-        @Test
+-        func `typed allocation preserves capacity and alignment`() {
+-            let buffer = unsafe UnsafeMutableBufferPointer<Int>.allocate(capacity: Cardinal(2))
+-            #expect(buffer.count == 2)
+-            unsafe buffer.deallocate()
+-            let raw = unsafe UnsafeMutableRawBufferPointer.allocate(
+-                byteCount: Cardinal(16),
+-                alignment: Cardinal(8)
+-            )
+-            #expect(raw.count == 16)
+-            let address = UInt(bitPattern: raw.baseAddress!)
+-            #expect(address % 8 == 0)
+-            unsafe raw.deallocate()
+-        }
+ 
+-        @Test
+-        func `span extraction preserves bounds and mutable views`() {
+-            var values = [10, 20, 30]
+-            values.withUnsafeMutableBufferPointer { buffer in
+-                let pointer = buffer.baseAddress!
+-                let span = unsafe Span(_unsafeStart: UnsafePointer(pointer), count: Cardinal(3))
+-                #expect(span.extracting(first: Cardinal(2)).count == 2)
+-                #expect(span.extracting(last: Cardinal(2))[0] == 20)
+-                #expect(span.extracting(droppingFirst: Cardinal(2))[0] == 30)
+-                #expect(span.extracting(droppingLast: Cardinal(2))[0] == 10)
+-                #expect(span.extracting(first: Cardinal(UInt(Int.max))).count == 3)
+-                #expect(span.extracting(droppingLast: Cardinal(UInt(Int.max))).count == 0)
+-
+-                var mutable = unsafe MutableSpan(_unsafeStart: pointer, count: Cardinal(3))
+-                do {
+-                    var first = mutable.extracting(first: Cardinal(1))
+-                    first[0] = 11
+-                }
+-                do {
+-                    var last = mutable.extracting(last: Cardinal(1))
+-                    last[0] = 31
+-                }
+-                do {
+-                    var tail = mutable.extracting(droppingFirst: Cardinal(1))
+-                    tail[0] = 21
+-                }
+-                do {
+-                    let prefix = mutable.extracting(droppingLast: Cardinal(1))
+-                    #expect(prefix.count == 2)
++            @Test
++            func `span extraction preserves bounds and mutable views`() {
++                var values = [10, 20, 30]
++                values.withUnsafeMutableBufferPointer { buffer in
++                    let pointer = buffer.baseAddress!
++                    let span = unsafe Span(_unsafeStart: UnsafePointer(pointer), count: Cardinal(3))
++                    #expect(span.extracting(first: Cardinal(2)).count == 2)
++                    #expect(span.extracting(last: Cardinal(2))[0] == 20)
++                    #expect(span.extracting(droppingFirst: Cardinal(2))[0] == 30)
++                    #expect(span.extracting(droppingLast: Cardinal(2))[0] == 10)
++                    #expect(span.extracting(first: Cardinal(UInt(Int.max))).count == 3)
++                    #expect(span.extracting(droppingLast: Cardinal(UInt(Int.max))).count == 0)
++
++                    var mutable = unsafe MutableSpan(_unsafeStart: pointer, count: Cardinal(3))
++                    do {
++                        var first = mutable.extracting(first: Cardinal(1))
++                        first[0] = 11
++                    }
++                    do {
++                        var last = mutable.extracting(last: Cardinal(1))
++                        last[0] = 31
++                    }
++                    do {
++                        var tail = mutable.extracting(droppingFirst: Cardinal(1))
++                        tail[0] = 21
++                    }
++                    do {
++                        let prefix = mutable.extracting(droppingLast: Cardinal(1))
++                        #expect(prefix.count == 2)
++                    }
+                 }
++                #expect(values == [11, 21, 31])
+             }
+-            #expect(values == [11, 21, 31])
+-        }
+ 
+-        @Test
+-        func `output spans append remove and finalize typed counts`() {
+-            let buffer = unsafe UnsafeMutableBufferPointer<Int>.allocate(capacity: Cardinal(3))
+-            var output = unsafe OutputSpan(buffer: buffer, initializedCount: Cardinal.zero)
+-            output.append(repeating: 7, count: Cardinal(2))
+-            output.removeLast(Count<StorageDomain>(Cardinal(1)))
+-            output.append(repeating: 9, count: Tagged<StorageDomain, Cardinal>(Cardinal(1)))
+-            let initialized = unsafe output.finalize(for: buffer)
+-            #expect(initialized == 2)
+-            #expect(unsafe buffer[0] == 7)
+-            #expect(unsafe buffer[1] == 9)
+-            unsafe buffer.baseAddress!.deinitialize(count: initialized)
+-            unsafe buffer.deallocate()
+-        }
++            @Test
++            func `output spans append remove and finalize typed counts`() {
++                let buffer = unsafe UnsafeMutableBufferPointer<Int>.allocate(capacity: Cardinal(3))
++                var output = unsafe OutputSpan(buffer: buffer, initializedCount: Cardinal.zero)
++                output.append(repeating: 7, count: Cardinal(2))
++                output.removeLast(Count<StorageDomain>(Cardinal(1)))
++                output.append(repeating: 9, count: Tagged<StorageDomain, Cardinal>(Cardinal(1)))
++                let initialized = unsafe output.finalize(for: buffer)
++                #expect(initialized == 2)
++                #expect(unsafe buffer[0] == 7)
++                #expect(unsafe buffer[1] == 9)
++                unsafe buffer.baseAddress!.deinitialize(count: initialized)
++                unsafe buffer.deallocate()
++            }
+ 
+-        @Test
+-        func `explicit conversion and full width arithmetic remain available`() throws {
+-            let maximum = Cardinal(UInt.max)
+-            let tagged = Tagged<StorageDomain, Cardinal>(maximum)
+-            #expect(Int(bitPattern: maximum) == -1)
+-            #expect(Int(bitPattern: tagged) == -1)
+-            #expect(Int(bitPattern: Count<StorageDomain>(maximum)) == -1)
+-            #expect(Int(clamping: maximum) == Int.max)
+-            #expect(Int(clamping: tagged) == Int.max)
+-            #expect(throws: Cardinal.Error.overflow) { try Int(maximum) }
+-            #expect(try maximum.add.exact(.zero) == maximum)
+-            #expect(try maximum.subtract.exact(.one).rawValue == UInt.max - 1)
++            @Test
++            func `explicit conversion and full width arithmetic remain available`() throws {
++                let maximum = Cardinal(UInt.max)
++                let tagged = Tagged<StorageDomain, Cardinal>(maximum)
++                #expect(Int(bitPattern: maximum) == -1)
++                #expect(Int(bitPattern: tagged) == -1)
++                #expect(Int(bitPattern: Count<StorageDomain>(maximum)) == -1)
++                #expect(Int(clamping: maximum) == Int.max)
++                #expect(Int(clamping: tagged) == Int.max)
++                #expect(throws: Cardinal.Error.overflow) { try Int(maximum) }
++                #expect(try maximum.add.exact(.zero) == maximum)
++                #expect(try maximum.subtract.exact(.one).rawValue == UInt.max - 1)
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Compatibility Tests.swift b/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Compatibility Tests.swift
+index 8caa841..5907f95 100644
+--- a/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Compatibility Tests.swift	
++++ b/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Compatibility Tests.swift	
+@@ -37,121 +37,125 @@
+ 
+     private enum InitializerFailure: Swift::Error { case element }
+ 
+-    @Suite struct `Cardinal carrier compatibility` {
+-        @Test
+-        func `custom carriers preserve counts and arithmetic domains`() throws(Cardinal.Error) {
+-            typealias Size = Count<Elements>
+-            var count = Size.zero
+-            count += .one
+-            #expect(count.cardinal == Cardinal(1))
+-            #expect(count.count == Cardinal(1))
+-            #expect(count + .one == Size(Cardinal(2)))
+-            let addition: Property::Property<Addition, Size> = count.add
+-            let subtraction: Property::Property<Subtraction, Size> = count.subtract
+-            #expect(try addition(.one) == Size(Cardinal(2)))
+-            #expect(try subtraction(.one) == .zero)
+-        }
+-
+-        @Test
+-        func `custom carriers retain explicit integer conversion semantics`() {
+-            let large = Count<Elements>(Cardinal(UInt.max))
+-            #expect(Int(bitPattern: large) == -1)
+-            #expect(UInt32(Count<Elements>(Cardinal(UInt(UInt32.max)))) == UInt32.max)
+-        }
+-
+-        @Test
+-        func `signed and unsigned carrier shifts retain their operand types`() {
+-            let count = Count<Elements>(Cardinal(1))
+-            var signed = Word(Int8(-4))
+-            var unsigned = Word(UInt8(4))
+-            #expect((signed >> count).underlying == -2)
+-            #expect((unsigned << count).underlying == 8)
+-            signed >>= count
+-            signed <<= count
+-            unsigned <<= count
+-            unsigned >>= count
+-            #expect(signed.underlying == -4)
+-            #expect(unsigned.underlying == 4)
+-        }
+-
+-        @Test
+-        func `compatibility shifts reject a count equal to the integer width`() async {
+-            await #expect(processExitsWith: .failure) {
+-                var value = Word(UInt8(1))
+-                value <<= Count<Elements>(Cardinal(8))
+-                precondition(value.underlying == 0)
++enum `Compatibility Tests` {}
++
++extension `Compatibility Tests` {
++        @Suite struct `Cardinal carrier compatibility` {
++            @Test
++            func `custom carriers preserve counts and arithmetic domains`() throws(Cardinal.Error) {
++                typealias Size = Count<Elements>
++                var count = Size.zero
++                count += .one
++                #expect(count.cardinal == Cardinal(1))
++                #expect(count.count == Cardinal(1))
++                #expect(count + .one == Size(Cardinal(2)))
++                let addition: Property::Property<Addition, Size> = count.add
++                let subtraction: Property::Property<Subtraction, Size> = count.subtract
++                #expect(try addition(.one) == Size(Cardinal(2)))
++                #expect(try subtraction(.one) == .zero)
+             }
+-        }
+ 
+-        @Test
+-        func `collections accept domain typed counts and oversized representable slices`() {
+-            let two = Count<Elements>(Cardinal(2))
+-            let large = Count<Elements>(Cardinal(UInt(Int.max)))
+-            var values = Array(repeating: 7, count: two)
+-            #expect(values == [7, 7])
+-            #expect(ContiguousArray(repeating: 7, count: two) == [7, 7])
+-            #expect(Array(values.prefix(large)) == values)
+-            #expect(values.dropFirst(large).isEmpty)
+-            values.reserveCapacity(two)
+-            values.removeFirst(Count<Elements>.one)
+-            values.removeLast(Count<Elements>.one)
+-            #expect(values.isEmpty)
+-            #expect(String(repeating: "a", count: two) == "aa")
+-        }
++            @Test
++            func `custom carriers retain explicit integer conversion semantics`() {
++                let large = Count<Elements>(Cardinal(UInt.max))
++                #expect(Int(bitPattern: large) == -1)
++                #expect(UInt32(Count<Elements>(Cardinal(UInt(UInt32.max)))) == UInt32.max)
++            }
+ 
+-        @Test(arguments: [false, true])
+-        func `typed factories return exactly their initialized prefix`(contiguous: Bool) {
+-            let capacity = Count<Elements>(Cardinal(3))
+-            let initialize = {
+-                (buffer: inout UnsafeMutableBufferPointer<Int>, count: inout Count<Elements>) in
+-                unsafe buffer.baseAddress!.initialize(to: 23)
+-                count = .one
++            @Test
++            func `signed and unsigned carrier shifts retain their operand types`() {
++                let count = Count<Elements>(Cardinal(1))
++                var signed = Word(Int8(-4))
++                var unsigned = Word(UInt8(4))
++                #expect((signed >> count).underlying == -2)
++                #expect((unsigned << count).underlying == 8)
++                signed >>= count
++                signed <<= count
++                unsigned <<= count
++                unsigned >>= count
++                #expect(signed.underlying == -4)
++                #expect(unsigned.underlying == 4)
+             }
+-            let values: [Int]
+-            if contiguous {
+-                values = unsafe Array(
+-                    ContiguousArray(
+-                        unsafeUninitializedCapacity: capacity,
+-                        initializingWith: initialize
+-                    )
+-                )
+-            } else {
+-                values = unsafe Array(
+-                    unsafeUninitializedCapacity: capacity,
+-                    initializingWith: initialize
+-                )
++
++            @Test
++            func `compatibility shifts reject a count equal to the integer width`() async {
++                await #expect(processExitsWith: .failure) {
++                    var value = Word(UInt8(1))
++                    value <<= Count<Elements>(Cardinal(8))
++                    precondition(value.underlying == 0)
++                }
+             }
+-            #expect(values == [23])
+-        }
+ 
+-        @Test(arguments: [false, true])
+-        func `throwing typed factories destroy their initialized prefix`(contiguous: Bool) {
+-            let deaths = Deaths()
+-            let capacity = Count<Elements>(Cardinal(2))
+-            let initialize = {
+-                (
+-                    buffer: inout UnsafeMutableBufferPointer<Element>,
+-                    count: inout Count<Elements>
+-                ) throws(InitializerFailure) in
+-                unsafe buffer.baseAddress!.initialize(to: Element(deaths))
+-                count = .one
+-                throw .element
++            @Test
++            func `collections accept domain typed counts and oversized representable slices`() {
++                let two = Count<Elements>(Cardinal(2))
++                let large = Count<Elements>(Cardinal(UInt(Int.max)))
++                var values = Array(repeating: 7, count: two)
++                #expect(values == [7, 7])
++                #expect(ContiguousArray(repeating: 7, count: two) == [7, 7])
++                #expect(Array(values.prefix(large)) == values)
++                #expect(values.dropFirst(large).isEmpty)
++                values.reserveCapacity(two)
++                values.removeFirst(Count<Elements>.one)
++                values.removeLast(Count<Elements>.one)
++                #expect(values.isEmpty)
++                #expect(String(repeating: "a", count: two) == "aa")
+             }
+-            #expect(throws: InitializerFailure.element) {
++
++            @Test(arguments: [false, true])
++            func `typed factories return exactly their initialized prefix`(contiguous: Bool) {
++                let capacity = Count<Elements>(Cardinal(3))
++                let initialize = {
++                    (buffer: inout UnsafeMutableBufferPointer<Int>, count: inout Count<Elements>) in
++                    unsafe buffer.baseAddress!.initialize(to: 23)
++                    count = .one
++                }
++                let values: [Int]
+                 if contiguous {
+-                    let _ = try unsafe ContiguousArray(
+-                        unsafeUninitializedCapacity: capacity,
+-                        initializingWith: initialize
++                    values = unsafe Array(
++                        ContiguousArray(
++                            unsafeUninitializedCapacity: capacity,
++                            initializingWith: initialize
++                        )
+                     )
+                 } else {
+-                    let _ = try unsafe Array(
++                    values = unsafe Array(
+                         unsafeUninitializedCapacity: capacity,
+                         initializingWith: initialize
+                     )
+                 }
++                #expect(values == [23])
++            }
++
++            @Test(arguments: [false, true])
++            func `throwing typed factories destroy their initialized prefix`(contiguous: Bool) {
++                let deaths = Deaths()
++                let capacity = Count<Elements>(Cardinal(2))
++                let initialize = {
++                    (
++                        buffer: inout UnsafeMutableBufferPointer<Element>,
++                        count: inout Count<Elements>
++                    ) throws(InitializerFailure) in
++                    unsafe buffer.baseAddress!.initialize(to: Element(deaths))
++                    count = .one
++                    throw .element
++                }
++                #expect(throws: InitializerFailure.element) {
++                    if contiguous {
++                        let _ = try unsafe ContiguousArray(
++                            unsafeUninitializedCapacity: capacity,
++                            initializingWith: initialize
++                        )
++                    } else {
++                        let _ = try unsafe Array(
++                            unsafeUninitializedCapacity: capacity,
++                            initializingWith: initialize
++                        )
++                    }
++                }
++                #expect(deaths.count == 1)
+             }
+-            #expect(deaths.count == 1)
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Span+Cardinal Tests.swift b/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Span+Cardinal Tests.swift
+index daa4cb9..8ad24b8 100644
+--- a/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Span+Cardinal Tests.swift	
++++ b/Tests/Consolidated swift-cardinal-carrier/Cardinal Carrier Tests/Span+Cardinal Tests.swift	
+@@ -4,9 +4,13 @@
+     import Cardinal
+     import Carrier
+ 
+-    @Suite struct `Cardinal span compatibility` {}
++enum `Span+Cardinal Tests` {}
+ 
+-    extension `Cardinal span compatibility` {
++extension `Span+Cardinal Tests` {
++        @Suite struct `Cardinal span compatibility` {}
++}
++
++    extension `Span+Cardinal Tests`.`Cardinal span compatibility` {
+         @Test
+         func `Span typed-Cardinal init reads the underlying buffer`() {
+             let values: [Int] = [10, 20, 30]
+@@ -39,7 +43,7 @@
+         }
+     }
+ 
+-    extension `Cardinal span compatibility` {
++    extension `Span+Cardinal Tests`.`Cardinal span compatibility` {
+         @Test
+         func `Span typed-Cardinal init with zero count is empty`() {
+             let values: [Int] = [7]
+diff --git a/Tests/Consolidated swift-cardinal-property/Cardinal Property Tests/Cardinal Property Tests.swift b/Tests/Consolidated swift-cardinal-property/Cardinal Property Tests/Cardinal Property Tests.swift
+index a4d3a07..a73a873 100644
+--- a/Tests/Consolidated swift-cardinal-property/Cardinal Property Tests/Cardinal Property Tests.swift	
++++ b/Tests/Consolidated swift-cardinal-property/Cardinal Property Tests/Cardinal Property Tests.swift	
+@@ -7,65 +7,69 @@
+     import Property
+     import Testing
+ 
+-    @Suite
+-    struct `Cardinal properties use canonical arithmetic operations` {
+-        @Test
+-        func `Saturating addition returns the sum`() {
+-            #expect(Cardinal(2).add.saturating(Cardinal(3)).rawValue == 5)
+-        }
++enum `Cardinal Property Tests` {}
+ 
+-        @Test
+-        func `Saturating addition clamps overflow to max`() {
+-            #expect(Cardinal(UInt.max).add.saturating(Cardinal(1)).rawValue == UInt.max)
+-        }
++extension `Cardinal Property Tests` {
++        @Suite
++        struct `Cardinal properties use canonical arithmetic operations` {
++            @Test
++            func `Saturating addition returns the sum`() {
++                #expect(Cardinal(2).add.saturating(Cardinal(3)).rawValue == 5)
++            }
+ 
+-        @Test
+-        func `Exact addition returns the sum`() throws {
+-            #expect(try Cardinal(2).add.exact(Cardinal(3)).rawValue == 5)
+-        }
++            @Test
++            func `Saturating addition clamps overflow to max`() {
++                #expect(Cardinal(UInt.max).add.saturating(Cardinal(1)).rawValue == UInt.max)
++            }
+ 
+-        @Test
+-        func `Exact addition reports overflow`() {
+-            #expect(throws: Cardinal.Error.overflow) {
+-                try Cardinal(UInt.max).add.exact(Cardinal(1))
++            @Test
++            func `Exact addition returns the sum`() throws {
++                #expect(try Cardinal(2).add.exact(Cardinal(3)).rawValue == 5)
+             }
+-        }
+ 
+-        @Test
+-        func `Saturating subtraction returns the difference`() {
+-            #expect(Cardinal(5).subtract.saturating(Cardinal(3)).rawValue == 2)
+-        }
++            @Test
++            func `Exact addition reports overflow`() {
++                #expect(throws: Cardinal.Error.overflow) {
++                    try Cardinal(UInt.max).add.exact(Cardinal(1))
++                }
++            }
+ 
+-        @Test
+-        func `Saturating subtraction clamps underflow to zero`() {
+-            #expect(Cardinal(2).subtract.saturating(Cardinal(3)).rawValue == 0)
+-        }
++            @Test
++            func `Saturating subtraction returns the difference`() {
++                #expect(Cardinal(5).subtract.saturating(Cardinal(3)).rawValue == 2)
++            }
+ 
+-        @Test
+-        func `Exact subtraction returns the difference`() throws {
+-            #expect(try Cardinal(5).subtract.exact(Cardinal(3)).rawValue == 2)
+-        }
++            @Test
++            func `Saturating subtraction clamps underflow to zero`() {
++                #expect(Cardinal(2).subtract.saturating(Cardinal(3)).rawValue == 0)
++            }
+ 
+-        @Test
+-        func `Exact subtraction reports underflow`() {
+-            #expect(throws: Cardinal.Error.underflow) {
+-                try Cardinal(2).subtract.exact(Cardinal(3))
++            @Test
++            func `Exact subtraction returns the difference`() throws {
++                #expect(try Cardinal(5).subtract.exact(Cardinal(3)).rawValue == 2)
+             }
+-        }
+ 
+-        @Test
+-        func `The addition tag selects the canonical operation`() throws {
+-            let tagged: Property<Addition, Cardinal> = Cardinal(2).add
+-            let canonical: Property<Addition, Cardinal> = tagged
+-            #expect(try canonical.exact(Cardinal(3)) == Cardinal(5))
+-        }
++            @Test
++            func `Exact subtraction reports underflow`() {
++                #expect(throws: Cardinal.Error.underflow) {
++                    try Cardinal(2).subtract.exact(Cardinal(3))
++                }
++            }
++
++            @Test
++            func `The addition tag selects the canonical operation`() throws {
++                let tagged: Property<Addition, Cardinal> = Cardinal(2).add
++                let canonical: Property<Addition, Cardinal> = tagged
++                #expect(try canonical.exact(Cardinal(3)) == Cardinal(5))
++            }
+ 
+-        @Test
+-        func `The subtraction tag selects the canonical operation`() throws {
+-            let tagged: Property<Subtraction, Cardinal> = Cardinal(5).subtract
+-            let canonical: Property<Subtraction, Cardinal> = tagged
+-            #expect(try canonical.exact(Cardinal(3)) == Cardinal(2))
++            @Test
++            func `The subtraction tag selects the canonical operation`() throws {
++                let tagged: Property<Subtraction, Cardinal> = Cardinal(5).subtract
++                let canonical: Property<Subtraction, Cardinal> = tagged
++                #expect(try canonical.exact(Cardinal(3)) == Cardinal(2))
++            }
+         }
+-    }
++}
+ 
+ #endif
+-- 
+2.43.0
+

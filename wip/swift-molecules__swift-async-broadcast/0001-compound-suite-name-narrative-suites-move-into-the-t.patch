@@ -1,0 +1,1449 @@
+From 98856673a25ffcbf7baa8dafdeda7da120a7e2fd Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:10 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Async.Broadcast Tests.swift               | 1212 +++++++++--------
+ 1 file changed, 610 insertions(+), 602 deletions(-)
+
+diff --git a/Tests/Async Broadcast Tests/Async.Broadcast Tests.swift b/Tests/Async Broadcast Tests/Async.Broadcast Tests.swift
+index bd5753f..dbccc24 100644
+--- a/Tests/Async Broadcast Tests/Async.Broadcast Tests.swift	
++++ b/Tests/Async Broadcast Tests/Async.Broadcast Tests.swift	
+@@ -7,819 +7,827 @@ import Async_Broadcast
+     import Async_Channel
+     import Testing
+ 
+-    @Suite
+-    struct `Async broadcasts deliver values to their subscribers` {
+-
+-        @Test
+-        func `Single subscriber receives all elements`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
+-
+-            broadcast.send(1)
+-            broadcast.send(2)
+-            broadcast.send(3)
+-            broadcast.finish()
+-
+-            var received: [Int] = []
+-            for try await value in subscription {
+-                received.append(value)
+-            }
++enum `Async.Broadcast Tests` {}
+ 
+-            #expect(received == [1, 2, 3])
+-        }
++extension `Async.Broadcast Tests` {
++        @Suite
++        struct `Async broadcasts deliver values to their subscribers` {
+ 
+-        @Test
+-        func `Multiple subscribers each receive all elements`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
+-            let sub1 = broadcast.subscribe()
+-            let sub2 = broadcast.subscribe()
++            @Test
++            func `Single subscriber receives all elements`() async throws {
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
+ 
+-            broadcast.send(1)
+-            broadcast.send(2)
+-            broadcast.finish()
++                broadcast.send(1)
++                broadcast.send(2)
++                broadcast.send(3)
++                broadcast.finish()
+ 
+-            let task1 = Task {
+                 var received: [Int] = []
+-                for try await value in sub1 {
++                for try await value in subscription {
+                     received.append(value)
+                 }
+-                return received
++
++                #expect(received == [1, 2, 3])
+             }
+ 
+-            let task2 = Task {
+-                var received: [Int] = []
+-                for try await value in sub2 {
+-                    received.append(value)
++            @Test
++            func `Multiple subscribers each receive all elements`() async throws {
++                let broadcast = Async.Broadcast<Int>()
++                let sub1 = broadcast.subscribe()
++                let sub2 = broadcast.subscribe()
++
++                broadcast.send(1)
++                broadcast.send(2)
++                broadcast.finish()
++
++                let task1 = Task {
++                    var received: [Int] = []
++                    for try await value in sub1 {
++                        received.append(value)
++                    }
++                    return received
+                 }
+-                return received
+-            }
+ 
+-            let result1 = try await task1.value
+-            let result2 = try await task2.value
++                let task2 = Task {
++                    var received: [Int] = []
++                    for try await value in sub2 {
++                        received.append(value)
++                    }
++                    return received
++                }
+ 
+-            #expect(result1 == [1, 2])
+-            #expect(result2 == [1, 2])
+-        }
++                let result1 = try await task1.value
++                let result2 = try await task2.value
+ 
+-        @Test
+-        func `Late subscriber only sees new elements`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
++                #expect(result1 == [1, 2])
++                #expect(result2 == [1, 2])
++            }
+ 
+-            broadcast.send(1)
++            @Test
++            func `Late subscriber only sees new elements`() async throws {
++                let broadcast = Async.Broadcast<Int>()
+ 
+-            let subscription = broadcast.subscribe()
++                broadcast.send(1)
+ 
+-            broadcast.send(2)
+-            broadcast.send(3)
+-            broadcast.finish()
++                let subscription = broadcast.subscribe()
+ 
+-            var received: [Int] = []
+-            for try await value in subscription {
+-                received.append(value)
++                broadcast.send(2)
++                broadcast.send(3)
++                broadcast.finish()
++
++                var received: [Int] = []
++                for try await value in subscription {
++                    received.append(value)
++                }
++
++                #expect(received == [2, 3])
+             }
+ 
+-            #expect(received == [2, 3])
+-        }
++            @Test
++            func `The finished query reflects broadcast state`() {
++                let broadcast = Async.Broadcast<Int>()
++                #expect(broadcast.isFinished == false)
++                broadcast.finish()
++                #expect(broadcast.isFinished == true)
++            }
+ 
+-        @Test
+-        func `The finished query reflects broadcast state`() {
+-            let broadcast = Async.Broadcast<Int>()
+-            #expect(broadcast.isFinished == false)
+-            broadcast.finish()
+-            #expect(broadcast.isFinished == true)
+-        }
++            @Test
++            func `Subscriber suspends until element available`() async throws {
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
++                let started = Async.Barrier(parties: 2)
+ 
+-        @Test
+-        func `Subscriber suspends until element available`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
+-            let started = Async.Barrier(parties: 2)
++                let receiveTask = Task { () -> Int? in
++                    try? await started.arrive()
++                    var iterator = subscription.makeAsyncIterator()
++                    return try await iterator.next()
++                }
+ 
+-            let receiveTask = Task { () -> Int? in
+                 try? await started.arrive()
+-                var iterator = subscription.makeAsyncIterator()
+-                return try await iterator.next()
+-            }
+ 
+-            try? await started.arrive()
++                broadcast.send(42)
+ 
+-            broadcast.send(42)
++                let result = try await receiveTask.value
++                #expect(result == 42)
++            }
+ 
+-            let result = try await receiveTask.value
+-            #expect(result == 42)
+-        }
++            @Test
++            func `Subscriber resumes with nil on finish`() async throws {
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
++                let started = Async.Barrier(parties: 2)
+ 
+-        @Test
+-        func `Subscriber resumes with nil on finish`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
+-            let started = Async.Barrier(parties: 2)
++                let receiveTask = Task { () -> Int? in
++                    try? await started.arrive()
++                    var iterator = subscription.makeAsyncIterator()
++                    return try await iterator.next()
++                }
+ 
+-            let receiveTask = Task { () -> Int? in
+                 try? await started.arrive()
+-                var iterator = subscription.makeAsyncIterator()
+-                return try await iterator.next()
+-            }
+ 
+-            try? await started.arrive()
++                broadcast.finish()
+ 
+-            broadcast.finish()
++                let result = try await receiveTask.value
++                #expect(result == nil)
++            }
+ 
+-            let result = try await receiveTask.value
+-            #expect(result == nil)
+-        }
++            @Test
++            func `Cancel subscription stops iteration`() async throws {
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
++                let started = Async.Barrier(parties: 2)
+ 
+-        @Test
+-        func `Cancel subscription stops iteration`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
+-            let started = Async.Barrier(parties: 2)
++                let receiveTask = Task { () -> Int? in
++                    try? await started.arrive()
++                    var iterator = subscription.makeAsyncIterator()
++                    return try await iterator.next()
++                }
+ 
+-            let receiveTask = Task { () -> Int? in
+                 try? await started.arrive()
+-                var iterator = subscription.makeAsyncIterator()
+-                return try await iterator.next()
+-            }
+ 
+-            try? await started.arrive()
++                subscription.cancel()
+ 
+-            subscription.cancel()
++                let result = try await receiveTask.value
++                #expect(result == nil)
++            }
+ 
+-            let result = try await receiveTask.value
+-            #expect(result == nil)
+-        }
++            @Test
++            func `Elements delivered in order`() async throws {
+ 
+-        @Test
+-        func `Elements delivered in order`() async throws {
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: 100)
++                let subscription = broadcast.subscribe()
+ 
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: 100)
+-            let subscription = broadcast.subscribe()
++                (1...100).forEach { i in
++                    broadcast.send(i)
++                }
++                broadcast.finish()
+ 
+-            (1...100).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
++                var received: [Int] = []
++                for try await value in subscription {
++                    received.append(value)
++                }
+ 
+-            var received: [Int] = []
+-            for try await value in subscription {
+-                received.append(value)
++                #expect(received == Array(1...100))
+             }
+ 
+-            #expect(received == Array(1...100))
+-        }
++            @Test
++            func `Send after finish is ignored`() async throws {
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
+ 
+-        @Test
+-        func `Send after finish is ignored`() async throws {
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
++                broadcast.send(1)
++                broadcast.finish()
++                broadcast.send(2)
+ 
+-            broadcast.send(1)
+-            broadcast.finish()
+-            broadcast.send(2)
++                var received: [Int] = []
++                for try await value in subscription {
++                    received.append(value)
++                }
+ 
+-            var received: [Int] = []
+-            for try await value in subscription {
+-                received.append(value)
++                #expect(received == [1])
+             }
+ 
+-            #expect(received == [1])
+-        }
++            @Test
++            func `Task cancellation throws cancelled error`() async {
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
++                let started = Async.Barrier(parties: 2)
+ 
+-        @Test
+-        func `Task cancellation throws cancelled error`() async {
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
+-            let started = Async.Barrier(parties: 2)
++                let receiveTask = Task {
++                    try? await started.arrive()
++                    var iterator = subscription.makeAsyncIterator()
++                    return try await iterator.next()
++                }
+ 
+-            let receiveTask = Task {
+                 try? await started.arrive()
+-                var iterator = subscription.makeAsyncIterator()
+-                return try await iterator.next()
+-            }
+ 
+-            try? await started.arrive()
++                receiveTask.cancel()
+ 
+-            receiveTask.cancel()
+-
+-            do {
+-                _ = try await receiveTask.value
+-                Issue.record("Expected cancellation error")
+-            } catch let error as Async.Broadcast<Int>.Error {
+-                #expect(error == .cancelled)
+-            } catch {
+-                Issue.record("Unexpected error type: \(error)")
++                do {
++                    _ = try await receiveTask.value
++                    Issue.record("Expected cancellation error")
++                } catch let error as Async.Broadcast<Int>.Error {
++                    #expect(error == .cancelled)
++                } catch {
++                    Issue.record("Unexpected error type: \(error)")
++                }
+             }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Async broadcasts preserve delivery under concurrent load` {
++extension `Async.Broadcast Tests` {
++        @Suite
++        struct `Async broadcasts preserve delivery under concurrent load` {
+ 
+-        private func yieldProgress(iterations: Int = 50) async {
+-            for _ in 0..<iterations {
+-                await Task.yield()
++            private func yieldProgress(iterations: Int = 50) async {
++                for _ in 0..<iterations {
++                    await Task.yield()
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `All subscribers receive all elements - no loss`() async throws {
++            @Test
++            func `All subscribers receive all elements - no loss`() async throws {
+ 
+-            for round in 0..<20 {
+-                let elementCount = 50
++                for round in 0..<20 {
++                    let elementCount = 50
+ 
+-                let broadcast = Async.Broadcast<Int>(bufferCapacity: elementCount)
+-                let subscriberCount = 5
++                    let broadcast = Async.Broadcast<Int>(bufferCapacity: elementCount)
++                    let subscriberCount = 5
+ 
+-                let subscriptions = (0..<subscriberCount).map { _ in
+-                    broadcast.subscribe()
+-                }
++                    let subscriptions = (0..<subscriberCount).map { _ in
++                        broadcast.subscribe()
++                    }
+ 
+-                let consumerTasks = subscriptions.map { subscription in
+-                    Task {
+-                        var received: [Int] = []
+-                        for try await value in subscription {
+-                            received.append(value)
++                    let consumerTasks = subscriptions.map { subscription in
++                        Task {
++                            var received: [Int] = []
++                            for try await value in subscription {
++                                received.append(value)
++                            }
++                            return received
+                         }
+-                        return received
++                    }
++
++                    await yieldProgress(iterations: 20)
++
++                    (0..<elementCount).forEach { i in
++                        broadcast.send(i)
++                    }
++                    broadcast.finish()
++
++                    for (index, task) in consumerTasks.enumerated() {
++                        let received = try await task.value
++
++                        #expect(
++                            received.count == elementCount,
++                            "Round \(round), subscriber \(index): count \(received.count) != \(elementCount)"
++                        )
++                        #expect(
++                            received == Array(0..<elementCount),
++                            "Round \(round), subscriber \(index): elements mismatch"
++                        )
+                     }
+                 }
++            }
+ 
+-                await yieldProgress(iterations: 20)
++            @Test
++            func `Cancellation racing with send - token matching correctness`() async throws {
+ 
+-                (0..<elementCount).forEach { i in
+-                    broadcast.send(i)
++                for round in 0..<30 {
++                    let elementCount = 20
++                    let broadcast = Async.Broadcast<Int>(bufferCapacity: elementCount)
++                    let subscriberCount = 10
++
++                    let subscriptions = (0..<subscriberCount).map { _ in
++                        broadcast.subscribe()
++                    }
++
++                    let consumerTasks = subscriptions.enumerated().map { index, subscription in
++                        Task {
++                            var received: [Int] = []
++                            var iterator = subscription.makeAsyncIterator()
++                            while true {
++                                do {
++                                    guard let value = try await iterator.next() else {
++                                        break
++                                    }
++                                    received.append(value)
++                                } catch let error as Async.Broadcast<Int>.Error {
++                                    #expect(
++                                        error == .cancelled,
++                                        "Round \(round), subscriber \(index): Expected .cancelled, got \(error)"
++                                    )
++                                    return (index, received, true)
++                                } catch {
++                                    #expect(
++                                        Bool(false),
++                                        "Round \(round), subscriber \(index): Unexpected error: \(error)"
++                                    )
++                                    break
++                                }
++                            }
++                            return (index, received, false)
++                        }
++                    }
++
++                    broadcast.send(0)
++                    await yieldProgress(iterations: 30)
++
++                    for i in stride(from: 0, to: subscriberCount, by: 2) {
++                        consumerTasks[i].cancel()
++                    }
++
++                    for i in 1..<elementCount {
++                        broadcast.send(i)
++                        await Task.yield()
++                    }
++                    broadcast.finish()
++
++                    var cancelledCount = 0
++                    for task in consumerTasks {
++                        let (index, received, wasCancelled) = await task.value
++
++                        if wasCancelled {
++                            cancelledCount += 1
++
++                            #expect(
++                                received.first == 0 || received.isEmpty,
++                                "Round \(round), cancelled subscriber \(index): Unexpected first element"
++                            )
++                        } else {
++
++                            #expect(
++                                received == Array(0..<elementCount),
++                                "Round \(round), subscriber \(index): Expected all elements"
++                            )
++                        }
++                    }
++
++                    #expect(cancelledCount > 0, "Round \(round): No cancellations observed")
+                 }
+-                broadcast.finish()
++            }
+ 
+-                for (index, task) in consumerTasks.enumerated() {
+-                    let received = try await task.value
++            @Test
++            func `Finish racing with pending subscribers - all resume with nil`() async throws {
+ 
+-                    #expect(
+-                        received.count == elementCount,
+-                        "Round \(round), subscriber \(index): count \(received.count) != \(elementCount)"
+-                    )
+-                    #expect(
+-                        received == Array(0..<elementCount),
+-                        "Round \(round), subscriber \(index): elements mismatch"
+-                    )
++                for round in 0..<30 {
++                    let broadcast = Async.Broadcast<Int>()
++                    let subscriberCount = 15
++                    let preBufferedCount = 5
++
++                    (0..<preBufferedCount).forEach { i in
++                        broadcast.send(i)
++                    }
++
++                    let subscriptions = (0..<subscriberCount).map { _ in
++                        broadcast.subscribe()
++                    }
++
++                    let consumerTasks = subscriptions.map { subscription in
++                        Task { () -> [Int] in
++                            var received: [Int] = []
++                            for try await value in subscription {
++                                received.append(value)
++                            }
++                            return received
++                        }
++                    }
++
++                    await yieldProgress()
++
++                    broadcast.finish()
++
++                    for (index, task) in consumerTasks.enumerated() {
++                        let received = try await task.value
++
++                        #expect(
++                            received.isEmpty,
++                            "Round \(round), subscriber \(index): Expected empty, got \(received.count) elements"
++                        )
++                    }
+                 }
+             }
+-        }
+ 
+-        @Test
+-        func `Cancellation racing with send - token matching correctness`() async throws {
++            @Test
++            func `Many subscribers with interleaved send and cancel`() async throws {
+ 
+-            for round in 0..<30 {
+-                let elementCount = 20
++                let subscriberCount = 20
++                let elementCount = 500
+                 let broadcast = Async.Broadcast<Int>(bufferCapacity: elementCount)
+-                let subscriberCount = 10
+ 
+-                let subscriptions = (0..<subscriberCount).map { _ in
+-                    broadcast.subscribe()
+-                }
++                let results = Async.Channel<(id: Int, elements: [Int], terminatedViaCancellation: Bool)>
++                    .Unbounded().take().ends()
++                let ready = Async.Channel<Int>.Unbounded().take().ends()
++
++                var subscriberTasks: [(id: Int, task: Task<Void, Never>)] = []
+ 
+-                let consumerTasks = subscriptions.enumerated().map { index, subscription in
+-                    Task {
++                for id in 0..<subscriberCount {
++                    let task = Task { [sender = results.sender] in
++                        let subscription = broadcast.subscribe()
+                         var received: [Int] = []
++                        var terminatedViaCancellation = false
++
+                         var iterator = subscription.makeAsyncIterator()
+-                        while true {
++                        do {
++                            try ready.sender.send(id)
++                        } catch { #expect(Bool(false), "ready channel unexpectedly closed") }
++
++                        loop: while true {
+                             do {
+                                 guard let value = try await iterator.next() else {
+-                                    break
++                                    break loop
+                                 }
+                                 received.append(value)
++                                await Task.yield()
+                             } catch let error as Async.Broadcast<Int>.Error {
++
+                                 #expect(
+                                     error == .cancelled,
+-                                    "Round \(round), subscriber \(index): Expected .cancelled, got \(error)"
++                                    "Subscriber \(id): Unexpected broadcast error: \(error)"
+                                 )
+-                                return (index, received, true)
++                                terminatedViaCancellation = true
++                                break loop
+                             } catch {
++
+                                 #expect(
+                                     Bool(false),
+-                                    "Round \(round), subscriber \(index): Unexpected error: \(error)"
++                                    "Subscriber \(id): Unexpected error type: \(error)"
+                                 )
+-                                break
++                                break loop
+                             }
+                         }
+-                        return (index, received, false)
++
++                        do {
++                            try sender.send(
++                                (
++                                    id: id, elements: received,
++                                    terminatedViaCancellation: terminatedViaCancellation
++                                )
++                            )
++                        } catch { #expect(Bool(false), "results channel unexpectedly closed") }
+                     }
++                    subscriberTasks.append((id: id, task: task))
+                 }
+ 
+-                broadcast.send(0)
+-                await yieldProgress(iterations: 30)
++                let idsToCancel = Set(stride(from: 0, to: subscriberCount, by: 3))
++                let controlSubscriberID = 0
+ 
+-                for i in stride(from: 0, to: subscriberCount, by: 2) {
+-                    consumerTasks[i].cancel()
++                for _ in 0..<subscriberCount {
++                    _ = try await ready.receiver.receive()
+                 }
++                ready.close()
+ 
+-                for i in 1..<elementCount {
+-                    broadcast.send(i)
+-                    await Task.yield()
+-                }
+-                broadcast.finish()
++                let controlTask = subscriberTasks[controlSubscriberID].task
++                controlTask.cancel()
++                await controlTask.value
+ 
+-                var cancelledCount = 0
+-                for task in consumerTasks {
+-                    let (index, received, wasCancelled) = await task.value
++                await withTaskGroup(of: Void.self) { group in
+ 
+-                    if wasCancelled {
+-                        cancelledCount += 1
++                    group.addTask {
++                        for i in 0..<elementCount {
++                            broadcast.send(i)
++                            if i % 20 == 0 { await Task.yield() }
++                        }
++                        broadcast.finish()
++                    }
+ 
+-                        #expect(
+-                            received.first == 0 || received.isEmpty,
+-                            "Round \(round), cancelled subscriber \(index): Unexpected first element"
+-                        )
+-                    } else {
++                    group.addTask { [subscriberTasks] in
++                        for _ in 0..<10 { await Task.yield() }
++                        for entry in subscriberTasks
++                        where
++                            idsToCancel.contains(entry.id) && entry.id != controlSubscriberID
++                        {
++                            entry.task.cancel()
++                        }
++                    }
+ 
+-                        #expect(
+-                            received == Array(0..<elementCount),
+-                            "Round \(round), subscriber \(index): Expected all elements"
+-                        )
++                    group.addTask { [subscriberTasks] in
++                        for entry in subscriberTasks {
++                            await entry.task.value
++                        }
+                     }
+                 }
+ 
+-                #expect(cancelledCount > 0, "Round \(round): No cancellations observed")
+-            }
+-        }
+-
+-        @Test
+-        func `Finish racing with pending subscribers - all resume with nil`() async throws {
+-
+-            for round in 0..<30 {
+-                let broadcast = Async.Broadcast<Int>()
+-                let subscriberCount = 15
+-                let preBufferedCount = 5
++                results.close()
+ 
+-                (0..<preBufferedCount).forEach { i in
+-                    broadcast.send(i)
+-                }
++                var completedSubscribers = 0
++                var cancelledSubscribers = 0
+ 
+-                let subscriptions = (0..<subscriberCount).map { _ in
+-                    broadcast.subscribe()
+-                }
++                while let result = try await results.receiver.receive() {
++                    completedSubscribers += 1
+ 
+-                let consumerTasks = subscriptions.map { subscription in
+-                    Task { () -> [Int] in
+-                        var received: [Int] = []
+-                        for try await value in subscription {
+-                            received.append(value)
+-                        }
+-                        return received
++                    for (previous, next) in zip(result.elements, result.elements.dropFirst()) {
++                        #expect(
++                            next > previous,
++                            "Subscriber \(result.id): Out of order: \(previous) -> \(next)"
++                        )
+                     }
+-                }
+ 
+-                await yieldProgress()
++                    #expect(
++                        Set(result.elements).count == result.elements.count,
++                        "Subscriber \(result.id): Duplicate elements detected"
++                    )
+ 
+-                broadcast.finish()
++                    for value in result.elements {
++                        #expect(
++                            (0..<elementCount).contains(value),
++                            "Subscriber \(result.id): Value \(value) out of range [0, \(elementCount))"
++                        )
++                    }
+ 
+-                for (index, task) in consumerTasks.enumerated() {
+-                    let received = try await task.value
++                    if result.terminatedViaCancellation {
++                        cancelledSubscribers += 1
++                        #expect(
++                            idsToCancel.contains(result.id),
++                            "Subscriber \(result.id): Unexpected cancellation"
++                        )
++                    } else {
++                        #expect(
++                            result.elements == Array(0..<elementCount),
++                            "Subscriber \(result.id): A non-cancelled subscriber must receive every element"
++                        )
++                    }
+ 
+-                    #expect(
+-                        received.isEmpty,
+-                        "Round \(round), subscriber \(index): Expected empty, got \(received.count) elements"
+-                    )
++                    if result.id == controlSubscriberID {
++                        #expect(result.terminatedViaCancellation)
++                        #expect(result.elements.isEmpty)
++                    }
+                 }
+-            }
+-        }
+ 
+-        @Test
+-        func `Many subscribers with interleaved send and cancel`() async throws {
++                #expect(
++                    completedSubscribers == subscriberCount,
++                    "Expected \(subscriberCount) subscribers to terminate, got \(completedSubscribers)"
++                )
++                #expect(cancelledSubscribers > 0, "Expected at least one subscriber cancellation")
++            }
+ 
+-            let subscriberCount = 20
+-            let elementCount = 500
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: elementCount)
++            @Test
++            func `Buffer trimming with slow subscriber`() async throws {
+ 
+-            let results = Async.Channel<(id: Int, elements: [Int], terminatedViaCancellation: Bool)>
+-                .Unbounded().take().ends()
+-            let ready = Async.Channel<Int>.Unbounded().take().ends()
++                let bufferCapacity = 20
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferCapacity)
++                let elementCount = 100
+ 
+-            var subscriberTasks: [(id: Int, task: Task<Void, Never>)] = []
++                let fastSub = broadcast.subscribe()
++                let slowSub = broadcast.subscribe()
+ 
+-            for id in 0..<subscriberCount {
+-                let task = Task { [sender = results.sender] in
+-                    let subscription = broadcast.subscribe()
++                let fastTask = Task {
+                     var received: [Int] = []
+-                    var terminatedViaCancellation = false
++                    for try await value in fastSub {
++                        received.append(value)
++                    }
++                    return received
++                }
+ 
+-                    var iterator = subscription.makeAsyncIterator()
+-                    do {
+-                        try ready.sender.send(id)
+-                    } catch { #expect(Bool(false), "ready channel unexpectedly closed") }
++                let slowTask = Task {
++                    var received: [Int] = []
++                    var iterator = slowSub.makeAsyncIterator()
++                    while let value = try await iterator.next() {
++                        received.append(value)
+ 
+-                    loop: while true {
+-                        do {
+-                            guard let value = try await iterator.next() else {
+-                                break loop
+-                            }
+-                            received.append(value)
++                        for _ in 0..<10 {
+                             await Task.yield()
+-                        } catch let error as Async.Broadcast<Int>.Error {
+-
+-                            #expect(
+-                                error == .cancelled,
+-                                "Subscriber \(id): Unexpected broadcast error: \(error)"
+-                            )
+-                            terminatedViaCancellation = true
+-                            break loop
+-                        } catch {
+-
+-                            #expect(
+-                                Bool(false),
+-                                "Subscriber \(id): Unexpected error type: \(error)"
+-                            )
+-                            break loop
+                         }
+                     }
+-
+-                    do {
+-                        try sender.send(
+-                            (
+-                                id: id, elements: received,
+-                                terminatedViaCancellation: terminatedViaCancellation
+-                            )
+-                        )
+-                    } catch { #expect(Bool(false), "results channel unexpectedly closed") }
++                    return received
+                 }
+-                subscriberTasks.append((id: id, task: task))
+-            }
+-
+-            let idsToCancel = Set(stride(from: 0, to: subscriberCount, by: 3))
+-            let controlSubscriberID = 0
+-
+-            for _ in 0..<subscriberCount {
+-                _ = try await ready.receiver.receive()
+-            }
+-            ready.close()
+-
+-            let controlTask = subscriberTasks[controlSubscriberID].task
+-            controlTask.cancel()
+-            await controlTask.value
+-
+-            await withTaskGroup(of: Void.self) { group in
+ 
+-                group.addTask {
++                Task {
+                     for i in 0..<elementCount {
+                         broadcast.send(i)
+-                        if i % 20 == 0 { await Task.yield() }
++                        await Task.yield()
+                     }
+                     broadcast.finish()
+                 }
+ 
+-                group.addTask { [subscriberTasks] in
+-                    for _ in 0..<10 { await Task.yield() }
+-                    for entry in subscriberTasks
+-                    where
+-                        idsToCancel.contains(entry.id) && entry.id != controlSubscriberID
+-                    {
+-                        entry.task.cancel()
+-                    }
+-                }
++                let fastReceived = try await fastTask.value
++                let slowReceived = try await slowTask.value
+ 
+-                group.addTask { [subscriberTasks] in
+-                    for entry in subscriberTasks {
+-                        await entry.task.value
+-                    }
+-                }
+-            }
+-
+-            results.close()
+-
+-            var completedSubscribers = 0
+-            var cancelledSubscribers = 0
+-
+-            while let result = try await results.receiver.receive() {
+-                completedSubscribers += 1
++                #expect(
++                    fastReceived == Array(0..<elementCount),
++                    "Fast subscriber should receive all elements in order"
++                )
+ 
+-                for (previous, next) in zip(result.elements, result.elements.dropFirst()) {
++                (1..<slowReceived.count).forEach { i in
+                     #expect(
+-                        next > previous,
+-                        "Subscriber \(result.id): Out of order: \(previous) -> \(next)"
++                        slowReceived[i] > slowReceived[i - 1],
++                        "Slow subscriber elements out of order at index \(i)"
+                     )
+                 }
+ 
+                 #expect(
+-                    Set(result.elements).count == result.elements.count,
+-                    "Subscriber \(result.id): Duplicate elements detected"
++                    Set(slowReceived).count == slowReceived.count,
++                    "Slow subscriber has duplicates"
+                 )
+ 
+-                for value in result.elements {
++                for value in slowReceived {
+                     #expect(
+                         (0..<elementCount).contains(value),
+-                        "Subscriber \(result.id): Value \(value) out of range [0, \(elementCount))"
++                        "Slow subscriber received out-of-range value: \(value)"
+                     )
+                 }
+-
+-                if result.terminatedViaCancellation {
+-                    cancelledSubscribers += 1
+-                    #expect(
+-                        idsToCancel.contains(result.id),
+-                        "Subscriber \(result.id): Unexpected cancellation"
+-                    )
+-                } else {
+-                    #expect(
+-                        result.elements == Array(0..<elementCount),
+-                        "Subscriber \(result.id): A non-cancelled subscriber must receive every element"
+-                    )
+-                }
+-
+-                if result.id == controlSubscriberID {
+-                    #expect(result.terminatedViaCancellation)
+-                    #expect(result.elements.isEmpty)
+-                }
+             }
+ 
+-            #expect(
+-                completedSubscribers == subscriberCount,
+-                "Expected \(subscriberCount) subscribers to terminate, got \(completedSubscribers)"
+-            )
+-            #expect(cancelledSubscribers > 0, "Expected at least one subscriber cancellation")
+-        }
++            @Test
++            func `Sequential next usage is correct`() async throws {
+ 
+-        @Test
+-        func `Buffer trimming with slow subscriber`() async throws {
+-
+-            let bufferCapacity = 20
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferCapacity)
+-            let elementCount = 100
++                let broadcast = Async.Broadcast<Int>()
++                let subscription = broadcast.subscribe()
+ 
+-            let fastSub = broadcast.subscribe()
+-            let slowSub = broadcast.subscribe()
++                (0..<10).forEach { i in
++                    broadcast.send(i)
++                }
++                broadcast.finish()
+ 
+-            let fastTask = Task {
+                 var received: [Int] = []
+-                for try await value in fastSub {
++                for try await value in subscription {
+                     received.append(value)
+                 }
+-                return received
++
++                #expect(received == Array(0..<10))
+             }
++        }
++}
+ 
+-            let slowTask = Task {
+-                var received: [Int] = []
+-                var iterator = slowSub.makeAsyncIterator()
+-                while let value = try await iterator.next() {
+-                    received.append(value)
++extension `Async.Broadcast Tests` {
++        @Suite
++        struct `Async broadcasts preserve subscription behavior` {
++            @Test
++            func `Send trims the replay buffer to bufferLimit behind a stalled subscriber, which observes loss`()
++                async throws
++            {
+ 
+-                    for _ in 0..<10 {
+-                        await Task.yield()
+-                    }
+-                }
+-                return received
+-            }
++                let bufferLimit = 4
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit)
++
++                let stalled = broadcast.subscribe()
+ 
+-            Task {
+-                for i in 0..<elementCount {
++                let elementCount = 50
++                (0..<elementCount).forEach { i in
+                     broadcast.send(i)
+-                    await Task.yield()
+                 }
+                 broadcast.finish()
+-            }
+-
+-            let fastReceived = try await fastTask.value
+-            let slowReceived = try await slowTask.value
+ 
+-            #expect(
+-                fastReceived == Array(0..<elementCount),
+-                "Fast subscriber should receive all elements in order"
+-            )
++                var received: [Int] = []
++                for try await value in stalled {
++                    received.append(value)
++                }
+ 
+-            (1..<slowReceived.count).forEach { i in
+-                #expect(
+-                    slowReceived[i] > slowReceived[i - 1],
+-                    "Slow subscriber elements out of order at index \(i)"
+-                )
++                #expect(received == Array((elementCount - bufferLimit)..<elementCount))
+             }
+ 
+-            #expect(
+-                Set(slowReceived).count == slowReceived.count,
+-                "Slow subscriber has duplicates"
+-            )
+-
+-            for value in slowReceived {
+-                #expect(
+-                    (0..<elementCount).contains(value),
+-                    "Slow subscriber received out-of-range value: \(value)"
+-                )
+-            }
+-        }
+-
+-        @Test
+-        func `Sequential next usage is correct`() async throws {
+-
+-            let broadcast = Async.Broadcast<Int>()
+-            let subscription = broadcast.subscribe()
++            @Test
++            func `Loss fires with a positive dropped count when a lagging subscriber's cursor is advanced past drops`()
++                async throws
++            {
++                let bufferLimit = 4
++                let recorder = LossRecorder()
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit) { loss in
++                    recorder.record(loss)
++                }
+ 
+-            (0..<10).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
++                let stalled = broadcast.subscribe()
+ 
+-            var received: [Int] = []
+-            for try await value in subscription {
+-                received.append(value)
+-            }
+-
+-            #expect(received == Array(0..<10))
+-        }
+-    }
++                let elementCount = 50
++                (0..<elementCount).forEach { i in
++                    broadcast.send(i)
++                }
++                broadcast.finish()
+ 
+-    @Suite
+-    struct `Async broadcasts preserve subscription behavior` {
+-        @Test
+-        func `Send trims the replay buffer to bufferLimit behind a stalled subscriber, which observes loss`()
+-            async throws
+-        {
++                var received: [Int] = []
++                for try await value in stalled {
++                    received.append(value)
++                }
+ 
+-            let bufferLimit = 4
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit)
++                #expect(received == Array((elementCount - bufferLimit)..<elementCount))
+ 
+-            let stalled = broadcast.subscribe()
++                let losses = recorder.events
+ 
+-            let elementCount = 50
+-            (0..<elementCount).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
++                #expect(!losses.isEmpty, "Expected at least one Loss signal for the stalled subscriber")
++                for loss in losses {
++                    #expect(
++                        loss.droppedCount > 0,
++                        "droppedCount must be positive — this signal only fires on genuine lag"
++                    )
++                    #expect(loss.reason == .capacityLimit)
++                }
+ 
+-            var received: [Int] = []
+-            for try await value in stalled {
+-                received.append(value)
+-            }
++                #expect(losses.last?.resumingAtIndex == UInt64(elementCount - bufferLimit))
+ 
+-            #expect(received == Array((elementCount - bufferLimit)..<elementCount))
+-        }
++                #expect(Set(losses.map(\.subscriberID)).count == 1)
+ 
+-        @Test
+-        func `Loss fires with a positive dropped count when a lagging subscriber's cursor is advanced past drops`()
+-            async throws
+-        {
+-            let bufferLimit = 4
+-            let recorder = LossRecorder()
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit) { loss in
+-                recorder.record(loss)
++                #expect(losses.reduce(0) { $0 + $1.droppedCount } >= elementCount - bufferLimit)
+             }
+ 
+-            let stalled = broadcast.subscribe()
+-
+-            let elementCount = 50
+-            (0..<elementCount).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
++            @Test
++            func `Loss does not fire when no subscriber lags`() async throws {
++                let recorder = LossRecorder()
+ 
+-            var received: [Int] = []
+-            for try await value in stalled {
+-                received.append(value)
+-            }
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: 100) { loss in
++                    recorder.record(loss)
++                }
++                let subscription = broadcast.subscribe()
+ 
+-            #expect(received == Array((elementCount - bufferLimit)..<elementCount))
++                (0..<10).forEach { i in
++                    broadcast.send(i)
++                }
++                broadcast.finish()
+ 
+-            let losses = recorder.events
++                var received: [Int] = []
++                for try await value in subscription {
++                    received.append(value)
++                }
+ 
+-            #expect(!losses.isEmpty, "Expected at least one Loss signal for the stalled subscriber")
+-            for loss in losses {
++                #expect(received == Array(0..<10))
+                 #expect(
+-                    loss.droppedCount > 0,
+-                    "droppedCount must be positive — this signal only fires on genuine lag"
++                    recorder.events.isEmpty,
++                    "No subscriber lagged behind the (never-trimmed) buffer; Loss must not fire"
+                 )
+-                #expect(loss.reason == .capacityLimit)
+             }
+ 
+-            #expect(losses.last?.resumingAtIndex == UInt64(elementCount - bufferLimit))
++            @Test
++            func `Loss does not fire for a subscriber that joins late, since replay from the current window is not loss`()
++                async throws
++            {
++                let bufferLimit = 4
++                let recorder = LossRecorder()
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit) { loss in
++                    recorder.record(loss)
++                }
+ 
+-            #expect(Set(losses.map(\.subscriberID)).count == 1)
++                (0..<20).forEach { i in
++                    broadcast.send(i)
++                }
+ 
+-            #expect(losses.reduce(0) { $0 + $1.droppedCount } >= elementCount - bufferLimit)
+-        }
++                #expect(recorder.events.isEmpty)
+ 
+-        @Test
+-        func `Loss does not fire when no subscriber lags`() async throws {
+-            let recorder = LossRecorder()
++                let lateSubscriber = broadcast.subscribe()
+ 
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: 100) { loss in
+-                recorder.record(loss)
+-            }
+-            let subscription = broadcast.subscribe()
++                (20..<24).forEach { i in
++                    broadcast.send(i)
++                }
++                broadcast.finish()
+ 
+-            (0..<10).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
++                var received: [Int] = []
++                for try await value in lateSubscriber {
++                    received.append(value)
++                }
+ 
+-            var received: [Int] = []
+-            for try await value in subscription {
+-                received.append(value)
++                #expect(received == Array(20..<24))
++                #expect(
++                    recorder.events.isEmpty,
++                    "A subscriber that joins after a drop must never be reported as lagging — its cursor starts at the current window"
++                )
+             }
+ 
+-            #expect(received == Array(0..<10))
+-            #expect(
+-                recorder.events.isEmpty,
+-                "No subscriber lagged behind the (never-trimmed) buffer; Loss must not fire"
+-            )
+-        }
++            @Test
++            func `Loss accounts for multiple lagging subscribers individually`() async throws {
++                let bufferLimit = 4
++                let recorder = LossRecorder()
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit) { loss in
++                    recorder.record(loss)
++                }
+ 
+-        @Test
+-        func `Loss does not fire for a subscriber that joins late, since replay from the current window is not loss`()
+-            async throws
+-        {
+-            let bufferLimit = 4
+-            let recorder = LossRecorder()
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit) { loss in
+-                recorder.record(loss)
+-            }
++                let stalledA = broadcast.subscribe()
++                let stalledB = broadcast.subscribe()
+ 
+-            (0..<20).forEach { i in
+-                broadcast.send(i)
+-            }
++                let elementCount = 30
++                (0..<elementCount).forEach { i in
++                    broadcast.send(i)
++                }
++                broadcast.finish()
+ 
+-            #expect(recorder.events.isEmpty)
++                var receivedA: [Int] = []
++                for try await value in stalledA { receivedA.append(value) }
++                var receivedB: [Int] = []
++                for try await value in stalledB { receivedB.append(value) }
+ 
+-            let lateSubscriber = broadcast.subscribe()
++                #expect(receivedA == Array((elementCount - bufferLimit)..<elementCount))
++                #expect(receivedB == Array((elementCount - bufferLimit)..<elementCount))
+ 
+-            (20..<24).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
++                let losses = recorder.events
++                let subscriberIDs = Set(losses.map(\.subscriberID))
+ 
+-            var received: [Int] = []
+-            for try await value in lateSubscriber {
+-                received.append(value)
++                #expect(
++                    subscriberIDs.count == 2,
++                    "Expected loss events for exactly 2 distinct lagging subscribers, got \(subscriberIDs)"
++                )
++                for id in subscriberIDs {
++                    let idLosses = losses.filter { $0.subscriberID == id }
++                    #expect(!idLosses.isEmpty)
++                    for loss in idLosses {
++                        #expect(loss.droppedCount > 0)
++                        #expect(loss.reason == .capacityLimit)
++                    }
++                }
+             }
+ 
+-            #expect(received == Array(20..<24))
+-            #expect(
+-                recorder.events.isEmpty,
+-                "A subscriber that joins after a drop must never be reported as lagging — its cursor starts at the current window"
+-            )
+-        }
+-
+-        @Test
+-        func `Loss accounts for multiple lagging subscribers individually`() async throws {
+-            let bufferLimit = 4
+-            let recorder = LossRecorder()
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit) { loss in
+-                recorder.record(loss)
+-            }
++            @Test
++            func
++                `Async broadcasts deliver repeated buffered values without an onLoss handler and Loss.Reason equality holds`()
++                async throws
++            {
+ 
+-            let stalledA = broadcast.subscribe()
+-            let stalledB = broadcast.subscribe()
++                let bufferLimit = 4
++                let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit)
++                let stalled = broadcast.subscribe()
+ 
+-            let elementCount = 30
+-            (0..<elementCount).forEach { i in
+-                broadcast.send(i)
+-            }
+-            broadcast.finish()
+-
+-            var receivedA: [Int] = []
+-            for try await value in stalledA { receivedA.append(value) }
+-            var receivedB: [Int] = []
+-            for try await value in stalledB { receivedB.append(value) }
+-
+-            #expect(receivedA == Array((elementCount - bufferLimit)..<elementCount))
+-            #expect(receivedB == Array((elementCount - bufferLimit)..<elementCount))
+-
+-            let losses = recorder.events
+-            let subscriberIDs = Set(losses.map(\.subscriberID))
+-
+-            #expect(
+-                subscriberIDs.count == 2,
+-                "Expected loss events for exactly 2 distinct lagging subscribers, got \(subscriberIDs)"
+-            )
+-            for id in subscriberIDs {
+-                let idLosses = losses.filter { $0.subscriberID == id }
+-                #expect(!idLosses.isEmpty)
+-                for loss in idLosses {
+-                    #expect(loss.droppedCount > 0)
+-                    #expect(loss.reason == .capacityLimit)
++                let elementCount = 20
++                (0..<elementCount).forEach { i in
++                    broadcast.send(i)
+                 }
+-            }
+-        }
++                broadcast.finish()
+ 
+-        @Test
+-        func
+-            `Async broadcasts deliver repeated buffered values without an onLoss handler and Loss.Reason equality holds`()
+-            async throws
+-        {
++                var received: [Int] = []
++                for try await value in stalled { received.append(value) }
+ 
+-            let bufferLimit = 4
+-            let broadcast = Async.Broadcast<Int>(bufferCapacity: bufferLimit)
+-            let stalled = broadcast.subscribe()
++                #expect(received == Array((elementCount - bufferLimit)..<elementCount))
+ 
+-            let elementCount = 20
+-            (0..<elementCount).forEach { i in
+-                broadcast.send(i)
++                #expect(Async.Broadcast<Int>.Loss.Reason.capacityLimit == .capacityLimit)
+             }
+-            broadcast.finish()
+-
+-            var received: [Int] = []
+-            for try await value in stalled { received.append(value) }
+-
+-            #expect(received == Array((elementCount - bufferLimit)..<elementCount))
+-
+-            #expect(Async.Broadcast<Int>.Loss.Reason.capacityLimit == .capacityLimit)
+         }
+-    }
++}
+ 
+     private final class LossRecorder: @unchecked Sendable {
+         private(set) var events: [Async.Broadcast<Int>.Loss] = []
+-- 
+2.43.0
+

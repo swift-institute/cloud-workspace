@@ -1,0 +1,421 @@
+From 43e4a7061890c48b461e47eb6c65110c8e0dddc4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:55 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Affine Representations Tests.swift        |  94 +++---
+ Tests/Affine Tests/Affine Tests.swift         | 270 +++++++++---------
+ 2 files changed, 187 insertions(+), 177 deletions(-)
+
+diff --git a/Tests/Affine Representations Tests/Affine Representations Tests.swift b/Tests/Affine Representations Tests/Affine Representations Tests.swift
+index 983581c..625b29c 100644
+--- a/Tests/Affine Representations Tests/Affine Representations Tests.swift	
++++ b/Tests/Affine Representations Tests/Affine Representations Tests.swift	
+@@ -11,52 +11,56 @@ import Testing
+ private enum Screen {}
+ private enum World {}
+ 
+-@Suite struct `Affine composition preserves independently owned representations` {
+-    #if Tagged
+-        @Test func `Affine relationships compose independently owned point and displacement types`() {
+-            struct Reading: Equatable { let time: Swift::Duration }
+-            let affine = Affine<Reading, Swift::Duration, Never>(
+-                translating: { Reading(time: $0.time + $1) },
+-                displacement: { $1.time - $0.time }
+-            )
+-            let start = Reading(time: .seconds(10))
+-            let end = affine.translated(start, by: .seconds(3))
+-            #expect(end.time == .seconds(13))
+-            #expect(affine.displacement(from: start, to: end) == .seconds(3))
+-            let tagged = affine.tagged(Screen.self)
+-            let p = Tagged<Screen, Reading>(_unchecked: start)
+-            let q = tagged.translated(p, by: .seconds(3))
+-            let duration: Swift::Duration = tagged.displacement(from: p, to: q)
+-            #expect(duration == .seconds(3))
+-        }
++enum `Affine Representations Tests` {}
+ 
+-    #endif
++extension `Affine Representations Tests` {
++    @Suite struct `Affine composition preserves independently owned representations` {
++        #if Tagged
++            @Test func `Affine relationships compose independently owned point and displacement types`() {
++                struct Reading: Equatable { let time: Swift::Duration }
++                let affine = Affine<Reading, Swift::Duration, Never>(
++                    translating: { Reading(time: $0.time + $1) },
++                    displacement: { $1.time - $0.time }
++                )
++                let start = Reading(time: .seconds(10))
++                let end = affine.translated(start, by: .seconds(3))
++                #expect(end.time == .seconds(13))
++                #expect(affine.displacement(from: start, to: end) == .seconds(3))
++                let tagged = affine.tagged(Screen.self)
++                let p = Tagged<Screen, Reading>(_unchecked: start)
++                let q = tagged.translated(p, by: .seconds(3))
++                let duration: Swift::Duration = tagged.displacement(from: p, to: q)
++                #expect(duration == .seconds(3))
++            }
++
++        #endif
+ 
+-    #if Vector
+-        @Test func `Positions and displacements can use different scalar representations`() throws {
+-            enum Failure: Swift.Error { case overflow }
+-            let affine = Affine<Vector<3, Int64>, Vector<3, Int128>, Failure>.componentwise(
+-                coordinates: { $0 },
+-                point: { $0 },
+-                components: { $0 },
+-                displacement: { $0 },
+-                translating: { (position, delta) throws(Failure) in
+-                    let sum = Int128(position).addingReportingOverflow(delta)
+-                    guard !sum.overflow, let result = Int64(exactly: sum.partialValue) else {
+-                        throw .overflow
+-                    }
+-                    return result
+-                },
+-                subtracting: { Int128($1) - Int128($0) }
+-            )
+-            let first = Vector<3, Int64>(repeating: .min)
+-            let last = Vector<3, Int64>(repeating: .max)
+-            let delta = try affine.displacement(from: first, to: last)
+-            #expect(delta == Vector(repeating: Int128(UInt64.max)))
+-            #expect(try affine.translated(first, by: delta) == last)
+-            #expect(throws: Failure.self) {
+-                try affine.translated(last, by: Vector(repeating: 1))
++        #if Vector
++            @Test func `Positions and displacements can use different scalar representations`() throws {
++                enum Failure: Swift.Error { case overflow }
++                let affine = Affine<Vector<3, Int64>, Vector<3, Int128>, Failure>.componentwise(
++                    coordinates: { $0 },
++                    point: { $0 },
++                    components: { $0 },
++                    displacement: { $0 },
++                    translating: { (position, delta) throws(Failure) in
++                        let sum = Int128(position).addingReportingOverflow(delta)
++                        guard !sum.overflow, let result = Int64(exactly: sum.partialValue) else {
++                            throw .overflow
++                        }
++                        return result
++                    },
++                    subtracting: { Int128($1) - Int128($0) }
++                )
++                let first = Vector<3, Int64>(repeating: .min)
++                let last = Vector<3, Int64>(repeating: .max)
++                let delta = try affine.displacement(from: first, to: last)
++                #expect(delta == Vector(repeating: Int128(UInt64.max)))
++                #expect(try affine.translated(first, by: delta) == last)
++                #expect(throws: Failure.self) {
++                    try affine.translated(last, by: Vector(repeating: 1))
++                }
+             }
+-        }
+-    #endif
++        #endif
++    }
+ }
+diff --git a/Tests/Affine Tests/Affine Tests.swift b/Tests/Affine Tests/Affine Tests.swift
+index 521f939..83952a7 100644
+--- a/Tests/Affine Tests/Affine Tests.swift	
++++ b/Tests/Affine Tests/Affine Tests.swift	
+@@ -1,156 +1,162 @@
+ import Affine
+ import Testing
+ 
+-@Suite struct `Affine relationships operate on independently owned types` {
+-    private struct Reading: Equatable { let value: Int }
++enum `Affine Tests` {}
+ 
+-    private var relationship: Affine<Reading, Int, Never> {
+-        .init(
+-            translating: { Reading(value: $0.value + $1) },
+-            displacement: { $1.value - $0.value }
+-        )
+-    }
++extension `Affine Tests` {
++    @Suite struct `Affine relationships operate on independently owned types` {
++        private struct Reading: Equatable { let value: Int }
+ 
+-    @Test func `Translation uses the supplied point and displacement`() {
+-        let start = Reading(value: 7)
+-        let end = relationship.translated(start, by: 3)
+-        #expect(end == Reading(value: 10))
+-    }
++        private var relationship: Affine<Reading, Int, Never> {
++            .init(
++                translating: { Reading(value: $0.value + $1) },
++                displacement: { $1.value - $0.value }
++            )
++        }
+ 
+-    @Test func `Displacement preserves the direction from start to end`() {
+-        let start = Reading(value: 7)
+-        let end = Reading(value: 10)
+-        #expect(relationship.displacement(from: start, to: end) == 3)
+-        #expect(relationship.displacement(from: end, to: start) == -3)
+-    }
++        @Test func `Translation uses the supplied point and displacement`() {
++            let start = Reading(value: 7)
++            let end = relationship.translated(start, by: 3)
++            #expect(end == Reading(value: 10))
++        }
+ 
+-    @Test(arguments: [-5, 0, 5])
+-    func `Zero translation preserves a point and self displacement is zero`(value: Int) {
+-        let point = Reading(value: value)
+-        #expect(relationship.translated(point, by: 0) == point)
+-        #expect(relationship.displacement(from: point, to: point) == 0)
+-    }
++        @Test func `Displacement preserves the direction from start to end`() {
++            let start = Reading(value: 7)
++            let end = Reading(value: 10)
++            #expect(relationship.displacement(from: start, to: end) == 3)
++            #expect(relationship.displacement(from: end, to: start) == -3)
++        }
+ 
+-    @Test(arguments: [-5, 0, 5], [-3, 0, 3])
+-    func `Translation and displacement recover each other`(value: Int, delta: Int) {
+-        let start = Reading(value: value)
+-        let end = relationship.translated(start, by: delta)
+-        #expect(relationship.displacement(from: start, to: end) == delta)
+-        #expect(
+-            relationship.translated(start, by: relationship.displacement(from: start, to: end))
+-                == end
+-        )
+-        #expect(relationship.translated(end, by: -delta) == start)
+-    }
++        @Test(arguments: [-5, 0, 5])
++        func `Zero translation preserves a point and self displacement is zero`(value: Int) {
++            let point = Reading(value: value)
++            #expect(relationship.translated(point, by: 0) == point)
++            #expect(relationship.displacement(from: point, to: point) == 0)
++        }
+ 
+-    @Test(arguments: [-3, 0, 3], [-2, 0, 2])
+-    func `Successive translations agree with displacement composition`(first: Int, second: Int) {
+-        let start = Reading(value: 7)
+-        let middle = relationship.translated(start, by: first)
+-        let end = relationship.translated(middle, by: second)
+-        #expect(end == relationship.translated(start, by: first + second))
+-        #expect(
+-            relationship.displacement(from: start, to: end) == relationship.displacement(
+-                from: start,
+-                to: middle
+-            ) + relationship.displacement(from: middle, to: end)
+-        )
+-    }
++        @Test(arguments: [-5, 0, 5], [-3, 0, 3])
++        func `Translation and displacement recover each other`(value: Int, delta: Int) {
++            let start = Reading(value: value)
++            let end = relationship.translated(start, by: delta)
++            #expect(relationship.displacement(from: start, to: end) == delta)
++            #expect(
++                relationship.translated(start, by: relationship.displacement(from: start, to: end))
++                    == end
++            )
++            #expect(relationship.translated(end, by: -delta) == start)
++        }
+ 
+-    @Test func `Native durations need no displacement wrapper`() {
+-        struct Sample: Equatable { let value: Swift::Duration }
+-        let relation = Affine<Sample, Swift::Duration, Never>(
+-            translating: { Sample(value: $0.value + $1) },
+-            displacement: { $1.value - $0.value }
+-        )
+-        let start = Sample(value: .seconds(7))
+-        let delta = Swift::Duration(attoseconds: 1)
+-        let end = relation.translated(start, by: delta)
+-        #expect(relation.displacement(from: start, to: end) == delta)
+-    }
++        @Test(arguments: [-3, 0, 3], [-2, 0, 2])
++        func `Successive translations agree with displacement composition`(first: Int, second: Int) {
++            let start = Reading(value: 7)
++            let middle = relationship.translated(start, by: first)
++            let end = relationship.translated(middle, by: second)
++            #expect(end == relationship.translated(start, by: first + second))
++            #expect(
++                relationship.displacement(from: start, to: end) == relationship.displacement(
++                    from: start,
++                    to: middle
++                ) + relationship.displacement(from: middle, to: end)
++            )
++        }
+ 
+-    @Test
+-    func `Closures can capture local state without imposing sendability or numeric protocols`() {
+-        final class Context { var calls: [String] = [] }
+-        final class Position {}
+-        struct Shift { let destination: Position }
+-        let context = Context()
+-        let relation = Affine<Position, Shift, Never>(
+-            translating: { _, shift in
+-                context.calls.append("translate")
+-                return shift.destination
+-            },
+-            displacement: { _, end in
+-                context.calls.append("difference")
+-                return Shift(destination: end)
+-            }
+-        )
+-        let start = Position()
+-        let end = Position()
+-        let shift = relation.displacement(from: start, to: end)
+-        #expect(relation.translated(start, by: shift) === end)
+-        #expect(context.calls == ["difference", "translate"])
++        @Test func `Native durations need no displacement wrapper`() {
++            struct Sample: Equatable { let value: Swift::Duration }
++            let relation = Affine<Sample, Swift::Duration, Never>(
++                translating: { Sample(value: $0.value + $1) },
++                displacement: { $1.value - $0.value }
++            )
++            let start = Sample(value: .seconds(7))
++            let delta = Swift::Duration(attoseconds: 1)
++            let end = relation.translated(start, by: delta)
++            #expect(relation.displacement(from: start, to: end) == delta)
++        }
++
++        @Test
++        func `Closures can capture local state without imposing sendability or numeric protocols`() {
++            final class Context { var calls: [String] = [] }
++            final class Position {}
++            struct Shift { let destination: Position }
++            let context = Context()
++            let relation = Affine<Position, Shift, Never>(
++                translating: { _, shift in
++                    context.calls.append("translate")
++                    return shift.destination
++                },
++                displacement: { _, end in
++                    context.calls.append("difference")
++                    return Shift(destination: end)
++                }
++            )
++            let start = Position()
++            let end = Position()
++            let shift = relation.displacement(from: start, to: end)
++            #expect(relation.translated(start, by: shift) === end)
++            #expect(context.calls == ["difference", "translate"])
++        }
+     }
+ }
+ 
+-@Suite struct `Affine relationships preserve typed failures` {
+-    private enum Failure: Swift::Error, Equatable {
+-        case translation(Int)
+-        case displacement(Int, Int)
+-    }
++extension `Affine Tests` {
++    @Suite struct `Affine relationships preserve typed failures` {
++        private enum Failure: Swift::Error, Equatable {
++            case translation(Int)
++            case displacement(Int, Int)
++        }
+ 
+-    @Test func `Translation propagates its exact failure without invoking displacement`() {
+-        let relation = Affine<Int, Int, Failure>(
+-            translating: { (_, delta) throws(Failure) in throw .translation(delta) },
+-            displacement: { _, _ in
+-                Issue.record("Translation must not invoke the displacement closure")
+-                return 0
++        @Test func `Translation propagates its exact failure without invoking displacement`() {
++            let relation = Affine<Int, Int, Failure>(
++                translating: { (_, delta) throws(Failure) in throw .translation(delta) },
++                displacement: { _, _ in
++                    Issue.record("Translation must not invoke the displacement closure")
++                    return 0
++                }
++            )
++            do throws(Failure) {
++                _ = try relation.translated(7, by: 3)
++                Issue.record("Translation should have thrown")
++            } catch {
++                #expect(error == .translation(3))
+             }
+-        )
+-        do throws(Failure) {
+-            _ = try relation.translated(7, by: 3)
+-            Issue.record("Translation should have thrown")
+-        } catch {
+-            #expect(error == .translation(3))
+         }
+-    }
+ 
+-    @Test func `Displacement propagates its exact failure without invoking translation`() {
+-        let relation = Affine<Int, Int, Failure>(
+-            translating: { _, _ in
+-                Issue.record("Displacement must not invoke the translation closure")
+-                return 0
+-            },
+-            displacement: { (start, end) throws(Failure) in throw .displacement(start, end) }
+-        )
+-        do throws(Failure) {
+-            _ = try relation.displacement(from: 7, to: 10)
+-            Issue.record("Displacement should have thrown")
+-        } catch {
+-            #expect(error == .displacement(7, 10))
++        @Test func `Displacement propagates its exact failure without invoking translation`() {
++            let relation = Affine<Int, Int, Failure>(
++                translating: { _, _ in
++                    Issue.record("Displacement must not invoke the translation closure")
++                    return 0
++                },
++                displacement: { (start, end) throws(Failure) in throw .displacement(start, end) }
++            )
++            do throws(Failure) {
++                _ = try relation.displacement(from: 7, to: 10)
++                Issue.record("Displacement should have thrown")
++            } catch {
++                #expect(error == .displacement(7, 10))
++            }
+         }
+-    }
+ 
+-    @Test func `Checked operations retain successful values`() throws {
+-        let relation = Affine<Int, Int, Failure>(
+-            translating: { (point, delta) throws(Failure) in
+-                let result = point.addingReportingOverflow(delta)
+-                guard !result.overflow else { throw .translation(delta) }
+-                return result.partialValue
+-            },
+-            displacement: { (start, end) throws(Failure) in
+-                let result = end.subtractingReportingOverflow(start)
+-                guard !result.overflow else { throw .displacement(start, end) }
+-                return result.partialValue
++        @Test func `Checked operations retain successful values`() throws {
++            let relation = Affine<Int, Int, Failure>(
++                translating: { (point, delta) throws(Failure) in
++                    let result = point.addingReportingOverflow(delta)
++                    guard !result.overflow else { throw .translation(delta) }
++                    return result.partialValue
++                },
++                displacement: { (start, end) throws(Failure) in
++                    let result = end.subtractingReportingOverflow(start)
++                    guard !result.overflow else { throw .displacement(start, end) }
++                    return result.partialValue
++                }
++            )
++            #expect(try relation.translated(7, by: 3) == 10)
++            #expect(try relation.displacement(from: 7, to: 10) == 3)
++            #expect(throws: Failure.translation(1)) {
++                try relation.translated(Int.max, by: 1)
++            }
++            #expect(throws: Failure.displacement(Int.min, Int.max)) {
++                try relation.displacement(from: Int.min, to: Int.max)
+             }
+-        )
+-        #expect(try relation.translated(7, by: 3) == 10)
+-        #expect(try relation.displacement(from: 7, to: 10) == 3)
+-        #expect(throws: Failure.translation(1)) {
+-            try relation.translated(Int.max, by: 1)
+-        }
+-        #expect(throws: Failure.displacement(Int.min, Int.max)) {
+-            try relation.displacement(from: Int.min, to: Int.max)
+         }
+     }
+ }
+-- 
+2.43.0
+

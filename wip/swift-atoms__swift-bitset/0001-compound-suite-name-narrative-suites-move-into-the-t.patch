@@ -1,0 +1,844 @@
+From 38183b270b469dd241dcb4bf3fbd71cc8f5913da Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:57 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Bitset Tests/Bitset Capacity Tests.swift  | 338 +++++++++---------
+ .../Bitset Differential Tests.swift           | 324 ++++++++---------
+ .../Bitset Tests/Bitset Iterator Tests.swift  |  38 +-
+ Tests/Bitset Tests/Bitset.Builder Tests.swift |  14 +-
+ .../Bitset.Variants+Builder Tests.swift       |  10 +-
+ 5 files changed, 375 insertions(+), 349 deletions(-)
+
+diff --git a/Tests/Bitset Tests/Bitset Capacity Tests.swift b/Tests/Bitset Tests/Bitset Capacity Tests.swift
+index 139eca8..e341931 100644
+--- a/Tests/Bitset Tests/Bitset Capacity Tests.swift	
++++ b/Tests/Bitset Tests/Bitset Capacity Tests.swift	
+@@ -2,198 +2,202 @@ import Testing
+ 
+ @testable import Bitset
+ 
+-@Suite
+-struct `Bitset capacities remain representable` {
+-    @Test(arguments: [
+-        0, 1, 63, 64, 65, 127, 128, 129, Int.max - 64, Int.max - 63, Int.max - 1, Int.max,
+-    ])
+-    func `storage rounding gives the smallest whole word extent containing every requested bit`(
+-        _ capacity: Int
+-    ) {
+-        let words = Bitset.storageWordCount(for: capacity)
+-        let coveredBits = UInt(words) * UInt(UInt.bitWidth)
+-        #expect(coveredBits >= UInt(capacity))
+-        #expect(coveredBits - UInt(capacity) < UInt(UInt.bitWidth))
+-        #expect(words == 0 || UInt(words - 1) * UInt(UInt.bitWidth) < UInt(capacity))
+-        #expect(UInt(words) * UInt(MemoryLayout<UInt>.stride) <= UInt(Int.max))
+-    }
++enum `Bitset Capacity Tests` {}
+ 
+-    @Test
+-    func `static word capacities accept the largest representable product and reject overflow`() {
+-        let last = Int.max / UInt.bitWidth
+-        #expect(Bitset.bitCapacity(forWordCount: 0) == 0)
+-        #expect(Bitset.bitCapacity(forWordCount: last) == Int.max - Int.max % UInt.bitWidth)
+-        #expect(Bitset.bitCapacity(forWordCount: last + 1) == nil)
+-        #expect(Bitset.bitCapacity(forWordCount: Int.max) == nil)
+-        #expect(Bitset.bitCapacity(forWordCount: -1) == nil)
+-        #expect(Bitset.bitCapacity(forWordCount: Int.min) == nil)
+-    }
++extension `Bitset Capacity Tests` {
++    @Suite
++    struct `Bitset capacities remain representable` {
++        @Test(arguments: [
++            0, 1, 63, 64, 65, 127, 128, 129, Int.max - 64, Int.max - 63, Int.max - 1, Int.max,
++        ])
++        func `storage rounding gives the smallest whole word extent containing every requested bit`(
++            _ capacity: Int
++        ) {
++            let words = Bitset.storageWordCount(for: capacity)
++            let coveredBits = UInt(words) * UInt(UInt.bitWidth)
++            #expect(coveredBits >= UInt(capacity))
++            #expect(coveredBits - UInt(capacity) < UInt(UInt.bitWidth))
++            #expect(words == 0 || UInt(words - 1) * UInt(UInt.bitWidth) < UInt(capacity))
++            #expect(UInt(words) * UInt(MemoryLayout<UInt>.stride) <= UInt(Int.max))
++        }
+ 
+-    @Test(arguments: [0, 1, 63, 64, 65, 127, 128, 129])
+-    func `allocated capacity excludes padding bits across word boundaries`(_ capacity: Int) throws {
+-        var dynamic = try Bitset(capacity: capacity)
+-        var fixed = try Bitset.Fixed(capacity: capacity)
+-        for member in 0..<capacity {
+-            try dynamic.insert(member)
+-            try fixed.insert(member)
++        @Test
++        func `static word capacities accept the largest representable product and reject overflow`() {
++            let last = Int.max / UInt.bitWidth
++            #expect(Bitset.bitCapacity(forWordCount: 0) == 0)
++            #expect(Bitset.bitCapacity(forWordCount: last) == Int.max - Int.max % UInt.bitWidth)
++            #expect(Bitset.bitCapacity(forWordCount: last + 1) == nil)
++            #expect(Bitset.bitCapacity(forWordCount: Int.max) == nil)
++            #expect(Bitset.bitCapacity(forWordCount: -1) == nil)
++            #expect(Bitset.bitCapacity(forWordCount: Int.min) == nil)
+         }
+-        #expect(dynamic.capacity == capacity)
+-        #expect(fixed.capacity == capacity)
+-        #expect(dynamic.count == capacity)
+-        #expect(fixed.count == capacity)
+-        #expect(Array(dynamic) == Array(0..<capacity))
+-        var fixedMembers: [Int] = []
+-        fixed.forEach { fixedMembers.append($0) }
+-        #expect(fixedMembers == Array(0..<capacity))
+-        #expect(!dynamic.contains(capacity))
+-        #expect(!fixed.contains(capacity))
+-        #expect(!dynamic.contains(Int.max))
+-        #expect(!fixed.contains(Int.min))
+-    }
+ 
+-    @Test
+-    func `failed dynamic mutations preserve both membership and capacity`() throws {
+-        var bitset = try Bitset([0, 63, 64])
+-        let original = bitset
+-        let capacity = bitset.capacity
+-        for member in [Int.min, -1, Int.max] {
+-            do throws(Bitset.Error) {
+-                try bitset.insert(member)
+-                Issue.record("Expected an unrepresentable member to fail")
+-            } catch {
+-                #expect(error == .bounds(.init(member: member, capacity: capacity)))
++        @Test(arguments: [0, 1, 63, 64, 65, 127, 128, 129])
++        func `allocated capacity excludes padding bits across word boundaries`(_ capacity: Int) throws {
++            var dynamic = try Bitset(capacity: capacity)
++            var fixed = try Bitset.Fixed(capacity: capacity)
++            for member in 0..<capacity {
++                try dynamic.insert(member)
++                try fixed.insert(member)
+             }
+-            #expect(bitset == original)
+-            #expect(bitset.capacity == capacity)
++            #expect(dynamic.capacity == capacity)
++            #expect(fixed.capacity == capacity)
++            #expect(dynamic.count == capacity)
++            #expect(fixed.count == capacity)
++            #expect(Array(dynamic) == Array(0..<capacity))
++            var fixedMembers: [Int] = []
++            fixed.forEach { fixedMembers.append($0) }
++            #expect(fixedMembers == Array(0..<capacity))
++            #expect(!dynamic.contains(capacity))
++            #expect(!fixed.contains(capacity))
++            #expect(!dynamic.contains(Int.max))
++            #expect(!fixed.contains(Int.min))
+         }
+-        for member in [Int.min, -1, capacity, Int.max] {
+-            do throws(Bitset.Error) {
+-                try bitset.remove(member)
+-                Issue.record("Expected removal outside capacity to fail")
+-            } catch {
+-                #expect(error == .bounds(.init(member: member, capacity: capacity)))
++
++        @Test
++        func `failed dynamic mutations preserve both membership and capacity`() throws {
++            var bitset = try Bitset([0, 63, 64])
++            let original = bitset
++            let capacity = bitset.capacity
++            for member in [Int.min, -1, Int.max] {
++                do throws(Bitset.Error) {
++                    try bitset.insert(member)
++                    Issue.record("Expected an unrepresentable member to fail")
++                } catch {
++                    #expect(error == .bounds(.init(member: member, capacity: capacity)))
++                }
++                #expect(bitset == original)
++                #expect(bitset.capacity == capacity)
++            }
++            for member in [Int.min, -1, capacity, Int.max] {
++                do throws(Bitset.Error) {
++                    try bitset.remove(member)
++                    Issue.record("Expected removal outside capacity to fail")
++                } catch {
++                    #expect(error == .bounds(.init(member: member, capacity: capacity)))
++                }
++                #expect(bitset == original)
++                #expect(bitset.capacity == capacity)
+             }
+-            #expect(bitset == original)
+-            #expect(bitset.capacity == capacity)
+         }
+-    }
+ 
+-    @Test
+-    func `fixed failures distinguish overflow from bounds without changing storage`() throws {
+-        var bitset = try Bitset.Fixed(capacity: 65) {
+-            0
+-            64
+-        }
+-        let original = bitset
+-        for member in [Int.min, -1, 65, Int.max] {
+-            do throws(Bitset.Fixed.Error) {
+-                try bitset.insert(member)
+-                Issue.record("Expected fixed insertion outside capacity to fail")
+-            } catch {
+-                if member < 0 {
++        @Test
++        func `fixed failures distinguish overflow from bounds without changing storage`() throws {
++            var bitset = try Bitset.Fixed(capacity: 65) {
++                0
++                64
++            }
++            let original = bitset
++            for member in [Int.min, -1, 65, Int.max] {
++                do throws(Bitset.Fixed.Error) {
++                    try bitset.insert(member)
++                    Issue.record("Expected fixed insertion outside capacity to fail")
++                } catch {
++                    if member < 0 {
++                        #expect(error == .bounds(.init(member: member, capacity: 65)))
++                    } else {
++                        #expect(error == .overflow(.init()))
++                    }
++                }
++                #expect(bitset == original)
++                do throws(Bitset.Fixed.Error) {
++                    try bitset.remove(member)
++                    Issue.record("Expected fixed removal outside capacity to fail")
++                } catch {
+                     #expect(error == .bounds(.init(member: member, capacity: 65)))
+-                } else {
+-                    #expect(error == .overflow(.init()))
+                 }
++                #expect(bitset == original)
+             }
+-            #expect(bitset == original)
+-            do throws(Bitset.Fixed.Error) {
+-                try bitset.remove(member)
+-                Issue.record("Expected fixed removal outside capacity to fail")
+-            } catch {
+-                #expect(error == .bounds(.init(member: member, capacity: 65)))
+-            }
+-            #expect(bitset == original)
+         }
+-    }
+ 
+-    @Test
+-    func `static failures retain their specialization and leave membership unchanged`() throws {
+-        var bitset = try Bitset.Static<2> {
+-            0
+-            127
+-        }
+-        let original = bitset
+-        for member in [Int.min, -1, 128, Int.max] {
+-            do throws(Bitset.Static<2>.Error) {
+-                try bitset.insert(member)
+-                Issue.record("Expected static insertion outside capacity to fail")
+-            } catch {
+-                if member < 0 {
++        @Test
++        func `static failures retain their specialization and leave membership unchanged`() throws {
++            var bitset = try Bitset.Static<2> {
++                0
++                127
++            }
++            let original = bitset
++            for member in [Int.min, -1, 128, Int.max] {
++                do throws(Bitset.Static<2>.Error) {
++                    try bitset.insert(member)
++                    Issue.record("Expected static insertion outside capacity to fail")
++                } catch {
++                    if member < 0 {
++                        #expect(error == .bounds(.init(member: member, capacity: 128)))
++                    } else {
++                        #expect(error == .overflow(.init()))
++                    }
++                }
++                #expect(bitset == original)
++                do throws(Bitset.Static<2>.Error) {
++                    try bitset.remove(member)
++                    Issue.record("Expected static removal outside capacity to fail")
++                } catch {
+                     #expect(error == .bounds(.init(member: member, capacity: 128)))
+-                } else {
+-                    #expect(error == .overflow(.init()))
+                 }
++                #expect(bitset == original)
+             }
+-            #expect(bitset == original)
+-            do throws(Bitset.Static<2>.Error) {
+-                try bitset.remove(member)
+-                Issue.record("Expected static removal outside capacity to fail")
+-            } catch {
+-                #expect(error == .bounds(.init(member: member, capacity: 128)))
+-            }
+-            #expect(bitset == original)
+         }
+-    }
+ 
+-    @Test
+-    func `constructors and builders throw errors in their owning domains`() {
+-        #expect(throws: Bitset.Error.invalidCapacity(.init())) {
+-            _ = try Bitset(capacity: Int.min)
+-        }
+-        #expect(throws: Bitset.Fixed.Error.invalidCapacity(.init())) {
+-            _ = try Bitset.Fixed(capacity: -1)
+-        }
+-        #expect(throws: Bitset.Error.bounds(.init(member: Int.max, capacity: 2))) {
+-            _ = try Bitset {
+-                1
+-                Int.max
++        @Test
++        func `constructors and builders throw errors in their owning domains`() {
++            #expect(throws: Bitset.Error.invalidCapacity(.init())) {
++                _ = try Bitset(capacity: Int.min)
+             }
+-        }
+-        #expect(throws: Bitset.Error.bounds(.init(member: -1, capacity: 2))) {
+-            _ = try Bitset([1, -1])
+-        }
+-        #expect(throws: Bitset.Fixed.Error.overflow(.init())) {
+-            _ = try Bitset.Fixed(capacity: 2) {
+-                1
+-                2
++            #expect(throws: Bitset.Fixed.Error.invalidCapacity(.init())) {
++                _ = try Bitset.Fixed(capacity: -1)
+             }
+-        }
+-        #expect(throws: Bitset.Static<1>.Error.overflow(.init())) {
+-            _ = try Bitset.Static<1> {
+-                1
+-                64
++            #expect(throws: Bitset.Error.bounds(.init(member: Int.max, capacity: 2))) {
++                _ = try Bitset {
++                    1
++                    Int.max
++                }
+             }
++            #expect(throws: Bitset.Error.bounds(.init(member: -1, capacity: 2))) {
++                _ = try Bitset([1, -1])
++            }
++            #expect(throws: Bitset.Fixed.Error.overflow(.init())) {
++                _ = try Bitset.Fixed(capacity: 2) {
++                    1
++                    2
++                }
++            }
++            #expect(throws: Bitset.Static<1>.Error.overflow(.init())) {
++                _ = try Bitset.Static<1> {
++                    1
++                    64
++                }
++            }
++            let dynamic: any Swift.Error = Bitset.Error.bounds(.init(member: 1, capacity: 0))
++            let fixed: any Swift.Error = Bitset.Fixed.Error.bounds(.init(member: 1, capacity: 0))
++            let singleWord: any Swift.Error = Bitset.Static<1>.Error.overflow(.init())
++            #expect(!(dynamic is Bitset.Fixed.Error))
++            #expect(!(fixed is Bitset.Error))
++            #expect(!(singleWord is Bitset.Static<2>.Error))
+         }
+-        let dynamic: any Swift.Error = Bitset.Error.bounds(.init(member: 1, capacity: 0))
+-        let fixed: any Swift.Error = Bitset.Fixed.Error.bounds(.init(member: 1, capacity: 0))
+-        let singleWord: any Swift.Error = Bitset.Static<1>.Error.overflow(.init())
+-        #expect(!(dynamic is Bitset.Fixed.Error))
+-        #expect(!(fixed is Bitset.Error))
+-        #expect(!(singleWord is Bitset.Static<2>.Error))
+-    }
+ 
+-    @Test
+-    func `zero word static sets are empty and reject insertion with overflow`() {
+-        var bitset = Bitset.Static<0>()
+-        #expect(bitset.capacity == 0)
+-        #expect(bitset.isEmpty)
+-        #expect(bitset.count == 0)
+-        #expect(!bitset.contains(0))
+-        #expect(throws: Bitset.Static<0>.Error.overflow(.init())) {
+-            try bitset.insert(0)
++        @Test
++        func `zero word static sets are empty and reject insertion with overflow`() {
++            var bitset = Bitset.Static<0>()
++            #expect(bitset.capacity == 0)
++            #expect(bitset.isEmpty)
++            #expect(bitset.count == 0)
++            #expect(!bitset.contains(0))
++            #expect(throws: Bitset.Static<0>.Error.overflow(.init())) {
++                try bitset.insert(0)
++            }
++            #expect(bitset.isEmpty)
+         }
+-        #expect(bitset.isEmpty)
+-    }
+ 
+-    @Test
+-    func `exhausted iterators keep returning no member`() throws {
+-        var empty = Bitset().makeIterator()
+-        for _ in 0..<100 { #expect(empty.next() == nil) }
+-        var iterator = try Bitset([0, 64]).makeIterator()
+-        #expect(iterator.next() == 0)
+-        #expect(iterator.next() == 64)
+-        #expect(iterator.next() == nil)
+-        for _ in 0..<100 { #expect(iterator.next() == nil) }
++        @Test
++        func `exhausted iterators keep returning no member`() throws {
++            var empty = Bitset().makeIterator()
++            for _ in 0..<100 { #expect(empty.next() == nil) }
++            var iterator = try Bitset([0, 64]).makeIterator()
++            #expect(iterator.next() == 0)
++            #expect(iterator.next() == 64)
++            #expect(iterator.next() == nil)
++            for _ in 0..<100 { #expect(iterator.next() == nil) }
++        }
+     }
+ }
+diff --git a/Tests/Bitset Tests/Bitset Differential Tests.swift b/Tests/Bitset Tests/Bitset Differential Tests.swift
+index 9219a47..37da4da 100644
+--- a/Tests/Bitset Tests/Bitset Differential Tests.swift	
++++ b/Tests/Bitset Tests/Bitset Differential Tests.swift	
+@@ -2,174 +2,178 @@ import Testing
+ 
+ @testable import Bitset
+ 
+-@Suite
+-struct `Bitset operations agree with finite integer sets` {
+-    private func members(_ value: Bitset.Fixed) -> Set<Int> {
+-        var result: Set<Int> = []
+-        value.forEach { result.insert($0) }
+-        return result
+-    }
++enum `Bitset Differential Tests` {}
+ 
+-    private func members<let words: Int>(_ value: Bitset.Static<words>) -> Set<Int> {
+-        var result: Set<Int> = []
+-        value.forEach { result.insert($0) }
+-        return result
+-    }
++extension `Bitset Differential Tests` {
++    @Suite
++    struct `Bitset operations agree with finite integer sets` {
++        private func members(_ value: Bitset.Fixed) -> Set<Int> {
++            var result: Set<Int> = []
++            value.forEach { result.insert($0) }
++            return result
++        }
+ 
+-    @Test(arguments: [UInt64(1), 23, 901])
+-    func `mixed mutations preserve membership across dynamic fixed and static storage`(
+-        _ seed: UInt64
+-    ) throws {
+-        var dynamic = try Bitset(capacity: 192)
+-        var fixed = try Bitset.Fixed(capacity: 192)
+-        var inline = Bitset.Static<3>()
+-        var expected: Set<Int> = []
+-        var state = seed
+-        for step in 0..<600 {
+-            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+-            let member = Int((state >> 16) % 192)
+-            if state & 4 == 0 {
+-                let inserted = expected.insert(member).inserted
+-                let dynamicInserted = try dynamic.insert(member)
+-                let fixedInserted = try fixed.insert(member)
+-                let staticInserted = try inline.insert(member)
+-                #expect(dynamicInserted == inserted)
+-                #expect(fixedInserted == inserted)
+-                #expect(staticInserted == inserted)
+-            } else {
+-                let removed = expected.remove(member) != nil
+-                let dynamicRemoved = try dynamic.remove(member)
+-                let fixedRemoved = try fixed.remove(member)
+-                let staticRemoved = try inline.remove(member)
+-                #expect(dynamicRemoved == removed)
+-                #expect(fixedRemoved == removed)
+-                #expect(staticRemoved == removed)
+-            }
+-            #expect(dynamic.count == expected.count)
+-            #expect(fixed.count == expected.count)
+-            #expect(inline.count == expected.count)
+-            #expect(dynamic.min == expected.min())
+-            #expect(dynamic.max == expected.max())
+-            if step.isMultiple(of: 25) {
+-                #expect(Array(dynamic) == expected.sorted())
+-                #expect(members(fixed) == expected)
+-                #expect(members(inline) == expected)
++        private func members<let words: Int>(_ value: Bitset.Static<words>) -> Set<Int> {
++            var result: Set<Int> = []
++            value.forEach { result.insert($0) }
++            return result
++        }
++
++        @Test(arguments: [UInt64(1), 23, 901])
++        func `mixed mutations preserve membership across dynamic fixed and static storage`(
++            _ seed: UInt64
++        ) throws {
++            var dynamic = try Bitset(capacity: 192)
++            var fixed = try Bitset.Fixed(capacity: 192)
++            var inline = Bitset.Static<3>()
++            var expected: Set<Int> = []
++            var state = seed
++            for step in 0..<600 {
++                state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
++                let member = Int((state >> 16) % 192)
++                if state & 4 == 0 {
++                    let inserted = expected.insert(member).inserted
++                    let dynamicInserted = try dynamic.insert(member)
++                    let fixedInserted = try fixed.insert(member)
++                    let staticInserted = try inline.insert(member)
++                    #expect(dynamicInserted == inserted)
++                    #expect(fixedInserted == inserted)
++                    #expect(staticInserted == inserted)
++                } else {
++                    let removed = expected.remove(member) != nil
++                    let dynamicRemoved = try dynamic.remove(member)
++                    let fixedRemoved = try fixed.remove(member)
++                    let staticRemoved = try inline.remove(member)
++                    #expect(dynamicRemoved == removed)
++                    #expect(fixedRemoved == removed)
++                    #expect(staticRemoved == removed)
++                }
++                #expect(dynamic.count == expected.count)
++                #expect(fixed.count == expected.count)
++                #expect(inline.count == expected.count)
++                #expect(dynamic.min == expected.min())
++                #expect(dynamic.max == expected.max())
++                if step.isMultiple(of: 25) {
++                    #expect(Array(dynamic) == expected.sorted())
++                    #expect(members(fixed) == expected)
++                    #expect(members(inline) == expected)
++                }
+             }
++            dynamic.removeAll()
++            fixed.removeAll()
++            inline.removeAll()
++            #expect(dynamic.isEmpty && fixed.isEmpty && inline.isEmpty)
++            #expect(dynamic.capacity == 192 && fixed.capacity == 192 && inline.capacity == 192)
+         }
+-        dynamic.removeAll()
+-        fixed.removeAll()
+-        inline.removeAll()
+-        #expect(dynamic.isEmpty && fixed.isEmpty && inline.isEmpty)
+-        #expect(dynamic.capacity == 192 && fixed.capacity == 192 && inline.capacity == 192)
+-    }
+ 
+-    @Test(arguments: [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193])
+-    func `algebra and relations preserve members across unequal partial word capacities`(
+-        _ leftCapacity: Int
+-    ) throws {
+-        let rightCapacity = 193 - leftCapacity
+-        let leftMembers = Set((0..<leftCapacity).filter { $0.isMultiple(of: 3) || $0 % 64 == 63 })
+-        let rightMembers = Set((0..<rightCapacity).filter { $0.isMultiple(of: 5) || $0 % 64 == 0 })
+-        var left = try Bitset(capacity: leftCapacity)
+-        var right = try Bitset(capacity: rightCapacity)
+-        for value in leftMembers { try left.insert(value) }
+-        for value in rightMembers { try right.insert(value) }
+-        let union = left.algebra.union(right)
+-        let intersection = left.algebra.intersection(right)
+-        let subtraction = left.algebra.subtract(right)
+-        let symmetric = left.algebra.symmetric.difference(right)
+-        #expect(Set(union) == leftMembers.union(rightMembers))
+-        #expect(Set(intersection) == leftMembers.intersection(rightMembers))
+-        #expect(Set(subtraction) == leftMembers.subtracting(rightMembers))
+-        #expect(Set(symmetric) == leftMembers.symmetricDifference(rightMembers))
+-        #expect(union.capacity == max(leftCapacity, rightCapacity))
+-        #expect(symmetric.capacity == max(leftCapacity, rightCapacity))
+-        #expect(intersection.capacity == leftCapacity)
+-        #expect(subtraction.capacity == leftCapacity)
+-        #expect(left.relation.isSubset(of: right) == leftMembers.isSubset(of: rightMembers))
+-        #expect(left.relation.isSuperset(of: right) == leftMembers.isSuperset(of: rightMembers))
+-        #expect(left.relation.isDisjoint(with: right) == leftMembers.isDisjoint(with: rightMembers))
+-        #expect(left.algebra.union(right) == right.algebra.union(left))
+-        #expect(
+-            left.algebra.symmetric.difference(right) == right.algebra.symmetric.difference(left)
+-        )
+-        let before = left
+-        var updated = left
+-        updated.form { $0.union(right) }
+-        #expect(updated == union)
+-        #expect(left == before && Set(left) == leftMembers)
+-        let compact = try Bitset(leftMembers)
+-        #expect(compact == left)
+-        #expect(Set([compact, left]).count == 1)
++        @Test(arguments: [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193])
++        func `algebra and relations preserve members across unequal partial word capacities`(
++            _ leftCapacity: Int
++        ) throws {
++            let rightCapacity = 193 - leftCapacity
++            let leftMembers = Set((0..<leftCapacity).filter { $0.isMultiple(of: 3) || $0 % 64 == 63 })
++            let rightMembers = Set((0..<rightCapacity).filter { $0.isMultiple(of: 5) || $0 % 64 == 0 })
++            var left = try Bitset(capacity: leftCapacity)
++            var right = try Bitset(capacity: rightCapacity)
++            for value in leftMembers { try left.insert(value) }
++            for value in rightMembers { try right.insert(value) }
++            let union = left.algebra.union(right)
++            let intersection = left.algebra.intersection(right)
++            let subtraction = left.algebra.subtract(right)
++            let symmetric = left.algebra.symmetric.difference(right)
++            #expect(Set(union) == leftMembers.union(rightMembers))
++            #expect(Set(intersection) == leftMembers.intersection(rightMembers))
++            #expect(Set(subtraction) == leftMembers.subtracting(rightMembers))
++            #expect(Set(symmetric) == leftMembers.symmetricDifference(rightMembers))
++            #expect(union.capacity == max(leftCapacity, rightCapacity))
++            #expect(symmetric.capacity == max(leftCapacity, rightCapacity))
++            #expect(intersection.capacity == leftCapacity)
++            #expect(subtraction.capacity == leftCapacity)
++            #expect(left.relation.isSubset(of: right) == leftMembers.isSubset(of: rightMembers))
++            #expect(left.relation.isSuperset(of: right) == leftMembers.isSuperset(of: rightMembers))
++            #expect(left.relation.isDisjoint(with: right) == leftMembers.isDisjoint(with: rightMembers))
++            #expect(left.algebra.union(right) == right.algebra.union(left))
++            #expect(
++                left.algebra.symmetric.difference(right) == right.algebra.symmetric.difference(left)
++            )
++            let before = left
++            var updated = left
++            updated.form { $0.union(right) }
++            #expect(updated == union)
++            #expect(left == before && Set(left) == leftMembers)
++            let compact = try Bitset(leftMembers)
++            #expect(compact == left)
++            #expect(Set([compact, left]).count == 1)
+ 
+-        let fixedCapacity = max(leftCapacity, rightCapacity)
+-        var fixedLeft = try Bitset.Fixed(capacity: fixedCapacity)
+-        var fixedRight = try Bitset.Fixed(capacity: fixedCapacity)
+-        var staticLeft = Bitset.Static<4>()
+-        var staticRight = Bitset.Static<4>()
+-        for value in leftMembers {
+-            try fixedLeft.insert(value)
+-            try staticLeft.insert(value)
+-        }
+-        for value in rightMembers {
+-            try fixedRight.insert(value)
+-            try staticRight.insert(value)
++            let fixedCapacity = max(leftCapacity, rightCapacity)
++            var fixedLeft = try Bitset.Fixed(capacity: fixedCapacity)
++            var fixedRight = try Bitset.Fixed(capacity: fixedCapacity)
++            var staticLeft = Bitset.Static<4>()
++            var staticRight = Bitset.Static<4>()
++            for value in leftMembers {
++                try fixedLeft.insert(value)
++                try staticLeft.insert(value)
++            }
++            for value in rightMembers {
++                try fixedRight.insert(value)
++                try staticRight.insert(value)
++            }
++            #expect(members(fixedLeft.algebra.union(fixedRight)) == leftMembers.union(rightMembers))
++            #expect(
++                members(fixedLeft.algebra.intersection(fixedRight))
++                    == leftMembers.intersection(rightMembers)
++            )
++            #expect(
++                members(fixedLeft.algebra.subtract(fixedRight)) == leftMembers.subtracting(rightMembers)
++            )
++            #expect(
++                members(fixedLeft.algebra.symmetric.difference(fixedRight))
++                    == leftMembers.symmetricDifference(rightMembers)
++            )
++            #expect(
++                fixedLeft.relation.isSubset(of: fixedRight) == leftMembers.isSubset(of: rightMembers)
++            )
++            #expect(
++                fixedLeft.relation.isSuperset(of: fixedRight)
++                    == leftMembers.isSuperset(of: rightMembers)
++            )
++            #expect(
++                fixedLeft.relation.isDisjoint(with: fixedRight)
++                    == leftMembers.isDisjoint(with: rightMembers)
++            )
++            #expect(members(staticLeft.algebra.union(staticRight)) == leftMembers.union(rightMembers))
++            #expect(
++                members(staticLeft.algebra.intersection(staticRight))
++                    == leftMembers.intersection(rightMembers)
++            )
++            #expect(
++                members(staticLeft.algebra.subtract(staticRight))
++                    == leftMembers.subtracting(rightMembers)
++            )
++            #expect(
++                members(staticLeft.algebra.symmetric.difference(staticRight))
++                    == leftMembers.symmetricDifference(rightMembers)
++            )
++            #expect(
++                staticLeft.relation.isSubset(of: staticRight) == leftMembers.isSubset(of: rightMembers)
++            )
++            #expect(
++                staticLeft.relation.isSuperset(of: staticRight)
++                    == leftMembers.isSuperset(of: rightMembers)
++            )
++            #expect(
++                staticLeft.relation.isDisjoint(with: staticRight)
++                    == leftMembers.isDisjoint(with: rightMembers)
++            )
+         }
+-        #expect(members(fixedLeft.algebra.union(fixedRight)) == leftMembers.union(rightMembers))
+-        #expect(
+-            members(fixedLeft.algebra.intersection(fixedRight))
+-                == leftMembers.intersection(rightMembers)
+-        )
+-        #expect(
+-            members(fixedLeft.algebra.subtract(fixedRight)) == leftMembers.subtracting(rightMembers)
+-        )
+-        #expect(
+-            members(fixedLeft.algebra.symmetric.difference(fixedRight))
+-                == leftMembers.symmetricDifference(rightMembers)
+-        )
+-        #expect(
+-            fixedLeft.relation.isSubset(of: fixedRight) == leftMembers.isSubset(of: rightMembers)
+-        )
+-        #expect(
+-            fixedLeft.relation.isSuperset(of: fixedRight)
+-                == leftMembers.isSuperset(of: rightMembers)
+-        )
+-        #expect(
+-            fixedLeft.relation.isDisjoint(with: fixedRight)
+-                == leftMembers.isDisjoint(with: rightMembers)
+-        )
+-        #expect(members(staticLeft.algebra.union(staticRight)) == leftMembers.union(rightMembers))
+-        #expect(
+-            members(staticLeft.algebra.intersection(staticRight))
+-                == leftMembers.intersection(rightMembers)
+-        )
+-        #expect(
+-            members(staticLeft.algebra.subtract(staticRight))
+-                == leftMembers.subtracting(rightMembers)
+-        )
+-        #expect(
+-            members(staticLeft.algebra.symmetric.difference(staticRight))
+-                == leftMembers.symmetricDifference(rightMembers)
+-        )
+-        #expect(
+-            staticLeft.relation.isSubset(of: staticRight) == leftMembers.isSubset(of: rightMembers)
+-        )
+-        #expect(
+-            staticLeft.relation.isSuperset(of: staticRight)
+-                == leftMembers.isSuperset(of: rightMembers)
+-        )
+-        #expect(
+-            staticLeft.relation.isDisjoint(with: staticRight)
+-                == leftMembers.isDisjoint(with: rightMembers)
+-        )
+-    }
+ 
+-    @Test
+-    func `fixed algebra rejects mismatched capacity domains`() async {
+-        await #expect(processExitsWith: .failure) {
+-            let left = try Bitset.Fixed(capacity: 63)
+-            let right = try Bitset.Fixed(capacity: 64)
+-            _ = left.algebra.union(right)
++        @Test
++        func `fixed algebra rejects mismatched capacity domains`() async {
++            await #expect(processExitsWith: .failure) {
++                let left = try Bitset.Fixed(capacity: 63)
++                let right = try Bitset.Fixed(capacity: 64)
++                _ = left.algebra.union(right)
++            }
+         }
+     }
+ }
+diff --git a/Tests/Bitset Tests/Bitset Iterator Tests.swift b/Tests/Bitset Tests/Bitset Iterator Tests.swift
+index fadfcf2..6e69fcb 100644
+--- a/Tests/Bitset Tests/Bitset Iterator Tests.swift	
++++ b/Tests/Bitset Tests/Bitset Iterator Tests.swift	
+@@ -2,26 +2,30 @@ import Bitset
+ import Iterator
+ import Testing
+ 
+-@Suite
+-struct `Bitset iterators conform to Institute iteration` {
++enum `Bitset Iterator Tests` {}
+ 
+-    @Test
+-    func `bitset iterator satisfies Institute iteration`() throws {
+-        var bitset = Bitset()
+-        try bitset.insert(7)
+-        try bitset.insert(2)
+-        try bitset.insert(11)
++extension `Bitset Iterator Tests` {
++    @Suite
++    struct `Bitset iterators conform to Institute iteration` {
+ 
+-        #expect(collect(bitset.makeIterator()) == [2, 7, 11])
+-    }
++        @Test
++        func `bitset iterator satisfies Institute iteration`() throws {
++            var bitset = Bitset()
++            try bitset.insert(7)
++            try bitset.insert(2)
++            try bitset.insert(11)
++
++            #expect(collect(bitset.makeIterator()) == [2, 7, 11])
++        }
+ 
+-    private func collect<I: Iterating>(_ source: consuming I) -> [Int]
+-    where I.Element == Int, I.Failure == Never {
+-        var iterator = source
+-        var result: [Int] = []
+-        while let element = iterator.next() {
+-            result.append(element)
++        private func collect<I: Iterating>(_ source: consuming I) -> [Int]
++        where I.Element == Int, I.Failure == Never {
++            var iterator = source
++            var result: [Int] = []
++            while let element = iterator.next() {
++                result.append(element)
++            }
++            return result
+         }
+-        return result
+     }
+ }
+diff --git a/Tests/Bitset Tests/Bitset.Builder Tests.swift b/Tests/Bitset Tests/Bitset.Builder Tests.swift
+index c337449..4c4640b 100644
+--- a/Tests/Bitset Tests/Bitset.Builder Tests.swift	
++++ b/Tests/Bitset Tests/Bitset.Builder Tests.swift	
+@@ -7,13 +7,19 @@ enum `Bitset.Builder Tests` {}
+ extension `Bitset.Builder Tests` {
+     @Suite
+     struct `Bitset builders combine expressions into distinct members` {
+-        @Suite struct `Bitset builders preserve optional conditional and repeated expressions` {}
+-        @Suite struct `Bitset builders preserve long and nested membership expressions` {}
+-        @Suite struct `Built bitsets support subsequent mutation and membership queries` {}
+-        @Suite struct `Bitset builder components preserve their contributed members` {}
+     }
+ }
+ 
++extension `Bitset.Builder Tests`.`Bitset builders combine expressions into distinct members` {
++    @Suite struct `Bitset builders preserve optional conditional and repeated expressions` {}
++
++    @Suite struct `Bitset builders preserve long and nested membership expressions` {}
++
++    @Suite struct `Built bitsets support subsequent mutation and membership queries` {}
++
++    @Suite struct `Bitset builder components preserve their contributed members` {}
++}
++
+ extension `Bitset.Builder Tests`.`Bitset builders combine expressions into distinct members` {
+     fileprivate static func collected(_ bitset: Bitset) -> [Int] {
+         var result: [Int] = []
+diff --git a/Tests/Bitset Tests/Bitset.Variants+Builder Tests.swift b/Tests/Bitset Tests/Bitset.Variants+Builder Tests.swift
+index c3e4249..e2bb983 100644
+--- a/Tests/Bitset Tests/Bitset.Variants+Builder Tests.swift	
++++ b/Tests/Bitset Tests/Bitset.Variants+Builder Tests.swift	
+@@ -2,7 +2,14 @@ import Testing
+ 
+ @testable import Bitset
+ 
+-@Suite struct `Static bitset builders preserve members within their capacity` {
++enum `Bitset.Variants+Builder Tests` {}
++
++extension `Bitset.Variants+Builder Tests` {
++    @Suite struct `Static bitset builders preserve members within their capacity` {
++    }
++}
++
++extension `Bitset.Variants+Builder Tests`.`Static bitset builders preserve members within their capacity` {
+     @Suite struct `Static builders construct sets from bounded member expressions` {
+         @Test
+         func `static builders retain members within their capacity`() throws {
+@@ -17,6 +24,7 @@ import Testing
+     }
+ 
+     @Suite struct `No static bitset builder boundary cases are defined` {}
++
+     @Suite struct `No static bitset builder integration behavior cases are defined` {}
+ }
+ 
+-- 
+2.43.0
+

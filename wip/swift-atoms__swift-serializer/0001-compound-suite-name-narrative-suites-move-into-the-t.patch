@@ -1,0 +1,2006 @@
+From bd72e89312906e66bb012ca23e683e985b0baea4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:07 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Always Integration Tests.swift            |  18 +-
+ .../Body and Ownership Tests.swift            | 170 ++++++-----
+ .../Collection Buffer Tests.swift             |  42 +--
+ .../Collection Many Tests.swift               |  18 +-
+ .../Either Integration Tests.swift            |  56 ++--
+ .../Lazy Integration Tests.swift              | 140 ++++-----
+ .../Optic Integration Tests.swift             | 148 ++++-----
+ .../Pair Integration Tests.swift              |  92 +++---
+ .../Repetition Semantics Tests.swift          | 116 +++----
+ ...r Standard Library Integration Tests.swift |  84 +++---
+ .../Serializer.Error Tests.swift              |  82 ++---
+ .../Serializer.Map Ownership Tests.swift      | 284 +++++++++---------
+ .../Serializer.Map Tests.swift                |  94 +++---
+ .../Serializer.Protocol Tests.swift           |  74 ++---
+ .../Serializer.Witness Tests.swift            |  86 +++---
+ .../Tagged Integration Tests.swift            |  88 +++---
+ 16 files changed, 833 insertions(+), 759 deletions(-)
+
+diff --git a/Tests/Serializer Tests/Always Integration Tests.swift b/Tests/Serializer Tests/Always Integration Tests.swift
+index 745d4cd..8b64195 100644
+--- a/Tests/Serializer Tests/Always Integration Tests.swift	
++++ b/Tests/Serializer Tests/Always Integration Tests.swift	
+@@ -3,13 +3,17 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Always.Serializer` {
+-        @Suite struct Unit {}
+-        @Suite struct `Edge Case` {}
+-    }
++enum `Always Integration Tests` {}
++
++extension `Always Integration Tests` {
++        @Suite
++        struct `Always.Serializer` {
++            @Suite struct Unit {}
++            @Suite struct `Edge Case` {}
++        }
++}
+ 
+-    extension `Always.Serializer`.Unit {
++    extension `Always Integration Tests`.`Always.Serializer`.Unit {
+         @Test
+         func `writes nothing to the buffer`() {
+             let serializer = Always<Int>.Serializer<[UInt8]>(42)
+@@ -42,7 +46,7 @@
+         }
+     }
+ 
+-    extension `Always.Serializer`.`Edge Case` {
++    extension `Always Integration Tests`.`Always.Serializer`.`Edge Case` {
+         @Test
+         func `leaves an empty buffer empty`() {
+             let serializer = Always<String>.Serializer<[UInt8]>("hello")
+diff --git a/Tests/Serializer Tests/Body and Ownership Tests.swift b/Tests/Serializer Tests/Body and Ownership Tests.swift
+index d491057..6286079 100644
+--- a/Tests/Serializer Tests/Body and Ownership Tests.swift	
++++ b/Tests/Serializer Tests/Body and Ownership Tests.swift	
+@@ -1,47 +1,51 @@
+ import Serializer
+ import Testing
+ 
+-@Suite struct `Serializer bodies preserve exact failures and ownership` {
+-    @Test func `opaque infallible body needs no try`() {
+-        var buffer: [Int] = []
+-        Infallible().serialize(3, into: &buffer)
+-        #expect(buffer == [3])
+-        let _: Infallible.Failure.Type = Never.self
+-    }
++enum `Body and Ownership Tests` {}
+ 
+-    @Test func `opaque fallible body preserves its exact failure`() {
+-        var buffer: [Int] = []
+-        #expect(throws: Rejection.negative) { try Positive().serialize(-1, into: &buffer) }
+-        #expect(buffer.isEmpty)
+-        let _: Positive.Failure.Type = Rejection.self
+-    }
++extension `Body and Ownership Tests` {
++    @Suite struct `Serializer bodies preserve exact failures and ownership` {
++        @Test func `opaque infallible body needs no try`() {
++            var buffer: [Int] = []
++            Infallible().serialize(3, into: &buffer)
++            #expect(buffer == [3])
++            let _: Infallible.Failure.Type = Never.self
++        }
+ 
+-    @Test func `direct closure and body borrow scoped values`() {
+-        let values = [3, 5]
+-        var buffer: [Int] = []
+-        let serializer = Serializer<Span<Int>, [Int], Never> { Scoped() }
+-        serializer.serialize(values.span, into: &buffer)
+-        ScopedBody().serialize(values.span, into: &buffer)
+-        #expect(buffer == [3, 5, 3, 5])
+-        #expect(values == [3, 5])
+-    }
++        @Test func `opaque fallible body preserves its exact failure`() {
++            var buffer: [Int] = []
++            #expect(throws: Rejection.negative) { try Positive().serialize(-1, into: &buffer) }
++            #expect(buffer.isEmpty)
++            let _: Positive.Failure.Type = Rejection.self
++        }
+ 
+-    @Test func `present optional failures propagate without disappearing`() {
+-        var buffer: [Int] = []
+-        let serializer = Optional<Positive>.Serializer(Positive())
+-        #expect(throws: Rejection.negative) { try serializer.serialize(-1, into: &buffer) }
+-        #expect(buffer.isEmpty)
+-    }
++        @Test func `direct closure and body borrow scoped values`() {
++            let values = [3, 5]
++            var buffer: [Int] = []
++            let serializer = Serializer<Span<Int>, [Int], Never> { Scoped() }
++            serializer.serialize(values.span, into: &buffer)
++            ScopedBody().serialize(values.span, into: &buffer)
++            #expect(buffer == [3, 5, 3, 5])
++            #expect(values == [3, 5])
++        }
++
++        @Test func `present optional failures propagate without disappearing`() {
++            var buffer: [Int] = []
++            let serializer = Optional<Positive>.Serializer(Positive())
++            #expect(throws: Rejection.negative) { try serializer.serialize(-1, into: &buffer) }
++            #expect(buffer.isEmpty)
++        }
+ 
+-    @Test func `body construction retains one noncopyable owner`() {
+-        let lifetime = Lifetime()
+-        var buffer: [Int] = []
+-        let serializer = Serializer<Int, [Int], Never> { Owned(lifetime: lifetime) }
+-        #expect(lifetime.destroyed == 0)
+-        serializer.serialize(3, into: &buffer)
+-        serializer.serialize(5, into: &buffer)
+-        #expect(buffer == [3, 5])
+-        #expect(lifetime.destroyed == 0)
++        @Test func `body construction retains one noncopyable owner`() {
++            let lifetime = Lifetime()
++            var buffer: [Int] = []
++            let serializer = Serializer<Int, [Int], Never> { Owned(lifetime: lifetime) }
++            #expect(lifetime.destroyed == 0)
++            serializer.serialize(3, into: &buffer)
++            serializer.serialize(5, into: &buffer)
++            #expect(buffer == [3, 5])
++            #expect(lifetime.destroyed == 0)
++        }
+     }
+ }
+ 
+@@ -86,32 +90,34 @@ extension Owned {
+ }
+ 
+ #if Pair
+-    @Suite struct `Serializer structural builder borrows product fields` {
+-        @Test func `noncopyable fields survive repeated serialization`() {
+-            let value = Pair(Field(value: 2), Field(value: 7))
+-            let serializer = Serializer {
+-                FieldSerializer()
+-                FieldSerializer()
++extension `Body and Ownership Tests` {
++        @Suite struct `Serializer structural builder borrows product fields` {
++            @Test func `noncopyable fields survive repeated serialization`() {
++                let value = Pair(Field(value: 2), Field(value: 7))
++                let serializer = Serializer {
++                    FieldSerializer()
++                    FieldSerializer()
++                }
++                var buffer: [Int] = []
++                serializer.serialize(value, into: &buffer)
++                serializer.serialize(value, into: &buffer)
++                #expect(buffer == [2, 7, 2, 7])
++                #expect(value.first.value == 2 && value.second.value == 7)
+             }
+-            var buffer: [Int] = []
+-            serializer.serialize(value, into: &buffer)
+-            serializer.serialize(value, into: &buffer)
+-            #expect(buffer == [2, 7, 2, 7])
+-            #expect(value.first.value == 2 && value.second.value == 7)
+-        }
+-        @Test func `noncopyable serializer components remain owned`() {
+-            let first = Lifetime()
+-            let second = Lifetime()
+-            let serializer = Serializer {
+-                Owned(lifetime: first)
+-                Owned(lifetime: second)
++            @Test func `noncopyable serializer components remain owned`() {
++                let first = Lifetime()
++                let second = Lifetime()
++                let serializer = Serializer {
++                    Owned(lifetime: first)
++                    Owned(lifetime: second)
++                }
++                var buffer: [Int] = []
++                serializer.serialize(Pair(2, 7), into: &buffer)
++                #expect(buffer == [2, 7])
++                #expect(first.destroyed == 0 && second.destroyed == 0)
+             }
+-            var buffer: [Int] = []
+-            serializer.serialize(Pair(2, 7), into: &buffer)
+-            #expect(buffer == [2, 7])
+-            #expect(first.destroyed == 0 && second.destroyed == 0)
+         }
+-    }
++}
+     private struct Field: ~Copyable { let value: Int }
+     private struct FieldSerializer: Serializing {}
+ 
+@@ -123,28 +129,30 @@ extension Owned {
+ #endif
+ 
+ #if Either
+-    @Suite struct `Serializer conditional construction chooses one branch` {
+-        @Test func `condition is decided during construction`() throws {
+-            var chooseFirst = true
+-            let serializer = Serializer {
+-                if chooseFirst { Infallible() } else { Positive() }
+-            }
+-            chooseFirst = false
+-            var buffer: [Int] = []
+-            try serializer.serialize(-1, into: &buffer)
+-            #expect(buffer == [-1])
+-            #expect(!chooseFirst)
+-        }
+-        @Test func `selected branch preserves failure provenance`() {
+-            let selectFirst = false
+-            let serializer = Serializer {
+-                if selectFirst { Infallible() } else { Positive() }
+-            }
+-            var buffer: [Int] = []
+-            #expect(throws: Either<Never, Rejection>.right(.negative)) {
++extension `Body and Ownership Tests` {
++        @Suite struct `Serializer conditional construction chooses one branch` {
++            @Test func `condition is decided during construction`() throws {
++                var chooseFirst = true
++                let serializer = Serializer {
++                    if chooseFirst { Infallible() } else { Positive() }
++                }
++                chooseFirst = false
++                var buffer: [Int] = []
+                 try serializer.serialize(-1, into: &buffer)
++                #expect(buffer == [-1])
++                #expect(!chooseFirst)
++            }
++            @Test func `selected branch preserves failure provenance`() {
++                let selectFirst = false
++                let serializer = Serializer {
++                    if selectFirst { Infallible() } else { Positive() }
++                }
++                var buffer: [Int] = []
++                #expect(throws: Either<Never, Rejection>.right(.negative)) {
++                    try serializer.serialize(-1, into: &buffer)
++                }
++                #expect(buffer.isEmpty)
+             }
+-            #expect(buffer.isEmpty)
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Serializer Tests/Collection Buffer Tests.swift b/Tests/Serializer Tests/Collection Buffer Tests.swift
+index e2bbbe1..c656b15 100644
+--- a/Tests/Serializer Tests/Collection Buffer Tests.swift	
++++ b/Tests/Serializer Tests/Collection Buffer Tests.swift	
+@@ -1,33 +1,37 @@
+ import Serializer
+ import Testing
+ 
+-@Suite
+-struct `Collection Serializer Buffer Tests` {
++enum `Collection Buffer Tests` {}
+ 
+-    @Test
+-    func `builds a fresh buffer for a nonfailing serializer`() {
+-        let serializer = Character.Serializer()
++extension `Collection Buffer Tests` {
++    @Suite
++    struct `Collection Serializer Buffer Tests` {
+ 
+-        let buffer: [UInt8] = serializer.serialize("a")
++        @Test
++        func `builds a fresh buffer for a nonfailing serializer`() {
++            let serializer = Character.Serializer()
+ 
+-        #expect(buffer == Array("a".utf8))
+-    }
++            let buffer: [UInt8] = serializer.serialize("a")
+ 
+-    @Test
+-    func `builds a fresh buffer for a failing serializer`() throws(any Swift::Error) {
+-        let serializer = Literal("a")
++            #expect(buffer == Array("a".utf8))
++        }
+ 
+-        let buffer: [UInt8] = try serializer.serialize("a")
++        @Test
++        func `builds a fresh buffer for a failing serializer`() throws(any Swift::Error) {
++            let serializer = Literal("a")
+ 
+-        #expect(buffer == Array("a".utf8))
+-    }
++            let buffer: [UInt8] = try serializer.serialize("a")
++
++            #expect(buffer == Array("a".utf8))
++        }
+ 
+-    @Test
+-    func `propagates the failure instead of returning a buffer`() {
+-        let serializer = Literal("a")
++        @Test
++        func `propagates the failure instead of returning a buffer`() {
++            let serializer = Literal("a")
+ 
+-        #expect(throws: LiteralError.expected("a")) {
+-            let _: [UInt8] = try serializer.serialize("b")
++            #expect(throws: LiteralError.expected("a")) {
++                let _: [UInt8] = try serializer.serialize("b")
++            }
+         }
+     }
+ }
+diff --git a/Tests/Serializer Tests/Collection Many Tests.swift b/Tests/Serializer Tests/Collection Many Tests.swift
+index 432a682..d7417f2 100644
+--- a/Tests/Serializer Tests/Collection Many Tests.swift	
++++ b/Tests/Serializer Tests/Collection Many Tests.swift	
+@@ -3,13 +3,17 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Collection Serializer Many Tests` {
+-        @Suite struct Unit {}
+-        @Suite struct `Edge Case` {}
+-    }
++enum `Collection Many Tests` {}
++
++extension `Collection Many Tests` {
++        @Suite
++        struct `Collection Serializer Many Tests` {
++            @Suite struct Unit {}
++            @Suite struct `Edge Case` {}
++        }
++}
+ 
+-    extension `Collection Serializer Many Tests`.Unit {
++    extension `Collection Many Tests`.`Collection Serializer Many Tests`.Unit {
+ 
+         @Test
+         func `emits every element in order`() throws(any Swift::Error) {
+@@ -32,7 +36,7 @@
+         }
+     }
+ 
+-    extension `Collection Serializer Many Tests`.`Edge Case` {
++    extension `Collection Many Tests`.`Collection Serializer Many Tests`.`Edge Case` {
+ 
+         @Test
+         func `rejects fewer elements than the minimum`() {
+diff --git a/Tests/Serializer Tests/Either Integration Tests.swift b/Tests/Serializer Tests/Either Integration Tests.swift
+index 91ddb5d..9f27e8b 100644
+--- a/Tests/Serializer Tests/Either Integration Tests.swift	
++++ b/Tests/Serializer Tests/Either Integration Tests.swift	
+@@ -3,45 +3,49 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Either Serializer` {
++enum `Either Integration Tests` {}
+ 
+-        @Test
+-        func `serializes through the selected left serializer`() throws(any Swift.Error) {
+-            var buffer: [UInt8] = []
++extension `Either Integration Tests` {
++        @Suite
++        struct `Either Serializer` {
+ 
+-            try branch(true).serializer().serialize("a", into: &buffer)
++            @Test
++            func `serializes through the selected left serializer`() throws(any Swift.Error) {
++                var buffer: [UInt8] = []
+ 
+-            #expect(buffer == Array("a".utf8))
+-        }
++                try branch(true).serializer().serialize("a", into: &buffer)
+ 
+-        @Test
+-        func `serializes through the selected right serializer`() throws(any Swift.Error) {
+-            var buffer: [UInt8] = []
++                #expect(buffer == Array("a".utf8))
++            }
+ 
+-            try branch(false).serializer().serialize("b", into: &buffer)
++            @Test
++            func `serializes through the selected right serializer`() throws(any Swift.Error) {
++                var buffer: [UInt8] = []
+ 
+-            #expect(buffer == Array("b".utf8))
+-        }
++                try branch(false).serializer().serialize("b", into: &buffer)
+ 
+-        @Test
+-        func `attributes the left failure to Either left`() {
+-            var buffer: [UInt8] = []
++                #expect(buffer == Array("b".utf8))
++            }
+ 
+-            #expect(throws: Either<LiteralError, LiteralError>.left(.expected("a"))) {
+-                try branch(true).serializer().serialize("z", into: &buffer)
++            @Test
++            func `attributes the left failure to Either left`() {
++                var buffer: [UInt8] = []
++
++                #expect(throws: Either<LiteralError, LiteralError>.left(.expected("a"))) {
++                    try branch(true).serializer().serialize("z", into: &buffer)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `attributes the right failure to Either right`() {
+-            var buffer: [UInt8] = []
++            @Test
++            func `attributes the right failure to Either right`() {
++                var buffer: [UInt8] = []
+ 
+-            #expect(throws: Either<LiteralError, LiteralError>.right(.expected("b"))) {
+-                try branch(false).serializer().serialize("z", into: &buffer)
++                #expect(throws: Either<LiteralError, LiteralError>.right(.expected("b"))) {
++                    try branch(false).serializer().serialize("z", into: &buffer)
++                }
+             }
+         }
+-    }
++}
+ 
+     private func branch(_ useLeft: Bool) -> Either<Literal, Literal> {
+         useLeft ? .left(Literal("a")) : .right(Literal("b"))
+diff --git a/Tests/Serializer Tests/Lazy Integration Tests.swift b/Tests/Serializer Tests/Lazy Integration Tests.swift
+index fdde33d..c374dc8 100644
+--- a/Tests/Serializer Tests/Lazy Integration Tests.swift	
++++ b/Tests/Serializer Tests/Lazy Integration Tests.swift	
+@@ -3,60 +3,64 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Lazy Serializer Tests` {
+-
+-        @Test
+-        func `defers serializer construction until serialize time`() throws(any Swift.Error) {
+-            final class Box {
+-                var built = 0
+-            }
+-            let box = Box()
+-
+-            let lazy = Lazy { () -> Literal in
+-                box.built += 1
+-                return Literal("a")
++enum `Lazy Integration Tests` {}
++
++extension `Lazy Integration Tests` {
++        @Suite
++        struct `Lazy Serializer Tests` {
++
++            @Test
++            func `defers serializer construction until serialize time`() throws(any Swift.Error) {
++                final class Box {
++                    var built = 0
++                }
++                let box = Box()
++
++                let lazy = Lazy { () -> Literal in
++                    box.built += 1
++                    return Literal("a")
++                }
++                #expect(box.built == 0)
++
++                var buffer: [UInt8] = []
++                try lazy.serializer().serialize("a", into: &buffer)
++
++                #expect(buffer == Array("a".utf8))
++                #expect(box.built == 1)
+             }
+-            #expect(box.built == 0)
+ 
+-            var buffer: [UInt8] = []
+-            try lazy.serializer().serialize("a", into: &buffer)
++            @Test
++            func `re-invokes the thunk on every serialize`() throws(any Swift.Error) {
++                final class Box {
++                    var built = 0
++                }
++                let box = Box()
+ 
+-            #expect(buffer == Array("a".utf8))
+-            #expect(box.built == 1)
+-        }
++                let lazy = Lazy { () -> Literal in
++                    box.built += 1
++                    return Literal("a")
++                }
+ 
+-        @Test
+-        func `re-invokes the thunk on every serialize`() throws(any Swift.Error) {
+-            final class Box {
+-                var built = 0
+-            }
+-            let box = Box()
++                var buffer: [UInt8] = []
++                try lazy.serializer().serialize("a", into: &buffer)
++                try lazy.serializer().serialize("a", into: &buffer)
+ 
+-            let lazy = Lazy { () -> Literal in
+-                box.built += 1
+-                return Literal("a")
++                #expect(box.built == 2)
++                #expect(buffer == Array("aa".utf8))
+             }
+ 
+-            var buffer: [UInt8] = []
+-            try lazy.serializer().serialize("a", into: &buffer)
+-            try lazy.serializer().serialize("a", into: &buffer)
+-
+-            #expect(box.built == 2)
+-            #expect(buffer == Array("aa".utf8))
+-        }
+-
+-        @Test
+-        func `propagates the wrapped serializer's failure`() {
+-            let lazy = Lazy(Literal("a"))
+-            var buffer: [UInt8] = []
++            @Test
++            func `propagates the wrapped serializer's failure`() {
++                let lazy = Lazy(Literal("a"))
++                var buffer: [UInt8] = []
+ 
+-            #expect(throws: LiteralError.expected("a")) {
+-                try lazy.serializer().serialize("b", into: &buffer)
++                #expect(throws: LiteralError.expected("a")) {
++                    try lazy.serializer().serialize("b", into: &buffer)
++                }
++                #expect(buffer.isEmpty)
+             }
+-            #expect(buffer.isEmpty)
+         }
+-    }
++}
+ 
+     private enum LiteralError: Swift.Error, Equatable {
+         case expected(Character)
+@@ -87,32 +91,34 @@
+ #endif
+ 
+ #if Lazy
+-    @Suite struct `Lazy serializer ownership and failure stages` {
+-        @Test func `throwing factory is retried and creates fresh owned serializers`() throws {
+-            let state = FactoryState()
+-            let lazy = Lazy { () throws(FactoryError) -> OwnedSerializer in
+-                state.built += 1
+-                guard state.built > 1 else { throw .unavailable }
+-                return OwnedSerializer(state: state)
+-            }.serializer()
+-            var buffer: [Int] = []
+-            #expect(throws: Either<FactoryError, Never>.left(.unavailable)) {
++extension `Lazy Integration Tests` {
++        @Suite struct `Lazy serializer ownership and failure stages` {
++            @Test func `throwing factory is retried and creates fresh owned serializers`() throws {
++                let state = FactoryState()
++                let lazy = Lazy { () throws(FactoryError) -> OwnedSerializer in
++                    state.built += 1
++                    guard state.built > 1 else { throw .unavailable }
++                    return OwnedSerializer(state: state)
++                }.serializer()
++                var buffer: [Int] = []
++                #expect(throws: Either<FactoryError, Never>.left(.unavailable)) {
++                    try lazy.serialize(2, into: &buffer)
++                }
++                #expect(buffer.isEmpty && state.destroyed == 0)
+                 try lazy.serialize(2, into: &buffer)
++                #expect(state.destroyed == 1)
++                try lazy.serialize(7, into: &buffer)
++                #expect(state.destroyed == 2 && state.built == 3)
++                #expect(buffer == [2, 7])
++            }
++            @Test func `infallible factory preserves Never through builder`() {
++                let serializer = Serializer { Lazy { IntSerializer() } }
++                var buffer: [Int] = []
++                serializer.serialize(3, into: &buffer)
++                #expect(buffer == [3])
+             }
+-            #expect(buffer.isEmpty && state.destroyed == 0)
+-            try lazy.serialize(2, into: &buffer)
+-            #expect(state.destroyed == 1)
+-            try lazy.serialize(7, into: &buffer)
+-            #expect(state.destroyed == 2 && state.built == 3)
+-            #expect(buffer == [2, 7])
+-        }
+-        @Test func `infallible factory preserves Never through builder`() {
+-            let serializer = Serializer { Lazy { IntSerializer() } }
+-            var buffer: [Int] = []
+-            serializer.serialize(3, into: &buffer)
+-            #expect(buffer == [3])
+         }
+-    }
++}
+     private enum FactoryError: Swift.Error, Equatable { case unavailable }
+     private final class FactoryState {
+         var built = 0
+diff --git a/Tests/Serializer Tests/Optic Integration Tests.swift b/Tests/Serializer Tests/Optic Integration Tests.swift
+index a44db93..c78f82a 100644
+--- a/Tests/Serializer Tests/Optic Integration Tests.swift	
++++ b/Tests/Serializer Tests/Optic Integration Tests.swift	
+@@ -4,100 +4,104 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Optic Serializer Tests` {
++enum `Optic Integration Tests` {}
+ 
+-        @Test
+-        func `maps backward through an Isomorphism`() {
+-            let serializer = Text().map(backward: textWrapper)
++extension `Optic Integration Tests` {
++        @Suite
++        struct `Optic Serializer Tests` {
+ 
+-            var buffer: [UInt8] = []
+-            serializer.serialize(TextValue(rawValue: "42"), into: &buffer)
++            @Test
++            func `maps backward through an Isomorphism`() {
++                let serializer = Text().map(backward: textWrapper)
+ 
+-            #expect(buffer == Array("42".utf8))
+-        }
++                var buffer: [UInt8] = []
++                serializer.serialize(TextValue(rawValue: "42"), into: &buffer)
+ 
+-        @Test
+-        func `maps backward through a total Adapter`() {
+-            let serializer = Text().map(backward: totalAdapter)
++                #expect(buffer == Array("42".utf8))
++            }
+ 
+-            var buffer: [UInt8] = []
+-            serializer.serialize(7, into: &buffer)
++            @Test
++            func `maps backward through a total Adapter`() {
++                let serializer = Text().map(backward: totalAdapter)
+ 
+-            #expect(buffer == Array("7".utf8))
+-        }
++                var buffer: [UInt8] = []
++                serializer.serialize(7, into: &buffer)
+ 
+-        @Test
+-        func `maps backward through a partial Adapter`() throws(any Swift.Error) {
+-            let serializer = Text().map(backward: nonNegativeAdapter)
++                #expect(buffer == Array("7".utf8))
++            }
+ 
+-            var buffer: [UInt8] = []
+-            try serializer.serialize(7, into: &buffer)
++            @Test
++            func `maps backward through a partial Adapter`() throws(any Swift.Error) {
++                let serializer = Text().map(backward: nonNegativeAdapter)
+ 
+-            #expect(buffer == Array("7".utf8))
+-        }
++                var buffer: [UInt8] = []
++                try serializer.serialize(7, into: &buffer)
+ 
+-        @Test
+-        func `surfaces a partial Adapter's backward failure`() {
+-            let serializer = Text().map(backward: nonNegativeAdapter)
+-
+-            var buffer: [UInt8] = []
+-            do {
+-                try serializer.serialize(-1, into: &buffer)
+-                Issue.record("Expected the backward direction to fail")
+-            } catch {
+-                switch error {
+-                case .left:
+-                    Issue.record("Expected a right failure")
+-                case .right(let backward):
+-                    #expect(backward == .negative)
+-                }
++                #expect(buffer == Array("7".utf8))
+             }
+-            #expect(buffer.isEmpty)
+-        }
+-
+-        @Test
+-        func `embeds through a Prism`() {
+-            let serializer = NodeText().map(embedding: leaf)
+ 
+-            var buffer: [UInt8] = []
+-            serializer.serialize(3, into: &buffer)
+-
+-            #expect(buffer == Array("leaf(3)".utf8))
+-        }
++            @Test
++            func `surfaces a partial Adapter's backward failure`() {
++                let serializer = Text().map(backward: nonNegativeAdapter)
++
++                var buffer: [UInt8] = []
++                do {
++                    try serializer.serialize(-1, into: &buffer)
++                    Issue.record("Expected the backward direction to fail")
++                } catch {
++                    switch error {
++                    case .left:
++                        Issue.record("Expected a right failure")
++                    case .right(let backward):
++                        #expect(backward == .negative)
++                    }
++                }
++                #expect(buffer.isEmpty)
++            }
+ 
+-        @Test
+-        func `matches through a Prism into an Either output`() {
+-            let serializer = BranchText().map(matching: leaf)
++            @Test
++            func `embeds through a Prism`() {
++                let serializer = NodeText().map(embedding: leaf)
+ 
+-            var buffer: [UInt8] = []
+-            serializer.serialize(.leaf(5), into: &buffer)
++                var buffer: [UInt8] = []
++                serializer.serialize(3, into: &buffer)
+ 
+-            #expect(buffer == Array("right(5)".utf8))
+-        }
++                #expect(buffer == Array("leaf(3)".utf8))
++            }
+ 
+-        @Test
+-        func `matches through a Prism and fails on a mismatch`() throws(any Swift.Error) {
+-            let serializer = Decimal().map(matching: leaf, failure: MatchFailure.mismatch)
++            @Test
++            func `matches through a Prism into an Either output`() {
++                let serializer = BranchText().map(matching: leaf)
+ 
+-            var buffer: [UInt8] = []
+-            try serializer.serialize(.leaf(9), into: &buffer)
++                var buffer: [UInt8] = []
++                serializer.serialize(.leaf(5), into: &buffer)
+ 
+-            #expect(buffer == Array("9".utf8))
++                #expect(buffer == Array("right(5)".utf8))
++            }
+ 
+-            do {
+-                try serializer.serialize(.empty, into: &buffer)
+-                Issue.record("Expected the match to fail")
+-            } catch {
+-                switch error {
+-                case .left:
+-                    Issue.record("Expected a right failure")
+-                case .right(.mismatch(let node)):
+-                    #expect(node == .empty)
++            @Test
++            func `matches through a Prism and fails on a mismatch`() throws(any Swift.Error) {
++                let serializer = Decimal().map(matching: leaf, failure: MatchFailure.mismatch)
++
++                var buffer: [UInt8] = []
++                try serializer.serialize(.leaf(9), into: &buffer)
++
++                #expect(buffer == Array("9".utf8))
++
++                do {
++                    try serializer.serialize(.empty, into: &buffer)
++                    Issue.record("Expected the match to fail")
++                } catch {
++                    switch error {
++                    case .left:
++                        Issue.record("Expected a right failure")
++                    case .right(.mismatch(let node)):
++                        #expect(node == .empty)
++                    }
+                 }
+             }
+         }
+-    }
++}
+ 
+     private enum Node: Equatable {
+         case leaf(Int)
+diff --git a/Tests/Serializer Tests/Pair Integration Tests.swift b/Tests/Serializer Tests/Pair Integration Tests.swift
+index b69b2c9..f22bc11 100644
+--- a/Tests/Serializer Tests/Pair Integration Tests.swift	
++++ b/Tests/Serializer Tests/Pair Integration Tests.swift	
+@@ -4,66 +4,70 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Pair Serializer Tests` {
++enum `Pair Integration Tests` {}
+ 
+-        @Test
+-        func `serializes both halves of a nominal Pair in order`() throws(any Swift.Error) {
+-            var buffer: [UInt8] = []
+-            let serializer: Pair::Pair<Literal, OtherLiteral>.Serializer<Either<LiteralError, OtherError>> =
+-                Pair::Pair(Literal("a"), OtherLiteral("b")).serializer()
++extension `Pair Integration Tests` {
++        @Suite
++        struct `Pair Serializer Tests` {
+ 
+-            try serializer.serialize(Pair::Pair("a", "b"), into: &buffer)
++            @Test
++            func `serializes both halves of a nominal Pair in order`() throws(any Swift.Error) {
++                var buffer: [UInt8] = []
++                let serializer: Pair::Pair<Literal, OtherLiteral>.Serializer<Either<LiteralError, OtherError>> =
++                    Pair::Pair(Literal("a"), OtherLiteral("b")).serializer()
+ 
+-            #expect(buffer == Array("ab".utf8))
+-        }
++                try serializer.serialize(Pair::Pair("a", "b"), into: &buffer)
++
++                #expect(buffer == Array("ab".utf8))
++            }
+ 
+-        @Test
+-        func `attributes first failure to Either left`() {
+-            var buffer: [UInt8] = []
+-            let serializer: Pair::Pair<Literal, OtherLiteral>.Serializer<Either<LiteralError, OtherError>> =
+-                Pair::Pair(Literal("a"), OtherLiteral("b")).serializer()
++            @Test
++            func `attributes first failure to Either left`() {
++                var buffer: [UInt8] = []
++                let serializer: Pair::Pair<Literal, OtherLiteral>.Serializer<Either<LiteralError, OtherError>> =
++                    Pair::Pair(Literal("a"), OtherLiteral("b")).serializer()
+ 
+-            #expect(throws: Either<LiteralError, OtherError>.left(.expected("a"))) {
+-                try serializer.serialize(Pair::Pair("x", "b"), into: &buffer)
++                #expect(throws: Either<LiteralError, OtherError>.left(.expected("a"))) {
++                    try serializer.serialize(Pair::Pair("x", "b"), into: &buffer)
++                }
++                #expect(buffer.isEmpty)
+             }
+-            #expect(buffer.isEmpty)
+-        }
+ 
+-        @Test
+-        func `attributes second failure to Either right`() {
+-            var buffer: [UInt8] = []
+-            let serializer: Pair::Pair<Literal, OtherLiteral>.Serializer<Either<LiteralError, OtherError>> =
+-                Pair::Pair(Literal("a"), OtherLiteral("b")).serializer()
++            @Test
++            func `attributes second failure to Either right`() {
++                var buffer: [UInt8] = []
++                let serializer: Pair::Pair<Literal, OtherLiteral>.Serializer<Either<LiteralError, OtherError>> =
++                    Pair::Pair(Literal("a"), OtherLiteral("b")).serializer()
+ 
+-            #expect(throws: Either<LiteralError, OtherError>.right(.expected("b"))) {
+-                try serializer.serialize(Pair::Pair("a", "x"), into: &buffer)
++                #expect(throws: Either<LiteralError, OtherError>.right(.expected("b"))) {
++                    try serializer.serialize(Pair::Pair("a", "x"), into: &buffer)
++                }
++                #expect(buffer == Array("a".utf8))
+             }
+-            #expect(buffer == Array("a".utf8))
+-        }
+ 
+-        @Test
+-        func `equally typed failures collapse`() throws(any Swift.Error) {
+-            var buffer: [UInt8] = []
+-            let serializer: Pair::Pair<Literal, Literal>.Serializer<LiteralError> =
+-                Pair::Pair(Literal("a"), Literal("b")).serializer()
++            @Test
++            func `equally typed failures collapse`() throws(any Swift.Error) {
++                var buffer: [UInt8] = []
++                let serializer: Pair::Pair<Literal, Literal>.Serializer<LiteralError> =
++                    Pair::Pair(Literal("a"), Literal("b")).serializer()
+ 
+-            try serializer.serialize(Pair::Pair("a", "b"), into: &buffer)
++                try serializer.serialize(Pair::Pair("a", "b"), into: &buffer)
+ 
+-            #expect(buffer == Array("ab".utf8))
+-        }
++                #expect(buffer == Array("ab".utf8))
++            }
+ 
+-        @Test
+-        func `Never plus Never collapses to Never and requires no try`() {
+-            var buffer: [UInt8] = []
+-            let serializer: Pair::Pair<AnyCharacter, AnyCharacter>.Serializer<Never> =
+-                Pair::Pair(AnyCharacter(), AnyCharacter()).serializer()
++            @Test
++            func `Never plus Never collapses to Never and requires no try`() {
++                var buffer: [UInt8] = []
++                let serializer: Pair::Pair<AnyCharacter, AnyCharacter>.Serializer<Never> =
++                    Pair::Pair(AnyCharacter(), AnyCharacter()).serializer()
+ 
+-            serializer.serialize(Pair::Pair("a", "b"), into: &buffer)
++                serializer.serialize(Pair::Pair("a", "b"), into: &buffer)
+ 
+-            #expect(buffer == Array("ab".utf8))
++                #expect(buffer == Array("ab".utf8))
++            }
+         }
+-    }
++}
+ 
+     private struct AnyCharacter: Serializer::Serializing {}
+ 
+diff --git a/Tests/Serializer Tests/Repetition Semantics Tests.swift b/Tests/Serializer Tests/Repetition Semantics Tests.swift
+index 760d1a2..545b1dd 100644
+--- a/Tests/Serializer Tests/Repetition Semantics Tests.swift	
++++ b/Tests/Serializer Tests/Repetition Semantics Tests.swift	
+@@ -2,73 +2,77 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite struct `Repeated serialization validates bounds before writes` {
+-        @Test func `empty cardinal bounds reject even an empty array`() {
+-            let serializer = Repetition(Cardinal.zero..<Cardinal.zero, operation: Element()).serializer()
+-            var buffer = [9]
+-            #expect(throws: Either<Repetition<Range<Cardinal>, Element>.Error, ElementError>.left(.emptyBounds)) {
+-                try serializer.serialize([], into: &buffer)
++enum `Repetition Semantics Tests` {}
++
++extension `Repetition Semantics Tests` {
++        @Suite struct `Repeated serialization validates bounds before writes` {
++            @Test func `empty cardinal bounds reject even an empty array`() {
++                let serializer = Repetition(Cardinal.zero..<Cardinal.zero, operation: Element()).serializer()
++                var buffer = [9]
++                #expect(throws: Either<Repetition<Range<Cardinal>, Element>.Error, ElementError>.left(.emptyBounds)) {
++                    try serializer.serialize([], into: &buffer)
++                }
++                #expect(buffer == [9])
+             }
+-            #expect(buffer == [9])
+-        }
+ 
+-        @Test func `minimum and exclusive maximum preserve exact cardinal failures`() {
+-            let serializer = Repetition(Cardinal(2)..<Cardinal(4), operation: Element()).serializer()
+-            var buffer = [9]
+-            #expect(throws: Either<Repetition<Range<Cardinal>, Element>.Error, ElementError>.left(.insufficient(actual: 1))) {
+-                try serializer.serialize([1], into: &buffer)
++            @Test func `minimum and exclusive maximum preserve exact cardinal failures`() {
++                let serializer = Repetition(Cardinal(2)..<Cardinal(4), operation: Element()).serializer()
++                var buffer = [9]
++                #expect(throws: Either<Repetition<Range<Cardinal>, Element>.Error, ElementError>.left(.insufficient(actual: 1))) {
++                    try serializer.serialize([1], into: &buffer)
++                }
++                #expect(throws: Either<Repetition<Range<Cardinal>, Element>.Error, ElementError>.left(.excessive(actual: 4))) {
++                    try serializer.serialize([1, 2, 3, 4], into: &buffer)
++                }
++                #expect(buffer == [9])
+             }
+-            #expect(throws: Either<Repetition<Range<Cardinal>, Element>.Error, ElementError>.left(.excessive(actual: 4))) {
+-                try serializer.serialize([1, 2, 3, 4], into: &buffer)
++
++            @Test func `separated count validation precedes every write`() {
++                let serializer = Repetition(Cardinal(1)...Cardinal(2), operation: Element()).serializer(separator: Separator())
++                var buffer = [9]
++                #expect(throws: Either<Repetition<ClosedRange<Cardinal>, Element>.Error, Either<ElementError, Never>>.left(.excessive(actual: 3))) {
++                    try serializer.serialize([1, 2, 3], into: &buffer)
++                }
++                #expect(buffer == [9])
+             }
+-            #expect(buffer == [9])
+-        }
+ 
+-        @Test func `separated count validation precedes every write`() {
+-            let serializer = Repetition(Cardinal(1)...Cardinal(2), operation: Element()).serializer(separator: Separator())
+-            var buffer = [9]
+-            #expect(throws: Either<Repetition<ClosedRange<Cardinal>, Element>.Error, Either<ElementError, Never>>.left(.excessive(actual: 3))) {
+-                try serializer.serialize([1, 2, 3], into: &buffer)
++            @Test func `empty and singleton arrays never emit a separator`() throws {
++                let serializer = Repetition(Cardinal.zero..., operation: Element()).serializer(separator: FailingSeparator())
++                var buffer: [Int] = []
++                try serializer.serialize([], into: &buffer)
++                try serializer.serialize([3], into: &buffer)
++                #expect(buffer == [3])
+             }
+-            #expect(buffer == [9])
+-        }
+ 
+-        @Test func `empty and singleton arrays never emit a separator`() throws {
+-            let serializer = Repetition(Cardinal.zero..., operation: Element()).serializer(separator: FailingSeparator())
+-            var buffer: [Int] = []
+-            try serializer.serialize([], into: &buffer)
+-            try serializer.serialize([3], into: &buffer)
+-            #expect(buffer == [3])
+-        }
++            @Test func `separator and element failures propagate with partial writes`() {
++                let separatorFailure = Repetition(Cardinal.zero..., operation: Element()).serializer(separator: FailingSeparator())
++                var first: [Int] = []
++                #expect(throws: Either<Repetition<PartialRangeFrom<Cardinal>, Element>.Error, Either<ElementError, SeparatorError>>.right(.right(.failed))) {
++                    try separatorFailure.serialize([1, 2], into: &first)
++                }
++                #expect(first == [1, 99])
+ 
+-        @Test func `separator and element failures propagate with partial writes`() {
+-            let separatorFailure = Repetition(Cardinal.zero..., operation: Element()).serializer(separator: FailingSeparator())
+-            var first: [Int] = []
+-            #expect(throws: Either<Repetition<PartialRangeFrom<Cardinal>, Element>.Error, Either<ElementError, SeparatorError>>.right(.right(.failed))) {
+-                try separatorFailure.serialize([1, 2], into: &first)
++                let elementFailure = Repetition(Cardinal.zero..., operation: Element()).serializer(separator: Separator())
++                var second: [Int] = []
++                #expect(throws: Either<Repetition<PartialRangeFrom<Cardinal>, Element>.Error, Either<ElementError, Never>>.right(.left(.rejected))) {
++                    try elementFailure.serialize([1, -1, 3], into: &second)
++                }
++                #expect(second == [1, 0, -1])
+             }
+-            #expect(first == [1, 99])
+ 
+-            let elementFailure = Repetition(Cardinal.zero..., operation: Element()).serializer(separator: Separator())
+-            var second: [Int] = []
+-            #expect(throws: Either<Repetition<PartialRangeFrom<Cardinal>, Element>.Error, Either<ElementError, Never>>.right(.left(.rejected))) {
+-                try elementFailure.serialize([1, -1, 3], into: &second)
++            @Test func `noncopyable repeated owner and buffer are preserved`() throws {
++                let lifetime = Lifetime()
++                let serializer = Repetition(Cardinal.zero..., operation: OwnedElement(lifetime: lifetime)).serializer()
++                var buffer = OwnedBuffer()
++                try serializer.serialize([1, 2], into: &buffer)
++                try serializer.serialize([3], into: &buffer)
++                #expect(buffer.values == [1, 2, 3])
++                #expect(lifetime.destroyed == 0)
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
+             }
+-            #expect(second == [1, 0, -1])
+         }
+-
+-        @Test func `noncopyable repeated owner and buffer are preserved`() throws {
+-            let lifetime = Lifetime()
+-            let serializer = Repetition(Cardinal.zero..., operation: OwnedElement(lifetime: lifetime)).serializer()
+-            var buffer = OwnedBuffer()
+-            try serializer.serialize([1, 2], into: &buffer)
+-            try serializer.serialize([3], into: &buffer)
+-            #expect(buffer.values == [1, 2, 3])
+-            #expect(lifetime.destroyed == 0)
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
+-    }
++}
+ 
+     private enum ElementError: Swift.Error, Equatable { case rejected }
+     private enum SeparatorError: Swift.Error, Equatable { case failed }
+@@ -107,7 +111,7 @@
+ #endif
+ 
+ #if Repetition
+-    extension `Repeated serialization validates bounds before writes` {
++    extension `Repetition Semantics Tests`.`Repeated serialization validates bounds before writes` {
+         @Test func `separated repetition owns both noncopyable serializers`() throws {
+             let elementLifetime = Lifetime()
+             let separatorLifetime = Lifetime()
+diff --git a/Tests/Serializer Tests/Serializer Standard Library Integration Tests.swift b/Tests/Serializer Tests/Serializer Standard Library Integration Tests.swift
+index 1b02e22..99afde4 100644
+--- a/Tests/Serializer Tests/Serializer Standard Library Integration Tests.swift	
++++ b/Tests/Serializer Tests/Serializer Standard Library Integration Tests.swift	
+@@ -1,41 +1,45 @@
+ import Serializer
+ import Testing
+ 
+-@Suite
+-struct `Optional and array values serialize their present elements` {
++enum `Serializer Standard Library Integration Tests` {}
+ 
+-    @Test
+-    func `an optional representation emits the wrapped output when present`() {
+-        var buffer: [UInt8] = []
+-        Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(Count(value: 9), into: &buffer)
+-        #expect(buffer == [9])
+-    }
++extension `Serializer Standard Library Integration Tests` {
++    @Suite
++    struct `Optional and array values serialize their present elements` {
+ 
+-    @Test
+-    func `an optional representation emits nothing when the output is nil`() {
+-        var buffer: [UInt8] = []
+-        Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(nil, into: &buffer)
+-        #expect(buffer.isEmpty)
+-    }
++        @Test
++        func `an optional representation emits the wrapped output when present`() {
++            var buffer: [UInt8] = []
++            Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(Count(value: 9), into: &buffer)
++            #expect(buffer == [9])
++        }
+ 
+-    @Test
+-    func `an array serializes itself into a buffer of its elements`() {
+-        var text = ""
+-        [Character].Serializer<String>(["<", "t", "a", "g"]).serialize((), into: &text)
+-        #expect(text == "<tag")
++        @Test
++        func `an optional representation emits nothing when the output is nil`() {
++            var buffer: [UInt8] = []
++            Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(nil, into: &buffer)
++            #expect(buffer.isEmpty)
++        }
+ 
+-        var bytes: [UInt8] = []
+-        [UInt8].Serializer<[UInt8]>([1, 2, 3]).serialize((), into: &bytes)
+-        #expect(bytes == [1, 2, 3])
+-    }
++        @Test
++        func `an array serializes itself into a buffer of its elements`() {
++            var text = ""
++            [Character].Serializer<String>(["<", "t", "a", "g"]).serialize((), into: &text)
++            #expect(text == "<tag")
++
++            var bytes: [UInt8] = []
++            [UInt8].Serializer<[UInt8]>([1, 2, 3]).serialize((), into: &bytes)
++            #expect(bytes == [1, 2, 3])
++        }
+ 
+-    @Test
+-    func `an explicit optional serializer can be reused`() {
+-        var buffer: [UInt8] = []
+-        Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(Count(value: 3), into: &buffer)
+-        #expect(buffer == [3])
+-        Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(nil, into: &buffer)
+-        #expect(buffer == [3])
++        @Test
++        func `an explicit optional serializer can be reused`() {
++            var buffer: [UInt8] = []
++            Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(Count(value: 3), into: &buffer)
++            #expect(buffer == [3])
++            Swift::Optional<CountSerializer>.Serializer(CountSerializer()).serialize(nil, into: &buffer)
++            #expect(buffer == [3])
++        }
+     }
+ }
+ 
+@@ -52,15 +56,17 @@ extension CountSerializer {
+     }
+ }
+ 
+-@Suite struct `Explicit optional serializers retain owned components` {
+-    @Test func `noncopyable values and serializers can be borrowed repeatedly`() {
+-        let serializer = Optional<OwnedCountSerializer>.Serializer(OwnedCountSerializer())
+-        let value: OwnedCount? = .some(OwnedCount(value: 7))
+-        var buffer = OwnedBuffer()
+-        serializer.serialize(value, into: &buffer)
+-        serializer.serialize(value, into: &buffer)
+-        serializer.serialize(nil, into: &buffer)
+-        #expect(buffer.values == [7, 7])
++extension `Serializer Standard Library Integration Tests` {
++    @Suite struct `Explicit optional serializers retain owned components` {
++        @Test func `noncopyable values and serializers can be borrowed repeatedly`() {
++            let serializer = Optional<OwnedCountSerializer>.Serializer(OwnedCountSerializer())
++            let value: OwnedCount? = .some(OwnedCount(value: 7))
++            var buffer = OwnedBuffer()
++            serializer.serialize(value, into: &buffer)
++            serializer.serialize(value, into: &buffer)
++            serializer.serialize(nil, into: &buffer)
++            #expect(buffer.values == [7, 7])
++        }
+     }
+ }
+ private struct OwnedCount: ~Copyable { let value: Int }
+diff --git a/Tests/Serializer Tests/Serializer.Error Tests.swift b/Tests/Serializer Tests/Serializer.Error Tests.swift
+index 35d17de..fad4113 100644
+--- a/Tests/Serializer Tests/Serializer.Error Tests.swift	
++++ b/Tests/Serializer Tests/Serializer.Error Tests.swift	
+@@ -2,53 +2,57 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Serializer error maps transform failures and preserve successful writes` {
++enum `Serializer.Error Tests` {}
+ 
+-        @Test
+-        func `error map rewrites the upstream failure`() {
+-            let serializer = NonZero().mapFailure { (_: Rejection) -> Downstream in .rejected }
+-            var buffer: [UInt8] = []
+-            #expect(throws: Downstream.rejected) {
+-                try serializer.serialize(0, into: &buffer)
+-            }
+-            requireFailure(serializer, Downstream.self)
+-        }
++extension `Serializer.Error Tests` {
++        @Suite
++        struct `Serializer error maps transform failures and preserve successful writes` {
+ 
+-        @Test
+-        func `error map leaves a successful serialization untouched`() throws(any Swift::Error) {
+-            let serializer = NonZero().mapFailure { (_: Rejection) -> Downstream in .rejected }
+-            var buffer: [UInt8] = []
+-            try serializer.serialize(5, into: &buffer)
+-            #expect(buffer == [5])
+-        }
++            @Test
++            func `error map rewrites the upstream failure`() {
++                let serializer = NonZero().mapFailure { (_: Rejection) -> Downstream in .rejected }
++                var buffer: [UInt8] = []
++                #expect(throws: Downstream.rejected) {
++                    try serializer.serialize(0, into: &buffer)
++                }
++                requireFailure(serializer, Downstream.self)
++            }
+ 
+-        @Test
+-        func `error map hands the exact upstream failure to the transform`() {
+-            let serializer = NonZero().mapFailure { (failure: Rejection) -> Downstream in
+-                failure == .zero ? .rejected : .other
++            @Test
++            func `error map leaves a successful serialization untouched`() throws(any Swift::Error) {
++                let serializer = NonZero().mapFailure { (_: Rejection) -> Downstream in .rejected }
++                var buffer: [UInt8] = []
++                try serializer.serialize(5, into: &buffer)
++                #expect(buffer == [5])
+             }
+-            var buffer: [UInt8] = []
+-            #expect(throws: Downstream.rejected) {
+-                try serializer.serialize(0, into: &buffer)
++
++            @Test
++            func `error map hands the exact upstream failure to the transform`() {
++                let serializer = NonZero().mapFailure { (failure: Rejection) -> Downstream in
++                    failure == .zero ? .rejected : .other
++                }
++                var buffer: [UInt8] = []
++                #expect(throws: Downstream.rejected) {
++                    try serializer.serialize(0, into: &buffer)
++                }
++                #expect(buffer.isEmpty)
+             }
+-            #expect(buffer.isEmpty)
+-        }
+ 
+-        @Test
+-        func `error map composes with a second error map`() throws(any Swift::Error) {
+-            let serializer = NonZero()
+-                .mapFailure { (_: Rejection) -> Downstream in .rejected }
+-                .mapFailure { (_: Downstream) -> Rejection in .zero }
+-            var buffer: [UInt8] = []
+-            #expect(throws: Rejection.zero) {
+-                try serializer.serialize(0, into: &buffer)
++            @Test
++            func `error map composes with a second error map`() throws(any Swift::Error) {
++                let serializer = NonZero()
++                    .mapFailure { (_: Rejection) -> Downstream in .rejected }
++                    .mapFailure { (_: Downstream) -> Rejection in .zero }
++                var buffer: [UInt8] = []
++                #expect(throws: Rejection.zero) {
++                    try serializer.serialize(0, into: &buffer)
++                }
++                try serializer.serialize(9, into: &buffer)
++                #expect(buffer == [9])
++                requireFailure(serializer, Rejection.self)
+             }
+-            try serializer.serialize(9, into: &buffer)
+-            #expect(buffer == [9])
+-            requireFailure(serializer, Rejection.self)
+         }
+-    }
++}
+ 
+     private func requireFailure<S: Serializing, Failure: Swift::Error>(
+         _: borrowing S,
+diff --git a/Tests/Serializer Tests/Serializer.Map Ownership Tests.swift b/Tests/Serializer Tests/Serializer.Map Ownership Tests.swift
+index e938e04..359b099 100644
+--- a/Tests/Serializer Tests/Serializer.Map Ownership Tests.swift	
++++ b/Tests/Serializer Tests/Serializer.Map Ownership Tests.swift	
+@@ -3,159 +3,163 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Serializer mapping preserves its owned resource` {
+-        @Test
+-        func `a noncopyable leaf borrows execution and retains partial writes on failure`() throws {
+-            let lifetime = Lifetime()
+-            let serializer = Owned(lifetime: lifetime)
+-            var buffer = Buffer()
+-            try serializer.serialize(1, into: &buffer)
+-            do throws(Owned.Error) {
+-                try serializer.serialize(2, into: &buffer)
+-                Issue.record("The leaf unexpectedly accepted the rejected value")
+-            } catch {
+-                #expect(error == .rejected(2))
++enum `Serializer.Map Ownership Tests` {}
++
++extension `Serializer.Map Ownership Tests` {
++        @Suite
++        struct `Serializer mapping preserves its owned resource` {
++            @Test
++            func `a noncopyable leaf borrows execution and retains partial writes on failure`() throws {
++                let lifetime = Lifetime()
++                let serializer = Owned(lifetime: lifetime)
++                var buffer = Buffer()
++                try serializer.serialize(1, into: &buffer)
++                do throws(Owned.Error) {
++                    try serializer.serialize(2, into: &buffer)
++                    Issue.record("The leaf unexpectedly accepted the rejected value")
++                } catch {
++                    #expect(error == .rejected(2))
++                }
++                #expect(buffer.values == [1, 2])
++                #expect(lifetime.destroyed == 0)
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
+             }
+-            #expect(buffer.values == [1, 2])
+-            #expect(lifetime.destroyed == 0)
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
+ 
+-        @Test
+-        func `explicit error transforms compose noncopyable owners and preserve partial writes`() throws {
+-            let lifetime = Lifetime()
+-            let firstMap = Owned(lifetime: lifetime).mapFailure { error -> Mapped in
+-                lifetime.mapped += 1
+-                return .upstream(error)
+-            }
+-            let serializer = firstMap.mapFailure { error -> Mapped in error }
+-            requireFailure(serializer, Mapped.self)
+-            var buffer = Buffer()
+-            try serializer.serialize(1, into: &buffer)
+-            #expect(lifetime.mapped == 0)
+-            do throws(Mapped) {
+-                try serializer.serialize(2, into: &buffer)
+-                Issue.record("The mapped serializer unexpectedly accepted the rejected value")
+-            } catch {
+-                #expect(error == .upstream(.rejected(2)))
++            @Test
++            func `explicit error transforms compose noncopyable owners and preserve partial writes`() throws {
++                let lifetime = Lifetime()
++                let firstMap = Owned(lifetime: lifetime).mapFailure { error -> Mapped in
++                    lifetime.mapped += 1
++                    return .upstream(error)
++                }
++                let serializer = firstMap.mapFailure { error -> Mapped in error }
++                requireFailure(serializer, Mapped.self)
++                var buffer = Buffer()
++                try serializer.serialize(1, into: &buffer)
++                #expect(lifetime.mapped == 0)
++                do throws(Mapped) {
++                    try serializer.serialize(2, into: &buffer)
++                    Issue.record("The mapped serializer unexpectedly accepted the rejected value")
++                } catch {
++                    #expect(error == .upstream(.rejected(2)))
++                }
++                try serializer.serialize(3, into: &buffer)
++                #expect(buffer.values == [1, 2, 3])
++                #expect(lifetime.mapped == 1)
++                #expect(lifetime.destroyed == 0)
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
+             }
+-            try serializer.serialize(3, into: &buffer)
+-            #expect(buffer.values == [1, 2, 3])
+-            #expect(lifetime.mapped == 1)
+-            #expect(lifetime.destroyed == 0)
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
+ 
+-        @Test
+-        func `total contramap borrows noncopyable values and preserves upstream failure`() throws {
+-            let lifetime = Lifetime()
+-            let serializer = Owned(lifetime: lifetime).contramap { (value: borrowing Value) in value.number }
+-            requireFailure(serializer, Owned.Error.self)
+-            let first = Value(number: 1)
+-            let rejected = Value(number: 2)
+-            var buffer = Buffer()
+-            try serializer.serialize(first, into: &buffer)
+-            do throws(Owned.Error) {
+-                try serializer.serialize(rejected, into: &buffer)
+-                Issue.record("Contramap unexpectedly accepted the rejected value")
+-            } catch {
+-                #expect(error == .rejected(2))
++            @Test
++            func `total contramap borrows noncopyable values and preserves upstream failure`() throws {
++                let lifetime = Lifetime()
++                let serializer = Owned(lifetime: lifetime).contramap { (value: borrowing Value) in value.number }
++                requireFailure(serializer, Owned.Error.self)
++                let first = Value(number: 1)
++                let rejected = Value(number: 2)
++                var buffer = Buffer()
++                try serializer.serialize(first, into: &buffer)
++                do throws(Owned.Error) {
++                    try serializer.serialize(rejected, into: &buffer)
++                    Issue.record("Contramap unexpectedly accepted the rejected value")
++                } catch {
++                    #expect(error == .rejected(2))
++                }
++                #expect(first.number == 1 && rejected.number == 2)
++                #expect(buffer.values == [1, 2])
++                #expect(lifetime.destroyed == 0)
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
+             }
+-            #expect(first.number == 1 && rejected.number == 2)
+-            #expect(buffer.values == [1, 2])
+-            #expect(lifetime.destroyed == 0)
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
+ 
+-        @Test
+-        func `throwing contramap preserves both failure branches and remains usable after failure`() throws {
+-            let lifetime = Lifetime()
+-            let serializer = Owned(lifetime: lifetime).contramap(transform)
+-            requireFailure(serializer, Either<Owned.Error, TransformError>.self)
+-            let invalid = Value(number: -1)
+-            let rejected = Value(number: 2)
+-            let accepted = Value(number: 3)
+-            var buffer = Buffer()
+-            do throws(Either<Owned.Error, TransformError>) {
+-                try serializer.serialize(invalid, into: &buffer)
+-                Issue.record("The value transform unexpectedly succeeded")
+-            } catch {
+-                #expect(error == .right(.negative(-1)))
+-            }
+-            #expect(buffer.values.isEmpty)
+-            #expect(lifetime.calls == 0)
+-            do throws(Either<Owned.Error, TransformError>) {
+-                try serializer.serialize(rejected, into: &buffer)
+-                Issue.record("The upstream serializer unexpectedly succeeded")
+-            } catch {
+-                #expect(error == .left(.rejected(2)))
++            @Test
++            func `throwing contramap preserves both failure branches and remains usable after failure`() throws {
++                let lifetime = Lifetime()
++                let serializer = Owned(lifetime: lifetime).contramap(transform)
++                requireFailure(serializer, Either<Owned.Error, TransformError>.self)
++                let invalid = Value(number: -1)
++                let rejected = Value(number: 2)
++                let accepted = Value(number: 3)
++                var buffer = Buffer()
++                do throws(Either<Owned.Error, TransformError>) {
++                    try serializer.serialize(invalid, into: &buffer)
++                    Issue.record("The value transform unexpectedly succeeded")
++                } catch {
++                    #expect(error == .right(.negative(-1)))
++                }
++                #expect(buffer.values.isEmpty)
++                #expect(lifetime.calls == 0)
++                do throws(Either<Owned.Error, TransformError>) {
++                    try serializer.serialize(rejected, into: &buffer)
++                    Issue.record("The upstream serializer unexpectedly succeeded")
++                } catch {
++                    #expect(error == .left(.rejected(2)))
++                }
++                try serializer.serialize(accepted, into: &buffer)
++                #expect(buffer.values == [2, 3])
++                #expect(lifetime.calls == 2)
++                #expect(invalid.number == -1 && rejected.number == 2 && accepted.number == 3)
++                #expect(lifetime.destroyed == 0)
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
+             }
+-            try serializer.serialize(accepted, into: &buffer)
+-            #expect(buffer.values == [2, 3])
+-            #expect(lifetime.calls == 2)
+-            #expect(invalid.number == -1 && rejected.number == 2 && accepted.number == 3)
+-            #expect(lifetime.destroyed == 0)
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
+ 
+-        @Test
+-        func `error mapping composes with a throwing contramap without copying the owner`() throws {
+-            let lifetime = Lifetime()
+-            let upstream = Owned(lifetime: lifetime).contramap(transform)
+-            let serializer = upstream.mapFailure { Mapped.composition($0) }
+-            let invalid = Value(number: -1)
+-            let accepted = Value(number: 3)
+-            var buffer = Buffer()
+-            do throws(Mapped) {
+-                try serializer.serialize(invalid, into: &buffer)
+-                Issue.record("The composed transform unexpectedly succeeded")
+-            } catch {
+-                #expect(error == .composition(.right(.negative(-1))))
++            @Test
++            func `error mapping composes with a throwing contramap without copying the owner`() throws {
++                let lifetime = Lifetime()
++                let upstream = Owned(lifetime: lifetime).contramap(transform)
++                let serializer = upstream.mapFailure { Mapped.composition($0) }
++                let invalid = Value(number: -1)
++                let accepted = Value(number: 3)
++                var buffer = Buffer()
++                do throws(Mapped) {
++                    try serializer.serialize(invalid, into: &buffer)
++                    Issue.record("The composed transform unexpectedly succeeded")
++                } catch {
++                    #expect(error == .composition(.right(.negative(-1))))
++                }
++                try serializer.serialize(accepted, into: &buffer)
++                #expect(buffer.values == [3])
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
+             }
+-            try serializer.serialize(accepted, into: &buffer)
+-            #expect(buffer.values == [3])
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
+ 
+-        @Test
+-        func `contramap borrows a scoped input while mutating a noncopyable buffer`() throws {
+-            let lifetime = Lifetime()
+-            let serializer = Owned(lifetime: lifetime).contramap { (span: borrowing Span<Int>) in span[0] }
+-            let values = [3, 4]
+-            var buffer = Buffer()
+-            try serializer.serialize(values.span, into: &buffer)
+-            #expect(buffer.values == [3])
+-            #expect(values == [3, 4])
+-            discard(serializer)
+-            #expect(lifetime.destroyed == 1)
+-        }
++            @Test
++            func `contramap borrows a scoped input while mutating a noncopyable buffer`() throws {
++                let lifetime = Lifetime()
++                let serializer = Owned(lifetime: lifetime).contramap { (span: borrowing Span<Int>) in span[0] }
++                let values = [3, 4]
++                var buffer = Buffer()
++                try serializer.serialize(values.span, into: &buffer)
++                #expect(buffer.values == [3])
++                #expect(values == [3, 4])
++                discard(serializer)
++                #expect(lifetime.destroyed == 1)
++            }
+ 
+-        @Test
+-        func `fluent error access and maps stay copyable with copyable owners`() throws {
+-            let upstream = Serializer<Int, Buffer, Owned.Error> { value, buffer in
+-                buffer.values.append(value)
++            @Test
++            func `fluent error access and maps stay copyable with copyable owners`() throws {
++                let upstream = Serializer<Int, Buffer, Owned.Error> { value, buffer in
++                    buffer.values.append(value)
++                }
++                let mappedErrors = upstream.mapFailure { Mapped.upstream($0) }
++                requireCopyable(mappedErrors)
++                let total = upstream.contramap { (value: borrowing Value) in value.number }
++                requireCopyable(total)
++                let throwing = upstream.contramap(transform)
++                requireCopyable(throwing)
++                let value = Value(number: 3)
++                var buffer = Buffer()
++                try upstream.serialize(1, into: &buffer)
++                try mappedErrors.serialize(2, into: &buffer)
++                try total.serialize(value, into: &buffer)
++                try throwing.serialize(value, into: &buffer)
++                #expect(buffer.values == [1, 2, 3, 3])
+             }
+-            let mappedErrors = upstream.mapFailure { Mapped.upstream($0) }
+-            requireCopyable(mappedErrors)
+-            let total = upstream.contramap { (value: borrowing Value) in value.number }
+-            requireCopyable(total)
+-            let throwing = upstream.contramap(transform)
+-            requireCopyable(throwing)
+-            let value = Value(number: 3)
+-            var buffer = Buffer()
+-            try upstream.serialize(1, into: &buffer)
+-            try mappedErrors.serialize(2, into: &buffer)
+-            try total.serialize(value, into: &buffer)
+-            try throwing.serialize(value, into: &buffer)
+-            #expect(buffer.values == [1, 2, 3, 3])
+         }
+-    }
++}
+ 
+     private func transform(_ value: borrowing Value) throws(TransformError) -> Int {
+         guard value.number >= 0 else { throw .negative(value.number) }
+diff --git a/Tests/Serializer Tests/Serializer.Map Tests.swift b/Tests/Serializer Tests/Serializer.Map Tests.swift
+index 6680bf0..0a19956 100644
+--- a/Tests/Serializer Tests/Serializer.Map Tests.swift	
++++ b/Tests/Serializer Tests/Serializer.Map Tests.swift	
+@@ -3,59 +3,63 @@
+     import Serializer
+     import Testing
+ 
+-    @Suite
+-    struct `Serializer contramaps borrow transformed values and distinguish stage failures` {
+-
+-        @Test
+-        func `contramap transforms the new output before delegating`() {
+-            let mapped = Digit().contramap { (text: borrowing String) -> UInt8 in UInt8(text.count) }
+-            var buffer: [UInt8] = []
+-            mapped.serialize("hello", into: &buffer)
+-            #expect(buffer == [5])
+-        }
+-
+-        @Test
+-        func `a total contramap introduces no failure`() {
+-            let mapped = NonZero().contramap { (text: borrowing String) -> UInt8 in UInt8(text.count) }
+-            requireFailure(mapped, Rejection.self)
+-        }
+-
+-        @Test
+-        func `a throwing contramap nests the transform failure on the right`() {
+-            let mapped = NonZero().contramap { (text: borrowing String) throws(Empty) -> UInt8 in
+-                guard !text.isEmpty else { throw Empty() }
+-                return UInt8(text.count)
++enum `Serializer.Map Tests` {}
++
++extension `Serializer.Map Tests` {
++        @Suite
++        struct `Serializer contramaps borrow transformed values and distinguish stage failures` {
++
++            @Test
++            func `contramap transforms the new output before delegating`() {
++                let mapped = Digit().contramap { (text: borrowing String) -> UInt8 in UInt8(text.count) }
++                var buffer: [UInt8] = []
++                mapped.serialize("hello", into: &buffer)
++                #expect(buffer == [5])
+             }
+-            requireFailure(mapped, Either<Rejection, Empty>.self)
+ 
+-            var buffer: [UInt8] = []
+-            #expect(throws: Either<Rejection, Empty>.right(Empty())) {
+-                try mapped.serialize("", into: &buffer)
++            @Test
++            func `a total contramap introduces no failure`() {
++                let mapped = NonZero().contramap { (text: borrowing String) -> UInt8 in UInt8(text.count) }
++                requireFailure(mapped, Rejection.self)
+             }
+-            #expect(buffer.isEmpty)
+-        }
+ 
+-        @Test
+-        func `a throwing contramap keeps the upstream failure on the left`() {
+-            let mapped = NonZero().contramap { (value: borrowing Int) throws(Empty) -> UInt8 in
+-                UInt8(truncatingIfNeeded: copy value)
++            @Test
++            func `a throwing contramap nests the transform failure on the right`() {
++                let mapped = NonZero().contramap { (text: borrowing String) throws(Empty) -> UInt8 in
++                    guard !text.isEmpty else { throw Empty() }
++                    return UInt8(text.count)
++                }
++                requireFailure(mapped, Either<Rejection, Empty>.self)
++
++                var buffer: [UInt8] = []
++                #expect(throws: Either<Rejection, Empty>.right(Empty())) {
++                    try mapped.serialize("", into: &buffer)
++                }
++                #expect(buffer.isEmpty)
+             }
+-            var buffer: [UInt8] = []
+-            #expect(throws: Either<Rejection, Empty>.left(.zero)) {
+-                try mapped.serialize(0, into: &buffer)
++
++            @Test
++            func `a throwing contramap keeps the upstream failure on the left`() {
++                let mapped = NonZero().contramap { (value: borrowing Int) throws(Empty) -> UInt8 in
++                    UInt8(truncatingIfNeeded: copy value)
++                }
++                var buffer: [UInt8] = []
++                #expect(throws: Either<Rejection, Empty>.left(.zero)) {
++                    try mapped.serialize(0, into: &buffer)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `contramap borrows a noncopyable new output`() {
+-            let mapped = Digit().contramap { (token: borrowing Token) -> UInt8 in token.value }
+-            var buffer: [UInt8] = []
+-            let token = Token(value: 8)
+-            mapped.serialize(token, into: &buffer)
+-            #expect(buffer == [8])
+-            #expect(token.value == 8)
++            @Test
++            func `contramap borrows a noncopyable new output`() {
++                let mapped = Digit().contramap { (token: borrowing Token) -> UInt8 in token.value }
++                var buffer: [UInt8] = []
++                let token = Token(value: 8)
++                mapped.serialize(token, into: &buffer)
++                #expect(buffer == [8])
++                #expect(token.value == 8)
++            }
+         }
+-    }
++}
+ 
+     private func requireFailure<S: Serializing, Failure: Swift::Error>(
+         _: borrowing S,
+diff --git a/Tests/Serializer Tests/Serializer.Protocol Tests.swift b/Tests/Serializer Tests/Serializer.Protocol Tests.swift
+index af59b93..67118ee 100644
+--- a/Tests/Serializer Tests/Serializer.Protocol Tests.swift	
++++ b/Tests/Serializer Tests/Serializer.Protocol Tests.swift	
+@@ -1,47 +1,51 @@
+ import Serializer
+ import Testing
+ 
+-@Suite
+-struct `Serializer leaves append borrowed values and preserve typed failures` {
+-
+-    @Test
+-    func `a leaf declares only serialize`() {
+-        var buffer: [UInt8] = []
+-        Digit().serialize(7, into: &buffer)
+-        #expect(buffer == [7])
+-    }
++enum `Serializer.Protocol Tests` {}
+ 
+-    @Test
+-    func `a leaf's Failure defaults to Never`() {
+-        let _: Digit.Failure.Type = Never.self
+-    }
++extension `Serializer.Protocol Tests` {
++    @Suite
++    struct `Serializer leaves append borrowed values and preserve typed failures` {
+ 
+-    @Test
+-    func `serialize appends in call order`() {
+-        var buffer: [UInt8] = [1]
+-        Digit().serialize(2, into: &buffer)
+-        Digit().serialize(3, into: &buffer)
+-        #expect(buffer == [1, 2, 3])
+-    }
++        @Test
++        func `a leaf declares only serialize`() {
++            var buffer: [UInt8] = []
++            Digit().serialize(7, into: &buffer)
++            #expect(buffer == [7])
++        }
+ 
+-    @Test
+-    func `a typed failure propagates through the conformance`() {
+-        var buffer: [UInt8] = []
+-        #expect(throws: Rejection.zero) {
+-            try NonZero().serialize(0, into: &buffer)
++        @Test
++        func `a leaf's Failure defaults to Never`() {
++            let _: Digit.Failure.Type = Never.self
+         }
+-        #expect(buffer.isEmpty)
+-    }
+ 
+-    @Test
+-    func `a noncopyable output is borrowed`() {
+-        var buffer: [UInt8] = []
+-        let token = Token(value: 9)
+-        TokenSerializer().serialize(token, into: &buffer)
+-        #expect(buffer == [9])
+-        #expect(token.value == 9)
+-    }
++        @Test
++        func `serialize appends in call order`() {
++            var buffer: [UInt8] = [1]
++            Digit().serialize(2, into: &buffer)
++            Digit().serialize(3, into: &buffer)
++            #expect(buffer == [1, 2, 3])
++        }
++
++        @Test
++        func `a typed failure propagates through the conformance`() {
++            var buffer: [UInt8] = []
++            #expect(throws: Rejection.zero) {
++                try NonZero().serialize(0, into: &buffer)
++            }
++            #expect(buffer.isEmpty)
++        }
+ 
++        @Test
++        func `a noncopyable output is borrowed`() {
++            var buffer: [UInt8] = []
++            let token = Token(value: 9)
++            TokenSerializer().serialize(token, into: &buffer)
++            #expect(buffer == [9])
++            #expect(token.value == 9)
++        }
++
++    }
+ }
+ 
+ private struct Digit: Serializing {}
+diff --git a/Tests/Serializer Tests/Serializer.Witness Tests.swift b/Tests/Serializer Tests/Serializer.Witness Tests.swift
+index f82b0d0..e3a3446 100644
+--- a/Tests/Serializer Tests/Serializer.Witness Tests.swift	
++++ b/Tests/Serializer Tests/Serializer.Witness Tests.swift	
+@@ -1,53 +1,57 @@
+ import Serializer
+ import Testing
+ 
+-@Suite
+-struct `Serializer witnesses execute their closure with borrowed output and typed failure` {
++enum `Serializer.Witness Tests` {}
+ 
+-    @Test
+-    func `a witness serializes through its closure`() {
+-        let witness = Serializer<Int, [UInt8], Never> { value, buffer in
+-            buffer.append(UInt8(truncatingIfNeeded: value))
+-        }
+-        var buffer: [UInt8] = [10]
+-        witness.serialize(40, into: &buffer)
+-        #expect(buffer == [10, 40])
+-    }
+-
+-    @Test
+-    func `a pure witness needs no try`() {
+-        let pure = Serializer<UInt8, [UInt8], Never> { value, buffer in buffer.append(value) }
+-        var buffer: [UInt8] = []
+-        pure.serialize(255, into: &buffer)
+-        #expect(buffer == [255])
+-    }
++extension `Serializer.Witness Tests` {
++    @Suite
++    struct `Serializer witnesses execute their closure with borrowed output and typed failure` {
+ 
+-    @Test
+-    func `a witness propagates its typed failure`() {
+-        struct Forbidden: Swift::Error, Equatable {}
+-        let witness = Serializer<Int, [UInt8], Forbidden> { value, buffer throws(Forbidden) in
+-            guard value != 0 else { throw Forbidden() }
+-            buffer.append(UInt8(truncatingIfNeeded: value))
++        @Test
++        func `a witness serializes through its closure`() {
++            let witness = Serializer<Int, [UInt8], Never> { value, buffer in
++                buffer.append(UInt8(truncatingIfNeeded: value))
++            }
++            var buffer: [UInt8] = [10]
++            witness.serialize(40, into: &buffer)
++            #expect(buffer == [10, 40])
+         }
+-        var buffer: [UInt8] = []
+-        #expect(throws: Forbidden()) {
+-            try witness.serialize(0, into: &buffer)
++
++        @Test
++        func `a pure witness needs no try`() {
++            let pure = Serializer<UInt8, [UInt8], Never> { value, buffer in buffer.append(value) }
++            var buffer: [UInt8] = []
++            pure.serialize(255, into: &buffer)
++            #expect(buffer == [255])
+         }
+-        #expect(buffer.isEmpty)
+-    }
+ 
+-    @Test
+-    func `a witness borrows a noncopyable output`() {
+-        struct Token: ~Copyable {
+-            let value: UInt8
++        @Test
++        func `a witness propagates its typed failure`() {
++            struct Forbidden: Swift::Error, Equatable {}
++            let witness = Serializer<Int, [UInt8], Forbidden> { value, buffer throws(Forbidden) in
++                guard value != 0 else { throw Forbidden() }
++                buffer.append(UInt8(truncatingIfNeeded: value))
++            }
++            var buffer: [UInt8] = []
++            #expect(throws: Forbidden()) {
++                try witness.serialize(0, into: &buffer)
++            }
++            #expect(buffer.isEmpty)
+         }
+-        let witness = Serializer<Token, [UInt8], Never> { token, buffer in
+-            buffer.append(token.value)
++
++        @Test
++        func `a witness borrows a noncopyable output`() {
++            struct Token: ~Copyable {
++                let value: UInt8
++            }
++            let witness = Serializer<Token, [UInt8], Never> { token, buffer in
++                buffer.append(token.value)
++            }
++            var buffer: [UInt8] = []
++            let token = Token(value: 3)
++            witness.serialize(token, into: &buffer)
++            #expect(buffer == [3])
++            #expect(token.value == 3)
+         }
+-        var buffer: [UInt8] = []
+-        let token = Token(value: 3)
+-        witness.serialize(token, into: &buffer)
+-        #expect(buffer == [3])
+-        #expect(token.value == 3)
+     }
+ }
+diff --git a/Tests/Serializer Tests/Tagged Integration Tests.swift b/Tests/Serializer Tests/Tagged Integration Tests.swift
+index bfda521..8fe0390 100644
+--- a/Tests/Serializer Tests/Tagged Integration Tests.swift	
++++ b/Tests/Serializer Tests/Tagged Integration Tests.swift	
+@@ -3,47 +3,51 @@
+     import Tagged
+     import Testing
+ 
+-    @Suite struct `Tagged Serializer Tests` {
++enum `Tagged Integration Tests` {}
+ 
+-        @Test
+-        func `Tagged accepts an explicit underlying representation`() {
+-            let _: Identifier.Serializer<ValueSerializer> = Identifier.Serializer(ValueSerializer())
+-        }
++extension `Tagged Integration Tests` {
++        @Suite struct `Tagged Serializer Tests` {
+ 
+-        @Test
+-        func `lifted serializer delegates the underlying value`() throws(any Swift::Error) {
+-            let identifier = Identifier(_unchecked: Value(rawValue: 42))
+-            var buffer: [Int] = []
++            @Test
++            func `Tagged accepts an explicit underlying representation`() {
++                let _: Identifier.Serializer<ValueSerializer> = Identifier.Serializer(ValueSerializer())
++            }
+ 
+-            try Identifier.Serializer(ValueSerializer()).serialize(identifier, into: &buffer)
++            @Test
++            func `lifted serializer delegates the underlying value`() throws(any Swift::Error) {
++                let identifier = Identifier(_unchecked: Value(rawValue: 42))
++                var buffer: [Int] = []
+ 
+-            #expect(buffer == [42])
+-        }
++                try Identifier.Serializer(ValueSerializer()).serialize(identifier, into: &buffer)
+ 
+-        @Test
+-        func `lifted serializer appends into an existing buffer`() throws(any Swift::Error) {
+-            let identifier = Identifier(_unchecked: Value(rawValue: 42))
+-            var buffer = [1, 2]
++                #expect(buffer == [42])
++            }
+ 
+-            try Identifier.Serializer(ValueSerializer()).serialize(identifier, into: &buffer)
++            @Test
++            func `lifted serializer appends into an existing buffer`() throws(any Swift::Error) {
++                let identifier = Identifier(_unchecked: Value(rawValue: 42))
++                var buffer = [1, 2]
+ 
+-            #expect(buffer == [1, 2, 42])
+-        }
++                try Identifier.Serializer(ValueSerializer()).serialize(identifier, into: &buffer)
+ 
+-        @Test
+-        func `lifted serializer preserves the underlying failure`() {
+-            let identifier = Identifier(_unchecked: Value(rawValue: -1))
+-            var buffer: [Int] = []
++                #expect(buffer == [1, 2, 42])
++            }
+ 
+-            do throws(TestFailure) {
+-                try Identifier.Serializer(ValueSerializer()).serialize(identifier, into: &buffer)
+-                Issue.record("Expected the underlying serializer to reject the value")
+-            } catch {
+-                #expect(error == .rejected)
++            @Test
++            func `lifted serializer preserves the underlying failure`() {
++                let identifier = Identifier(_unchecked: Value(rawValue: -1))
++                var buffer: [Int] = []
++
++                do throws(TestFailure) {
++                    try Identifier.Serializer(ValueSerializer()).serialize(identifier, into: &buffer)
++                    Issue.record("Expected the underlying serializer to reject the value")
++                } catch {
++                    #expect(error == .rejected)
++                }
++                #expect(buffer.isEmpty)
+             }
+-            #expect(buffer.isEmpty)
+         }
+-    }
++}
+ 
+     private enum IdentifierTag {}
+ 
+@@ -74,18 +78,20 @@
+ #endif
+ 
+ #if Tagged
+-    @Suite struct `Tagged serialization borrows noncopyable underlying values` {
+-        @Test func `tagged owned values can be printed repeatedly`() {
+-            typealias Token = Tagged<IdentifierTag, OwnedValue>
+-            let token = Token(_unchecked: OwnedValue(rawValue: 9))
+-            var buffer: [Int] = []
+-            let serializer = Token.Serializer(OwnedValueSerializer())
+-            serializer.serialize(token, into: &buffer)
+-            serializer.serialize(token, into: &buffer)
+-            #expect(buffer == [9, 9])
+-            #expect(token.underlying.rawValue == 9)
++extension `Tagged Integration Tests` {
++        @Suite struct `Tagged serialization borrows noncopyable underlying values` {
++            @Test func `tagged owned values can be printed repeatedly`() {
++                typealias Token = Tagged<IdentifierTag, OwnedValue>
++                let token = Token(_unchecked: OwnedValue(rawValue: 9))
++                var buffer: [Int] = []
++                let serializer = Token.Serializer(OwnedValueSerializer())
++                serializer.serialize(token, into: &buffer)
++                serializer.serialize(token, into: &buffer)
++                #expect(buffer == [9, 9])
++                #expect(token.underlying.rawValue == 9)
++            }
+         }
+-    }
++}
+     private struct OwnedValue: ~Copyable {
+         let rawValue: Int
+     }
+-- 
+2.43.0
+

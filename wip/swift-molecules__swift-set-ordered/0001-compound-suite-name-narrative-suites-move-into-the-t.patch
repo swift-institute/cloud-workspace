@@ -1,0 +1,803 @@
+From 442a22982c7697d2eac98969aac4ba191a967c01 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:12 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Set.Ordered Model Tests.swift             |  20 +-
+ .../Set Ordered Tests/Set.Ordered Tests.swift | 686 +++++++++---------
+ 2 files changed, 362 insertions(+), 344 deletions(-)
+
+diff --git a/Tests/Set Ordered Tests/Set.Ordered Model Tests.swift b/Tests/Set Ordered Tests/Set.Ordered Model Tests.swift
+index af8dcb5..7e83dde 100644
+--- a/Tests/Set Ordered Tests/Set.Ordered Model Tests.swift	
++++ b/Tests/Set Ordered Tests/Set.Ordered Model Tests.swift	
+@@ -475,14 +475,18 @@ private func runFleetStream(seed: UInt64) -> Model.Verdict {
+     return verdict
+ }
+ 
+-@Suite
+-struct `Set.Ordered Model` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
++enum `Set.Ordered Model Tests` {}
++
++extension `Set.Ordered Model Tests` {
++    @Suite
++    struct `Set.Ordered Model` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++    }
+ }
+ 
+-extension `Set.Ordered Model`.Integration {
++extension `Set.Ordered Model Tests`.`Set.Ordered Model`.Integration {
+     @Test(arguments: Model.seeds(default: [0x02DE_2ED1, 0x02DE_2ED2]))
+     func `direct move-only stream: order, positions, and exact teardown`(seed: UInt64) {
+         let verdict = runDirectStream(seed: seed)
+@@ -498,7 +502,7 @@ extension `Set.Ordered Model`.Integration {
+     }
+ }
+ 
+-extension `Set.Ordered Model`.Unit {
++extension `Set.Ordered Model Tests`.`Set.Ordered Model`.Unit {
+     @Test
+     func `index(of:) tracks the backward-shift: positions compact after removal`() {
+         let census = Model.Census()
+@@ -524,7 +528,7 @@ extension `Set.Ordered Model`.Unit {
+     }
+ }
+ 
+-extension `Set.Ordered Model`.`Edge Case` {
++extension `Set.Ordered Model Tests`.`Set.Ordered Model`.`Edge Case` {
+     @Test
+     func `a sibling's removal does not move the other sibling's positions`() {
+         let census = Model.Census()
+diff --git a/Tests/Set Ordered Tests/Set.Ordered Tests.swift b/Tests/Set Ordered Tests/Set.Ordered Tests.swift
+index 77cd047..88f052d 100644
+--- a/Tests/Set Ordered Tests/Set.Ordered Tests.swift	
++++ b/Tests/Set Ordered Tests/Set.Ordered Tests.swift	
+@@ -21,49 +21,53 @@ private typealias HeapStorage<E: ~Copyable> =
+ private typealias OrderedColumn<E: Swift::Hashable & ~Copyable> =
+     Hash.Indexed<Buffer<HeapStorage<E>>.Linear>
+ 
+-@Suite
+-struct `Set.Ordered Column Law Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `the shared ordered-hashed column obeys the seam ledger laws`() {
+-        let violations = Seam.Ledger.violations(
+-            makeEmpty: {
+-                Ownership.Shared(OrderedColumn<Int>(minimumCapacity: Index<Int>.Count(4)))
+-            },
+-            element: { $0 }
+-        )
+-        #expect(violations.isEmpty, "\(violations)")
+-    }
++enum `Set.Ordered Tests` {}
++
++extension `Set.Ordered Tests` {
++    @Suite
++    struct `Set.Ordered Column Law Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `the shared ordered-hashed column obeys the seam ledger laws`() {
++            let violations = Seam.Ledger.violations(
++                makeEmpty: {
++                    Ownership.Shared(OrderedColumn<Int>(minimumCapacity: Index<Int>.Count(4)))
++                },
++                element: { $0 }
++            )
++            #expect(violations.isEmpty, "\(violations)")
++        }
+ 
+-    @Test
+-    func `coherence holds through the ordered surface, direct column`() {
+-        var direct = Set<Int>.Ordered(minimumCapacity: 4)
+-        var i = 0
+-        while i < 16 {
+-            direct.insert(i &* 3)
+-            i += 1
++        @Test
++        func `coherence holds through the ordered surface, direct column`() {
++            var direct = Set<Int>.Ordered(minimumCapacity: 4)
++            var i = 0
++            while i < 16 {
++                direct.insert(i &* 3)
++                i += 1
++            }
++            _ = direct.remove(9)
++            _ = direct.remove(0)
++            let directViolations = direct.take().checkCoherence()
++            #expect(directViolations.isEmpty, "\(directViolations)")
+         }
+-        _ = direct.remove(9)
+-        _ = direct.remove(0)
+-        let directViolations = direct.take().checkCoherence()
+-        #expect(directViolations.isEmpty, "\(directViolations)")
+-    }
+ 
+-    @Test
+-    func `coherence holds through the ordered surface, shared column`() {
+-        var shared = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        var i = 0
+-        while i < 16 {
+-            shared.insert(i &* 5)
+-            i += 1
++        @Test
++        func `coherence holds through the ordered surface, shared column`() {
++            var shared = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            var i = 0
++            while i < 16 {
++                shared.insert(i &* 5)
++                i += 1
++            }
++            _ = shared.remove(25)
++            _ = shared.remove(0)
++            let sharedViolations = shared.take().withColumn { Hash.Coherence.violations($0) }
++            #expect(sharedViolations.isEmpty, "\(sharedViolations)")
+         }
+-        _ = shared.remove(25)
+-        _ = shared.remove(0)
+-        let sharedViolations = shared.take().withColumn { Hash.Coherence.violations($0) }
+-        #expect(sharedViolations.isEmpty, "\(sharedViolations)")
+     }
+ }
+ 
+@@ -73,315 +77,323 @@ extension Hash.Indexed<Buffer<HeapStorage<Int>>.Linear> {
+     }
+ }
+ 
+-@Suite(.serialized)
+-struct `Set.Ordered Core Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `insert, contains, duplicate hand-back, remove, counts`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        let isEmpty = s.isEmpty
+-        #expect(isEmpty)
+-        let first = s.insert(10)
+-        #expect(first == nil)
+-        let dup = s.insert(10)
+-        #expect(dup == 10)
+-        s.insert(20)
+-        s.insert(30)
+-        let has = s.contains(20)
+-        let hasNot = s.contains(40)
+-        #expect(has)
+-        #expect(!hasNot)
+-        let removed = s.remove(20)
+-        #expect(removed == 20)
+-        let absent = s.remove(20)
+-        #expect(absent == nil)
+-        let n = s.count
+-        #expect(n == Index<Int>.Count(2))
+-    }
++extension `Set.Ordered Tests` {
++    @Suite(.serialized)
++    struct `Set.Ordered Core Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `insert, contains, duplicate hand-back, remove, counts`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            let isEmpty = s.isEmpty
++            #expect(isEmpty)
++            let first = s.insert(10)
++            #expect(first == nil)
++            let dup = s.insert(10)
++            #expect(dup == 10)
++            s.insert(20)
++            s.insert(30)
++            let has = s.contains(20)
++            let hasNot = s.contains(40)
++            #expect(has)
++            #expect(!hasNot)
++            let removed = s.remove(20)
++            #expect(removed == 20)
++            let absent = s.remove(20)
++            #expect(absent == nil)
++            let n = s.count
++            #expect(n == Index<Int>.Count(2))
++        }
+ 
+-    @Test
+-    func `iteration is insertion-ordered across growth and removal`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 2)
+-        var i = 0
+-        while i < 12 {
+-            s.insert(i)
+-            i += 1
++        @Test
++        func `iteration is insertion-ordered across growth and removal`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 2)
++            var i = 0
++            while i < 12 {
++                s.insert(i)
++                i += 1
++            }
++            _ = s.remove(5)
++            var seen: [Int] = []
++            s.forEach { seen.append($0) }
++            #expect(seen == [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11])
+         }
+-        _ = s.remove(5)
+-        var seen: [Int] = []
+-        s.forEach { seen.append($0) }
+-        #expect(seen == [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11])
+-    }
+ 
+-    @Test
+-    func `removeAll empties; reuse works; direct clone detaches`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        s.insert(1)
+-        s.insert(2)
+-        var c = s.clone()
+-        _ = c.remove(1)
+-        let mineHas = s.contains(1)
+-        let theirsHas = c.contains(1)
+-        #expect(mineHas)
+-        #expect(!theirsHas)
+-        s.removeAll()
+-        let isEmpty = s.isEmpty
+-        #expect(isEmpty)
+-        s.insert(7)
+-        let has7 = s.contains(7)
+-        #expect(has7)
++        @Test
++        func `removeAll empties; reuse works; direct clone detaches`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            s.insert(1)
++            s.insert(2)
++            var c = s.clone()
++            _ = c.remove(1)
++            let mineHas = s.contains(1)
++            let theirsHas = c.contains(1)
++            #expect(mineHas)
++            #expect(!theirsHas)
++            s.removeAll()
++            let isEmpty = s.isEmpty
++            #expect(isEmpty)
++            s.insert(7)
++            let has7 = s.contains(7)
++            #expect(has7)
++        }
+     }
+ }
+ 
+-@Suite(.serialized)
+-struct `Set.Ordered Order Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `positional subscript reads insertion order, both columns`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        s.insert(10)
+-        s.insert(20)
+-        s.insert(30)
+-        let a = s[0]
+-        let b = s[1]
+-        let c = s[2]
+-        #expect(a == 10)
+-        #expect(b == 20)
+-        #expect(c == 30)
+-
+-        var t = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        t.insert(7)
+-        t.insert(8)
+-        let x = t[0]
+-        let y = t[1]
+-        #expect(x == 7)
+-        #expect(y == 8)
+-    }
++extension `Set.Ordered Tests` {
++    @Suite(.serialized)
++    struct `Set.Ordered Order Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `positional subscript reads insertion order, both columns`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            s.insert(10)
++            s.insert(20)
++            s.insert(30)
++            let a = s[0]
++            let b = s[1]
++            let c = s[2]
++            #expect(a == 10)
++            #expect(b == 20)
++            #expect(c == 30)
++
++            var t = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            t.insert(7)
++            t.insert(8)
++            let x = t[0]
++            let y = t[1]
++            #expect(x == 7)
++            #expect(y == 8)
++        }
+ 
+-    @Test
+-    func `index(of:) returns the insertion position; nil for absent members`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        s.insert(10)
+-        s.insert(20)
+-        s.insert(30)
+-        let i10 = s.index(of: 10)
+-        let i30 = s.index(of: 30)
+-        let missing = s.index(of: 40)
+-        #expect(i10 == 0)
+-        #expect(i30 == 2)
+-        #expect(missing == nil)
+-
+-        var t = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        t.insert(5)
+-        t.insert(6)
+-        let i6 = t.index(of: 6)
+-        let absent = t.index(of: 9)
+-        #expect(i6 == 1)
+-        #expect(absent == nil)
+-    }
++        @Test
++        func `index(of:) returns the insertion position; nil for absent members`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            s.insert(10)
++            s.insert(20)
++            s.insert(30)
++            let i10 = s.index(of: 10)
++            let i30 = s.index(of: 30)
++            let missing = s.index(of: 40)
++            #expect(i10 == 0)
++            #expect(i30 == 2)
++            #expect(missing == nil)
++
++            var t = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            t.insert(5)
++            t.insert(6)
++            let i6 = t.index(of: 6)
++            let absent = t.index(of: 9)
++            #expect(i6 == 1)
++            #expect(absent == nil)
++        }
+ 
+-    @Test
+-    func `removal shifts later members down; insertion order is preserved`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        s.insert(1)
+-        s.insert(2)
+-        s.insert(3)
+-        s.insert(4)
+-        _ = s.remove(2)
+-        let a = s[0]
+-        let b = s[1]
+-        let c = s[2]
+-        #expect(a == 1)
+-        #expect(b == 3)
+-        #expect(c == 4)
+-        let i4 = s.index(of: 4)
+-        #expect(i4 == 2)
+-    }
++        @Test
++        func `removal shifts later members down; insertion order is preserved`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            s.insert(1)
++            s.insert(2)
++            s.insert(3)
++            s.insert(4)
++            _ = s.remove(2)
++            let a = s[0]
++            let b = s[1]
++            let c = s[2]
++            #expect(a == 1)
++            #expect(b == 3)
++            #expect(c == 4)
++            let i4 = s.index(of: 4)
++            #expect(i4 == 2)
++        }
+ 
+-    @Test
+-    func `re-insertion goes to the end`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        s.insert(1)
+-        s.insert(2)
+-        s.insert(3)
+-        _ = s.remove(1)
+-        s.insert(1)
+-        var seen: [Int] = []
+-        s.forEach { seen.append($0) }
+-        #expect(seen == [2, 3, 1])
+-        let i1 = s.index(of: 1)
+-        #expect(i1 == 2)
+-    }
++        @Test
++        func `re-insertion goes to the end`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            s.insert(1)
++            s.insert(2)
++            s.insert(3)
++            _ = s.remove(1)
++            s.insert(1)
++            var seen: [Int] = []
++            s.forEach { seen.append($0) }
++            #expect(seen == [2, 3, 1])
++            let i1 = s.index(of: 1)
++            #expect(i1 == 2)
++        }
+ 
+-    @Test
+-    func `first and last track the insertion boundary; nil when empty`() {
+-        var s = Set<Int>.Ordered(minimumCapacity: 4)
+-        let emptyFirst = s.first
+-        let emptyLast = s.last
+-        #expect(emptyFirst == nil)
+-        #expect(emptyLast == nil)
+-        s.insert(10)
+-        s.insert(20)
+-        s.insert(30)
+-        let f = s.first
+-        let l = s.last
+-        #expect(f == 10)
+-        #expect(l == 30)
+-        _ = s.remove(10)
+-        let f2 = s.first
+-        #expect(f2 == 20)
+-        _ = s.remove(30)
+-        let l2 = s.last
+-        #expect(l2 == 20)
++        @Test
++        func `first and last track the insertion boundary; nil when empty`() {
++            var s = Set<Int>.Ordered(minimumCapacity: 4)
++            let emptyFirst = s.first
++            let emptyLast = s.last
++            #expect(emptyFirst == nil)
++            #expect(emptyLast == nil)
++            s.insert(10)
++            s.insert(20)
++            s.insert(30)
++            let f = s.first
++            let l = s.last
++            #expect(f == 10)
++            #expect(l == 30)
++            _ = s.remove(10)
++            let f2 = s.first
++            #expect(f2 == 20)
++            _ = s.remove(30)
++            let l2 = s.last
++            #expect(l2 == 20)
++        }
+     }
+ }
+ 
+-@Suite(.serialized)
+-struct `Set.Ordered CoW Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `copies share until mutation; inserts detach through the box`() {
+-        var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        a.insert(1)
+-        let b = a
+-        a.insert(2)
+-        let mine = a.count
+-        let theirs = b.count
+-        #expect(mine == Index<Int>.Count(2))
+-        #expect(theirs == Index<Int>.Count(1))
+-        let aHas2 = a.contains(2)
+-        let bHas2 = b.contains(2)
+-        #expect(aHas2)
+-        #expect(!bHas2)
+-    }
++extension `Set.Ordered Tests` {
++    @Suite(.serialized)
++    struct `Set.Ordered CoW Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `copies share until mutation; inserts detach through the box`() {
++            var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            a.insert(1)
++            let b = a
++            a.insert(2)
++            let mine = a.count
++            let theirs = b.count
++            #expect(mine == Index<Int>.Count(2))
++            #expect(theirs == Index<Int>.Count(1))
++            let aHas2 = a.contains(2)
++            let bHas2 = b.contains(2)
++            #expect(aHas2)
++            #expect(!bHas2)
++        }
+ 
+-    @Test
+-    func `ordered reads never detach; removal detaches; generic clone detaches`() {
+-        var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        a.insert(1)
+-        a.insert(2)
+-        let b = a
+-        let pos = a.index(of: 2)
+-        let head = a.first
+-        let tail = b.last
+-        let read = a[0]
+-        #expect(pos == 1)
+-        #expect(head == 1)
+-        #expect(tail == 2)
+-        #expect(read == 1)
+-
+-        let removed = a.remove(1)
+-        #expect(removed == 1)
+-        let bStillHas = b.contains(1)
+-        #expect(bStillHas)
+-
+-        var c = a.clone()
+-        c.insert(9)
+-        let aHas9 = a.contains(9)
+-        let cHas9 = c.contains(9)
+-        #expect(!aHas9)
+-        #expect(cHas9)
+-    }
++        @Test
++        func `ordered reads never detach; removal detaches; generic clone detaches`() {
++            var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            a.insert(1)
++            a.insert(2)
++            let b = a
++            let pos = a.index(of: 2)
++            let head = a.first
++            let tail = b.last
++            let read = a[0]
++            #expect(pos == 1)
++            #expect(head == 1)
++            #expect(tail == 2)
++            #expect(read == 1)
++
++            let removed = a.remove(1)
++            #expect(removed == 1)
++            let bStillHas = b.contains(1)
++            #expect(bStillHas)
++
++            var c = a.clone()
++            c.insert(9)
++            let aHas9 = a.contains(9)
++            let cHas9 = c.contains(9)
++            #expect(!aHas9)
++            #expect(cHas9)
++        }
+ 
+-    @Test
+-    func `removeAll detaches to a fresh box; the sibling is untouched`() {
+-        var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        a.insert(1)
+-        let b = a
+-        a.removeAll()
+-        let aEmpty = a.isEmpty
+-        let bHas = b.contains(1)
+-        #expect(aEmpty)
+-        #expect(bHas)
+-    }
++        @Test
++        func `removeAll detaches to a fresh box; the sibling is untouched`() {
++            var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            a.insert(1)
++            let b = a
++            a.removeAll()
++            let aEmpty = a.isEmpty
++            let bHas = b.contains(1)
++            #expect(aEmpty)
++            #expect(bHas)
++        }
+ 
+-    @Test
+-    func `equality and hashing are order-sensitive (the S5 carriers)`() {
+-        var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        a.insert(1)
+-        a.insert(2)
+-        var b = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        b.insert(1)
+-        b.insert(2)
+-        var c = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
+-        c.insert(2)
+-        c.insert(1)
+-        #expect(a == b)
+-        #expect(a != c)
+-        let ha = a.hashValue
+-        let hb = b.hashValue
+-        #expect(ha == hb)
++        @Test
++        func `equality and hashing are order-sensitive (the S5 carriers)`() {
++            var a = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            a.insert(1)
++            a.insert(2)
++            var b = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            b.insert(1)
++            b.insert(2)
++            var c = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 4)
++            c.insert(2)
++            c.insert(1)
++            #expect(a == b)
++            #expect(a != c)
++            let ha = a.hashValue
++            let hb = b.hashValue
++            #expect(ha == hb)
++        }
+     }
+ }
+ 
+-@Suite(.serialized)
+-struct `Set.Ordered Teardown Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `move-only members flow through and tear down exactly once`() {
+-        OrderedProbe.reset()
+-        do {
+-            var s = Set<OrderedItem>.Ordered(minimumCapacity: 4)
+-            s.insert(OrderedItem(1))
+-            s.insert(OrderedItem(2))
+-            let has = s.contains(OrderedItem(2))
+-            #expect(has)
+-            if let removed: OrderedItem = s.remove(OrderedItem(1)) {
+-                let id = removed.id
+-                #expect(id == 1)
+-            } else {
+-                Issue.record("expected the removed member")
++extension `Set.Ordered Tests` {
++    @Suite(.serialized)
++    struct `Set.Ordered Teardown Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `move-only members flow through and tear down exactly once`() {
++            OrderedProbe.reset()
++            do {
++                var s = Set<OrderedItem>.Ordered(minimumCapacity: 4)
++                s.insert(OrderedItem(1))
++                s.insert(OrderedItem(2))
++                let has = s.contains(OrderedItem(2))
++                #expect(has)
++                if let removed: OrderedItem = s.remove(OrderedItem(1)) {
++                    let id = removed.id
++                    #expect(id == 1)
++                } else {
++                    Issue.record("expected the removed member")
++                }
+             }
++            let all = OrderedProbe.destroyedSorted
++            let twos = all.filter { $0 == 2 }.count
++            #expect(twos == 2)
+         }
+-        let all = OrderedProbe.destroyedSorted
+-        let twos = all.filter { $0 == 2 }.count
+-        #expect(twos == 2)
+-    }
+ 
+-    @Test
+-    func `positional reads borrow move-only members in place`() {
+-        OrderedProbe.reset()
+-        do {
+-            var s = Set<OrderedItem>.Ordered(minimumCapacity: 4)
+-            s.insert(OrderedItem(7))
+-            s.insert(OrderedItem(8))
+-            let id0 = s[0].id
+-            let id1 = s[1].id
+-            #expect(id0 == 7)
+-            #expect(id1 == 8)
+-            let pos = s.index(of: OrderedItem(8))
+-            #expect(pos == 1)
++        @Test
++        func `positional reads borrow move-only members in place`() {
++            OrderedProbe.reset()
++            do {
++                var s = Set<OrderedItem>.Ordered(minimumCapacity: 4)
++                s.insert(OrderedItem(7))
++                s.insert(OrderedItem(8))
++                let id0 = s[0].id
++                let id1 = s[1].id
++                #expect(id0 == 7)
++                #expect(id1 == 8)
++                let pos = s.index(of: OrderedItem(8))
++                #expect(pos == 1)
++            }
++            let sevens = OrderedProbe.destroyedSorted.filter { $0 == 7 }.count
++            #expect(sevens == 1)
+         }
+-        let sevens = OrderedProbe.destroyedSorted.filter { $0 == 7 }.count
+-        #expect(sevens == 1)
+-    }
+ 
+-    @Test
+-    func `the boxed move-only lane tears down via the box drain`() {
+-        OrderedProbe2.reset()
+-        do {
+-            var s = __Set<Ownership.Shared<OrderedItem2, OrderedColumn<OrderedItem2>>>.Ordered(
+-                minimumCapacity: 4
+-            )
+-            s.insert(OrderedItem2(7))
+-            s.insert(OrderedItem2(8))
+-            let n = s.count
+-            #expect(n == Index<OrderedItem2>.Count(2))
++        @Test
++        func `the boxed move-only lane tears down via the box drain`() {
++            OrderedProbe2.reset()
++            do {
++                var s = __Set<Ownership.Shared<OrderedItem2, OrderedColumn<OrderedItem2>>>.Ordered(
++                    minimumCapacity: 4
++                )
++                s.insert(OrderedItem2(7))
++                s.insert(OrderedItem2(8))
++                let n = s.count
++                #expect(n == Index<OrderedItem2>.Count(2))
++            }
++            let all = OrderedProbe2.destroyedSorted
++            #expect(all == [7, 8])
+         }
+-        let all = OrderedProbe2.destroyedSorted
+-        #expect(all == [7, 8])
+     }
+ }
+ 
+@@ -437,19 +449,21 @@ extension OrderedProbe2 {
+     static var destroyedSorted: [Int] { unsafe _destroyed.sorted() }
+ }
+ 
+-@Suite
+-struct `Set.Ordered Sendable Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `sendable composes through both columns`() {
+-        let a = Set<Int>.Ordered(minimumCapacity: 1)
+-        requireSendable(a)
+-        let b = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 1)
+-        requireSendable(b)
+-        #expect(Bool(true))
++extension `Set.Ordered Tests` {
++    @Suite
++    struct `Set.Ordered Sendable Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `sendable composes through both columns`() {
++            let a = Set<Int>.Ordered(minimumCapacity: 1)
++            requireSendable(a)
++            let b = __Set<Ownership.Shared<Int, OrderedColumn<Int>>>.Ordered(minimumCapacity: 1)
++            requireSendable(b)
++            #expect(Bool(true))
++        }
+     }
+ }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,223 @@
+From 58a71290b8756b15e91647f5d6a17fcc4da00825 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:58 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Clock.Immediate Tests.swift               | 80 ++++++++--------
+ .../Clock.Test Tests.swift                    | 94 ++++++++++---------
+ 2 files changed, 91 insertions(+), 83 deletions(-)
+
+diff --git a/Tests/Clock Concurrency Tests/Clock.Immediate Tests.swift b/Tests/Clock Concurrency Tests/Clock.Immediate Tests.swift
+index af9a5c8..f3e9705 100644
+--- a/Tests/Clock Concurrency Tests/Clock.Immediate Tests.swift	
++++ b/Tests/Clock Concurrency Tests/Clock.Immediate Tests.swift	
+@@ -2,47 +2,51 @@ import Clock_Concurrency
+ import Testing
+ import Time
+ 
+-@Suite
+-struct `Clock.Immediate` {
+-    @Test
+-    func `sleeping until a deadline adopts that deadline as now`() async throws {
+-        let clock = Clock.Immediate()
+-        let deadline = clock.now.advanced(by: .seconds(5))
+-
+-        try await clock.sleep(until: deadline)
+-
+-        #expect(clock.now == deadline)
+-    }
+-
+-    @Test
+-    func `a fresh clock reports the instant it was created with`() {
+-        let start = Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
+-            by: .nanoseconds(0)
+-        ).advanced(by: .seconds(3))
+-        let clock = Clock.Immediate(now: start)
+-
+-        #expect(clock.now == start)
+-    }
+-
+-    @Test
+-    func `sleeping for an earlier deadline never moves now backwards`() async throws {
+-        let clock = Clock.Immediate(
+-            now: Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
+-                by: .nanoseconds(10)
++enum `Clock.Immediate Tests` {}
++
++extension `Clock.Immediate Tests` {
++    @Suite
++    struct `Clock.Immediate` {
++        @Test
++        func `sleeping until a deadline adopts that deadline as now`() async throws {
++            let clock = Clock.Immediate()
++            let deadline = clock.now.advanced(by: .seconds(5))
++
++            try await clock.sleep(until: deadline)
++
++            #expect(clock.now == deadline)
++        }
++
++        @Test
++        func `a fresh clock reports the instant it was created with`() {
++            let start = Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
++                by: .nanoseconds(0)
++            ).advanced(by: .seconds(3))
++            let clock = Clock.Immediate(now: start)
++
++            #expect(clock.now == start)
++        }
++
++        @Test
++        func `sleeping for an earlier deadline never moves now backwards`() async throws {
++            let clock = Clock.Immediate(
++                now: Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
++                    by: .nanoseconds(10)
++                )
+             )
+-        )
+ 
+-        try await clock.sleep(
+-            until: Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
+-                by: .nanoseconds(5)
++            try await clock.sleep(
++                until: Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
++                    by: .nanoseconds(5)
++                )
+             )
+-        )
+ 
+-        #expect(
+-            clock.now
+-                == Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
+-                    by: .nanoseconds(10)
+-                )
+-        )
++            #expect(
++                clock.now
++                    == Clock.Immediate.Instant(Time.Instant(secondsSinceUnixEpoch: 0)).advanced(
++                        by: .nanoseconds(10)
++                    )
++            )
++        }
+     }
+ }
+diff --git a/Tests/Clock Concurrency Tests/Clock.Test Tests.swift b/Tests/Clock Concurrency Tests/Clock.Test Tests.swift
+index 9cb9e5a..39945f9 100644
+--- a/Tests/Clock Concurrency Tests/Clock.Test Tests.swift	
++++ b/Tests/Clock Concurrency Tests/Clock.Test Tests.swift	
+@@ -1,59 +1,63 @@
+ import Clock_Concurrency
+ import Testing
+ 
+-@Suite
+-struct `Clock.Test` {
+-    enum Reach: CaseIterable, Sendable {
+-        case direct, existential, erased
+-    }
++enum `Clock.Test Tests` {}
+ 
+-    @MainActor
+-    @Test(arguments: Reach.allCases)
+-    func `advancing runs each woken sleeper on its actor until it sleeps again`(_ reach: Reach) async {
+-        for _ in 0..<100 {
+-            let test = Clock.Test()
+-            let ticks = Ticks()
+-            let task: Task<Void, any Swift.Error>
+-            switch reach {
+-            case .direct:
+-                task = Task.immediate { @MainActor in
+-                    for _ in 0..<3 {
+-                        try await test.sleep(for: .milliseconds(140))
+-                        ticks.count += 1
++extension `Clock.Test Tests` {
++    @Suite
++    struct `Clock.Test` {
++        enum Reach: CaseIterable, Sendable {
++            case direct, existential, erased
++        }
++
++        @MainActor
++        @Test(arguments: Reach.allCases)
++        func `advancing runs each woken sleeper on its actor until it sleeps again`(_ reach: Reach) async {
++            for _ in 0..<100 {
++                let test = Clock.Test()
++                let ticks = Ticks()
++                let task: Task<Void, any Swift.Error>
++                switch reach {
++                case .direct:
++                    task = Task.immediate { @MainActor in
++                        for _ in 0..<3 {
++                            try await test.sleep(for: .milliseconds(140))
++                            ticks.count += 1
++                        }
+                     }
+-                }
+-            case .existential, .erased:
+-                let clock: any Clock.Nonsending<Duration> = reach == .erased ? Clock.`Any`(test) : test
+-                task = Task.immediate { @MainActor in
+-                    for _ in 0..<3 {
+-                        try await clock.sleep(for: .milliseconds(140))
+-                        ticks.count += 1
++                case .existential, .erased:
++                    let clock: any Clock.Nonsending<Duration> = reach == .erased ? Clock.`Any`(test) : test
++                    task = Task.immediate { @MainActor in
++                        for _ in 0..<3 {
++                            try await clock.sleep(for: .milliseconds(140))
++                            ticks.count += 1
++                        }
+                     }
+                 }
++                await test.advance(by: .milliseconds(140))
++                #expect(ticks.count == 1)
++                await test.advance(by: .milliseconds(140))
++                #expect(ticks.count == 2)
++                await test.run()
++                #expect(ticks.count == 3)
++                task.cancel()
+             }
+-            await test.advance(by: .milliseconds(140))
+-            #expect(ticks.count == 1)
+-            await test.advance(by: .milliseconds(140))
+-            #expect(ticks.count == 2)
+-            await test.run()
+-            #expect(ticks.count == 3)
+-            task.cancel()
+         }
+-    }
+ 
+-    @MainActor
+-    @Test
+-    func `a sleep until now returns at once`() async throws {
+-        let test = Clock.Test()
+-        let ticks = Ticks()
+-        let task = Task.immediate { @MainActor in
+-            try await test.sleep(until: test.now)
+-            ticks.count += 1
++        @MainActor
++        @Test
++        func `a sleep until now returns at once`() async throws {
++            let test = Clock.Test()
++            let ticks = Ticks()
++            let task = Task.immediate { @MainActor in
++                try await test.sleep(until: test.now)
++                ticks.count += 1
++            }
++            #expect(ticks.count == 1)
++            #expect(throws: Never.self) { try test.checkSuspension() }
++            task.cancel()
++            _ = await task.result
+         }
+-        #expect(ticks.count == 1)
+-        #expect(throws: Never.self) { try test.checkSuspension() }
+-        task.cancel()
+-        _ = await task.result
+     }
+ }
+ 
+-- 
+2.43.0
+

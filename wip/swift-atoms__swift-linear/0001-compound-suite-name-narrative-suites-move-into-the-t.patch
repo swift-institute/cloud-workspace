@@ -1,0 +1,236 @@
+From d00e13d3286290dca0e249fad61d784f52c7f8ff Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:03 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ Tests/Linear Tests/Vector Tests.swift | 196 +++++++++++++-------------
+ 1 file changed, 100 insertions(+), 96 deletions(-)
+
+diff --git a/Tests/Linear Tests/Vector Tests.swift b/Tests/Linear Tests/Vector Tests.swift
+index dff9a97..1a5b8e2 100644
+--- a/Tests/Linear Tests/Vector Tests.swift	
++++ b/Tests/Linear Tests/Vector Tests.swift	
+@@ -5,116 +5,120 @@ import Testing
+ private enum Drawing {}
+ private enum MappingFailure: Swift.Error { case stop }
+ 
+-@Suite struct `Linear atom delegation` {
+-    @Test func `empty vectors map without evaluating transform`() throws {
+-        let vector = Linear<Int, Drawing>.Vector<0>([])
+-        var calls = 0
+-        let mapped: Linear<String, Drawing>.Vector<0> = vector.map { value in
+-            calls += 1
+-            return String(value)
+-        }
+-        #expect(mapped.components.count == 0)
+-        #expect(calls == 0)
+-        let encoded = try JSONEncoder().encode(vector)
+-        #expect(String(decoding: encoded, as: UTF8.self) == "[]")
+-        #expect(try JSONDecoder().decode(Linear<Int, Drawing>.Vector<0>.self, from: encoded) == vector)
+-    }
++enum `Vector Tests` {}
+ 
+-    @Test func `vector mapping visits once in order and preserves typed failure`() {
+-        let vector = Linear<Int, Drawing>.Vector<3>([3, 1, 2])
+-        var visited: [Int] = []
+-        let mapped = vector.map { value in
+-            visited.append(value)
+-            return String(value)
++extension `Vector Tests` {
++    @Suite struct `Linear atom delegation` {
++        @Test func `empty vectors map without evaluating transform`() throws {
++            let vector = Linear<Int, Drawing>.Vector<0>([])
++            var calls = 0
++            let mapped: Linear<String, Drawing>.Vector<0> = vector.map { value in
++                calls += 1
++                return String(value)
++            }
++            #expect(mapped.components.count == 0)
++            #expect(calls == 0)
++            let encoded = try JSONEncoder().encode(vector)
++            #expect(String(decoding: encoded, as: UTF8.self) == "[]")
++            #expect(try JSONDecoder().decode(Linear<Int, Drawing>.Vector<0>.self, from: encoded) == vector)
+         }
+-        #expect(visited == [3, 1, 2])
+-        #expect(mapped[0] == "3" && mapped[2] == "2")
+-        visited = []
+-        do {
+-            let _: Linear<Int, Drawing>.Vector<3> = try vector.map { (value: Int) throws(MappingFailure) in
++
++        @Test func `vector mapping visits once in order and preserves typed failure`() {
++            let vector = Linear<Int, Drawing>.Vector<3>([3, 1, 2])
++            var visited: [Int] = []
++            let mapped = vector.map { value in
+                 visited.append(value)
+-                if value == 1 { throw .stop }
+-                return value
++                return String(value)
+             }
+-            Issue.record("Expected mapping failure")
+-        } catch {
+-            let typed: MappingFailure = error
+-            #expect(typed == .stop)
++            #expect(visited == [3, 1, 2])
++            #expect(mapped[0] == "3" && mapped[2] == "2")
++            visited = []
++            do {
++                let _: Linear<Int, Drawing>.Vector<3> = try vector.map { (value: Int) throws(MappingFailure) in
++                    visited.append(value)
++                    if value == 1 { throw .stop }
++                    return value
++                }
++                Issue.record("Expected mapping failure")
++            } catch {
++                let typed: MappingFailure = error
++                #expect(typed == .stop)
++            }
++            #expect(visited == [3, 1])
+         }
+-        #expect(visited == [3, 1])
+-    }
+ 
+-    @Test func `vector decoding enforces exact dimension`() throws {
+-        typealias V = Linear<Int, Drawing>.Vector<2>
+-        for json in ["[]", "[1]", "[1,2,3]", "[1,\"x\"]"] {
+-            #expect(throws: DecodingError.self) { try JSONDecoder().decode(V.self, from: Data(json.utf8)) }
++        @Test func `vector decoding enforces exact dimension`() throws {
++            typealias V = Linear<Int, Drawing>.Vector<2>
++            for json in ["[]", "[1]", "[1,2,3]", "[1,\"x\"]"] {
++                #expect(throws: DecodingError.self) { try JSONDecoder().decode(V.self, from: Data(json.utf8)) }
++            }
++            let decoded = try JSONDecoder().decode(V.self, from: Data("[1,2]".utf8))
++            #expect(decoded == V([1, 2]))
++            #expect(Set([decoded, V([1, 2]), V([2, 1])]).count == 2)
+         }
+-        let decoded = try JSONDecoder().decode(V.self, from: Data("[1,2]".utf8))
+-        #expect(decoded == V([1, 2]))
+-        #expect(Set([decoded, V([1, 2]), V([2, 1])]).count == 2)
+-    }
+ 
+-    @Test func `delegated value storage supports snapshot and component writeback`() {
+-        var vector = Linear<Int, Drawing>.Vector<2>([1, 2])
+-        let snapshot = vector
+-        vector.components[0] = 9
+-        vector[1] = 8
+-        #expect(snapshot[0] == 1 && snapshot[1] == 2)
+-        #expect(vector[0] == 9 && vector[1] == 8)
+-        var matrix = Linear<Int, Drawing>.Matrix<2, 2>(rows: [[1, 2], [3, 4]])
+-        let old = matrix
+-        matrix.rows[0][1] = 7
+-        matrix[row: 1] = [8, 9]
+-        #expect(old[0, 1] == 2 && old[1, 1] == 4)
+-        #expect(matrix[0, 1] == 7 && matrix[1, 1] == 9)
+-    }
+-
+-    @Test func `empty matrix shapes transpose and map without scalar access`() {
+-        let noRows = Linear<Int, Drawing>.Matrix<0, 3>(rows: [])
+-        let transposed: Linear<Int, Drawing>.Matrix<3, 0> = noRows.transpose
+-        #expect(transposed.rows.count == 3)
+-        #expect(transposed[row: 0].count == 0)
+-        #expect(transposed.transpose == noRows)
+-        var calls = 0
+-        let result = transposed.map { value in
+-            calls += 1
+-            return String(value)
++        @Test func `delegated value storage supports snapshot and component writeback`() {
++            var vector = Linear<Int, Drawing>.Vector<2>([1, 2])
++            let snapshot = vector
++            vector.components[0] = 9
++            vector[1] = 8
++            #expect(snapshot[0] == 1 && snapshot[1] == 2)
++            #expect(vector[0] == 9 && vector[1] == 8)
++            var matrix = Linear<Int, Drawing>.Matrix<2, 2>(rows: [[1, 2], [3, 4]])
++            let old = matrix
++            matrix.rows[0][1] = 7
++            matrix[row: 1] = [8, 9]
++            #expect(old[0, 1] == 2 && old[1, 1] == 4)
++            #expect(matrix[0, 1] == 7 && matrix[1, 1] == 9)
+         }
+-        #expect(result.rows.count == 3)
+-        #expect(calls == 0)
+-        let product: Linear<Int, Drawing>.Matrix<3, 3> = transposed.multiplied(by: noRows)
+-        #expect(product == .zero)
+-    }
+ 
+-    @Test func `matrix mapping visits each scalar once in row order`() {
+-        let matrix = Linear<Int, Drawing>.Matrix<2, 2>(rows: [[1, 2], [3, 4]])
+-        var visited: [Int] = []
+-        let result = matrix.map { value in
+-            visited.append(value)
+-            return String(value)
++        @Test func `empty matrix shapes transpose and map without scalar access`() {
++            let noRows = Linear<Int, Drawing>.Matrix<0, 3>(rows: [])
++            let transposed: Linear<Int, Drawing>.Matrix<3, 0> = noRows.transpose
++            #expect(transposed.rows.count == 3)
++            #expect(transposed[row: 0].count == 0)
++            #expect(transposed.transpose == noRows)
++            var calls = 0
++            let result = transposed.map { value in
++                calls += 1
++                return String(value)
++            }
++            #expect(result.rows.count == 3)
++            #expect(calls == 0)
++            let product: Linear<Int, Drawing>.Matrix<3, 3> = transposed.multiplied(by: noRows)
++            #expect(product == .zero)
+         }
+-        #expect(visited == [1, 2, 3, 4])
+-        #expect(result[1, 0] == "3")
+-        visited = []
+-        do {
+-            let _ = try matrix.map { (value: Int) throws(MappingFailure) in
++
++        @Test func `matrix mapping visits each scalar once in row order`() {
++            let matrix = Linear<Int, Drawing>.Matrix<2, 2>(rows: [[1, 2], [3, 4]])
++            var visited: [Int] = []
++            let result = matrix.map { value in
+                 visited.append(value)
+-                if value == 2 { throw .stop }
+-                return value
++                return String(value)
++            }
++            #expect(visited == [1, 2, 3, 4])
++            #expect(result[1, 0] == "3")
++            visited = []
++            do {
++                let _ = try matrix.map { (value: Int) throws(MappingFailure) in
++                    visited.append(value)
++                    if value == 2 { throw .stop }
++                    return value
++                }
++                Issue.record("Expected failure")
++            } catch {
++                let typed: MappingFailure = error
++                #expect(typed == .stop)
+             }
+-            Issue.record("Expected failure")
+-        } catch {
+-            let typed: MappingFailure = error
+-            #expect(typed == .stop)
++            #expect(visited == [1, 2])
+         }
+-        #expect(visited == [1, 2])
+-    }
+ 
+-    @Test func `matrix keeps its legacy keyed wire format`() throws {
+-        typealias M = Linear<Int, Drawing>.Matrix<2, 2>
+-        let original = M(a: 1, b: 2, c: 3, d: 4)
+-        let data = try JSONEncoder().encode(original)
+-        #expect(try JSONDecoder().decode([String: Int].self, from: data) == ["a": 1, "b": 2, "c": 3, "d": 4])
+-        #expect(try JSONDecoder().decode(M.self, from: data) == original)
++        @Test func `matrix keeps its legacy keyed wire format`() throws {
++            typealias M = Linear<Int, Drawing>.Matrix<2, 2>
++            let original = M(a: 1, b: 2, c: 3, d: 4)
++            let data = try JSONEncoder().encode(original)
++            #expect(try JSONDecoder().decode([String: Int].self, from: data) == ["a": 1, "b": 2, "c": 3, "d": 4])
++            #expect(try JSONDecoder().decode(M.self, from: data) == original)
++        }
+     }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,2908 @@
+From a8e34d90d2db593fe670e04a0e73c2793a571c54 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:14 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../BodyPart Codable Tests.swift              |  80 +--
+ .../BodyPart.Headers Codable Tests.swift      |  72 +--
+ .../Boundary Codable Tests.swift              | 100 ++--
+ .../RFC 2046 Tests/BodyPart Coder Tests.swift | 286 ++++++-----
+ Tests/RFC 2046 Tests/BodyPart Tests.swift     | 158 +++---
+ .../BodyPart.Headers Coder Tests.swift        | 482 +++++++++---------
+ .../BodyPart.Headers Tests.swift              | 156 +++---
+ Tests/RFC 2046 Tests/Boundary Tests.swift     | 220 ++++----
+ .../Boundary random Tests.swift               |  11 +-
+ .../RFC 2046 Tests/Coder Witness Tests.swift  | 150 +++---
+ .../Multipart Boundary Parameter Tests.swift  |  56 +-
+ .../Multipart Coder Tests.swift               | 302 +++++------
+ .../RFC 2046 Tests/MultipartError Tests.swift | 208 ++++----
+ .../QuotedPrintable Tests.swift               |  70 +--
+ .../Serialization Equivalence Tests.swift     | 166 +++---
+ 15 files changed, 1312 insertions(+), 1205 deletions(-)
+
+diff --git a/Tests/RFC 2046 Foundation Integration Tests/BodyPart Codable Tests.swift b/Tests/RFC 2046 Foundation Integration Tests/BodyPart Codable Tests.swift
+index f6bcdc7..b50fa86 100644
+--- a/Tests/RFC 2046 Foundation Integration Tests/BodyPart Codable Tests.swift	
++++ b/Tests/RFC 2046 Foundation Integration Tests/BodyPart Codable Tests.swift	
+@@ -5,43 +5,47 @@ import RFC_2046
+ import RFC_2046_Foundation_Integration
+ import Testing
+ 
+-@Suite
+-struct `BodyPart - Codable` {
+-    @Test
+-    func `Round-trip encoding preserves part`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(
+-            contentType: .textPlainUTF8,
+-            contentTransferEncoding: .base64
+-        )
+-        let content = RFC_2046.BodyPart.Content("Hello, World!")
+-        let original = RFC_2046.BodyPart(headers: headers, content: content)
+-
+-        let encoder = JSONEncoder()
+-        let decoder = JSONDecoder()
+-
+-        let data = try encoder.encode(original)
+-        let decoded = try decoder.decode(RFC_2046.BodyPart.self, from: data)
+-
+-        #expect(decoded == original)
+-        #expect(decoded.content.description == original.content.description)
+-        #expect(decoded.contentType == original.contentType)
+-        #expect(decoded.transferEncoding == original.transferEncoding)
+-    }
+-
+-    @Test
+-    func `Encoding preserves binary content`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(contentType: .imageJPEG)
+-        let content = RFC_2046.BodyPart.Content(
+-            [0xFF, 0xD8, 0xFF, 0xE0].map(Byte.init(bitPattern:))
+-        )
+-        let original = RFC_2046.BodyPart(headers: headers, content: content)
+-
+-        let encoder = JSONEncoder()
+-        let decoder = JSONDecoder()
+-
+-        let data = try encoder.encode(original)
+-        let decoded = try decoder.decode(RFC_2046.BodyPart.self, from: data)
+-
+-        #expect(decoded.content.rawValue == original.content.rawValue)
++enum `BodyPart Codable Tests` {}
++
++extension `BodyPart Codable Tests` {
++    @Suite
++    struct `BodyPart - Codable` {
++        @Test
++        func `Round-trip encoding preserves part`() throws {
++            let headers = RFC_2046.BodyPart.Headers(
++                contentType: .textPlainUTF8,
++                contentTransferEncoding: .base64
++            )
++            let content = RFC_2046.BodyPart.Content("Hello, World!")
++            let original = RFC_2046.BodyPart(headers: headers, content: content)
++
++            let encoder = JSONEncoder()
++            let decoder = JSONDecoder()
++
++            let data = try encoder.encode(original)
++            let decoded = try decoder.decode(RFC_2046.BodyPart.self, from: data)
++
++            #expect(decoded == original)
++            #expect(decoded.content.description == original.content.description)
++            #expect(decoded.contentType == original.contentType)
++            #expect(decoded.transferEncoding == original.transferEncoding)
++        }
++
++        @Test
++        func `Encoding preserves binary content`() throws {
++            let headers = RFC_2046.BodyPart.Headers(contentType: .imageJPEG)
++            let content = RFC_2046.BodyPart.Content(
++                [0xFF, 0xD8, 0xFF, 0xE0].map(Byte.init(bitPattern:))
++            )
++            let original = RFC_2046.BodyPart(headers: headers, content: content)
++
++            let encoder = JSONEncoder()
++            let decoder = JSONDecoder()
++
++            let data = try encoder.encode(original)
++            let decoded = try decoder.decode(RFC_2046.BodyPart.self, from: data)
++
++            #expect(decoded.content.rawValue == original.content.rawValue)
++        }
+     }
+ }
+diff --git a/Tests/RFC 2046 Foundation Integration Tests/BodyPart.Headers Codable Tests.swift b/Tests/RFC 2046 Foundation Integration Tests/BodyPart.Headers Codable Tests.swift
+index bf63d94..4ee9406 100644
+--- a/Tests/RFC 2046 Foundation Integration Tests/BodyPart.Headers Codable Tests.swift	
++++ b/Tests/RFC 2046 Foundation Integration Tests/BodyPart.Headers Codable Tests.swift	
+@@ -6,39 +6,43 @@ import RFC_2183
+ import RFC_5322
+ import Testing
+ 
+-@Suite
+-struct `BodyPart.Headers - Codable` {
+-    @Test
+-    func `Round-trip encoding preserves headers`() throws {
+-        let original = try RFC_2046.BodyPart.Headers(
+-            contentDisposition: .inline(),
+-            contentType: .textPlainUTF8,
+-            contentTransferEncoding: .base64,
+-            custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-        )
+-
+-        let encoder = JSONEncoder()
+-        let decoder = JSONDecoder()
+-
+-        let data = try encoder.encode(original)
+-        let decoded = try decoder.decode(RFC_2046.BodyPart.Headers.self, from: data)
+-
+-        #expect(decoded.contentDisposition == original.contentDisposition)
+-        #expect(decoded.contentType == original.contentType)
+-        #expect(decoded.contentTransferEncoding == original.contentTransferEncoding)
+-        #expect(decoded.custom == original.custom)
+-    }
+-
+-    @Test
+-    func `Empty headers encode and decode correctly`() throws {
+-        let original = RFC_2046.BodyPart.Headers()
+-
+-        let encoder = JSONEncoder()
+-        let decoder = JSONDecoder()
+-
+-        let data = try encoder.encode(original)
+-        let decoded = try decoder.decode(RFC_2046.BodyPart.Headers.self, from: data)
+-
+-        #expect(decoded == original)
++enum `BodyPart.Headers Codable Tests` {}
++
++extension `BodyPart.Headers Codable Tests` {
++    @Suite
++    struct `BodyPart.Headers - Codable` {
++        @Test
++        func `Round-trip encoding preserves headers`() throws {
++            let original = try RFC_2046.BodyPart.Headers(
++                contentDisposition: .inline(),
++                contentType: .textPlainUTF8,
++                contentTransferEncoding: .base64,
++                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++            )
++
++            let encoder = JSONEncoder()
++            let decoder = JSONDecoder()
++
++            let data = try encoder.encode(original)
++            let decoded = try decoder.decode(RFC_2046.BodyPart.Headers.self, from: data)
++
++            #expect(decoded.contentDisposition == original.contentDisposition)
++            #expect(decoded.contentType == original.contentType)
++            #expect(decoded.contentTransferEncoding == original.contentTransferEncoding)
++            #expect(decoded.custom == original.custom)
++        }
++
++        @Test
++        func `Empty headers encode and decode correctly`() throws {
++            let original = RFC_2046.BodyPart.Headers()
++
++            let encoder = JSONEncoder()
++            let decoder = JSONDecoder()
++
++            let data = try encoder.encode(original)
++            let decoded = try decoder.decode(RFC_2046.BodyPart.Headers.self, from: data)
++
++            #expect(decoded == original)
++        }
+     }
+ }
+diff --git a/Tests/RFC 2046 Foundation Integration Tests/Boundary Codable Tests.swift b/Tests/RFC 2046 Foundation Integration Tests/Boundary Codable Tests.swift
+index 4388130..66c4e86 100644
+--- a/Tests/RFC 2046 Foundation Integration Tests/Boundary Codable Tests.swift	
++++ b/Tests/RFC 2046 Foundation Integration Tests/Boundary Codable Tests.swift	
+@@ -3,66 +3,70 @@ import RFC_2046
+ import RFC_2046_Foundation_Integration
+ import Testing
+ 
+-@Suite
+-struct `Boundary - Codable` {
+-    @Test
+-    func `Encoding produces valid JSON`() throws {
+-        let boundary = try RFC_2046.Boundary("test-boundary")
+-        let encoder = JSONEncoder()
+-        let data = try encoder.encode(boundary)
+-        let json = String(decoding: data, as: UTF8.self)
+-        #expect(json == "\"test-boundary\"")
+-    }
++enum `Boundary Codable Tests` {}
+ 
+-    @Test
+-    func `Decoding valid JSON succeeds`() throws {
+-        let json = "\"test-boundary\""
+-        let decoder = JSONDecoder()
+-        let boundary = try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
+-        #expect(boundary.rawValue == "test-boundary")
+-    }
++extension `Boundary Codable Tests` {
++    @Suite
++    struct `Boundary - Codable` {
++        @Test
++        func `Encoding produces valid JSON`() throws {
++            let boundary = try RFC_2046.Boundary("test-boundary")
++            let encoder = JSONEncoder()
++            let data = try encoder.encode(boundary)
++            let json = String(decoding: data, as: UTF8.self)
++            #expect(json == "\"test-boundary\"")
++        }
+ 
+-    @Test
+-    func `Round-trip encoding preserves value`() throws {
+-        let original = try RFC_2046.Boundary("----=_Part_Custom")
+-        let encoder = JSONEncoder()
+-        let decoder = JSONDecoder()
++        @Test
++        func `Decoding valid JSON succeeds`() throws {
++            let json = "\"test-boundary\""
++            let decoder = JSONDecoder()
++            let boundary = try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            #expect(boundary.rawValue == "test-boundary")
++        }
+ 
+-        let data = try encoder.encode(original)
+-        let decoded = try decoder.decode(RFC_2046.Boundary.self, from: data)
++        @Test
++        func `Round-trip encoding preserves value`() throws {
++            let original = try RFC_2046.Boundary("----=_Part_Custom")
++            let encoder = JSONEncoder()
++            let decoder = JSONDecoder()
+ 
+-        #expect(decoded == original)
+-        #expect(decoded.rawValue == original.rawValue)
+-    }
++            let data = try encoder.encode(original)
++            let decoded = try decoder.decode(RFC_2046.Boundary.self, from: data)
+ 
+-    @Test
+-    func `Decoding invalid boundary throws`() throws {
+-        let json = "\"\""
+-        let decoder = JSONDecoder()
++            #expect(decoded == original)
++            #expect(decoded.rawValue == original.rawValue)
++        }
++
++        @Test
++        func `Decoding invalid boundary throws`() throws {
++            let json = "\"\""
++            let decoder = JSONDecoder()
+ 
+-        #expect(throws: DecodingError.self) {
+-            try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            #expect(throws: DecodingError.self) {
++                try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Decoding boundary ending with space throws`() throws {
+-        let json = "\"test \""
+-        let decoder = JSONDecoder()
++        @Test
++        func `Decoding boundary ending with space throws`() throws {
++            let json = "\"test \""
++            let decoder = JSONDecoder()
+ 
+-        #expect(throws: DecodingError.self) {
+-            try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            #expect(throws: DecodingError.self) {
++                try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Decoding boundary too long throws`() throws {
+-        let longBoundary = String(repeating: "x", count: 71)
+-        let json = "\"\(longBoundary)\""
+-        let decoder = JSONDecoder()
++        @Test
++        func `Decoding boundary too long throws`() throws {
++            let longBoundary = String(repeating: "x", count: 71)
++            let json = "\"\(longBoundary)\""
++            let decoder = JSONDecoder()
+ 
+-        #expect(throws: DecodingError.self) {
+-            try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            #expect(throws: DecodingError.self) {
++                try decoder.decode(RFC_2046.Boundary.self, from: Data(json.utf8))
++            }
+         }
+     }
+ }
+diff --git a/Tests/RFC 2046 Tests/BodyPart Coder Tests.swift b/Tests/RFC 2046 Tests/BodyPart Coder Tests.swift
+index 27693aa..d3a28b6 100644
+--- a/Tests/RFC 2046 Tests/BodyPart Coder Tests.swift	
++++ b/Tests/RFC 2046 Tests/BodyPart Coder Tests.swift	
+@@ -4,171 +4,179 @@
+     import RFC_2046
+     import Testing
+ 
+-    @Suite
+-    struct `BodyPart - Serialization` {
+-        @Test
+-        func `Serialize produces headers plus content`() throws {
+-            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-            let content = RFC_2046.BodyPart.Content("Hello, World!")
+-            let part = RFC_2046.BodyPart(headers: headers, content: content)
+-
+-            let string = String(decoding: [Byte](part), as: UTF8.self)
+-
+-            #expect(string.contains("Content-Type: text/plain; charset=UTF-8"))
+-            #expect(string.contains("\r\n\r\n"))
+-            #expect(string.hasSuffix("Hello, World!"))
+-        }
++enum `BodyPart Coder Tests` {}
++
++extension `BodyPart Coder Tests` {
++        @Suite
++        struct `BodyPart - Serialization` {
++            @Test
++            func `Serialize produces headers plus content`() throws {
++                let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++                let content = RFC_2046.BodyPart.Content("Hello, World!")
++                let part = RFC_2046.BodyPart(headers: headers, content: content)
++
++                let string = String(decoding: [Byte](part), as: UTF8.self)
++
++                #expect(string.contains("Content-Type: text/plain; charset=UTF-8"))
++                #expect(string.contains("\r\n\r\n"))
++                #expect(string.hasSuffix("Hello, World!"))
++            }
+ 
+-        @Test
+-        func `Serialize with transfer encoding`() throws {
+-            let headers = RFC_2046.BodyPart.Headers(
+-                contentType: .textPlainUTF8,
+-                contentTransferEncoding: .sevenBit
+-            )
+-            let part = RFC_2046.BodyPart(
+-                headers: headers,
+-                content: RFC_2046.BodyPart.Content("Hello")
+-            )
+-
+-            let string = String(decoding: [Byte](part), as: UTF8.self)
+-
+-            #expect(string.contains("Content-Transfer-Encoding: 7bit"))
+-            #expect(string.hasSuffix("Hello"))
+-        }
++            @Test
++            func `Serialize with transfer encoding`() throws {
++                let headers = RFC_2046.BodyPart.Headers(
++                    contentType: .textPlainUTF8,
++                    contentTransferEncoding: .sevenBit
++                )
++                let part = RFC_2046.BodyPart(
++                    headers: headers,
++                    content: RFC_2046.BodyPart.Content("Hello")
++                )
+ 
+-        @Test
+-        func `Serialize with base64 encoding applies encoding`() throws {
+-            let headers = RFC_2046.BodyPart.Headers(
+-                contentType: .textPlainUTF8,
+-                contentTransferEncoding: .base64
+-            )
+-            let part = RFC_2046.BodyPart(
+-                headers: headers,
+-                content: RFC_2046.BodyPart.Content("Hello, World!")
+-            )
+-
+-            let string = String(decoding: [Byte](part), as: UTF8.self)
+-
+-            #expect(string.contains("Content-Transfer-Encoding: base64"))
+-            #expect(string.hasSuffix("SGVsbG8sIFdvcmxkIQ=="))
+-        }
++                let string = String(decoding: [Byte](part), as: UTF8.self)
+ 
+-        @Test
+-        func `Serialize empty content`() throws {
+-            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-            let part = RFC_2046.BodyPart(headers: headers, content: RFC_2046.BodyPart.Content([]))
++                #expect(string.contains("Content-Transfer-Encoding: 7bit"))
++                #expect(string.hasSuffix("Hello"))
++            }
+ 
+-            let string = String(decoding: [Byte](part), as: UTF8.self)
++            @Test
++            func `Serialize with base64 encoding applies encoding`() throws {
++                let headers = RFC_2046.BodyPart.Headers(
++                    contentType: .textPlainUTF8,
++                    contentTransferEncoding: .base64
++                )
++                let part = RFC_2046.BodyPart(
++                    headers: headers,
++                    content: RFC_2046.BodyPart.Content("Hello, World!")
++                )
+ 
+-            #expect(string.contains("Content-Type:"))
+-            #expect(string.contains("\r\n\r\n"))
+-        }
+-    }
+-
+-    @Suite
+-    struct `BodyPart - Parsing` {
+-        @Test
+-        func `Parse body part from raw bytes`() throws {
+-            let part = try RFC_2046.BodyPart(
+-                binary: [Byte](utf8: "Content-Type: text/plain\r\n\r\nHello!")
+-            )
+-
+-            #expect(part.contentType?.type == "text")
+-            #expect(part.contentType?.subtype == "plain")
+-            #expect(part.content.description == "Hello!")
+-        }
++                let string = String(decoding: [Byte](part), as: UTF8.self)
+ 
+-        @Test
+-        func `Parse body part with LF line endings`() throws {
+-            let part = try RFC_2046.BodyPart(
+-                binary: [Byte](utf8: "Content-Type: text/plain\n\nHello!")
+-            )
++                #expect(string.contains("Content-Transfer-Encoding: base64"))
++                #expect(string.hasSuffix("SGVsbG8sIFdvcmxkIQ=="))
++            }
+ 
+-            #expect(part.content.description == "Hello!")
+-        }
++            @Test
++            func `Serialize empty content`() throws {
++                let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++                let part = RFC_2046.BodyPart(headers: headers, content: RFC_2046.BodyPart.Content([]))
+ 
+-        @Test
+-        func `Parse body part with headers only`() throws {
+-            let part = try RFC_2046.BodyPart(binary: [Byte](utf8: "Content-Type: text/plain"))
++                let string = String(decoding: [Byte](part), as: UTF8.self)
+ 
+-            #expect(part.contentType?.type == "text")
+-            #expect(part.content.rawValue.isEmpty)
++                #expect(string.contains("Content-Type:"))
++                #expect(string.contains("\r\n\r\n"))
++            }
+         }
++}
++
++extension `BodyPart Coder Tests` {
++        @Suite
++        struct `BodyPart - Parsing` {
++            @Test
++            func `Parse body part from raw bytes`() throws {
++                let part = try RFC_2046.BodyPart(
++                    binary: [Byte](utf8: "Content-Type: text/plain\r\n\r\nHello!")
++                )
+ 
+-        @Test
+-        func `Parse decodes base64 transfer-encoded content to canonical bytes`() throws {
+-            let part = try RFC_2046.BodyPart(
+-                binary: [Byte](utf8: "Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8sIFdvcmxkIQ==")
+-            )
+-
+-            #expect(part.content.rawValue == [Byte](utf8: "Hello, World!"))
+-        }
++                #expect(part.contentType?.type == "text")
++                #expect(part.contentType?.subtype == "plain")
++                #expect(part.content.description == "Hello!")
++            }
+ 
+-        @Test
+-        func `Malformed base64 content throws a typed error`() throws {
+-            #expect(throws: RFC_2046.BodyPart.Error.self) {
+-                _ = try RFC_2046.BodyPart(
+-                    binary: [Byte](utf8: "Content-Transfer-Encoding: base64\r\n\r\nnot!!valid@@base64")
++            @Test
++            func `Parse body part with LF line endings`() throws {
++                let part = try RFC_2046.BodyPart(
++                    binary: [Byte](utf8: "Content-Type: text/plain\n\nHello!")
+                 )
++
++                #expect(part.content.description == "Hello!")
+             }
+-        }
+-    }
+ 
+-    @Suite
+-    struct `BodyPart - Round-trip` {
+-        @Test
+-        func `Round-trip preserves simple part`() throws {
+-            let original = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-                content: RFC_2046.BodyPart.Content("Hello, World!")
+-            )
++            @Test
++            func `Parse body part with headers only`() throws {
++                let part = try RFC_2046.BodyPart(binary: [Byte](utf8: "Content-Type: text/plain"))
++
++                #expect(part.contentType?.type == "text")
++                #expect(part.content.rawValue.isEmpty)
++            }
++
++            @Test
++            func `Parse decodes base64 transfer-encoded content to canonical bytes`() throws {
++                let part = try RFC_2046.BodyPart(
++                    binary: [Byte](utf8: "Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8sIFdvcmxkIQ==")
++                )
+ 
+-            let parsed = try RFC_2046.BodyPart(binary: [Byte](original))
++                #expect(part.content.rawValue == [Byte](utf8: "Hello, World!"))
++            }
+ 
+-            #expect(parsed.headers == original.headers)
+-            #expect(parsed.content.rawValue == original.content.rawValue)
++            @Test
++            func `Malformed base64 content throws a typed error`() throws {
++                #expect(throws: RFC_2046.BodyPart.Error.self) {
++                    _ = try RFC_2046.BodyPart(
++                        binary: [Byte](utf8: "Content-Transfer-Encoding: base64\r\n\r\nnot!!valid@@base64")
++                    )
++                }
++            }
+         }
++}
++
++extension `BodyPart Coder Tests` {
++        @Suite
++        struct `BodyPart - Round-trip` {
++            @Test
++            func `Round-trip preserves simple part`() throws {
++                let original = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++                    content: RFC_2046.BodyPart.Content("Hello, World!")
++                )
+ 
+-        @Test
+-        func `Round-trip preserves binary content`() throws {
+-            let original = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(contentType: .applicationOctetStream),
+-                content: RFC_2046.BodyPart.Content([Byte](utf8: "Hello"))
+-            )
++                let parsed = try RFC_2046.BodyPart(binary: [Byte](original))
+ 
+-            let parsed = try RFC_2046.BodyPart(binary: [Byte](original))
++                #expect(parsed.headers == original.headers)
++                #expect(parsed.content.rawValue == original.content.rawValue)
++            }
+ 
+-            #expect(parsed.content.rawValue == original.content.rawValue)
+-        }
++            @Test
++            func `Round-trip preserves binary content`() throws {
++                let original = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(contentType: .applicationOctetStream),
++                    content: RFC_2046.BodyPart.Content([Byte](utf8: "Hello"))
++                )
+ 
+-        @Test
+-        func `Round-trip preserves empty content`() throws {
+-            let original = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-                content: RFC_2046.BodyPart.Content([])
+-            )
++                let parsed = try RFC_2046.BodyPart(binary: [Byte](original))
+ 
+-            let parsed = try RFC_2046.BodyPart(binary: [Byte](original))
++                #expect(parsed.content.rawValue == original.content.rawValue)
++            }
+ 
+-            #expect(parsed.content.rawValue.isEmpty)
+-        }
++            @Test
++            func `Round-trip preserves empty content`() throws {
++                let original = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++                    content: RFC_2046.BodyPart.Content([])
++                )
+ 
+-        @Test
+-        func `Base64 part round-trips without double encoding`() throws {
+-            let payload: [Byte] = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10].map(Byte.init(bitPattern:))
+-            let original = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(
+-                    contentType: .imageJPEG,
+-                    contentTransferEncoding: .base64
+-                ),
+-                content: RFC_2046.BodyPart.Content(payload)
+-            )
++                let parsed = try RFC_2046.BodyPart(binary: [Byte](original))
+ 
+-            let wire = [Byte](original)
+-            let reparsed = try RFC_2046.BodyPart(binary: wire)
++                #expect(parsed.content.rawValue.isEmpty)
++            }
++
++            @Test
++            func `Base64 part round-trips without double encoding`() throws {
++                let payload: [Byte] = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10].map(Byte.init(bitPattern:))
++                let original = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(
++                        contentType: .imageJPEG,
++                        contentTransferEncoding: .base64
++                    ),
++                    content: RFC_2046.BodyPart.Content(payload)
++                )
+ 
+-            #expect(reparsed.content.rawValue == payload)
+-            #expect([Byte](reparsed) == wire)
++                let wire = [Byte](original)
++                let reparsed = try RFC_2046.BodyPart(binary: wire)
++
++                #expect(reparsed.content.rawValue == payload)
++                #expect([Byte](reparsed) == wire)
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/RFC 2046 Tests/BodyPart Tests.swift b/Tests/RFC 2046 Tests/BodyPart Tests.swift
+index 499f49a..1a39ea9 100644
+--- a/Tests/RFC 2046 Tests/BodyPart Tests.swift	
++++ b/Tests/RFC 2046 Tests/BodyPart Tests.swift	
+@@ -3,98 +3,106 @@ import RFC_2045
+ import RFC_2046
+ import Testing
+ 
+-@Suite
+-struct `BodyPart - Core initialization` {
+-    @Test
+-    func `Initialize with headers and Content`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(
+-            contentType: .textPlainUTF8
+-        )
+-        let content = RFC_2046.BodyPart.Content([Byte](utf8: "Hello"))
+-
+-        let part = RFC_2046.BodyPart(headers: headers, content: content)
+-
+-        #expect(part.headers == headers)
+-        #expect(part.content.rawValue == [Byte](utf8: "Hello"))
+-    }
+-
+-    @Test
+-    func `Initialize with empty Content`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(
+-            contentType: .textPlainUTF8
+-        )
+-        let content = RFC_2046.BodyPart.Content([])
+-
+-        let part = RFC_2046.BodyPart(headers: headers, content: content)
+-
+-        #expect(part.content.rawValue.isEmpty)
+-    }
+-
+-    @Test
+-    func `Initialize from a content type and text`() throws {
+-        let part = RFC_2046.BodyPart(contentType: .textPlainUTF8, text: "Hello, World!")
+-
+-        #expect(part.contentType == .textPlainUTF8)
+-        #expect(part.transferEncoding == .eightBit)
+-        #expect(part.content.rawValue == [Byte](utf8: "Hello, World!"))
++enum `BodyPart Tests` {}
++
++extension `BodyPart Tests` {
++    @Suite
++    struct `BodyPart - Core initialization` {
++        @Test
++        func `Initialize with headers and Content`() throws {
++            let headers = RFC_2046.BodyPart.Headers(
++                contentType: .textPlainUTF8
++            )
++            let content = RFC_2046.BodyPart.Content([Byte](utf8: "Hello"))
++
++            let part = RFC_2046.BodyPart(headers: headers, content: content)
++
++            #expect(part.headers == headers)
++            #expect(part.content.rawValue == [Byte](utf8: "Hello"))
++        }
++
++        @Test
++        func `Initialize with empty Content`() throws {
++            let headers = RFC_2046.BodyPart.Headers(
++                contentType: .textPlainUTF8
++            )
++            let content = RFC_2046.BodyPart.Content([])
++
++            let part = RFC_2046.BodyPart(headers: headers, content: content)
++
++            #expect(part.content.rawValue.isEmpty)
++        }
++
++        @Test
++        func `Initialize from a content type and text`() throws {
++            let part = RFC_2046.BodyPart(contentType: .textPlainUTF8, text: "Hello, World!")
++
++            #expect(part.contentType == .textPlainUTF8)
++            #expect(part.transferEncoding == .eightBit)
++            #expect(part.content.rawValue == [Byte](utf8: "Hello, World!"))
++        }
+     }
+ }
+ 
+-@Suite
+-struct `BodyPart Content - Value semantics` {
+-    @Test
+-    func `Content from text string`() throws {
+-        let content = RFC_2046.BodyPart.Content("Hello, World!")
++extension `BodyPart Tests` {
++    @Suite
++    struct `BodyPart Content - Value semantics` {
++        @Test
++        func `Content from text string`() throws {
++            let content = RFC_2046.BodyPart.Content("Hello, World!")
+ 
+-        #expect(content.rawValue == [Byte](utf8: "Hello, World!"))
+-        #expect(content.description == "Hello, World!")
+-    }
++            #expect(content.rawValue == [Byte](utf8: "Hello, World!"))
++            #expect(content.description == "Hello, World!")
++        }
+ 
+-    @Test
+-    func `Content from bytes`() throws {
+-        let bytes: [Byte] = [Byte](utf8: "Hello")
+-        let content = RFC_2046.BodyPart.Content(bytes)
++        @Test
++        func `Content from bytes`() throws {
++            let bytes: [Byte] = [Byte](utf8: "Hello")
++            let content = RFC_2046.BodyPart.Content(bytes)
+ 
+-        #expect(content.rawValue == bytes)
+-        #expect(content.description == "Hello")
+-    }
++            #expect(content.rawValue == bytes)
++            #expect(content.description == "Hello")
++        }
+ 
+-    @Test
+-    func `Content from any byte collection`() throws {
+-        let bytes: [Byte] = [Byte](utf8: "Hello")
+-        let content = RFC_2046.BodyPart.Content(binary: bytes[...])
++        @Test
++        func `Content from any byte collection`() throws {
++            let bytes: [Byte] = [Byte](utf8: "Hello")
++            let content = RFC_2046.BodyPart.Content(binary: bytes[...])
+ 
+-        #expect(content.rawValue == bytes)
+-    }
++            #expect(content.rawValue == bytes)
++        }
+ 
+-    @Test
+-    func `Content text accessor returns string for valid UTF-8`() throws {
+-        let content = RFC_2046.BodyPart.Content("Hello 🌍")
++        @Test
++        func `Content text accessor returns string for valid UTF-8`() throws {
++            let content = RFC_2046.BodyPart.Content("Hello 🌍")
+ 
+-        #expect(content.description == "Hello 🌍")
++            #expect(content.description == "Hello 🌍")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `BodyPart - Hashable and Equatable` {
+-    @Test
+-    func `Same parts are equal`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-        let content = RFC_2046.BodyPart.Content("Hello")
++extension `BodyPart Tests` {
++    @Suite
++    struct `BodyPart - Hashable and Equatable` {
++        @Test
++        func `Same parts are equal`() throws {
++            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++            let content = RFC_2046.BodyPart.Content("Hello")
+ 
+-        let a = RFC_2046.BodyPart(headers: headers, content: content)
+-        let b = RFC_2046.BodyPart(headers: headers, content: content)
++            let a = RFC_2046.BodyPart(headers: headers, content: content)
++            let b = RFC_2046.BodyPart(headers: headers, content: content)
+ 
+-        #expect(a == b)
+-    }
++            #expect(a == b)
++        }
+ 
+-    @Test
+-    func `Different content makes parts not equal`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++        @Test
++        func `Different content makes parts not equal`() throws {
++            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+ 
+-        let a = RFC_2046.BodyPart(headers: headers, content: RFC_2046.BodyPart.Content("Hello"))
+-        let b = RFC_2046.BodyPart(headers: headers, content: RFC_2046.BodyPart.Content("World"))
++            let a = RFC_2046.BodyPart(headers: headers, content: RFC_2046.BodyPart.Content("Hello"))
++            let b = RFC_2046.BodyPart(headers: headers, content: RFC_2046.BodyPart.Content("World"))
+ 
+-        #expect(a != b)
++            #expect(a != b)
++        }
+     }
+ }
+diff --git a/Tests/RFC 2046 Tests/BodyPart.Headers Coder Tests.swift b/Tests/RFC 2046 Tests/BodyPart.Headers Coder Tests.swift
+index 7b60410..d7604ee 100644
+--- a/Tests/RFC 2046 Tests/BodyPart.Headers Coder Tests.swift	
++++ b/Tests/RFC 2046 Tests/BodyPart.Headers Coder Tests.swift	
+@@ -6,298 +6,310 @@
+     import RFC_5322
+     import Testing
+ 
+-    @Suite
+-    struct `BodyPart.Headers - Parsing from bytes` {
+-        @Test
+-        func `Parse empty bytes`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(ascii: [Byte]())
+-
+-            #expect(headers.contentDisposition == nil)
+-            #expect(headers.contentType == nil)
+-            #expect(headers.contentTransferEncoding == nil)
+-            #expect(headers.custom.isEmpty)
+-        }
++enum `BodyPart.Headers Coder Tests` {}
++
++extension `BodyPart.Headers Coder Tests` {
++        @Suite
++        struct `BodyPart.Headers - Parsing from bytes` {
++            @Test
++            func `Parse empty bytes`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(ascii: [Byte]())
++
++                #expect(headers.contentDisposition == nil)
++                #expect(headers.contentType == nil)
++                #expect(headers.contentTransferEncoding == nil)
++                #expect(headers.custom.isEmpty)
++            }
+ 
+-        @Test
+-        func `Parse Content-Type header`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "Content-Type: text/plain; charset=UTF-8")
+-            )
++            @Test
++            func `Parse Content-Type header`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "Content-Type: text/plain; charset=UTF-8")
++                )
+ 
+-            #expect(headers.contentType?.type == "text")
+-            #expect(headers.contentType?.subtype == "plain")
+-        }
++                #expect(headers.contentType?.type == "text")
++                #expect(headers.contentType?.subtype == "plain")
++            }
+ 
+-        @Test
+-        func `Parse Content-Disposition header`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "Content-Disposition: attachment; filename=\"document.pdf\"")
+-            )
++            @Test
++            func `Parse Content-Disposition header`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "Content-Disposition: attachment; filename=\"document.pdf\"")
++                )
+ 
+-            #expect(headers.contentDisposition != nil)
+-        }
++                #expect(headers.contentDisposition != nil)
++            }
+ 
+-        @Test
+-        func `Parse Content-Transfer-Encoding header`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "Content-Transfer-Encoding: base64")
+-            )
++            @Test
++            func `Parse Content-Transfer-Encoding header`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "Content-Transfer-Encoding: base64")
++                )
+ 
+-            #expect(headers.contentTransferEncoding == .base64)
+-        }
++                #expect(headers.contentTransferEncoding == .base64)
++            }
+ 
+-        @Test
+-        func `Parse all standard headers with CRLF`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](
+-                    utf8: "Content-Type: text/plain; charset=UTF-8\r\n"
+-                        + "Content-Disposition: inline\r\n"
+-                        + "Content-Transfer-Encoding: 7bit"
++            @Test
++            func `Parse all standard headers with CRLF`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](
++                        utf8: "Content-Type: text/plain; charset=UTF-8\r\n"
++                            + "Content-Disposition: inline\r\n"
++                            + "Content-Transfer-Encoding: 7bit"
++                    )
+                 )
+-            )
+ 
+-            #expect(headers.contentType != nil)
+-            #expect(headers.contentDisposition != nil)
+-            #expect(headers.contentTransferEncoding != nil)
+-        }
++                #expect(headers.contentType != nil)
++                #expect(headers.contentDisposition != nil)
++                #expect(headers.contentTransferEncoding != nil)
++            }
+ 
+-        @Test
+-        func `Parse custom headers`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "X-Custom-Header: custom-value\r\nX-Another: another-value")
+-            )
++            @Test
++            func `Parse custom headers`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "X-Custom-Header: custom-value\r\nX-Another: another-value")
++                )
+ 
+-            try #expect(headers[.init("X-Custom-Header")] == "custom-value")
+-            try #expect(headers[.init("X-Another")] == "another-value")
+-        }
++                try #expect(headers[.init("X-Custom-Header")] == "custom-value")
++                try #expect(headers[.init("X-Another")] == "another-value")
++            }
++
++            @Test
++            func `Invalid Content-Type is ignored`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "Content-Type: invalid syntax")
++                )
+ 
+-        @Test
+-        func `Invalid Content-Type is ignored`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "Content-Type: invalid syntax")
+-            )
++                #expect(headers.contentType == nil)
++            }
+ 
+-            #expect(headers.contentType == nil)
+-        }
++            @Test
++            func `Invalid Content-Transfer-Encoding is ignored`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "Content-Transfer-Encoding: invalid-encoding")
++                )
+ 
+-        @Test
+-        func `Invalid Content-Transfer-Encoding is ignored`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "Content-Transfer-Encoding: invalid-encoding")
+-            )
++                #expect(headers.contentTransferEncoding == nil)
++            }
+ 
+-            #expect(headers.contentTransferEncoding == nil)
+-        }
++            @Test
++            func `Invalid header line without colon throws`() {
++                #expect(throws: RFC_2046.BodyPart.Headers.Error.self) {
++                    _ = try RFC_2046.BodyPart.Headers(ascii: [Byte](utf8: "invalid header line"))
++                }
++            }
+ 
+-        @Test
+-        func `Invalid header line without colon throws`() {
+-            #expect(throws: RFC_2046.BodyPart.Headers.Error.self) {
+-                _ = try RFC_2046.BodyPart.Headers(ascii: [Byte](utf8: "invalid header line"))
++            @Test
++            func `Empty header name throws`() {
++                #expect(throws: RFC_2046.BodyPart.Headers.Error.self) {
++                    _ = try RFC_2046.BodyPart.Headers(ascii: [Byte](utf8: ": value"))
++                }
+             }
+         }
++}
++
++extension `BodyPart.Headers Coder Tests` {
++        @Suite
++        struct `BodyPart.Headers - Folded header lines` {
++            @Test
++            func `Folded Content-Type header is unfolded and parsed`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](utf8: "Content-Type: multipart/mixed;\r\n boundary=abc123\r\n")
++                )
+ 
+-        @Test
+-        func `Empty header name throws`() {
+-            #expect(throws: RFC_2046.BodyPart.Headers.Error.self) {
+-                _ = try RFC_2046.BodyPart.Headers(ascii: [Byte](utf8: ": value"))
++                #expect(headers.contentType?.type == "multipart")
++                #expect(headers.contentType?.subtype == "mixed")
++                #expect(headers.contentType?.parameters[.boundary] == "abc123")
+             }
+-        }
+-    }
+-
+-    @Suite
+-    struct `BodyPart.Headers - Folded header lines` {
+-        @Test
+-        func `Folded Content-Type header is unfolded and parsed`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](utf8: "Content-Type: multipart/mixed;\r\n boundary=abc123\r\n")
+-            )
+-
+-            #expect(headers.contentType?.type == "multipart")
+-            #expect(headers.contentType?.subtype == "mixed")
+-            #expect(headers.contentType?.parameters[.boundary] == "abc123")
+-        }
+ 
+-        @Test
+-        func `Tab-folded custom header unfolds into one header`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                ascii: [Byte](
+-                    utf8: "X-Custom: first\r\n\tsecond\r\nContent-Transfer-Encoding: 7bit\r\n"
++            @Test
++            func `Tab-folded custom header unfolds into one header`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    ascii: [Byte](
++                        utf8: "X-Custom: first\r\n\tsecond\r\nContent-Transfer-Encoding: 7bit\r\n"
++                    )
+                 )
+-            )
+ 
+-            #expect(headers.contentTransferEncoding == .sevenBit)
+-            #expect(headers.custom.count == 1)
++                #expect(headers.contentTransferEncoding == .sevenBit)
++                #expect(headers.custom.count == 1)
++            }
+         }
+-    }
++}
++
++extension `BodyPart.Headers Coder Tests` {
++        @Suite
++        struct `BodyPart.Headers - Byte serialization` {
++            @Test
++            func `Empty headers produce empty bytes`() {
++                #expect([Byte](RFC_2046.BodyPart.Headers()).isEmpty)
++            }
+ 
+-    @Suite
+-    struct `BodyPart.Headers - Byte serialization` {
+-        @Test
+-        func `Empty headers produce empty bytes`() {
+-            #expect([Byte](RFC_2046.BodyPart.Headers()).isEmpty)
+-        }
++            @Test
++            func `Content-Type is serialized`() {
++                let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++                let string = String(decoding: [Byte](headers), as: UTF8.self)
+ 
+-        @Test
+-        func `Content-Type is serialized`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-            let string = String(decoding: [Byte](headers), as: UTF8.self)
++                #expect(string.contains("Content-Type:"))
++                #expect(string.contains("text/plain"))
++            }
+ 
+-            #expect(string.contains("Content-Type:"))
+-            #expect(string.contains("text/plain"))
+-        }
++            @Test
++            func `Content-Disposition is serialized`() {
++                let headers = RFC_2046.BodyPart.Headers(contentDisposition: .inline())
++                let string = String(decoding: [Byte](headers), as: UTF8.self)
+ 
+-        @Test
+-        func `Content-Disposition is serialized`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentDisposition: .inline())
+-            let string = String(decoding: [Byte](headers), as: UTF8.self)
++                #expect(string.contains("Content-Disposition:"))
++            }
+ 
+-            #expect(string.contains("Content-Disposition:"))
+-        }
++            @Test
++            func `Content-Transfer-Encoding is serialized`() {
++                let headers = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
++                let string = String(decoding: [Byte](headers), as: UTF8.self)
+ 
+-        @Test
+-        func `Content-Transfer-Encoding is serialized`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
+-            let string = String(decoding: [Byte](headers), as: UTF8.self)
++                #expect(string.contains("Content-Transfer-Encoding:"))
++                #expect(string.contains("base64"))
++            }
+ 
+-            #expect(string.contains("Content-Transfer-Encoding:"))
+-            #expect(string.contains("base64"))
+-        }
++            @Test
++            func `All headers are serialized`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    contentDisposition: .inline(),
++                    contentType: .textPlainUTF8,
++                    contentTransferEncoding: .sevenBit,
++                    custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++                )
++                let string = String(decoding: [Byte](headers), as: UTF8.self)
+ 
+-        @Test
+-        func `All headers are serialized`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                contentDisposition: .inline(),
+-                contentType: .textPlainUTF8,
+-                contentTransferEncoding: .sevenBit,
+-                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-            )
+-            let string = String(decoding: [Byte](headers), as: UTF8.self)
+-
+-            #expect(string.contains("Content-Type:"))
+-            #expect(string.contains("Content-Disposition:"))
+-            #expect(string.contains("Content-Transfer-Encoding:"))
+-            #expect(string.contains("X-Custom:"))
+-        }
++                #expect(string.contains("Content-Type:"))
++                #expect(string.contains("Content-Disposition:"))
++                #expect(string.contains("Content-Transfer-Encoding:"))
++                #expect(string.contains("X-Custom:"))
++            }
+ 
+-        @Test
+-        func `Headers use CRLF line endings`() {
+-            let headers = RFC_2046.BodyPart.Headers(
+-                contentType: .textPlainUTF8,
+-                contentTransferEncoding: .base64
+-            )
+-            let string = String(decoding: [Byte](headers), as: UTF8.self)
++            @Test
++            func `Headers use CRLF line endings`() {
++                let headers = RFC_2046.BodyPart.Headers(
++                    contentType: .textPlainUTF8,
++                    contentTransferEncoding: .base64
++                )
++                let string = String(decoding: [Byte](headers), as: UTF8.self)
+ 
+-            #expect(string.contains("\r\n"))
+-        }
++                #expect(string.contains("\r\n"))
++            }
+ 
+-        @Test
+-        func `Description renders the serialized headers`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
++            @Test
++            func `Description renders the serialized headers`() {
++                let headers = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
+ 
+-            #expect(headers.description == "Content-Transfer-Encoding: base64\r\n")
++                #expect(headers.description == "Content-Transfer-Encoding: base64\r\n")
++            }
+         }
+-    }
+-
+-    @Suite
+-    struct `BodyPart.Headers - Round-trip serialization` {
+-        @Test
+-        func `Round-trip preserves Content-Type`() throws {
+-            let original = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-            let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
++}
++
++extension `BodyPart.Headers Coder Tests` {
++        @Suite
++        struct `BodyPart.Headers - Round-trip serialization` {
++            @Test
++            func `Round-trip preserves Content-Type`() throws {
++                let original = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++                let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
++
++                #expect(parsed.contentType?.type == "text")
++                #expect(parsed.contentType?.subtype == "plain")
++            }
+ 
+-            #expect(parsed.contentType?.type == "text")
+-            #expect(parsed.contentType?.subtype == "plain")
+-        }
++            @Test
++            func `Round-trip preserves Content-Transfer-Encoding`() throws {
++                let original = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
++                let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
+ 
+-        @Test
+-        func `Round-trip preserves Content-Transfer-Encoding`() throws {
+-            let original = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
+-            let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
++                #expect(parsed.contentTransferEncoding == .base64)
++            }
+ 
+-            #expect(parsed.contentTransferEncoding == .base64)
+-        }
++            @Test
++            func `Round-trip preserves custom headers`() throws {
++                let original = try RFC_2046.BodyPart.Headers(
++                    custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++                )
++                let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
+ 
+-        @Test
+-        func `Round-trip preserves custom headers`() throws {
+-            let original = try RFC_2046.BodyPart.Headers(
+-                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-            )
+-            let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
++                #expect(try parsed[.init("X-Custom")] == "value")
++            }
+ 
+-            #expect(try parsed[.init("X-Custom")] == "value")
+-        }
++            @Test
++            func `Round-trip preserves all headers`() throws {
++                let original = try RFC_2046.BodyPart.Headers(
++                    contentDisposition: .inline(),
++                    contentType: .textHTMLUTF8,
++                    contentTransferEncoding: .quotedPrintable,
++                    custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++                )
++                let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
+ 
+-        @Test
+-        func `Round-trip preserves all headers`() throws {
+-            let original = try RFC_2046.BodyPart.Headers(
+-                contentDisposition: .inline(),
+-                contentType: .textHTMLUTF8,
+-                contentTransferEncoding: .quotedPrintable,
+-                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-            )
+-            let parsed = try RFC_2046.BodyPart.Headers(ascii: [Byte](original))
+-
+-            #expect(parsed.contentDisposition != nil)
+-            #expect(parsed.contentType != nil)
+-            #expect(parsed.contentTransferEncoding == .quotedPrintable)
++                #expect(parsed.contentDisposition != nil)
++                #expect(parsed.contentType != nil)
++                #expect(parsed.contentTransferEncoding == .quotedPrintable)
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `BodyPart.Headers - Subscript access` {
+-        @Test
+-        func `Get Content-Type via subscript`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++extension `BodyPart.Headers Coder Tests` {
++        @Suite
++        struct `BodyPart.Headers - Subscript access` {
++            @Test
++            func `Get Content-Type via subscript`() {
++                let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+ 
+-            #expect(headers[.contentType]?.contains("text/plain") == true)
+-        }
++                #expect(headers[.contentType]?.contains("text/plain") == true)
++            }
+ 
+-        @Test
+-        func `Get Content-Disposition via subscript`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentDisposition: .inline())
++            @Test
++            func `Get Content-Disposition via subscript`() {
++                let headers = RFC_2046.BodyPart.Headers(contentDisposition: .inline())
+ 
+-            #expect(headers[.contentDisposition] != nil)
+-        }
++                #expect(headers[.contentDisposition] != nil)
++            }
+ 
+-        @Test
+-        func `Get Content-Transfer-Encoding via subscript`() {
+-            let headers = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
++            @Test
++            func `Get Content-Transfer-Encoding via subscript`() {
++                let headers = RFC_2046.BodyPart.Headers(contentTransferEncoding: .base64)
+ 
+-            #expect(headers[.contentTransferEncoding] == "base64")
+-        }
++                #expect(headers[.contentTransferEncoding] == "base64")
++            }
+ 
+-        @Test
+-        func `Get custom header via subscript`() throws {
+-            let headers = try RFC_2046.BodyPart.Headers(
+-                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-            )
++            @Test
++            func `Get custom header via subscript`() throws {
++                let headers = try RFC_2046.BodyPart.Headers(
++                    custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++                )
+ 
+-            #expect(try headers[.init("X-Custom")] == "value")
+-        }
++                #expect(try headers[.init("X-Custom")] == "value")
++            }
+ 
+-        @Test
+-        func `Set Content-Type via subscript`() {
+-            var headers = RFC_2046.BodyPart.Headers()
+-            headers[.contentType] = "text/html"
++            @Test
++            func `Set Content-Type via subscript`() {
++                var headers = RFC_2046.BodyPart.Headers()
++                headers[.contentType] = "text/html"
+ 
+-            #expect(headers.contentType?.type == "text")
+-            #expect(headers.contentType?.subtype == "html")
+-        }
++                #expect(headers.contentType?.type == "text")
++                #expect(headers.contentType?.subtype == "html")
++            }
+ 
+-        @Test
+-        func `Set custom header via subscript`() throws {
+-            var headers = RFC_2046.BodyPart.Headers()
+-            headers[try .init("X-Custom")] = "value"
++            @Test
++            func `Set custom header via subscript`() throws {
++                var headers = RFC_2046.BodyPart.Headers()
++                headers[try .init("X-Custom")] = "value"
+ 
+-            #expect(headers[try .init("X-Custom")] == "value")
+-        }
++                #expect(headers[try .init("X-Custom")] == "value")
++            }
+ 
+-        @Test
+-        func `Remove header via subscript`() {
+-            var headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-            headers[.contentType] = nil
++            @Test
++            func `Remove header via subscript`() {
++                var headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++                headers[.contentType] = nil
+ 
+-            #expect(headers.contentType == nil)
++                #expect(headers.contentType == nil)
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/RFC 2046 Tests/BodyPart.Headers Tests.swift b/Tests/RFC 2046 Tests/BodyPart.Headers Tests.swift
+index 8887dd1..690e9f8 100644
+--- a/Tests/RFC 2046 Tests/BodyPart.Headers Tests.swift	
++++ b/Tests/RFC 2046 Tests/BodyPart.Headers Tests.swift	
+@@ -4,93 +4,99 @@ import RFC_2183
+ import RFC_5322
+ import Testing
+ 
+-@Suite
+-struct `BodyPart.Headers - Initialization` {
+-    @Test
+-    func `Default initialization creates empty headers`() {
+-        let headers = RFC_2046.BodyPart.Headers()
+-        #expect(headers.contentDisposition == nil)
+-        #expect(headers.contentType == nil)
+-        #expect(headers.contentTransferEncoding == nil)
+-        #expect(headers.custom.isEmpty)
+-    }
++enum `BodyPart.Headers Tests` {}
+ 
+-    @Test
+-    func `Initialization with all parameters`() throws {
+-        let headers = try RFC_2046.BodyPart.Headers(
+-            contentDisposition: .inline(),
+-            contentType: .textPlainUTF8,
+-            contentTransferEncoding: .sevenBit,
+-            custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-        )
++extension `BodyPart.Headers Tests` {
++    @Suite
++    struct `BodyPart.Headers - Initialization` {
++        @Test
++        func `Default initialization creates empty headers`() {
++            let headers = RFC_2046.BodyPart.Headers()
++            #expect(headers.contentDisposition == nil)
++            #expect(headers.contentType == nil)
++            #expect(headers.contentTransferEncoding == nil)
++            #expect(headers.custom.isEmpty)
++        }
+ 
+-        #expect(headers.contentDisposition == .inline())
+-        #expect(headers.contentType == .textPlainUTF8)
+-        #expect(headers.contentTransferEncoding == .sevenBit)
+-        #expect(headers.custom.count == 1)
+-    }
++        @Test
++        func `Initialization with all parameters`() throws {
++            let headers = try RFC_2046.BodyPart.Headers(
++                contentDisposition: .inline(),
++                contentType: .textPlainUTF8,
++                contentTransferEncoding: .sevenBit,
++                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++            )
+ 
+-    @Test
+-    func `Initialization with only content type`() {
+-        let headers = RFC_2046.BodyPart.Headers(
+-            contentType: .textHTMLUTF8
+-        )
++            #expect(headers.contentDisposition == .inline())
++            #expect(headers.contentType == .textPlainUTF8)
++            #expect(headers.contentTransferEncoding == .sevenBit)
++            #expect(headers.custom.count == 1)
++        }
+ 
+-        #expect(headers.contentDisposition == nil)
+-        #expect(headers.contentType == .textHTMLUTF8)
+-        #expect(headers.contentTransferEncoding == nil)
+-        #expect(headers.custom.isEmpty)
+-    }
++        @Test
++        func `Initialization with only content type`() {
++            let headers = RFC_2046.BodyPart.Headers(
++                contentType: .textHTMLUTF8
++            )
+ 
+-    @Test
+-    func `Initialization with custom headers only`() throws {
+-        let headers = try RFC_2046.BodyPart.Headers(
+-            custom: [
+-                RFC_5322.Header(name: .init("X-Custom-1"), value: .init("value1")),
+-                RFC_5322.Header(name: .init("X-Custom-2"), value: .init("value2")),
+-            ]
+-        )
++            #expect(headers.contentDisposition == nil)
++            #expect(headers.contentType == .textHTMLUTF8)
++            #expect(headers.contentTransferEncoding == nil)
++            #expect(headers.custom.isEmpty)
++        }
+ 
+-        #expect(headers.contentDisposition == nil)
+-        #expect(headers.contentType == nil)
+-        #expect(headers.contentTransferEncoding == nil)
+-        #expect(headers.custom.count == 2)
+-    }
++        @Test
++        func `Initialization with custom headers only`() throws {
++            let headers = try RFC_2046.BodyPart.Headers(
++                custom: [
++                    RFC_5322.Header(name: .init("X-Custom-1"), value: .init("value1")),
++                    RFC_5322.Header(name: .init("X-Custom-2"), value: .init("value2")),
++                ]
++            )
+ 
+-    @Test
+-    func `Custom headers are addressable by name`() throws {
+-        let headers = try RFC_2046.BodyPart.Headers(
+-            custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
+-        )
++            #expect(headers.contentDisposition == nil)
++            #expect(headers.contentType == nil)
++            #expect(headers.contentTransferEncoding == nil)
++            #expect(headers.custom.count == 2)
++        }
+ 
+-        #expect(try headers.custom[.init("X-Custom")] == "value")
++        @Test
++        func `Custom headers are addressable by name`() throws {
++            let headers = try RFC_2046.BodyPart.Headers(
++                custom: [RFC_5322.Header(name: .init("X-Custom"), value: .init("value"))]
++            )
++
++            #expect(try headers.custom[.init("X-Custom")] == "value")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `BodyPart.Headers - Hashable and Equatable` {
+-    @Test
+-    func `Same headers are equal`() {
+-        let a = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-        let b = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-        #expect(a == b)
+-    }
++extension `BodyPart.Headers Tests` {
++    @Suite
++    struct `BodyPart.Headers - Hashable and Equatable` {
++        @Test
++        func `Same headers are equal`() {
++            let a = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++            let b = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++            #expect(a == b)
++        }
+ 
+-    @Test
+-    func `Different headers are not equal`() {
+-        let a = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-        let b = RFC_2046.BodyPart.Headers(contentType: .textHTMLUTF8)
+-        #expect(a != b)
+-    }
++        @Test
++        func `Different headers are not equal`() {
++            let a = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++            let b = RFC_2046.BodyPart.Headers(contentType: .textHTMLUTF8)
++            #expect(a != b)
++        }
+ 
+-    @Test
+-    func `Headers with different custom values are not equal`() throws {
+-        let a = try RFC_2046.BodyPart.Headers(custom: [
+-            RFC_5322.Header(name: .init("X-A"), value: .init("1"))
+-        ])
+-        let b = try RFC_2046.BodyPart.Headers(custom: [
+-            RFC_5322.Header(name: .init("X-A"), value: .init("2"))
+-        ])
+-        #expect(a != b)
++        @Test
++        func `Headers with different custom values are not equal`() throws {
++            let a = try RFC_2046.BodyPart.Headers(custom: [
++                RFC_5322.Header(name: .init("X-A"), value: .init("1"))
++            ])
++            let b = try RFC_2046.BodyPart.Headers(custom: [
++                RFC_5322.Header(name: .init("X-A"), value: .init("2"))
++            ])
++            #expect(a != b)
++        }
+     }
+ }
+diff --git a/Tests/RFC 2046 Tests/Boundary Tests.swift b/Tests/RFC 2046 Tests/Boundary Tests.swift
+index 5777078..6e61780 100644
+--- a/Tests/RFC 2046 Tests/Boundary Tests.swift	
++++ b/Tests/RFC 2046 Tests/Boundary Tests.swift	
+@@ -1,135 +1,147 @@
+ import RFC_2046
+ import Testing
+ 
+-@Suite
+-struct `Boundary - Valid boundaries` {
+-    @Test(arguments: [
+-        "simple",
+-        "----=_Part_Custom",
+-        "a",
+-        String(repeating: "x", count: 70),
+-        "boundary-with-dashes",
+-        "boundary_with_underscores",
+-        "boundary.with.dots",
+-        "AlphaNumeric123",
+-        "with spaces inside",
+-        "ends-with-dash-",
+-        "ends_with_underscore_",
+-    ])
+-    func `Valid boundary strings are accepted`(value: String) throws {
+-        let boundary = try RFC_2046.Boundary(value)
+-        #expect(boundary.rawValue == value)
++enum `Boundary Tests` {}
++
++extension `Boundary Tests` {
++    @Suite
++    struct `Boundary - Valid boundaries` {
++        @Test(arguments: [
++            "simple",
++            "----=_Part_Custom",
++            "a",
++            String(repeating: "x", count: 70),
++            "boundary-with-dashes",
++            "boundary_with_underscores",
++            "boundary.with.dots",
++            "AlphaNumeric123",
++            "with spaces inside",
++            "ends-with-dash-",
++            "ends_with_underscore_",
++        ])
++        func `Valid boundary strings are accepted`(value: String) throws {
++            let boundary = try RFC_2046.Boundary(value)
++            #expect(boundary.rawValue == value)
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Boundary - Invalid boundaries` {
+-    @Test
+-    func `Empty string is rejected`() {
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary("")
++extension `Boundary Tests` {
++    @Suite
++    struct `Boundary - Invalid boundaries` {
++        @Test
++        func `Empty string is rejected`() {
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary("")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Boundary ending with space is rejected`() {
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary("test ")
++        @Test
++        func `Boundary ending with space is rejected`() {
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary("test ")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Boundary ending with multiple spaces is rejected`() {
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary("test  ")
++        @Test
++        func `Boundary ending with multiple spaces is rejected`() {
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary("test  ")
++            }
+         }
+-    }
+ 
+-    @Test(arguments: [71, 100, 200])
+-    func `Boundary exceeding 70 characters is rejected`(length: Int) {
+-        let value = String(repeating: "x", count: length)
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary(value)
++        @Test(arguments: [71, 100, 200])
++        func `Boundary exceeding 70 characters is rejected`(length: Int) {
++            let value = String(repeating: "x", count: length)
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary(value)
++            }
+         }
+     }
+ }
+ 
+-@Suite
+-struct `Boundary - Edge cases` {
+-    @Test
+-    func `Single character boundary is valid`() throws {
+-        let boundary = try RFC_2046.Boundary("x")
+-        #expect(boundary.rawValue == "x")
+-    }
++extension `Boundary Tests` {
++    @Suite
++    struct `Boundary - Edge cases` {
++        @Test
++        func `Single character boundary is valid`() throws {
++            let boundary = try RFC_2046.Boundary("x")
++            #expect(boundary.rawValue == "x")
++        }
+ 
+-    @Test
+-    func `Exactly 70 characters is valid`() throws {
+-        let value = String(repeating: "x", count: 70)
+-        let boundary = try RFC_2046.Boundary(value)
+-        #expect(boundary.rawValue == value)
+-        #expect(boundary.rawValue.count == 70)
+-    }
++        @Test
++        func `Exactly 70 characters is valid`() throws {
++            let value = String(repeating: "x", count: 70)
++            let boundary = try RFC_2046.Boundary(value)
++            #expect(boundary.rawValue == value)
++            #expect(boundary.rawValue.count == 70)
++        }
+ 
+-    @Test
+-    func `Boundary with leading space is valid`() throws {
+-        let boundary = try RFC_2046.Boundary(" test")
+-        #expect(boundary.rawValue == " test")
+-    }
++        @Test
++        func `Boundary with leading space is valid`() throws {
++            let boundary = try RFC_2046.Boundary(" test")
++            #expect(boundary.rawValue == " test")
++        }
+ 
+-    @Test
+-    func `Boundary with space in middle is valid`() throws {
+-        let boundary = try RFC_2046.Boundary("test test")
+-        #expect(boundary.rawValue == "test test")
++        @Test
++        func `Boundary with space in middle is valid`() throws {
++            let boundary = try RFC_2046.Boundary("test test")
++            #expect(boundary.rawValue == "test test")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Boundary - Hashable and Equatable` {
+-    @Test
+-    func `Same boundaries are equal`() throws {
+-        let a = try RFC_2046.Boundary("test")
+-        let b = try RFC_2046.Boundary("test")
+-        #expect(a == b)
+-    }
++extension `Boundary Tests` {
++    @Suite
++    struct `Boundary - Hashable and Equatable` {
++        @Test
++        func `Same boundaries are equal`() throws {
++            let a = try RFC_2046.Boundary("test")
++            let b = try RFC_2046.Boundary("test")
++            #expect(a == b)
++        }
+ 
+-    @Test
+-    func `Different boundaries are not equal`() throws {
+-        let a = try RFC_2046.Boundary("test1")
+-        let b = try RFC_2046.Boundary("test2")
+-        #expect(a != b)
+-    }
++        @Test
++        func `Different boundaries are not equal`() throws {
++            let a = try RFC_2046.Boundary("test1")
++            let b = try RFC_2046.Boundary("test2")
++            #expect(a != b)
++        }
+ 
+-    @Test
+-    func `Boundaries work in Set`() throws {
+-        let boundaries: Set = try [
+-            RFC_2046.Boundary("test1"),
+-            RFC_2046.Boundary("test2"),
+-            RFC_2046.Boundary("test1"),
+-        ]
+-        #expect(boundaries.count == 2)
+-    }
++        @Test
++        func `Boundaries work in Set`() throws {
++            let boundaries: Set = try [
++                RFC_2046.Boundary("test1"),
++                RFC_2046.Boundary("test2"),
++                RFC_2046.Boundary("test1"),
++            ]
++            #expect(boundaries.count == 2)
++        }
+ 
+-    @Test
+-    func `Boundaries work as Dictionary keys`() throws {
+-        var dict: [RFC_2046.Boundary: String] = [:]
+-        let boundary = try RFC_2046.Boundary("test")
+-        dict[boundary] = "value"
+-        #expect(dict[boundary] == "value")
++        @Test
++        func `Boundaries work as Dictionary keys`() throws {
++            var dict: [RFC_2046.Boundary: String] = [:]
++            let boundary = try RFC_2046.Boundary("test")
++            dict[boundary] = "value"
++            #expect(dict[boundary] == "value")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Boundary - CustomStringConvertible` {
+-    @Test
+-    func `Description returns the boundary value`() throws {
+-        let boundary = try RFC_2046.Boundary("test-boundary")
+-        #expect(boundary.description == "test-boundary")
+-    }
++extension `Boundary Tests` {
++    @Suite
++    struct `Boundary - CustomStringConvertible` {
++        @Test
++        func `Description returns the boundary value`() throws {
++            let boundary = try RFC_2046.Boundary("test-boundary")
++            #expect(boundary.description == "test-boundary")
++        }
+ 
+-    @Test
+-    func `String interpolation works`() throws {
+-        let boundary = try RFC_2046.Boundary("test")
+-        let message = "Boundary: \(boundary)"
+-        #expect(message == "Boundary: test")
++        @Test
++        func `String interpolation works`() throws {
++            let boundary = try RFC_2046.Boundary("test")
++            let message = "Boundary: \(boundary)"
++            #expect(message == "Boundary: test")
++        }
+     }
+ }
+diff --git a/Tests/RFC 2046 Tests/Boundary random Tests.swift b/Tests/RFC 2046 Tests/Boundary random Tests.swift
+index 25eb065..66f319e 100644
+--- a/Tests/RFC 2046 Tests/Boundary random Tests.swift	
++++ b/Tests/RFC 2046 Tests/Boundary random Tests.swift	
+@@ -2,8 +2,15 @@ import RFC_2045
+ import RFC_2046
+ import Testing
+ 
+-@Suite
+-struct `Boundary.random` {
++enum `Boundary random Tests` {}
++
++extension `Boundary random Tests` {
++    @Suite
++    struct `Boundary.random` {
++    }
++}
++
++extension `Boundary random Tests`.`Boundary.random` {
+     @Suite
+     struct `Generated boundaries` {
+         @Test
+diff --git a/Tests/RFC 2046 Tests/Coder Witness Tests.swift b/Tests/RFC 2046 Tests/Coder Witness Tests.swift
+index a5b8260..acb2d12 100644
+--- a/Tests/RFC 2046 Tests/Coder Witness Tests.swift	
++++ b/Tests/RFC 2046 Tests/Coder Witness Tests.swift	
+@@ -6,84 +6,94 @@
+     import RFC_2046
+     import Testing
+ 
+-    @Suite
+-    struct `Boundary - Coder witness` {
+-        @Test
+-        func `Coder parses a boundary up to the line terminator`() throws {
+-            var input = [Byte](utf8: "----=_Part_12345\r\nrest")[...]
+-            let boundary = try RFC_2046.Boundary.coder.parse(&input)
+-
+-            #expect(boundary.rawValue == "----=_Part_12345")
+-        }
++enum `Coder Witness Tests` {}
+ 
+-        @Test
+-        func `Coder serializes a boundary verbatim`() throws {
+-            let boundary = try RFC_2046.Boundary("----=_Part_12345")
+-            var buffer: [Byte] = []
+-            try RFC_2046.Boundary.coder.serialize(boundary, into: &buffer)
++extension `Coder Witness Tests` {
++        @Suite
++        struct `Boundary - Coder witness` {
++            @Test
++            func `Coder parses a boundary up to the line terminator`() throws {
++                var input = [Byte](utf8: "----=_Part_12345\r\nrest")[...]
++                let boundary = try RFC_2046.Boundary.coder.parse(&input)
+ 
+-            #expect(String(decoding: buffer, as: UTF8.self) == "----=_Part_12345")
+-        }
++                #expect(boundary.rawValue == "----=_Part_12345")
++            }
+ 
+-        @Test
+-        func `Coder rejects an empty boundary`() {
+-            var input = [Byte](utf8: "\r\n")[...]
++            @Test
++            func `Coder serializes a boundary verbatim`() throws {
++                let boundary = try RFC_2046.Boundary("----=_Part_12345")
++                var buffer: [Byte] = []
++                try RFC_2046.Boundary.coder.serialize(boundary, into: &buffer)
+ 
+-            #expect(throws: RFC_2046.Boundary.Error.self) {
+-                _ = try RFC_2046.Boundary.coder.parse(&input)
++                #expect(String(decoding: buffer, as: UTF8.self) == "----=_Part_12345")
+             }
+-        }
+-    }
+ 
+-    @Suite
+-    struct `Multipart.Subtype - Coder witness` {
+-        @Test
+-        func `Coder round-trips a subtype`() throws {
+-            var buffer: [Byte] = []
+-            try RFC_2046.Multipart.Subtype.coder.serialize(.formData, into: &buffer)
++            @Test
++            func `Coder rejects an empty boundary`() {
++                var input = [Byte](utf8: "\r\n")[...]
+ 
+-            var input = buffer[...]
+-            #expect(try RFC_2046.Multipart.Subtype.coder.parse(&input) == .formData)
++                #expect(throws: RFC_2046.Boundary.Error.self) {
++                    _ = try RFC_2046.Boundary.coder.parse(&input)
++                }
++            }
+         }
+-    }
+-
+-    @Suite
+-    struct `BodyPart.Headers - Coder witness` {
+-        @Test
+-        func `Coder round-trips a header block`() throws {
+-            let headers = RFC_2046.BodyPart.Headers(
+-                contentType: .textPlainUTF8,
+-                contentTransferEncoding: .base64
+-            )
+-
+-            var buffer: [Byte] = []
+-            try RFC_2046.BodyPart.Headers.coder.serialize(headers, into: &buffer)
+-
+-            var input = buffer[...]
+-            let parsed = try RFC_2046.BodyPart.Headers.coder.parse(&input)
+-
+-            #expect(parsed.contentType == headers.contentType)
+-            #expect(parsed.contentTransferEncoding == headers.contentTransferEncoding)
++}
++
++extension `Coder Witness Tests` {
++        @Suite
++        struct `Multipart.Subtype - Coder witness` {
++            @Test
++            func `Coder round-trips a subtype`() throws {
++                var buffer: [Byte] = []
++                try RFC_2046.Multipart.Subtype.coder.serialize(.formData, into: &buffer)
++
++                var input = buffer[...]
++                #expect(try RFC_2046.Multipart.Subtype.coder.parse(&input) == .formData)
++            }
+         }
+-    }
+-
+-    @Suite
+-    struct `BodyPart - Coder witness` {
+-        @Test
+-        func `Coder round-trips a body part`() throws {
+-            let part = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-                content: RFC_2046.BodyPart.Content("Hello, World!")
+-            )
+-
+-            var buffer: [Byte] = []
+-            try RFC_2046.BodyPart.coder.serialize(part, into: &buffer)
+-
+-            var input = buffer[...]
+-            let parsed = try RFC_2046.BodyPart.coder.parse(&input)
+-
+-            #expect(parsed.content.rawValue == part.content.rawValue)
+-            #expect(parsed.contentType == part.contentType)
++}
++
++extension `Coder Witness Tests` {
++        @Suite
++        struct `BodyPart.Headers - Coder witness` {
++            @Test
++            func `Coder round-trips a header block`() throws {
++                let headers = RFC_2046.BodyPart.Headers(
++                    contentType: .textPlainUTF8,
++                    contentTransferEncoding: .base64
++                )
++
++                var buffer: [Byte] = []
++                try RFC_2046.BodyPart.Headers.coder.serialize(headers, into: &buffer)
++
++                var input = buffer[...]
++                let parsed = try RFC_2046.BodyPart.Headers.coder.parse(&input)
++
++                #expect(parsed.contentType == headers.contentType)
++                #expect(parsed.contentTransferEncoding == headers.contentTransferEncoding)
++            }
++        }
++}
++
++extension `Coder Witness Tests` {
++        @Suite
++        struct `BodyPart - Coder witness` {
++            @Test
++            func `Coder round-trips a body part`() throws {
++                let part = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++                    content: RFC_2046.BodyPart.Content("Hello, World!")
++                )
++
++                var buffer: [Byte] = []
++                try RFC_2046.BodyPart.coder.serialize(part, into: &buffer)
++
++                var input = buffer[...]
++                let parsed = try RFC_2046.BodyPart.coder.parse(&input)
++
++                #expect(parsed.content.rawValue == part.content.rawValue)
++                #expect(parsed.contentType == part.contentType)
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/RFC 2046 Tests/Multipart Boundary Parameter Tests.swift b/Tests/RFC 2046 Tests/Multipart Boundary Parameter Tests.swift
+index f24ad40..42398b9 100644
+--- a/Tests/RFC 2046 Tests/Multipart Boundary Parameter Tests.swift	
++++ b/Tests/RFC 2046 Tests/Multipart Boundary Parameter Tests.swift	
+@@ -2,37 +2,41 @@ import RFC_2045
+ import RFC_2046
+ import Testing
+ 
+-@Suite
+-struct `Multipart boundary parameter` {
+-    private static let part = RFC_2046.BodyPart(
+-        headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-        content: RFC_2046.BodyPart.Content("x")
+-    )
++enum `Multipart Boundary Parameter Tests` {}
+ 
+-    @Test
+-    func `an additional boundary parameter is refused`() throws {
+-        let boundary = try RFC_2046.Boundary("real")
+-        #expect(throws: RFC_2046.Multipart.Error.self) {
+-            try RFC_2046.Multipart(
++extension `Multipart Boundary Parameter Tests` {
++    @Suite
++    struct `Multipart boundary parameter` {
++        private static let part = RFC_2046.BodyPart(
++            headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++            content: RFC_2046.BodyPart.Content("x")
++        )
++
++        @Test
++        func `an additional boundary parameter is refused`() throws {
++            let boundary = try RFC_2046.Boundary("real")
++            #expect(throws: RFC_2046.Multipart.Error.self) {
++                try RFC_2046.Multipart(
++                    subtype: .mixed,
++                    parts: [Self.part],
++                    boundary: boundary,
++                    additionalParameters: [.boundary: "other"]
++                )
++            }
++        }
++
++        @Test
++        func `the content type always names the boundary that separates the parts`() throws {
++            let multipart = RFC_2046.Multipart(
++                __unchecked: (),
+                 subtype: .mixed,
+                 parts: [Self.part],
+-                boundary: boundary,
++                boundary: try RFC_2046.Boundary("real"),
++                preamble: nil,
++                epilogue: nil,
+                 additionalParameters: [.boundary: "other"]
+             )
++            #expect(multipart.contentType.parameters[.boundary] == "real")
+         }
+     }
+-
+-    @Test
+-    func `the content type always names the boundary that separates the parts`() throws {
+-        let multipart = RFC_2046.Multipart(
+-            __unchecked: (),
+-            subtype: .mixed,
+-            parts: [Self.part],
+-            boundary: try RFC_2046.Boundary("real"),
+-            preamble: nil,
+-            epilogue: nil,
+-            additionalParameters: [.boundary: "other"]
+-        )
+-        #expect(multipart.contentType.parameters[.boundary] == "real")
+-    }
+ }
+diff --git a/Tests/RFC 2046 Tests/Multipart Coder Tests.swift b/Tests/RFC 2046 Tests/Multipart Coder Tests.swift
+index b906c0b..eeb7e5b 100644
+--- a/Tests/RFC 2046 Tests/Multipart Coder Tests.swift	
++++ b/Tests/RFC 2046 Tests/Multipart Coder Tests.swift	
+@@ -4,156 +4,164 @@
+     import RFC_2046
+     import Testing
+ 
+-    @Suite
+-    struct `Multipart - Delimiter recognition` {
+-        @Test
+-        func `Delimiter lines with trailing transport padding are recognized`() throws {
+-            let raw =
+-                "--simple-boundary \t \r\n"
+-                + "Content-Type: text/plain\r\n"
+-                + "\r\n"
+-                + "Hello\r\n"
+-                + "--simple-boundary--  \r\n"
+-            let boundary = try RFC_2046.Boundary("simple-boundary")
+-            let multipart = try RFC_2046.Multipart(binary: [Byte](utf8: raw), boundary: boundary)
+-
+-            #expect(multipart.parts.count == 1)
+-            #expect(multipart.parts[0].content.rawValue == [Byte](utf8: "Hello"))
++enum `Multipart Coder Tests` {}
++
++extension `Multipart Coder Tests` {
++        @Suite
++        struct `Multipart - Delimiter recognition` {
++            @Test
++            func `Delimiter lines with trailing transport padding are recognized`() throws {
++                let raw =
++                    "--simple-boundary \t \r\n"
++                    + "Content-Type: text/plain\r\n"
++                    + "\r\n"
++                    + "Hello\r\n"
++                    + "--simple-boundary--  \r\n"
++                let boundary = try RFC_2046.Boundary("simple-boundary")
++                let multipart = try RFC_2046.Multipart(binary: [Byte](utf8: raw), boundary: boundary)
++
++                #expect(multipart.parts.count == 1)
++                #expect(multipart.parts[0].content.rawValue == [Byte](utf8: "Hello"))
++            }
++
++            @Test
++            func `Dash-boundary prefix followed by non-whitespace is not a delimiter`() throws {
++                let raw =
++                    "--b\r\n"
++                    + "\r\n"
++                    + "--bogus is content, not a delimiter\r\n"
++                    + "--b--\r\n"
++                let boundary = try RFC_2046.Boundary("b")
++                let multipart = try RFC_2046.Multipart(binary: [Byte](utf8: raw), boundary: boundary)
++
++                #expect(multipart.parts.count == 1)
++                #expect(
++                    multipart.parts[0].content.rawValue
++                        == [Byte](utf8: "--bogus is content, not a delimiter")
++                )
++            }
+         }
+-
+-        @Test
+-        func `Dash-boundary prefix followed by non-whitespace is not a delimiter`() throws {
+-            let raw =
+-                "--b\r\n"
+-                + "\r\n"
+-                + "--bogus is content, not a delimiter\r\n"
+-                + "--b--\r\n"
+-            let boundary = try RFC_2046.Boundary("b")
+-            let multipart = try RFC_2046.Multipart(binary: [Byte](utf8: raw), boundary: boundary)
+-
+-            #expect(multipart.parts.count == 1)
+-            #expect(
+-                multipart.parts[0].content.rawValue
+-                    == [Byte](utf8: "--bogus is content, not a delimiter")
+-            )
+-        }
+-    }
+-
+-    @Suite
+-    struct `Multipart - Byte-exact content` {
+-        @Test
+-        func `Bare CR and LF bytes inside part content are preserved exactly`() throws {
+-            let payload: [Byte] = [Byte](utf8: "A\nB\rC")
+-            var raw: [Byte] = [Byte](utf8: "--b\r\nContent-Type: application/octet-stream\r\n\r\n")
+-            raw.append(contentsOf: payload)
+-            raw.append(contentsOf: [Byte](utf8: "\r\n--b--\r\n"))
+-
+-            let boundary = try RFC_2046.Boundary("b")
+-            let multipart = try RFC_2046.Multipart(binary: raw, boundary: boundary)
+-
+-            #expect(multipart.parts.count == 1)
+-            #expect(multipart.parts[0].content.rawValue == payload)
+-        }
+-
+-        @Test
+-        func `Round-trip preserves binary content containing lone terminators`() throws {
+-            let payload: [Byte] = [0x00, 0x0A, 0x0D, 0x41, 0x0D, 0x0A, 0x42, 0x0A].map(
+-                Byte.init(bitPattern:)
+-            )
+-            let part = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(contentType: .applicationOctetStream),
+-                content: RFC_2046.BodyPart.Content(payload)
+-            )
+-            let boundary = try RFC_2046.Boundary("xyz-boundary")
+-            let multipart = try RFC_2046.Multipart(
+-                subtype: .mixed,
+-                parts: [part],
+-                boundary: boundary
+-            )
+-
+-            let wire = [Byte](multipart)
+-            let reparsed = try RFC_2046.Multipart(binary: wire, boundary: boundary)
+-
+-            #expect(reparsed.parts.count == 1)
+-            #expect(reparsed.parts[0].content.rawValue == payload)
+-        }
+-
+-        @Test
+-        func `Multipart round-trips transfer-encoded parts without double encoding`() throws {
+-            let binaryPayload: [Byte] = [0x00, 0x01, 0xFE, 0xFF].map(Byte.init(bitPattern:))
+-            let base64Part = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(
+-                    contentType: .applicationOctetStream,
+-                    contentTransferEncoding: .base64
+-                ),
+-                content: RFC_2046.BodyPart.Content(binaryPayload)
+-            )
+-            let quotedPayload: [Byte] = [Byte](utf8: "a=b") + [Byte(bitPattern: 0x0F)]
+-            let quotedPart = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(
+-                    contentType: .textPlainUTF8,
+-                    contentTransferEncoding: .quotedPrintable
+-                ),
+-                content: RFC_2046.BodyPart.Content(quotedPayload)
+-            )
+-            let boundary = try RFC_2046.Boundary("rt-boundary")
+-            let original = try RFC_2046.Multipart(
+-                subtype: .mixed,
+-                parts: [base64Part, quotedPart],
+-                boundary: boundary
+-            )
+-
+-            let wire = [Byte](original)
+-            let reparsed = try RFC_2046.Multipart(binary: wire, boundary: boundary)
+-
+-            #expect(reparsed.parts.count == 2)
+-            #expect(reparsed.parts[0].content.rawValue == binaryPayload)
+-            #expect(reparsed.parts[1].content.rawValue == quotedPayload)
+-            #expect([Byte](reparsed) == wire)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Multipart - Coder witness` {
+-        @Test
+-        func `Coder round-trips a serialized multipart body`() throws {
+-            let boundary = try RFC_2046.Boundary("----=_Part_12345")
+-            let original = try RFC_2046.Multipart(
+-                subtype: .alternative,
+-                parts: [
+-                    RFC_2046.BodyPart(
+-                        headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-                        content: RFC_2046.BodyPart.Content("Hello!")
++}
++
++extension `Multipart Coder Tests` {
++        @Suite
++        struct `Multipart - Byte-exact content` {
++            @Test
++            func `Bare CR and LF bytes inside part content are preserved exactly`() throws {
++                let payload: [Byte] = [Byte](utf8: "A\nB\rC")
++                var raw: [Byte] = [Byte](utf8: "--b\r\nContent-Type: application/octet-stream\r\n\r\n")
++                raw.append(contentsOf: payload)
++                raw.append(contentsOf: [Byte](utf8: "\r\n--b--\r\n"))
++
++                let boundary = try RFC_2046.Boundary("b")
++                let multipart = try RFC_2046.Multipart(binary: raw, boundary: boundary)
++
++                #expect(multipart.parts.count == 1)
++                #expect(multipart.parts[0].content.rawValue == payload)
++            }
++
++            @Test
++            func `Round-trip preserves binary content containing lone terminators`() throws {
++                let payload: [Byte] = [0x00, 0x0A, 0x0D, 0x41, 0x0D, 0x0A, 0x42, 0x0A].map(
++                    Byte.init(bitPattern:)
++                )
++                let part = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(contentType: .applicationOctetStream),
++                    content: RFC_2046.BodyPart.Content(payload)
++                )
++                let boundary = try RFC_2046.Boundary("xyz-boundary")
++                let multipart = try RFC_2046.Multipart(
++                    subtype: .mixed,
++                    parts: [part],
++                    boundary: boundary
++                )
++
++                let wire = [Byte](multipart)
++                let reparsed = try RFC_2046.Multipart(binary: wire, boundary: boundary)
++
++                #expect(reparsed.parts.count == 1)
++                #expect(reparsed.parts[0].content.rawValue == payload)
++            }
++
++            @Test
++            func `Multipart round-trips transfer-encoded parts without double encoding`() throws {
++                let binaryPayload: [Byte] = [0x00, 0x01, 0xFE, 0xFF].map(Byte.init(bitPattern:))
++                let base64Part = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(
++                        contentType: .applicationOctetStream,
++                        contentTransferEncoding: .base64
+                     ),
+-                    RFC_2046.BodyPart(
+-                        headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-                        content: RFC_2046.BodyPart.Content("World!")
++                    content: RFC_2046.BodyPart.Content(binaryPayload)
++                )
++                let quotedPayload: [Byte] = [Byte](utf8: "a=b") + [Byte(bitPattern: 0x0F)]
++                let quotedPart = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(
++                        contentType: .textPlainUTF8,
++                        contentTransferEncoding: .quotedPrintable
+                     ),
+-                ],
+-                boundary: boundary
+-            )
+-
+-            let coder = RFC_2046.Multipart.coder(boundary: boundary, subtype: .alternative)
+-
+-            var wire: [Byte] = []
+-            try coder.serialize(original, into: &wire)
+-
+-            var input = wire[...]
+-            let parsed = try coder.parse(&input)
+-
+-            #expect(parsed.parts.count == 2)
+-            #expect(parsed.boundary == boundary)
+-            #expect(parsed.parts.first?.content.description == "Hello!")
+-            #expect(parsed.parts.last?.content.description == "World!")
++                    content: RFC_2046.BodyPart.Content(quotedPayload)
++                )
++                let boundary = try RFC_2046.Boundary("rt-boundary")
++                let original = try RFC_2046.Multipart(
++                    subtype: .mixed,
++                    parts: [base64Part, quotedPart],
++                    boundary: boundary
++                )
++
++                let wire = [Byte](original)
++                let reparsed = try RFC_2046.Multipart(binary: wire, boundary: boundary)
++
++                #expect(reparsed.parts.count == 2)
++                #expect(reparsed.parts[0].content.rawValue == binaryPayload)
++                #expect(reparsed.parts[1].content.rawValue == quotedPayload)
++                #expect([Byte](reparsed) == wire)
++            }
+         }
+-
+-        @Test
+-        func `Coder carries the boundary and subtype it was built with`() throws {
+-            let boundary = try RFC_2046.Boundary("b0undary")
+-            let coder = RFC_2046.Multipart.coder(boundary: boundary, subtype: .related)
+-
+-            #expect(coder.boundary == boundary)
+-            #expect(coder.subtype == .related)
++}
++
++extension `Multipart Coder Tests` {
++        @Suite
++        struct `Multipart - Coder witness` {
++            @Test
++            func `Coder round-trips a serialized multipart body`() throws {
++                let boundary = try RFC_2046.Boundary("----=_Part_12345")
++                let original = try RFC_2046.Multipart(
++                    subtype: .alternative,
++                    parts: [
++                        RFC_2046.BodyPart(
++                            headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++                            content: RFC_2046.BodyPart.Content("Hello!")
++                        ),
++                        RFC_2046.BodyPart(
++                            headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++                            content: RFC_2046.BodyPart.Content("World!")
++                        ),
++                    ],
++                    boundary: boundary
++                )
++
++                let coder = RFC_2046.Multipart.coder(boundary: boundary, subtype: .alternative)
++
++                var wire: [Byte] = []
++                try coder.serialize(original, into: &wire)
++
++                var input = wire[...]
++                let parsed = try coder.parse(&input)
++
++                #expect(parsed.parts.count == 2)
++                #expect(parsed.boundary == boundary)
++                #expect(parsed.parts.first?.content.description == "Hello!")
++                #expect(parsed.parts.last?.content.description == "World!")
++            }
++
++            @Test
++            func `Coder carries the boundary and subtype it was built with`() throws {
++                let boundary = try RFC_2046.Boundary("b0undary")
++                let coder = RFC_2046.Multipart.coder(boundary: boundary, subtype: .related)
++
++                #expect(coder.boundary == boundary)
++                #expect(coder.subtype == .related)
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/RFC 2046 Tests/MultipartError Tests.swift b/Tests/RFC 2046 Tests/MultipartError Tests.swift
+index 375f6dd..1b8e455 100644
+--- a/Tests/RFC 2046 Tests/MultipartError Tests.swift	
++++ b/Tests/RFC 2046 Tests/MultipartError Tests.swift	
+@@ -2,133 +2,143 @@ import RFC_2045
+ import RFC_2046
+ import Testing
+ 
+-@Suite
+-struct `Boundary.Error - Error cases` {
+-    @Test
+-    func `empty boundary throws empty error`() {
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary("")
++enum `MultipartError Tests` {}
++
++extension `MultipartError Tests` {
++    @Suite
++    struct `Boundary.Error - Error cases` {
++        @Test
++        func `empty boundary throws empty error`() {
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary("")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `too long boundary throws tooLong error`() {
+-        let longBoundary = String(repeating: "x", count: 71)
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary(longBoundary)
++        @Test
++        func `too long boundary throws tooLong error`() {
++            let longBoundary = String(repeating: "x", count: 71)
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary(longBoundary)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `boundary with trailing space throws endsWithWhitespace error`() {
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary("test ")
++        @Test
++        func `boundary with trailing space throws endsWithWhitespace error`() {
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary("test ")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `boundary with invalid character throws invalidCharacter error`() {
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Boundary("test\u{00}")
++        @Test
++        func `boundary with invalid character throws invalidCharacter error`() {
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Boundary("test\u{00}")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `valid boundary succeeds`() throws {
+-        let boundary = try RFC_2046.Boundary("----=_Part_12345")
+-        #expect(boundary.rawValue == "----=_Part_12345")
+-    }
++        @Test
++        func `valid boundary succeeds`() throws {
++            let boundary = try RFC_2046.Boundary("----=_Part_12345")
++            #expect(boundary.rawValue == "----=_Part_12345")
++        }
+ 
+-    @Test
+-    func `maximum length boundary succeeds`() throws {
+-        let maxBoundary = String(repeating: "x", count: 70)
+-        let boundary = try RFC_2046.Boundary(maxBoundary)
+-        #expect(boundary.rawValue == maxBoundary)
++        @Test
++        func `maximum length boundary succeeds`() throws {
++            let maxBoundary = String(repeating: "x", count: 70)
++            let boundary = try RFC_2046.Boundary(maxBoundary)
++            #expect(boundary.rawValue == maxBoundary)
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Multipart.Error - Error cases` {
+-    @Test
+-    func `Multipart initialization throws emptyParts`() {
+-        #expect(throws: RFC_2046.Multipart.Error.self) {
+-            _ = try RFC_2046.Multipart(
+-                subtype: .mixed,
+-                parts: [],
+-                boundary: .init("test")
+-            )
++extension `MultipartError Tests` {
++    @Suite
++    struct `Multipart.Error - Error cases` {
++        @Test
++        func `Multipart initialization throws emptyParts`() {
++            #expect(throws: RFC_2046.Multipart.Error.self) {
++                _ = try RFC_2046.Multipart(
++                    subtype: .mixed,
++                    parts: [],
++                    boundary: .init("test")
++                )
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Catching emptyParts error`() {
+-        do {
+-            _ = try RFC_2046.Multipart(
+-                subtype: .mixed,
+-                parts: [],
+-                boundary: .init("test")
+-            )
+-            Issue.record("Expected error to be thrown")
+-        } catch let error as RFC_2046.Multipart.Error {
+-            #expect(error == .emptyParts)
+-        } catch {
+-            Issue.record("Expected RFC_2046.Multipart.Error")
++        @Test
++        func `Catching emptyParts error`() {
++            do {
++                _ = try RFC_2046.Multipart(
++                    subtype: .mixed,
++                    parts: [],
++                    boundary: .init("test")
++                )
++                Issue.record("Expected error to be thrown")
++            } catch let error as RFC_2046.Multipart.Error {
++                #expect(error == .emptyParts)
++            } catch {
++                Issue.record("Expected RFC_2046.Multipart.Error")
++            }
+         }
+     }
+ }
+ 
+-@Suite
+-struct `Subtype.Error - Error cases` {
+-    @Test
+-    func `empty subtype throws empty error`() {
+-        #expect(throws: RFC_2046.Multipart.Subtype.Error.self) {
+-            _ = try RFC_2046.Multipart.Subtype("")
++extension `MultipartError Tests` {
++    @Suite
++    struct `Subtype.Error - Error cases` {
++        @Test
++        func `empty subtype throws empty error`() {
++            #expect(throws: RFC_2046.Multipart.Subtype.Error.self) {
++                _ = try RFC_2046.Multipart.Subtype("")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `valid subtype succeeds`() throws {
+-        let subtype = try RFC_2046.Multipart.Subtype("alternative")
+-        #expect(subtype.rawValue == "alternative")
+-    }
++        @Test
++        func `valid subtype succeeds`() throws {
++            let subtype = try RFC_2046.Multipart.Subtype("alternative")
++            #expect(subtype.rawValue == "alternative")
++        }
+ 
+-    @Test
+-    func `subtype normalizes to lowercase`() throws {
+-        let subtype = try RFC_2046.Multipart.Subtype("ALTERNATIVE")
+-        #expect(subtype.rawValue == "alternative")
++        @Test
++        func `subtype normalizes to lowercase`() throws {
++            let subtype = try RFC_2046.Multipart.Subtype("ALTERNATIVE")
++            #expect(subtype.rawValue == "alternative")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Error - Integration` {
+-    @Test
+-    func `Valid multipart can be created`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-        let content = RFC_2046.BodyPart.Content("Hello!")
+-        let part = RFC_2046.BodyPart(headers: headers, content: content)
+-
+-        let multipart = try RFC_2046.Multipart(
+-            subtype: .mixed,
+-            parts: [part],
+-            boundary: .init("----=_Part_12345")
+-        )
+-
+-        #expect(multipart.parts.count == 1)
+-        #expect(multipart.boundary.rawValue == "----=_Part_12345")
+-    }
+-
+-    @Test
+-    func `Boundary errors propagate through Multipart init`() throws {
+-        let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-        let content = RFC_2046.BodyPart.Content("test")
+-        let part = RFC_2046.BodyPart(headers: headers, content: content)
++extension `MultipartError Tests` {
++    @Suite
++    struct `Error - Integration` {
++        @Test
++        func `Valid multipart can be created`() throws {
++            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++            let content = RFC_2046.BodyPart.Content("Hello!")
++            let part = RFC_2046.BodyPart(headers: headers, content: content)
+ 
+-        #expect(throws: RFC_2046.Boundary.Error.self) {
+-            _ = try RFC_2046.Multipart(
++            let multipart = try RFC_2046.Multipart(
+                 subtype: .mixed,
+                 parts: [part],
+-                boundary: .init("")
++                boundary: .init("----=_Part_12345")
+             )
++
++            #expect(multipart.parts.count == 1)
++            #expect(multipart.boundary.rawValue == "----=_Part_12345")
++        }
++
++        @Test
++        func `Boundary errors propagate through Multipart init`() throws {
++            let headers = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++            let content = RFC_2046.BodyPart.Content("test")
++            let part = RFC_2046.BodyPart(headers: headers, content: content)
++
++            #expect(throws: RFC_2046.Boundary.Error.self) {
++                _ = try RFC_2046.Multipart(
++                    subtype: .mixed,
++                    parts: [part],
++                    boundary: .init("")
++                )
++            }
+         }
+     }
+ }
+diff --git a/Tests/RFC 2046 Tests/QuotedPrintable Tests.swift b/Tests/RFC 2046 Tests/QuotedPrintable Tests.swift
+index 72c8108..0b89781 100644
+--- a/Tests/RFC 2046 Tests/QuotedPrintable Tests.swift	
++++ b/Tests/RFC 2046 Tests/QuotedPrintable Tests.swift	
+@@ -5,45 +5,49 @@
+     import RFC_2046
+     import Testing
+ 
+-    @Suite
+-    struct `Quoted-printable content` {
+-        @Test
+-        func `Serialize with quoted-printable encoding applies encoding`() throws {
+-            let part = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(
+-                    contentType: .textPlainUTF8,
+-                    contentTransferEncoding: .quotedPrintable
+-                ),
+-                content: RFC_2046.BodyPart.Content(
+-                    [Byte](utf8: "a=b") + [Byte(bitPattern: 0x0F)]
++enum `QuotedPrintable Tests` {}
++
++extension `QuotedPrintable Tests` {
++        @Suite
++        struct `Quoted-printable content` {
++            @Test
++            func `Serialize with quoted-printable encoding applies encoding`() throws {
++                let part = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(
++                        contentType: .textPlainUTF8,
++                        contentTransferEncoding: .quotedPrintable
++                    ),
++                    content: RFC_2046.BodyPart.Content(
++                        [Byte](utf8: "a=b") + [Byte(bitPattern: 0x0F)]
++                    )
+                 )
+-            )
+ 
+-            let string = String(decoding: [Byte](part), as: UTF8.self)
++                let string = String(decoding: [Byte](part), as: UTF8.self)
+ 
+-            #expect(string.contains("Content-Transfer-Encoding: quoted-printable"))
+-            #expect(string.hasSuffix("a=3Db=0F"))
+-        }
++                #expect(string.contains("Content-Transfer-Encoding: quoted-printable"))
++                #expect(string.hasSuffix("a=3Db=0F"))
++            }
+ 
+-        @Test
+-        func `Quoted-printable codec round-trips arbitrary bytes`() throws {
+-            let payload: [Byte] = (UInt8.min...UInt8.max).map(Byte.init(bitPattern:))
+-            let encoded = RFC_2046.QuotedPrintable.encode(payload)
++            @Test
++            func `Quoted-printable codec round-trips arbitrary bytes`() throws {
++                let payload: [Byte] = (UInt8.min...UInt8.max).map(Byte.init(bitPattern:))
++                let encoded = RFC_2046.QuotedPrintable.encode(payload)
+ 
+-            #expect(encoded.allSatisfy { $0.bitPattern < 0x80 })
+-            #expect(RFC_2046.QuotedPrintable.decode(encoded) == payload)
+-        }
++                #expect(encoded.allSatisfy { $0.bitPattern < 0x80 })
++                #expect(RFC_2046.QuotedPrintable.decode(encoded) == payload)
++            }
+ 
+-        @Test
+-        func `Quoted-printable encoded lines stay within 76 characters`() throws {
+-            let payload = [Byte](repeating: ASCII.Code.equalsSign.byte, count: 100)
+-            let encoded = RFC_2046.QuotedPrintable.encode(payload)
+-            let lines = String(decoding: encoded, as: UTF8.self).split(
+-                separator: "\r\n",
+-                omittingEmptySubsequences: false
+-            )
++            @Test
++            func `Quoted-printable encoded lines stay within 76 characters`() throws {
++                let payload = [Byte](repeating: ASCII.Code.equalsSign.byte, count: 100)
++                let encoded = RFC_2046.QuotedPrintable.encode(payload)
++                let lines = String(decoding: encoded, as: UTF8.self).split(
++                    separator: "\r\n",
++                    omittingEmptySubsequences: false
++                )
+ 
+-            #expect(lines.allSatisfy { $0.count <= 76 })
++                #expect(lines.allSatisfy { $0.count <= 76 })
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/RFC 2046 Tests/Serialization Equivalence Tests.swift b/Tests/RFC 2046 Tests/Serialization Equivalence Tests.swift
+index b8fbaf3..48e5fbf 100644
+--- a/Tests/RFC 2046 Tests/Serialization Equivalence Tests.swift	
++++ b/Tests/RFC 2046 Tests/Serialization Equivalence Tests.swift	
+@@ -7,86 +7,92 @@
+     import RFC_2183
+     import Testing
+ 
+-    @Suite
+-    struct `ASCII and binary serialization agree` {
+-        @Test func `Boundary verbs agree`() throws {
+-            let value = try RFC_2046.Boundary("----=_Part_12345_Custom")
+-            var ascii: [ASCII.Code] = []
+-            RFC_2046.Boundary.serialize(value, into: &ascii)
+-            var wire: [Byte] = []
+-            RFC_2046.Boundary.serialize(value, into: &wire)
+-
+-            #expect(ascii.map(\.byte) == wire)
+-            #expect(String(decoding: wire, as: UTF8.self) == "----=_Part_12345_Custom")
++enum `Serialization Equivalence Tests` {}
++
++extension `Serialization Equivalence Tests` {
++        @Suite
++        struct `ASCII and binary serialization agree` {
++            @Test func `Boundary verbs agree`() throws {
++                let value = try RFC_2046.Boundary("----=_Part_12345_Custom")
++                var ascii: [ASCII.Code] = []
++                RFC_2046.Boundary.serialize(value, into: &ascii)
++                var wire: [Byte] = []
++                RFC_2046.Boundary.serialize(value, into: &wire)
++
++                #expect(ascii.map(\.byte) == wire)
++                #expect(String(decoding: wire, as: UTF8.self) == "----=_Part_12345_Custom")
++            }
++
++            @Test func `Multipart.Subtype verbs agree`() {
++                let value = RFC_2046.Multipart.Subtype.alternative
++                var ascii: [ASCII.Code] = []
++                RFC_2046.Multipart.Subtype.serialize(value, into: &ascii)
++                var wire: [Byte] = []
++                RFC_2046.Multipart.Subtype.serialize(value, into: &wire)
++
++                #expect(ascii.map(\.byte) == wire)
++                #expect(String(decoding: wire, as: UTF8.self) == "alternative")
++            }
++
++            @Test func `BodyPart.Headers verbs agree`() {
++                let value = RFC_2046.BodyPart.Headers(
++                    contentDisposition: .inline(),
++                    contentType: .textPlainUTF8,
++                    contentTransferEncoding: .base64
++                )
++                var ascii: [ASCII.Code] = []
++                RFC_2046.BodyPart.Headers.serialize(value, into: &ascii)
++                var wire: [Byte] = []
++                RFC_2046.BodyPart.Headers.serialize(value, into: &wire)
++
++                #expect(ascii.map(\.byte) == wire)
++            }
+         }
+-
+-        @Test func `Multipart.Subtype verbs agree`() {
+-            let value = RFC_2046.Multipart.Subtype.alternative
+-            var ascii: [ASCII.Code] = []
+-            RFC_2046.Multipart.Subtype.serialize(value, into: &ascii)
+-            var wire: [Byte] = []
+-            RFC_2046.Multipart.Subtype.serialize(value, into: &wire)
+-
+-            #expect(ascii.map(\.byte) == wire)
+-            #expect(String(decoding: wire, as: UTF8.self) == "alternative")
+-        }
+-
+-        @Test func `BodyPart.Headers verbs agree`() {
+-            let value = RFC_2046.BodyPart.Headers(
+-                contentDisposition: .inline(),
+-                contentType: .textPlainUTF8,
+-                contentTransferEncoding: .base64
+-            )
+-            var ascii: [ASCII.Code] = []
+-            RFC_2046.BodyPart.Headers.serialize(value, into: &ascii)
+-            var wire: [Byte] = []
+-            RFC_2046.BodyPart.Headers.serialize(value, into: &wire)
+-
+-            #expect(ascii.map(\.byte) == wire)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Binary serialization round-trips` {
+-        @Test func `Content round-trips through the binary verb`() {
+-            let bytes: [Byte] = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10].map(Byte.init(bitPattern:))
+-            let original = RFC_2046.BodyPart.Content(bytes)
+-            var wire: [Byte] = []
+-            RFC_2046.BodyPart.Content.serialize(original, into: &wire)
+-
+-            #expect(wire == bytes)
+-            #expect(RFC_2046.BodyPart.Content(binary: wire) == original)
+-        }
+-
+-        @Test func `Boundary round-trips through the ASCII verbs`() throws {
+-            let original = try RFC_2046.Boundary("----=_Part_12345")
+-
+-            #expect(try RFC_2046.Boundary(ascii: [Byte](original)) == original)
+-        }
+-
+-        @Test func `Multipart.Subtype round-trips through the ASCII verbs`() throws {
+-            let original = RFC_2046.Multipart.Subtype.formData
+-
+-            #expect(try RFC_2046.Multipart.Subtype(ascii: [Byte](original)) == original)
+-        }
+-
+-        @Test func `Headers round-trip through the byte verb`() throws {
+-            let original = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
+-            var wire: [Byte] = []
+-            RFC_2046.BodyPart.Headers.serialize(original, into: &wire)
+-
+-            #expect(try RFC_2046.BodyPart.Headers(ascii: wire).contentType == original.contentType)
+-        }
+-
+-        @Test func `BodyPart round-trips through the byte verb`() throws {
+-            let original = RFC_2046.BodyPart(
+-                headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
+-                content: RFC_2046.BodyPart.Content("Hello, World!")
+-            )
+-            let reparsed = try RFC_2046.BodyPart(binary: [Byte](original))
+-
+-            #expect(reparsed.content.rawValue == original.content.rawValue)
+-            #expect(reparsed.contentType == original.contentType)
++}
++
++extension `Serialization Equivalence Tests` {
++        @Suite
++        struct `Binary serialization round-trips` {
++            @Test func `Content round-trips through the binary verb`() {
++                let bytes: [Byte] = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10].map(Byte.init(bitPattern:))
++                let original = RFC_2046.BodyPart.Content(bytes)
++                var wire: [Byte] = []
++                RFC_2046.BodyPart.Content.serialize(original, into: &wire)
++
++                #expect(wire == bytes)
++                #expect(RFC_2046.BodyPart.Content(binary: wire) == original)
++            }
++
++            @Test func `Boundary round-trips through the ASCII verbs`() throws {
++                let original = try RFC_2046.Boundary("----=_Part_12345")
++
++                #expect(try RFC_2046.Boundary(ascii: [Byte](original)) == original)
++            }
++
++            @Test func `Multipart.Subtype round-trips through the ASCII verbs`() throws {
++                let original = RFC_2046.Multipart.Subtype.formData
++
++                #expect(try RFC_2046.Multipart.Subtype(ascii: [Byte](original)) == original)
++            }
++
++            @Test func `Headers round-trip through the byte verb`() throws {
++                let original = RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8)
++                var wire: [Byte] = []
++                RFC_2046.BodyPart.Headers.serialize(original, into: &wire)
++
++                #expect(try RFC_2046.BodyPart.Headers(ascii: wire).contentType == original.contentType)
++            }
++
++            @Test func `BodyPart round-trips through the byte verb`() throws {
++                let original = RFC_2046.BodyPart(
++                    headers: RFC_2046.BodyPart.Headers(contentType: .textPlainUTF8),
++                    content: RFC_2046.BodyPart.Content("Hello, World!")
++                )
++                let reparsed = try RFC_2046.BodyPart(binary: [Byte](original))
++
++                #expect(reparsed.content.rawValue == original.content.rawValue)
++                #expect(reparsed.contentType == original.contentType)
++            }
+         }
+-    }
++}
+ #endif
+-- 
+2.43.0
+

@@ -1,0 +1,619 @@
+From 8562636e1b6768156a5fb27e47ff02c0d8662901 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:57 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Calendar Tests/Calendar error Tests.swift |  62 ++--
+ .../CalendarAlgebra Tests.swift               | 278 +++++++++---------
+ .../CalendarCorrespondence Tests.swift        |  88 +++---
+ .../CalendarIsolation Tests.swift             | 108 +++----
+ 4 files changed, 276 insertions(+), 260 deletions(-)
+
+diff --git a/Tests/Calendar Tests/Calendar error Tests.swift b/Tests/Calendar Tests/Calendar error Tests.swift
+index a7afc65..9b8a2d6 100644
+--- a/Tests/Calendar Tests/Calendar error Tests.swift	
++++ b/Tests/Calendar Tests/Calendar error Tests.swift	
+@@ -1,37 +1,41 @@
+ import Calendar
+ import Testing
+ 
+-@Suite struct `Calendar conversion preserves nested error payloads` {
+-    @Test(arguments: [Int64.min, -1, 0, 1, Int64.max])
+-    func `target decode failures retain the unsupported coordinate at the source boundary`(
+-        rawValue: Int64
+-    ) {
+-        let source = Calendar<DayNumber>(
+-            dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
+-            date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
+-        )
+-        let target = Calendar<String>(
+-            dayNumber: { _ throws(Calendar<String>.Encode.Error) in throw .unsupported },
+-            date: { day throws(Calendar<String>.Decode.Error) in throw .unsupported(day) }
+-        )
+-        let day = DayNumber(rawValue: rawValue)
+-        #expect(throws: Calendar<String>.Decode.Error.unsupported(day)) { try target.date(on: day) }
+-        #expect(throws: Calendar<DayNumber>.Error.decode(.unsupported(day))) {
+-            try source.convert(day, to: target)
++enum `Calendar error Tests` {}
++
++extension `Calendar error Tests` {
++    @Suite struct `Calendar conversion preserves nested error payloads` {
++        @Test(arguments: [Int64.min, -1, 0, 1, Int64.max])
++        func `target decode failures retain the unsupported coordinate at the source boundary`(
++            rawValue: Int64
++        ) {
++            let source = Calendar<DayNumber>(
++                dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
++                date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
++            )
++            let target = Calendar<String>(
++                dayNumber: { _ throws(Calendar<String>.Encode.Error) in throw .unsupported },
++                date: { day throws(Calendar<String>.Decode.Error) in throw .unsupported(day) }
++            )
++            let day = DayNumber(rawValue: rawValue)
++            #expect(throws: Calendar<String>.Decode.Error.unsupported(day)) { try target.date(on: day) }
++            #expect(throws: Calendar<DayNumber>.Error.decode(.unsupported(day))) {
++                try source.convert(day, to: target)
++            }
+         }
+-    }
+ 
+-    @Test func `source encoding failures keep their owning error domain`() {
+-        let source = Calendar<String>(
+-            dayNumber: { _ throws(Calendar<String>.Encode.Error) in throw .unsupported },
+-            date: { day throws(Calendar<String>.Decode.Error) in throw .unsupported(day) }
+-        )
+-        let target = Calendar<DayNumber>(
+-            dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
+-            date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
+-        )
+-        #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
+-            try source.convert("unsupported", to: target)
++        @Test func `source encoding failures keep their owning error domain`() {
++            let source = Calendar<String>(
++                dayNumber: { _ throws(Calendar<String>.Encode.Error) in throw .unsupported },
++                date: { day throws(Calendar<String>.Decode.Error) in throw .unsupported(day) }
++            )
++            let target = Calendar<DayNumber>(
++                dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
++                date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
++            )
++            #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
++                try source.convert("unsupported", to: target)
++            }
+         }
+     }
+ }
+diff --git a/Tests/Calendar Tests/CalendarAlgebra Tests.swift b/Tests/Calendar Tests/CalendarAlgebra Tests.swift
+index 3dd6201..02eb375 100644
+--- a/Tests/Calendar Tests/CalendarAlgebra Tests.swift	
++++ b/Tests/Calendar Tests/CalendarAlgebra Tests.swift	
+@@ -31,155 +31,159 @@ private func weekCalendar() -> sending Calendar<WeekDate> {
+     )
+ }
+ 
+-@Suite struct `Calendars preserve their coordinate algebra` {
+-    @Test(arguments: [Int64.min, -8, -7, -1, 0, 1, 6, 7, 8, Int64.max])
+-    func `Week dates and day numbers round trip across their coordinate domain`(
+-        rawValue: Int64
+-    ) throws {
+-        let calendar = weekCalendar()
+-        let day = DayNumber(rawValue: rawValue)
+-        let date = try calendar.date(on: day)
+-        #expect(try calendar.dayNumber(of: date) == day)
+-        #expect(try calendar.date(on: calendar.dayNumber(of: date)) == date)
+-    }
+-
+-    @Test func `advancement and distance are derived from coordinates`() throws {
+-        let calendar = weekCalendar()
+-        let start = WeekDate(week: -1, weekday: 7)
+-        let end = try calendar.adding(days: 8, to: start)
+-        #expect(end == WeekDate(week: 1, weekday: 1))
+-        #expect(try calendar.adding(days: 0, to: start) == start)
+-        #expect(try calendar.adding(days: 5, to: calendar.adding(days: 3, to: start)) == end)
+-        #expect(try calendar.distance(from: start, to: end).underlying == 8)
+-        #expect(try calendar.distance(from: end, to: start).underlying == -8)
+-        #expect(
+-            try calendar.adding(days: calendar.distance(from: start, to: end), to: start) == end
+-        )
+-        #expect(try calendar.adding(days: -8, to: end) == start)
+-    }
++enum `CalendarAlgebra Tests` {}
+ 
+-    @Test func `Calendar conversion preserves the day coordinate across date representations`()
+-        throws
+-    {
+-        let source = weekCalendar()
+-        let target = Calendar<DayNumber>(
+-            dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
+-            date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
+-        )
+-        let date = WeekDate(week: 42, weekday: 3)
+-        let converted = try source.convert(date, to: target)
+-        #expect(converted.rawValue == 296)
+-        #expect(try target.convert(converted, to: source) == date)
+-    }
++extension `CalendarAlgebra Tests` {
++    @Suite struct `Calendars preserve their coordinate algebra` {
++        @Test(arguments: [Int64.min, -8, -7, -1, 0, 1, 6, 7, 8, Int64.max])
++        func `Week dates and day numbers round trip across their coordinate domain`(
++            rawValue: Int64
++        ) throws {
++            let calendar = weekCalendar()
++            let day = DayNumber(rawValue: rawValue)
++            let date = try calendar.date(on: day)
++            #expect(try calendar.dayNumber(of: date) == day)
++            #expect(try calendar.date(on: calendar.dayNumber(of: date)) == date)
++        }
+ 
+-    @Test func `partial domains report typed errors`() {
+-        let calendar = Calendar<String>(
+-            dayNumber: { value throws(Calendar<String>.Encode.Error) in
+-                guard value == "origin" else { throw .unsupported }
+-                return DayNumber(rawValue: 0)
+-            },
+-            date: { day throws(Calendar<String>.Decode.Error) in
+-                guard day.rawValue == 0 else { throw .unsupported(day) }
+-                return "origin"
+-            }
+-        )
+-        #expect(throws: Calendar<String>.Encode.Error.unsupported) {
+-            try calendar.dayNumber(of: "missing")
++        @Test func `advancement and distance are derived from coordinates`() throws {
++            let calendar = weekCalendar()
++            let start = WeekDate(week: -1, weekday: 7)
++            let end = try calendar.adding(days: 8, to: start)
++            #expect(end == WeekDate(week: 1, weekday: 1))
++            #expect(try calendar.adding(days: 0, to: start) == start)
++            #expect(try calendar.adding(days: 5, to: calendar.adding(days: 3, to: start)) == end)
++            #expect(try calendar.distance(from: start, to: end).underlying == 8)
++            #expect(try calendar.distance(from: end, to: start).underlying == -8)
++            #expect(
++                try calendar.adding(days: calendar.distance(from: start, to: end), to: start) == end
++            )
++            #expect(try calendar.adding(days: -8, to: end) == start)
+         }
+-        #expect(throws: Calendar<String>.Error.decode(.unsupported(DayNumber(rawValue: 1)))) {
+-            try calendar.adding(days: 1, to: "origin")
++
++        @Test func `Calendar conversion preserves the day coordinate across date representations`()
++            throws
++        {
++            let source = weekCalendar()
++            let target = Calendar<DayNumber>(
++                dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
++                date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
++            )
++            let date = WeekDate(week: 42, weekday: 3)
++            let converted = try source.convert(date, to: target)
++            #expect(converted.rawValue == 296)
++            #expect(try target.convert(converted, to: source) == date)
+         }
+-    }
+ 
+-    @Test func `composed operations preserve leaf errors`() {
+-        let origin = Calendar<String>(
+-            dayNumber: { value throws(Calendar<String>.Encode.Error) in
+-                guard value == "origin" else { throw .unsupported }
+-                return DayNumber(rawValue: 0)
+-            },
+-            date: { day throws(Calendar<String>.Decode.Error) in
+-                guard day.rawValue == 0 else { throw .unsupported(day) }
+-                return "origin"
++        @Test func `partial domains report typed errors`() {
++            let calendar = Calendar<String>(
++                dayNumber: { value throws(Calendar<String>.Encode.Error) in
++                    guard value == "origin" else { throw .unsupported }
++                    return DayNumber(rawValue: 0)
++                },
++                date: { day throws(Calendar<String>.Decode.Error) in
++                    guard day.rawValue == 0 else { throw .unsupported(day) }
++                    return "origin"
++                }
++            )
++            #expect(throws: Calendar<String>.Encode.Error.unsupported) {
++                try calendar.dayNumber(of: "missing")
++            }
++            #expect(throws: Calendar<String>.Error.decode(.unsupported(DayNumber(rawValue: 1)))) {
++                try calendar.adding(days: 1, to: "origin")
+             }
+-        )
+-        let identity = Calendar<DayNumber>(
+-            dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
+-            date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
+-        )
+-        let missing = DayNumber(rawValue: 1)
+-        #expect(throws: Calendar<String>.Decode.Error.unsupported(missing)) {
+-            try origin.date(on: missing)
+-        }
+-        #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
+-            try origin.adding(days: 0, to: "missing")
+-        }
+-        #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
+-            try origin.distance(from: "origin", to: "missing")
+-        }
+-        #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
+-            try origin.convert("missing", to: identity)
+-        }
+-        #expect(throws: Calendar<DayNumber>.Error.decode(.unsupported(missing))) {
+-            try identity.convert(missing, to: origin)
+         }
+-        #expect(throws: Calendar<DayNumber>.Error.arithmetic(.overflow)) {
+-            try identity.adding(days: 1, to: DayNumber(rawValue: .max))
++
++        @Test func `composed operations preserve leaf errors`() {
++            let origin = Calendar<String>(
++                dayNumber: { value throws(Calendar<String>.Encode.Error) in
++                    guard value == "origin" else { throw .unsupported }
++                    return DayNumber(rawValue: 0)
++                },
++                date: { day throws(Calendar<String>.Decode.Error) in
++                    guard day.rawValue == 0 else { throw .unsupported(day) }
++                    return "origin"
++                }
++            )
++            let identity = Calendar<DayNumber>(
++                dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
++                date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
++            )
++            let missing = DayNumber(rawValue: 1)
++            #expect(throws: Calendar<String>.Decode.Error.unsupported(missing)) {
++                try origin.date(on: missing)
++            }
++            #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
++                try origin.adding(days: 0, to: "missing")
++            }
++            #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
++                try origin.distance(from: "origin", to: "missing")
++            }
++            #expect(throws: Calendar<String>.Error.encode(.unsupported)) {
++                try origin.convert("missing", to: identity)
++            }
++            #expect(throws: Calendar<DayNumber>.Error.decode(.unsupported(missing))) {
++                try identity.convert(missing, to: origin)
++            }
++            #expect(throws: Calendar<DayNumber>.Error.arithmetic(.overflow)) {
++                try identity.adding(days: 1, to: DayNumber(rawValue: .max))
++            }
+         }
+-    }
+ 
+-    @Test func `nested errors preserve their cases and checked conformances`() {
+-        func requireError<Value: Swift::Error & Equatable & Sendable>(_ value: Value) {}
+-        let encode = Calendar<String>.Encode.Error.unsupported
+-        let decode = Calendar<String>.Decode.Error.unsupported(.init(rawValue: 1))
+-        let composed = Calendar<String>.Error.decode(decode)
+-        requireError(encode)
+-        requireError(decode)
+-        requireError(composed)
+-        #expect(encode == .unsupported)
+-        #expect(composed == .decode(.unsupported(.init(rawValue: 1))))
+-    }
++        @Test func `nested errors preserve their cases and checked conformances`() {
++            func requireError<Value: Swift::Error & Equatable & Sendable>(_ value: Value) {}
++            let encode = Calendar<String>.Encode.Error.unsupported
++            let decode = Calendar<String>.Decode.Error.unsupported(.init(rawValue: 1))
++            let composed = Calendar<String>.Error.decode(decode)
++            requireError(encode)
++            requireError(decode)
++            requireError(composed)
++            #expect(encode == .unsupported)
++            #expect(composed == .decode(.unsupported(.init(rawValue: 1))))
++        }
+ 
+-    @Test
+-    func
+-        `Day coordinate addition rejects overflow while full range distance remains representable`()
+-    {
+-        #expect(throws: DayNumber.Error.overflow) { try DayNumber(rawValue: .max).adding(1) }
+-        #expect(throws: DayNumber.Error.overflow) { try DayNumber(rawValue: .min).adding(-1) }
+-        let distance = DayNumber(rawValue: .min).distance(to: DayNumber(rawValue: .max))
+-        #expect(distance.underlying.magnitude.value.rawValue == UInt.max)
+-        #expect(distance.underlying.polarity == .positive)
+-    }
++        @Test
++        func
++            `Day coordinate addition rejects overflow while full range distance remains representable`()
++        {
++            #expect(throws: DayNumber.Error.overflow) { try DayNumber(rawValue: .max).adding(1) }
++            #expect(throws: DayNumber.Error.overflow) { try DayNumber(rawValue: .min).adding(-1) }
++            let distance = DayNumber(rawValue: .min).distance(to: DayNumber(rawValue: .max))
++            #expect(distance.underlying.magnitude.value.rawValue == UInt.max)
++            #expect(distance.underlying.polarity == .positive)
++        }
+ 
+-    @Test func `full coordinate range has a representable displacement`() throws {
+-        let calendar = Calendar<DayNumber>(
+-            dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
+-            date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
+-        )
+-        let start = DayNumber(rawValue: .min)
+-        let end = DayNumber(rawValue: .max)
+-        let forward = try calendar.distance(from: start, to: end)
+-        let backward = try calendar.distance(from: end, to: start)
+-        #expect(forward.underlying.magnitude.value.rawValue == UInt.max)
+-        #expect(backward.underlying == -forward.underlying)
+-        #expect(try calendar.adding(days: forward, to: start) == end)
+-        #expect(try calendar.adding(days: backward, to: end) == start)
+-        #expect(throws: Calendar<DayNumber>.Error.arithmetic(.overflow)) {
+-            try calendar.adding(days: forward, to: end)
++        @Test func `full coordinate range has a representable displacement`() throws {
++            let calendar = Calendar<DayNumber>(
++                dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
++                date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
++            )
++            let start = DayNumber(rawValue: .min)
++            let end = DayNumber(rawValue: .max)
++            let forward = try calendar.distance(from: start, to: end)
++            let backward = try calendar.distance(from: end, to: start)
++            #expect(forward.underlying.magnitude.value.rawValue == UInt.max)
++            #expect(backward.underlying == -forward.underlying)
++            #expect(try calendar.adding(days: forward, to: start) == end)
++            #expect(try calendar.adding(days: backward, to: end) == start)
++            #expect(throws: Calendar<DayNumber>.Error.arithmetic(.overflow)) {
++                try calendar.adding(days: forward, to: end)
++            }
+         }
+-    }
+ 
+-    @Test func `date time composes the date representation with temporal atoms`() throws {
+-        let date = WeekDate(week: 42, weekday: 3)
+-        let value = DateTime(
+-            date: date,
+-            hour: try Time.Day.Hour(12),
+-            millisecond: try .init(123),
+-            microsecond: try .init(456),
+-            nanosecond: try .init(789)
+-        )
+-        #expect(value.date == date)
+-        #expect(value.hour.value == 12)
+-        #expect(value.totalNanoseconds == 123_456_789)
+-        #expect(Time.Epoch(referenceDate: value).referenceDate == value)
++        @Test func `date time composes the date representation with temporal atoms`() throws {
++            let date = WeekDate(week: 42, weekday: 3)
++            let value = DateTime(
++                date: date,
++                hour: try Time.Day.Hour(12),
++                millisecond: try .init(123),
++                microsecond: try .init(456),
++                nanosecond: try .init(789)
++            )
++            #expect(value.date == date)
++            #expect(value.hour.value == 12)
++            #expect(value.totalNanoseconds == 123_456_789)
++            #expect(Time.Epoch(referenceDate: value).referenceDate == value)
++        }
+     }
+ }
+diff --git a/Tests/Calendar Tests/CalendarCorrespondence Tests.swift b/Tests/Calendar Tests/CalendarCorrespondence Tests.swift
+index 4deb1d5..2266d9e 100644
+--- a/Tests/Calendar Tests/CalendarCorrespondence Tests.swift	
++++ b/Tests/Calendar Tests/CalendarCorrespondence Tests.swift	
+@@ -2,49 +2,53 @@ import Calendar
+ import Optic
+ import Testing
+ 
+-@Suite
+-private struct `Calendar directions compose through fixed coordinates` {
+-    @Test
+-    func `first class directions retain their leaf failure domains`() throws {
+-        let encode = Calendar<String>.Encode { value throws(Calendar<String>.Encode.Error) in
+-            guard value == "origin" else { throw .unsupported }
+-            return DayNumber(rawValue: 0)
+-        }
+-        let decode = Calendar<String>.Decode { day throws(Calendar<String>.Decode.Error) in
+-            guard day.rawValue == 0 else { throw .unsupported(day) }
+-            return "origin"
+-        }
+-        let calendar = Calendar(encode: encode, decode: decode)
+-        #expect(try encode("origin") == DayNumber(rawValue: 0))
+-        #expect(try decode(DayNumber(rawValue: 0)) == "origin")
+-        #expect(try calendar.encode("origin") == calendar.dayNumber(of: "origin"))
+-        #expect(
+-            try calendar.decode(DayNumber(rawValue: 0)) == calendar.date(on: DayNumber(rawValue: 0))
+-        )
+-        #expect(throws: Calendar<String>.Encode.Error.unsupported) {
+-            try calendar.encode("missing")
+-        }
+-        #expect(throws: Calendar<String>.Decode.Error.unsupported(DayNumber(rawValue: 1))) {
+-            try calendar.decode(DayNumber(rawValue: 1))
++enum `CalendarCorrespondence Tests` {}
++
++extension `CalendarCorrespondence Tests` {
++    @Suite
++    private struct `Calendar directions compose through fixed coordinates` {
++        @Test
++        func `first class directions retain their leaf failure domains`() throws {
++            let encode = Calendar<String>.Encode { value throws(Calendar<String>.Encode.Error) in
++                guard value == "origin" else { throw .unsupported }
++                return DayNumber(rawValue: 0)
++            }
++            let decode = Calendar<String>.Decode { day throws(Calendar<String>.Decode.Error) in
++                guard day.rawValue == 0 else { throw .unsupported(day) }
++                return "origin"
++            }
++            let calendar = Calendar(encode: encode, decode: decode)
++            #expect(try encode("origin") == DayNumber(rawValue: 0))
++            #expect(try decode(DayNumber(rawValue: 0)) == "origin")
++            #expect(try calendar.encode("origin") == calendar.dayNumber(of: "origin"))
++            #expect(
++                try calendar.decode(DayNumber(rawValue: 0)) == calendar.date(on: DayNumber(rawValue: 0))
++            )
++            #expect(throws: Calendar<String>.Encode.Error.unsupported) {
++                try calendar.encode("missing")
++            }
++            #expect(throws: Calendar<String>.Decode.Error.unsupported(DayNumber(rawValue: 1))) {
++                try calendar.decode(DayNumber(rawValue: 1))
++            }
+         }
+-    }
+ 
+-    @Test(arguments: [Int64.min, -1, 0, 1, Int64.max])
+-    func `calendar correspondences compose through shared fixed coordinates`(rawValue: Int64) throws {
+-        let source = Calendar<Int64>(
+-            dayNumber: { value throws(Calendar<Int64>.Encode.Error) in
+-                DayNumber(rawValue: value)
+-            },
+-            date: { day throws(Calendar<Int64>.Decode.Error) in day.rawValue }
+-        )
+-        let target = Calendar<DayNumber>(
+-            dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
+-            date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
+-        )
+-        let conversion = source.correspondence.appending(target.correspondence.reversed)
+-        let result = try conversion.forward(rawValue)
+-        #expect(result.rawValue == rawValue)
+-        #expect(try conversion.backward(result) == rawValue)
+-        #expect(try source.convert(rawValue, to: target) == result)
++        @Test(arguments: [Int64.min, -1, 0, 1, Int64.max])
++        func `calendar correspondences compose through shared fixed coordinates`(rawValue: Int64) throws {
++            let source = Calendar<Int64>(
++                dayNumber: { value throws(Calendar<Int64>.Encode.Error) in
++                    DayNumber(rawValue: value)
++                },
++                date: { day throws(Calendar<Int64>.Decode.Error) in day.rawValue }
++            )
++            let target = Calendar<DayNumber>(
++                dayNumber: { day throws(Calendar<DayNumber>.Encode.Error) in day },
++                date: { day throws(Calendar<DayNumber>.Decode.Error) in day }
++            )
++            let conversion = source.correspondence.appending(target.correspondence.reversed)
++            let result = try conversion.forward(rawValue)
++            #expect(result.rawValue == rawValue)
++            #expect(try conversion.backward(result) == rawValue)
++            #expect(try source.convert(rawValue, to: target) == result)
++        }
+     }
+ }
+diff --git a/Tests/Calendar Tests/CalendarIsolation Tests.swift b/Tests/Calendar Tests/CalendarIsolation Tests.swift
+index 09ea3a5..11360bd 100644
+--- a/Tests/Calendar Tests/CalendarIsolation Tests.swift	
++++ b/Tests/Calendar Tests/CalendarIsolation Tests.swift	
+@@ -58,64 +58,68 @@ private func makeDateTime() -> sending DateTime<LocalDate> { DateTime(date: Loca
+ private func requireSendable<T: Sendable>(_ value: T) {}
+ private struct EqualityOnly: Equatable { let value: Int }
+ 
+-@Suite struct `Calendars preserve isolation and ownership` {
+-    @Test func `local construction does not transfer aliases`() throws {
+-        let date = LocalDate(1)
+-        let calendar = makeCalendar()
+-        let value = DateTime(date: date)
+-        #expect(value.date === date)
+-        #expect(try calendar.dayNumber(of: date).rawValue == 11)
+-        #expect(try calendar.date(on: DayNumber(rawValue: 11)).value == date.value)
+-    }
++enum `CalendarIsolation Tests` {}
+ 
+-    @Test func `equality does not require hashability`() {
+-        #expect(DateTime(date: EqualityOnly(value: 1)) == DateTime(date: EqualityOnly(value: 1)))
+-    }
++extension `CalendarIsolation Tests` {
++    @Suite struct `Calendars preserve isolation and ownership` {
++        @Test func `local construction does not transfer aliases`() throws {
++            let date = LocalDate(1)
++            let calendar = makeCalendar()
++            let value = DateTime(date: date)
++            #expect(value.date === date)
++            #expect(try calendar.dayNumber(of: date).rawValue == 11)
++            #expect(try calendar.date(on: DayNumber(rawValue: 11)).value == date.value)
++        }
+ 
+-    @Test func `conditional hashability and sendability remain available`() {
+-        let value = DateTime(date: DayNumber(rawValue: 42))
+-        requireSendable(value)
+-        #expect(Set([value, value]).count == 1)
+-    }
++        @Test func `equality does not require hashability`() {
++            #expect(DateTime(date: EqualityOnly(value: 1)) == DateTime(date: EqualityOnly(value: 1)))
++        }
+ 
+-    @Test func `ordinary closures can retain locally aliased state`() throws {
+-        let context = LocalContext()
+-        let calendar = Calendar<LocalDate>(
+-            dayNumber: { date throws(Calendar<LocalDate>.Encode.Error) in
+-                do throws(DayNumber.Error) {
+-                    return try DayNumber(rawValue: date.value).adding(context.origin)
+-                } catch {
+-                    throw .unsupported
+-                }
+-            },
+-            date: { day throws(Calendar<LocalDate>.Decode.Error) in
+-                do throws(Difference.Error) {
+-                    return LocalDate(
+-                        Int64(
+-                            try DayNumber(rawValue: context.origin).distance(to: day).underlying
+-                                .intValue()
++        @Test func `conditional hashability and sendability remain available`() {
++            let value = DateTime(date: DayNumber(rawValue: 42))
++            requireSendable(value)
++            #expect(Set([value, value]).count == 1)
++        }
++
++        @Test func `ordinary closures can retain locally aliased state`() throws {
++            let context = LocalContext()
++            let calendar = Calendar<LocalDate>(
++                dayNumber: { date throws(Calendar<LocalDate>.Encode.Error) in
++                    do throws(DayNumber.Error) {
++                        return try DayNumber(rawValue: date.value).adding(context.origin)
++                    } catch {
++                        throw .unsupported
++                    }
++                },
++                date: { day throws(Calendar<LocalDate>.Decode.Error) in
++                    do throws(Difference.Error) {
++                        return LocalDate(
++                            Int64(
++                                try DayNumber(rawValue: context.origin).distance(to: day).underlying
++                                    .intValue()
++                            )
+                         )
+-                    )
+-                } catch {
+-                    throw .unsupported(day)
++                    } catch {
++                        throw .unsupported(day)
++                    }
+                 }
+-            }
+-        )
+-        #expect(context.origin == 10)
+-        #expect(try calendar.dayNumber(of: LocalDate(1)).rawValue == 11)
+-    }
++            )
++            #expect(context.origin == 10)
++            #expect(try calendar.dayNumber(of: LocalDate(1)).rawValue == 11)
++        }
+ 
+-    @Test func `captured calendar state can be transferred as one region`() async throws {
+-        let receiver = CalendarReceiver()
+-        let calendar = makeCalendar()
+-        await receiver.store(calendar)
+-        #expect(try await receiver.dayNumber() == 12)
+-    }
++        @Test func `captured calendar state can be transferred as one region`() async throws {
++            let receiver = CalendarReceiver()
++            let calendar = makeCalendar()
++            await receiver.store(calendar)
++            #expect(try await receiver.dayNumber() == 12)
++        }
+ 
+-    @Test func `non sendable date time can be transferred as one region`() async {
+-        let receiver = DateTimeReceiver()
+-        let value = makeDateTime()
+-        await receiver.store(value)
+-        #expect(await receiver.value() == 42)
++        @Test func `non sendable date time can be transferred as one region`() async {
++            let receiver = DateTimeReceiver()
++            let value = makeDateTime()
++            await receiver.store(value)
++            #expect(await receiver.value() == 42)
++        }
+     }
+ }
+-- 
+2.43.0
+

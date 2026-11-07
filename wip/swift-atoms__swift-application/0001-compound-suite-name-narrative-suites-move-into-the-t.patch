@@ -1,0 +1,791 @@
+From f570f57b9b5728a1e538ed241f7b3bce9c2f42f8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:56 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Application.Boot Tests.swift              | 408 +++++++++---------
+ .../Application.Boundary Tests.swift          |  99 ++---
+ .../Application.Resolution Tests.swift        |  11 +-
+ .../Application.Root Tests.swift              |  11 +-
+ .../Application.Root.Error Tests.swift        | 138 +++---
+ 5 files changed, 345 insertions(+), 322 deletions(-)
+
+diff --git a/Tests/Application Tests/Application.Boot Tests.swift b/Tests/Application Tests/Application.Boot Tests.swift
+index 2f32f34..3ed86e0 100644
+--- a/Tests/Application Tests/Application.Boot Tests.swift	
++++ b/Tests/Application Tests/Application.Boot Tests.swift	
+@@ -33,230 +33,232 @@ extension `Application.Boot Tests` {
+         final class Tally: Sendable {
+             let count = Mutex(0)
+         }
++    }
++}
+ 
+-        @Suite struct `Plans construct before registration` {
+-            @Test func `the phases are ordered construction before registration`() {
+-                #expect(Application.Boot.Phase.construction < Application.Boot.Phase.registration)
+-                #expect(Application.Boot.Phase.allCases == [.construction, .registration])
+-            }
++extension `Application.Boot Tests`.`Boot constructs and registers application roots` {
++    @Suite struct `Plans construct before registration` {
++        @Test func `the phases are ordered construction before registration`() {
++            #expect(Application.Boot.Phase.construction < Application.Boot.Phase.registration)
++            #expect(Application.Boot.Phase.allCases == [.construction, .registration])
++        }
+ 
+-            @Test func `a plan yields a root already in the registered state`() throws {
+-                let plan = Application.Boot.Plan<
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
+-                    Never
+-                >(
+-                    construct: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource(
+-                            label: "production"
+-                        )
+-                    },
+-                    compose: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
+-                            label: $0.label
+-                        )
+-                    }
+-                )
+-
+-                let root = plan()
+-                let resolved = try root.resolve()
+-
+-                #expect(root.isRegistered)
+-                #expect(
+-                    resolved
+-                        == `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                        .Composed(label: "production")
+-                )
+-            }
++        @Test func `a plan yields a root already in the registered state`() throws {
++            let plan = Application.Boot.Plan<
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
++                Never
++            >(
++                construct: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource(
++                        label: "production"
++                    )
++                },
++                compose: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
++                        label: $0.label
++                    )
++                }
++            )
+ 
+-            @Test func `a plan runs the construction phase exactly once`() {
+-                let tally = `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                    .Tally()
+-                let plan = Application.Boot.Plan<
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
+-                    Never
+-                >(
+-                    construct: {
+-                        tally.increment()
+-                        return `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Resource(label: "production")
+-                    },
+-                    compose: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
+-                            label: $0.label
+-                        )
+-                    }
+-                )
+-
+-                _ = plan()
+-
+-                #expect(tally.total == 1)
+-            }
++            let root = plan()
++            let resolved = try root.resolve()
+ 
+-            @Test func `composition follows construction exactly once per invocation`() throws {
+-                let construction = `Application.Boot Tests`.`Boot constructs and registers application roots`.Tally()
+-                let composition = `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                    .Tally()
+-                let plan = Application.Boot.Plan<Int, Int, Never>(
+-                    construct: {
+-                        construction.increment()
+-                        return construction.total
+-                    },
+-                    compose: { resource in
+-                        #expect(construction.total == resource)
+-                        #expect(composition.total == resource - 1)
+-                        composition.increment()
+-                        return resource
+-                    }
+-                )
+-
+-                let first = plan()
+-                let second = plan()
+-
+-                #expect(construction.total == 2)
+-                #expect(composition.total == 2)
+-                #expect(try first.resolve() == 1)
+-                #expect(try second.resolve() == 2)
+-            }
++            #expect(root.isRegistered)
++            #expect(
++                resolved
++                    == `Application.Boot Tests`.`Boot constructs and registers application roots`
++                    .Composed(label: "production")
++            )
++        }
+ 
+-            @Test func `a plan composing nil still registers its root`() throws {
+-                let plan = Application.Boot.Plan<Int, Int?, Never>(
+-                    construct: { 7 },
+-                    compose: { _ in nil }
+-                )
++        @Test func `a plan runs the construction phase exactly once`() {
++            let tally = `Application.Boot Tests`.`Boot constructs and registers application roots`
++                .Tally()
++            let plan = Application.Boot.Plan<
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
++                Never
++            >(
++                construct: {
++                    tally.increment()
++                    return `Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Resource(label: "production")
++                },
++                compose: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
++                        label: $0.label
++                    )
++                }
++            )
+ 
+-                var root = plan()
++            _ = plan()
+ 
+-                #expect(root.isRegistered)
+-                #expect(root.state == .registered(nil))
+-                #expect(try root.resolve() == nil)
+-                #expect(throws: Application.Root<Int?>.Error.alreadyRegistered) {
+-                    try root.register(8)
++            #expect(tally.total == 1)
++        }
++
++        @Test func `composition follows construction exactly once per invocation`() throws {
++            let construction = `Application.Boot Tests`.`Boot constructs and registers application roots`.Tally()
++            let composition = `Application.Boot Tests`.`Boot constructs and registers application roots`
++                .Tally()
++            let plan = Application.Boot.Plan<Int, Int, Never>(
++                construct: {
++                    construction.increment()
++                    return construction.total
++                },
++                compose: { resource in
++                    #expect(construction.total == resource)
++                    #expect(composition.total == resource - 1)
++                    composition.increment()
++                    return resource
+                 }
++            )
++
++            let first = plan()
++            let second = plan()
++
++            #expect(construction.total == 2)
++            #expect(composition.total == 2)
++            #expect(try first.resolve() == 1)
++            #expect(try second.resolve() == 2)
++        }
++
++        @Test func `a plan composing nil still registers its root`() throws {
++            let plan = Application.Boot.Plan<Int, Int?, Never>(
++                construct: { 7 },
++                compose: { _ in nil }
++            )
++
++            var root = plan()
++
++            #expect(root.isRegistered)
++            #expect(root.state == .registered(nil))
++            #expect(try root.resolve() == nil)
++            #expect(throws: Application.Root<Int?>.Error.alreadyRegistered) {
++                try root.register(8)
+             }
++        }
+ 
+-            @Test func `a failing construction phase raises its own error type`() {
+-                let plan = Application.Boot.Plan<
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Failure
+-                >(
+-
+-                    construct: {
+-                        () throws(`Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Failure)
+-                            -> `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Resource in
+-                        throw `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Failure.unavailable
+-                    },
+-                    compose: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
+-                            label: $0.label
+-                        )
+-                    }
+-                )
+-
+-                #expect(
+-                    throws: `Application.Boot Tests`.`Boot constructs and registers application roots`
++        @Test func `a failing construction phase raises its own error type`() {
++            let plan = Application.Boot.Plan<
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Failure
++            >(
++
++                construct: {
++                    () throws(`Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Failure)
++                        -> `Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Resource in
++                    throw `Application.Boot Tests`.`Boot constructs and registers application roots`
+                         .Failure.unavailable
+-                ) {
+-                    try plan()
++                },
++                compose: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
++                        label: $0.label
++                    )
+                 }
++            )
++
++            #expect(
++                throws: `Application.Boot Tests`.`Boot constructs and registers application roots`
++                    .Failure.unavailable
++            ) {
++                try plan()
+             }
+         }
++    }
+ 
+-        @Suite struct `Construction failure and repeated execution preserve phase boundaries` {
+-            @Test func `a failed construction registers nothing`() {
+-                let tally = `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                    .Tally()
+-                let plan = Application.Boot.Plan<
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Failure
+-                >(
+-                    construct: {
+-                        () throws(`Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Failure)
+-                            -> `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Resource in
+-                        throw `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Failure.unavailable
+-                    },
+-                    compose: {
+-                        tally.increment()
+-                        return `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Composed(label: $0.label)
+-                    }
+-                )
+-
+-                do throws(`Application.Boot Tests`.`Boot constructs and registers application roots`
+-                    .Failure)
+-                {
+-                    _ = try plan()
+-                } catch {}
+-
+-                #expect(tally.total == 0)
+-            }
++    @Suite struct `Construction failure and repeated execution preserve phase boundaries` {
++        @Test func `a failed construction registers nothing`() {
++            let tally = `Application.Boot Tests`.`Boot constructs and registers application roots`
++                .Tally()
++            let plan = Application.Boot.Plan<
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Failure
++            >(
++                construct: {
++                    () throws(`Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Failure)
++                        -> `Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Resource in
++                    throw `Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Failure.unavailable
++                },
++                compose: {
++                    tally.increment()
++                    return `Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Composed(label: $0.label)
++                }
++            )
+ 
+-            @Test func `each run of a plan constructs its own resources`() {
+-                let tally = `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                    .Tally()
+-                let plan = Application.Boot.Plan<
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
+-                    Never
+-                >(
+-                    construct: {
+-                        tally.increment()
+-                        return `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                            .Resource(label: "production")
+-                    },
+-                    compose: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
+-                            label: $0.label
+-                        )
+-                    }
+-                )
+-
+-                _ = plan()
+-                _ = plan()
+-
+-                #expect(tally.total == 2)
+-            }
++            do throws(`Application.Boot Tests`.`Boot constructs and registers application roots`
++                .Failure)
++            {
++                _ = try plan()
++            } catch {}
++
++            #expect(tally.total == 0)
+         }
+ 
+-        @Suite struct `Booted roots resolve through boundaries` {
+-            @Test func `a booted root resolves at every boundary`() throws {
+-                let plan = Application.Boot.Plan<
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
+-                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
+-                    Never
+-                >(
+-                    construct: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource(
+-                            label: "production"
+-                        )
+-                    },
+-                    compose: {
+-                        `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
+-                            label: $0.label
+-                        )
+-                    }
+-                )
+-
+-                let root = plan()
+-                let table = Application.Boundary.Table.reapplied
+-                let expected = `Application.Boot Tests`.`Boot constructs and registers application roots`
+-                    .Composed(label: "production")
++        @Test func `each run of a plan constructs its own resources`() {
++            let tally = `Application.Boot Tests`.`Boot constructs and registers application roots`
++                .Tally()
++            let plan = Application.Boot.Plan<
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
++                Never
++            >(
++                construct: {
++                    tally.increment()
++                    return `Application.Boot Tests`.`Boot constructs and registers application roots`
++                        .Resource(label: "production")
++                },
++                compose: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
++                        label: $0.label
++                    )
++                }
++            )
+ 
+-                for boundary in Application.Boundary.allCases {
+-                    let resolution = try root.resolve(at: boundary, using: table)
++            _ = plan()
++            _ = plan()
++
++            #expect(tally.total == 2)
++        }
++    }
+ 
+-                    #expect(resolution.disposition == .reapplied)
+-                    #expect(resolution.value == expected)
++    @Suite struct `Booted roots resolve through boundaries` {
++        @Test func `a booted root resolves at every boundary`() throws {
++            let plan = Application.Boot.Plan<
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource,
++                `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed,
++                Never
++            >(
++                construct: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Resource(
++                        label: "production"
++                    )
++                },
++                compose: {
++                    `Application.Boot Tests`.`Boot constructs and registers application roots`.Composed(
++                        label: $0.label
++                    )
+                 }
++            )
++
++            let root = plan()
++            let table = Application.Boundary.Table.reapplied
++            let expected = `Application.Boot Tests`.`Boot constructs and registers application roots`
++                .Composed(label: "production")
++
++            for boundary in Application.Boundary.allCases {
++                let resolution = try root.resolve(at: boundary, using: table)
++
++                #expect(resolution.disposition == .reapplied)
++                #expect(resolution.value == expected)
+             }
+         }
+     }
+diff --git a/Tests/Application Tests/Application.Boundary Tests.swift b/Tests/Application Tests/Application.Boundary Tests.swift
+index 5f41a1c..a16886e 100644
+--- a/Tests/Application Tests/Application.Boundary Tests.swift	
++++ b/Tests/Application Tests/Application.Boundary Tests.swift	
+@@ -6,71 +6,74 @@ enum `Application.Boundary Tests` {}
+ extension `Application.Boundary Tests` {
+     @Suite
+     struct `Boundary tables assign resolution dispositions` {
+-        @Suite struct `Each boundary has one disposition` {
+-            @Test func `a uniform table assigns its disposition to every boundary`() {
+-                for disposition in Application.Boundary.Disposition.allCases {
+-                    let table = Application.Boundary.Table.uniform(disposition)
++    }
++}
+ 
+-                    for boundary in Application.Boundary.allCases {
+-                        #expect(table[boundary] == disposition)
+-                    }
++extension `Application.Boundary Tests`.`Boundary tables assign resolution dispositions` {
++    @Suite struct `Each boundary has one disposition` {
++        @Test func `a uniform table assigns its disposition to every boundary`() {
++            for disposition in Application.Boundary.Disposition.allCases {
++                let table = Application.Boundary.Table.uniform(disposition)
++
++                for boundary in Application.Boundary.allCases {
++                    #expect(table[boundary] == disposition)
+                 }
+             }
++        }
+ 
+-            @Test func `the presets are the uniform tables`() {
+-                #expect(Application.Boundary.Table.inherited == .uniform(.inherited))
+-                #expect(Application.Boundary.Table.reapplied == .uniform(.reapplied))
+-            }
++        @Test func `the presets are the uniform tables`() {
++            #expect(Application.Boundary.Table.inherited == .uniform(.inherited))
++            #expect(Application.Boundary.Table.reapplied == .uniform(.reapplied))
++        }
+ 
+-            @Test func `assigning a boundary changes that boundary and no other`() {
+-                for assigned in Application.Boundary.allCases {
+-                    var table = Application.Boundary.Table.inherited
+-                    table[assigned] = .reapplied
++        @Test func `assigning a boundary changes that boundary and no other`() {
++            for assigned in Application.Boundary.allCases {
++                var table = Application.Boundary.Table.inherited
++                table[assigned] = .reapplied
+ 
+-                    for boundary in Application.Boundary.allCases {
+-                        let expected: Application.Boundary.Disposition =
+-                            boundary == assigned ? .reapplied : .inherited
+-                        #expect(table[boundary] == expected)
+-                    }
++                for boundary in Application.Boundary.allCases {
++                    let expected: Application.Boundary.Disposition =
++                        boundary == assigned ? .reapplied : .inherited
++                    #expect(table[boundary] == expected)
+                 }
+             }
++        }
+ 
+-            @Test func `the dispositions partition every boundary`() {
+-                var table = Application.Boundary.Table.inherited
+-                table[.job] = .reapplied
++        @Test func `the dispositions partition every boundary`() {
++            var table = Application.Boundary.Table.inherited
++            table[.job] = .reapplied
+ 
+-                let inherited = table.boundaries(.inherited)
+-                let reapplied = table.boundaries(.reapplied)
++            let inherited = table.boundaries(.inherited)
++            let reapplied = table.boundaries(.reapplied)
+ 
+-                #expect(reapplied == [.job])
+-                #expect(inherited.count + reapplied.count == Application.Boundary.allCases.count)
+-                #expect(!inherited.contains(.job))
+-            }
++            #expect(reapplied == [.job])
++            #expect(inherited.count + reapplied.count == Application.Boundary.allCases.count)
++            #expect(!inherited.contains(.job))
+         }
++    }
+ 
+-        @Suite struct `Boundary partitions remain total` {
+-            @Test func `a table is total over the boundary vocabulary`() {
++    @Suite struct `Boundary partitions remain total` {
++        @Test func `a table is total over the boundary vocabulary`() {
+ 
+-                let table = Application.Boundary.Table(
+-                    request: .inherited,
+-                    scene: .inherited,
+-                    task: .reapplied,
+-                    job: .reapplied,
+-                    shutdown: .inherited
+-                )
++            let table = Application.Boundary.Table(
++                request: .inherited,
++                scene: .inherited,
++                task: .reapplied,
++                job: .reapplied,
++                shutdown: .inherited
++            )
+ 
+-                #expect(Application.Boundary.allCases.count == 5)
+-                #expect(
+-                    table.boundaries(.inherited).count + table.boundaries(.reapplied).count == 5
+-                )
+-            }
++            #expect(Application.Boundary.allCases.count == 5)
++            #expect(
++                table.boundaries(.inherited).count + table.boundaries(.reapplied).count == 5
++            )
++        }
+ 
+-            @Test func `a table assigning every boundary the same way has one partition`() {
+-                let table = Application.Boundary.Table.reapplied
++        @Test func `a table assigning every boundary the same way has one partition`() {
++            let table = Application.Boundary.Table.reapplied
+ 
+-                #expect(table.boundaries(.inherited).isEmpty)
+-                #expect(table.boundaries(.reapplied) == Application.Boundary.allCases)
+-            }
++            #expect(table.boundaries(.inherited).isEmpty)
++            #expect(table.boundaries(.reapplied) == Application.Boundary.allCases)
+         }
+     }
+ }
+diff --git a/Tests/Application Tests/Application.Resolution Tests.swift b/Tests/Application Tests/Application.Resolution Tests.swift
+index 820e73d..44fee41 100644
+--- a/Tests/Application Tests/Application.Resolution Tests.swift	
++++ b/Tests/Application Tests/Application.Resolution Tests.swift	
+@@ -1,8 +1,15 @@
+ import Application
+ import Testing
+ 
+-@Suite
+-struct `Resolutions record values and boundary metadata` {
++enum `Application.Resolution Tests` {}
++
++extension `Application.Resolution Tests` {
++    @Suite
++    struct `Resolutions record values and boundary metadata` {
++    }
++}
++
++extension `Application.Resolution Tests`.`Resolutions record values and boundary metadata` {
+     @Suite struct `Resolution values determine agreement` {
+         @Test func `a resolution records the boundary and disposition it was obtained under`() {
+             let resolution = Application.Resolution(
+diff --git a/Tests/Application Tests/Application.Root Tests.swift b/Tests/Application Tests/Application.Root Tests.swift
+index 54ac614..abfd323 100644
+--- a/Tests/Application Tests/Application.Root Tests.swift	
++++ b/Tests/Application Tests/Application.Root Tests.swift	
+@@ -1,8 +1,15 @@
+ import Application
+ import Testing
+ 
+-@Suite
+-struct `Roots register and resolve application values` {
++enum `Application.Root Tests` {}
++
++extension `Application.Root Tests` {
++    @Suite
++    struct `Roots register and resolve application values` {
++    }
++}
++
++extension `Application.Root Tests`.`Roots register and resolve application values` {
+     @Suite struct `Registration follows the root state` {
+         @Test func `an unset root reports it is not registered`() {
+             let root = Application.Root<Int>.unset
+diff --git a/Tests/Application Tests/Application.Root.Error Tests.swift b/Tests/Application Tests/Application.Root.Error Tests.swift
+index 5ee9b5c..acea37a 100644
+--- a/Tests/Application Tests/Application.Root.Error Tests.swift	
++++ b/Tests/Application Tests/Application.Root.Error Tests.swift	
+@@ -1,85 +1,89 @@
+ import Application
+ import Testing
+ 
+-@Suite struct `Root errors preserve registration contracts` {
+-    struct Payload: Sendable {
+-        let value: Int
+-    }
++enum `Application.Root.Error Tests` {}
+ 
+-    @Test func `Different root value types have distinct error types`() {
+-        #expect(
+-            ObjectIdentifier(Application.Root<Int>.Error.self)
+-                != ObjectIdentifier(Application.Root<String>.Error.self)
+-        )
++extension `Application.Root.Error Tests` {
++    @Suite struct `Root errors preserve registration contracts` {
++        struct Payload: Sendable {
++            let value: Int
++        }
+ 
+-        let failure: any Swift::Error = Application.Root<Int>.Error.notRegistered
+-        #expect(failure is Application.Root<Int>.Error)
+-        #expect(!(failure is Application.Root<String>.Error))
+-    }
++        @Test func `Different root value types have distinct error types`() {
++            #expect(
++                ObjectIdentifier(Application.Root<Int>.Error.self)
++                    != ObjectIdentifier(Application.Root<String>.Error.self)
++            )
+ 
+-    @Test func `Root errors remain hashable and sendable without equality on the value`() async {
+-        let root = Application.Root<`Root errors preserve registration contracts`.Payload>.unset
+-        let failure = await Task.detached {
+-            () -> Application.Root<`Root errors preserve registration contracts`.Payload>.Error? in
+-            do throws(Application.Root<`Root errors preserve registration contracts`.Payload>.Error) {
+-                _ = try root.resolve()
+-                return nil
+-            } catch {
+-                return error
+-            }
+-        }.value
++            let failure: any Swift::Error = Application.Root<Int>.Error.notRegistered
++            #expect(failure is Application.Root<Int>.Error)
++            #expect(!(failure is Application.Root<String>.Error))
++        }
+ 
+-        #expect(failure == .notRegistered)
+-        let failures: Set<Application.Root<`Root errors preserve registration contracts`.Payload>.Error> = [
+-            .notRegistered, .alreadyRegistered, .notRegistered,
+-        ]
+-        #expect(failures.count == 2)
+-    }
++        @Test func `Root errors remain hashable and sendable without equality on the value`() async {
++            let root = Application.Root<`Root errors preserve registration contracts`.Payload>.unset
++            let failure = await Task.detached {
++                () -> Application.Root<`Root errors preserve registration contracts`.Payload>.Error? in
++                do throws(Application.Root<`Root errors preserve registration contracts`.Payload>.Error) {
++                    _ = try root.resolve()
++                    return nil
++                } catch {
++                    return error
++                }
++            }.value
+ 
+-    @Test(arguments: [nil, 7] as [Int?], [false, true])
+-    func `A registered nil rejects every subsequent registration`(
+-        replacement: Int?,
+-        initialized: Bool
+-    ) throws {
+-        var root: Application.Root<Int?>
+-        if initialized {
+-            root = Application.Root<Int?>(state: .registered(nil))
+-        } else {
+-            root = Application.Root<Int?>(state: .unset)
+-            try root.register(nil)
++            #expect(failure == .notRegistered)
++            let failures: Set<Application.Root<`Root errors preserve registration contracts`.Payload>.Error> = [
++                .notRegistered, .alreadyRegistered, .notRegistered,
++            ]
++            #expect(failures.count == 2)
+         }
+ 
+-        do {
+-            try root.register(replacement)
+-            Issue.record("A registered root accepted another value")
+-        } catch {
+-            let failure: Application.Root<Int?>.Error = error
+-            #expect(failure == .alreadyRegistered)
+-        }
++        @Test(arguments: [nil, 7] as [Int?], [false, true])
++        func `A registered nil rejects every subsequent registration`(
++            replacement: Int?,
++            initialized: Bool
++        ) throws {
++            var root: Application.Root<Int?>
++            if initialized {
++                root = Application.Root<Int?>(state: .registered(nil))
++            } else {
++                root = Application.Root<Int?>(state: .unset)
++                try root.register(nil)
++            }
++
++            do {
++                try root.register(replacement)
++                Issue.record("A registered root accepted another value")
++            } catch {
++                let failure: Application.Root<Int?>.Error = error
++                #expect(failure == .alreadyRegistered)
++            }
+ 
+-        #expect(root.isRegistered)
+-        #expect(root.state == .registered(nil))
+-        #expect(try root.resolve() == nil)
+-        for boundary in Application.Boundary.allCases {
+-            let resolution = try root.resolve(at: boundary, using: .reapplied)
+-            #expect(resolution.value == nil)
++            #expect(root.isRegistered)
++            #expect(root.state == .registered(nil))
++            #expect(try root.resolve() == nil)
++            for boundary in Application.Boundary.allCases {
++                let resolution = try root.resolve(at: boundary, using: .reapplied)
++                #expect(resolution.value == nil)
++            }
+         }
+-    }
+ 
+-    @Test func `Copies of an unset root register independently`() throws {
+-        let original = Application.Root<Int>.unset
+-        var first = original
+-        var second = original
++        @Test func `Copies of an unset root register independently`() throws {
++            let original = Application.Root<Int>.unset
++            var first = original
++            var second = original
+ 
+-        try first.register(1)
+-        try second.register(2)
++            try first.register(1)
++            try second.register(2)
+ 
+-        #expect(original.state == .unset)
+-        #expect(try first.resolve() == 1)
+-        #expect(try second.resolve() == 2)
+-        #expect(throws: Application.Root<Int>.Error.alreadyRegistered) {
+-            try first.register(3)
++            #expect(original.state == .unset)
++            #expect(try first.resolve() == 1)
++            #expect(try second.resolve() == 2)
++            #expect(throws: Application.Root<Int>.Error.alreadyRegistered) {
++                try first.register(3)
++            }
++            #expect(try second.resolve() == 2)
+         }
+-        #expect(try second.resolve() == 2)
+     }
+ }
+-- 
+2.43.0
+

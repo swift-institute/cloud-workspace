@@ -1,0 +1,1181 @@
+From e2448892fa6ec917f312591a77e49809011ee108 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:06 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Empty Renderer Laws Tests.swift           |  90 +++++------
+ .../Empty.Renderer Tests.swift                |  74 ++++-----
+ .../Pair Renderer Composition Tests.swift     | 100 ++++++------
+ .../Pair Renderer Empty Tests.swift           | 112 +++++++-------
+ .../Pair Renderer Ownership Tests.swift       |  50 +++---
+ .../Pair Renderer Tests.swift                 |  92 +++++------
+ .../Builder Tests.swift                       |   3 +
+ .../Composition Tests.swift                   |   3 +
+ .../Context Tests.swift                       |   4 +
+ .../NonCopyable Tests.swift                   |   3 +
+ .../Renderer Document Tests/View Tests.swift  |   5 +-
+ .../Renderer Composition Tests.swift          | 122 ++++++++-------
+ .../Renderer Ownership Tests.swift            | 144 +++++++++---------
+ Tests/Renderer Tests/Renderer Tests.swift     |  88 ++++++-----
+ 14 files changed, 471 insertions(+), 419 deletions(-)
+
+diff --git a/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty Renderer Laws Tests.swift b/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty Renderer Laws Tests.swift
+index 6fc4a2f..a1471a6 100644
+--- a/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty Renderer Laws Tests.swift	
++++ b/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty Renderer Laws Tests.swift	
+@@ -2,66 +2,70 @@
+     import Renderer
+     import Testing
+ 
+-    @Suite struct `Empty renderer laws` {
+-        enum Failure: Swift.Error, Equatable { case stopped }
++enum `Empty Renderer Laws Tests` {}
+ 
+-        struct Context: ~Copyable { var total = 7 }
++extension `Empty Renderer Laws Tests` {
++        @Suite struct `Empty renderer laws` {
++            enum Failure: Swift.Error, Equatable { case stopped }
+ 
+-        struct Content: ~Copyable, Renderable {
+-            struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
+-                init() { Issue.record("Empty constructed an element renderer") }
++            struct Context: ~Copyable { var total = 7 }
+ 
+-                borrowing func render(_ input: borrowing Content, into context: inout Context) throws(Failure) {
+-                    Issue.record("Empty invoked an element renderer")
+-                    context.total += 1
+-                    throw .stopped
++            struct Content: ~Copyable, Renderable {
++                struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
++                    init() { Issue.record("Empty constructed an element renderer") }
++
++                    borrowing func render(_ input: borrowing Content, into context: inout Context) throws(Failure) {
++                        Issue.record("Empty invoked an element renderer")
++                        context.total += 1
++                        throw .stopped
++                    }
+                 }
+-            }
+ 
+-            static var renderer: Renderer {
+-                Issue.record("Empty accessed the element renderer")
+-                return Renderer()
++                static var renderer: Renderer {
++                    Issue.record("Empty accessed the element renderer")
++                    return Renderer()
++                }
+             }
+-        }
+ 
+-        @Test func `Empty preserves a noncopyable context without constructing an element operation`() throws {
+-            let input = Empty<Content>()
+-            let renderer = Empty<Content>.Renderer()
+-            var context = Context()
++            @Test func `Empty preserves a noncopyable context without constructing an element operation`() throws {
++                let input = Empty<Content>()
++                let renderer = Empty<Content>.Renderer()
++                var context = Context()
+ 
+-            try renderer.render(input, into: &context)
+-            try renderer.render(input, into: &context)
+-            try input.render(into: &context)
++                try renderer.render(input, into: &context)
++                try renderer.render(input, into: &context)
++                try input.render(into: &context)
+ 
+-            #expect(context.total == 7)
+-        }
++                #expect(context.total == 7)
++            }
+ 
+-        struct ScopedContent: Renderable {
+-            struct Renderer: Renderer::Renderer.`Protocol` {
+-                func render(_ input: borrowing ScopedContent, into context: inout EmptyScopedContext) {
+-                    Issue.record("Empty invoked an element renderer")
+-                    context.total += 1
++            struct ScopedContent: Renderable {
++                struct Renderer: Renderer::Renderer.`Protocol` {
++                    func render(_ input: borrowing ScopedContent, into context: inout EmptyScopedContext) {
++                        Issue.record("Empty invoked an element renderer")
++                        context.total += 1
++                    }
+                 }
+-            }
+ 
+-            static var renderer: Renderer {
+-                Issue.record("Empty accessed the element renderer")
+-                return Renderer()
++                static var renderer: Renderer {
++                    Issue.record("Empty accessed the element renderer")
++                    return Renderer()
++                }
+             }
+-        }
+ 
+-        @Test func `Empty forwards a scoped context unchanged`() {
+-            let values = [3]
+-            var context = EmptyScopedContext(values.span)
+-            let input = Empty<ScopedContent>()
++            @Test func `Empty forwards a scoped context unchanged`() {
++                let values = [3]
++                var context = EmptyScopedContext(values.span)
++                let input = Empty<ScopedContent>()
+ 
+-            Empty<ScopedContent>.Renderer().render(input, into: &context)
+-            input.render(into: &context)
++                Empty<ScopedContent>.Renderer().render(input, into: &context)
++                input.render(into: &context)
+ 
+-            #expect(context.total == 7)
+-            #expect(context.values[0] == 3)
++                #expect(context.total == 7)
++                #expect(context.values[0] == 3)
++            }
+         }
+-    }
++}
+ 
+     struct EmptyScopedContext: ~Copyable, ~Escapable {
+         let values: Span<Int>
+diff --git a/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty.Renderer Tests.swift b/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty.Renderer Tests.swift
+index 4b44bb0..90f8ccb 100644
+--- a/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty.Renderer Tests.swift	
++++ b/Tests/Absorbed/swift-empty-renderer/Empty Renderer Tests/Empty.Renderer Tests.swift	
+@@ -2,49 +2,53 @@
+     import Renderer
+     import Testing
+ 
+-    @Suite struct `Empty rendering contracts` {
+-        enum Failure: Swift.Error { case unexpected }
++enum `Empty.Renderer Tests` {}
+ 
+-        struct Content: Renderable {
+-            struct Renderer: Renderer::Renderer.`Protocol` {
+-                init() { Issue.record("Empty constructed an element renderer") }
++extension `Empty.Renderer Tests` {
++        @Suite struct `Empty rendering contracts` {
++            enum Failure: Swift.Error { case unexpected }
+ 
+-                func render(_ input: borrowing Content, into context: inout [Int]) throws(Failure) {
+-                    context.append(99)
+-                    throw .unexpected
++            struct Content: Renderable {
++                struct Renderer: Renderer::Renderer.`Protocol` {
++                    init() { Issue.record("Empty constructed an element renderer") }
++
++                    func render(_ input: borrowing Content, into context: inout [Int]) throws(Failure) {
++                        context.append(99)
++                        throw .unexpected
++                    }
++                }
++                static var renderer: Renderer {
++                    Issue.record("Empty accessed the element renderer")
++                    return Renderer()
+                 }
+             }
+-            static var renderer: Renderer {
+-                Issue.record("Empty accessed the element renderer")
+-                return Renderer()
+-            }
+-        }
+ 
+-        struct OwnedContent: ~Copyable, Renderable {
+-            struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
+-                func render(_ input: borrowing OwnedContent, into context: inout String) { context += "unexpected" }
++            struct OwnedContent: ~Copyable, Renderable {
++                struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
++                    func render(_ input: borrowing OwnedContent, into context: inout String) { context += "unexpected" }
++                }
++                static var renderer: Renderer { Renderer() }
+             }
+-            static var renderer: Renderer { Renderer() }
+-        }
+ 
+-        @Test func `An empty operation leaves the context unchanged`() throws {
+-            var context = [1, 2]
+-            try Empty<Content>.Renderer().render(Empty<Content>(), into: &context)
+-            #expect(context == [1, 2])
+-        }
++            @Test func `An empty operation leaves the context unchanged`() throws {
++                var context = [1, 2]
++                try Empty<Content>.Renderer().render(Empty<Content>(), into: &context)
++                #expect(context == [1, 2])
++            }
+ 
+-        @Test func `An empty value uses its associated renderer`() throws {
+-            var context = [3]
+-            try Empty<Content>().render(into: &context)
+-            #expect(context == [3])
+-        }
++            @Test func `An empty value uses its associated renderer`() throws {
++                var context = [3]
++                try Empty<Content>().render(into: &context)
++                #expect(context == [3])
++            }
+ 
+-        @Test func `Empty supports noncopyable element types`() {
+-            let empty = Empty<OwnedContent>()
+-            var context = "before"
+-            empty.render(into: &context)
+-            empty.render(into: &context)
+-            #expect(context == "before")
++            @Test func `Empty supports noncopyable element types`() {
++                let empty = Empty<OwnedContent>()
++                var context = "before"
++                empty.render(into: &context)
++                empty.render(into: &context)
++                #expect(context == "before")
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Composition Tests.swift b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Composition Tests.swift
+index a688193..6c0960e 100644
+--- a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Composition Tests.swift	
++++ b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Composition Tests.swift	
+@@ -2,63 +2,67 @@
+     import Renderer
+     import Testing
+ 
+-    @Suite struct `Pair renderer composition laws` {
+-        enum Failure: Swift.Error, Equatable { case stopped(Int) }
++enum `Pair Renderer Composition Tests` {}
+ 
+-        struct Step: Renderer.`Protocol` {
+-            let index: Int
+-            let stop: Int
++extension `Pair Renderer Composition Tests` {
++        @Suite struct `Pair renderer composition laws` {
++            enum Failure: Swift.Error, Equatable { case stopped(Int) }
+ 
+-            func render(_ input: borrowing Int, into context: inout [Int]) throws(Failure) {
+-                context.append(input + index)
+-                if index == stop { throw .stopped(index) }
++            struct Step: Renderer.`Protocol` {
++                let index: Int
++                let stop: Int
++
++                func render(_ input: borrowing Int, into context: inout [Int]) throws(Failure) {
++                    context.append(input + index)
++                    if index == stop { throw .stopped(index) }
++                }
+             }
+-        }
+ 
+-        func outcome<R: Renderer.`Protocol`>(
+-            _ renderer: borrowing R,
+-            into context: inout [Int]
+-        ) -> Failure? where R.Input == Int, R.Context == [Int], R.Failure == Failure {
+-            do {
+-                try renderer.render(10, into: &context)
+-                return nil
+-            } catch {
+-                return error
++            func outcome<R: Renderer.`Protocol`>(
++                _ renderer: borrowing R,
++                into context: inout [Int]
++            ) -> Failure? where R.Input == Int, R.Context == [Int], R.Failure == Failure {
++                do {
++                    try renderer.render(10, into: &context)
++                    return nil
++                } catch {
++                    return error
++                }
+             }
+-        }
+ 
+-        @Test(arguments: [-1, 0, 1, 2])
+-        func `Regrouping and array composition preserve failure and effect order`(stop: Int) {
+-            let a = Step(index: 0, stop: stop)
+-            let b = Step(index: 1, stop: stop)
+-            let c = Step(index: 2, stop: stop)
+-            var left = [99]
+-            var right = [99]
+-            var array = [99]
++            @Test(arguments: [-1, 0, 1, 2])
++            func `Regrouping and array composition preserve failure and effect order`(stop: Int) {
++                let a = Step(index: 0, stop: stop)
++                let b = Step(index: 1, stop: stop)
++                let c = Step(index: 2, stop: stop)
++                var left = [99]
++                var right = [99]
++                var array = [99]
+ 
+-            let leftFailure = outcome(Pair(Pair(a, b), c), into: &left)
+-            let rightFailure = outcome(Pair(a, Pair(b, c)), into: &right)
+-            let arrayFailure = outcome([a, b, c], into: &array)
++                let leftFailure = outcome(Pair(Pair(a, b), c), into: &left)
++                let rightFailure = outcome(Pair(a, Pair(b, c)), into: &right)
++                let arrayFailure = outcome([a, b, c], into: &array)
+ 
+-            #expect(leftFailure == (stop < 0 ? nil : .stopped(stop)))
+-            #expect(leftFailure == rightFailure)
+-            #expect(leftFailure == arrayFailure)
+-            #expect(left == [99] + Array(10...(stop < 0 ? 12 : 10 + stop)))
+-            #expect(left == right)
+-            #expect(left == array)
+-        }
++                #expect(leftFailure == (stop < 0 ? nil : .stopped(stop)))
++                #expect(leftFailure == rightFailure)
++                #expect(leftFailure == arrayFailure)
++                #expect(left == [99] + Array(10...(stop < 0 ? 12 : 10 + stop)))
++                #expect(left == right)
++                #expect(left == array)
++            }
+ 
+-        @Test func `Empty arrays and absent operations are composition identities`() {
+-            let operation = Step(index: 0, stop: -1)
+-            let empty: [Step] = []
+-            let absent: Step? = nil
+-            var context = [99]
++            @Test func `Empty arrays and absent operations are composition identities`() {
++                let operation = Step(index: 0, stop: -1)
++                let empty: [Step] = []
++                let absent: Step? = nil
++                var context = [99]
+ 
+-            #expect(outcome(Pair(empty, operation), into: &context) == nil)
+-            #expect(outcome(Pair(operation, empty), into: &context) == nil)
+-            #expect(outcome(Pair(absent, operation), into: &context) == nil)
+-            #expect(outcome(Pair(operation, absent), into: &context) == nil)
+-            #expect(context == [99, 10, 10, 10, 10])
++                #expect(outcome(Pair(empty, operation), into: &context) == nil)
++                #expect(outcome(Pair(operation, empty), into: &context) == nil)
++                #expect(outcome(Pair(absent, operation), into: &context) == nil)
++                #expect(outcome(Pair(operation, absent), into: &context) == nil)
++                #expect(context == [99, 10, 10, 10, 10])
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Empty Tests.swift b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Empty Tests.swift
+index 19d319b..d552cf6 100644
+--- a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Empty Tests.swift	
++++ b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Empty Tests.swift	
+@@ -2,71 +2,75 @@
+     import Renderer
+     import Testing
+ 
+-    @Suite struct `Empty operations in pair composition` {
+-        enum Failure: Swift.Error, Equatable { case stopped }
++enum `Pair Renderer Empty Tests` {}
+ 
+-        struct Context: ~Copyable { var total = 7 }
++extension `Pair Renderer Empty Tests` {
++        @Suite struct `Empty operations in pair composition` {
++            enum Failure: Swift.Error, Equatable { case stopped }
+ 
+-        struct Content: ~Copyable, Renderable {
+-            struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
+-                init() { Issue.record("Empty constructed an element renderer") }
++            struct Context: ~Copyable { var total = 7 }
+ 
+-                borrowing func render(_ input: borrowing Content, into context: inout Context) throws(Failure) {
+-                    Issue.record("Empty invoked an element renderer")
+-                    context.total += 1
+-                    throw .stopped
+-                }
+-            }
++            struct Content: ~Copyable, Renderable {
++                struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
++                    init() { Issue.record("Empty constructed an element renderer") }
+ 
+-            static var renderer: Renderer {
+-                Issue.record("Empty accessed the element renderer")
+-                return Renderer()
+-            }
+-        }
++                    borrowing func render(_ input: borrowing Content, into context: inout Context) throws(Failure) {
++                        Issue.record("Empty invoked an element renderer")
++                        context.total += 1
++                        throw .stopped
++                    }
++                }
+ 
+-        @Test func `Empty is a left and right identity for operations on empty input`() throws {
+-            let empty = Empty<Content>.Renderer()
+-            let effect = Renderer.Witness<Empty<Content>, Context, Failure> { _, context in
+-                context.total *= 2
++                static var renderer: Renderer {
++                    Issue.record("Empty accessed the element renderer")
++                    return Renderer()
++                }
+             }
+-            let input = Empty<Content>()
+-            var left = Context()
+-            var right = Context()
+-
+-            try Pair(empty, effect).render(input, into: &left)
+-            try Pair(effect, empty).render(input, into: &right)
+ 
+-            #expect(left.total == 14)
+-            #expect(right.total == left.total)
+-        }
+-
+-        @Test func `Empty preserves the failure type and earlier effects in composition`() {
+-            let empty = Empty<Content>.Renderer()
+-            let effect = Renderer.Witness<Empty<Content>, Context, Failure> { _, context throws(Failure) in
+-                context.total += 1
+-                throw .stopped
+-            }
+-            let input = Empty<Content>()
+-            var left = Context()
+-            var right = Context()
++            @Test func `Empty is a left and right identity for operations on empty input`() throws {
++                let empty = Empty<Content>.Renderer()
++                let effect = Renderer.Witness<Empty<Content>, Context, Failure> { _, context in
++                    context.total *= 2
++                }
++                let input = Empty<Content>()
++                var left = Context()
++                var right = Context()
+ 
+-            do {
+                 try Pair(empty, effect).render(input, into: &left)
+-                Issue.record("Expected a rendering failure")
+-            } catch {
+-                let failure: Failure = error
+-                #expect(failure == .stopped)
+-            }
+-            do {
+                 try Pair(effect, empty).render(input, into: &right)
+-                Issue.record("Expected a rendering failure")
+-            } catch {
+-                let failure: Failure = error
+-                #expect(failure == .stopped)
++
++                #expect(left.total == 14)
++                #expect(right.total == left.total)
+             }
+ 
+-            #expect(left.total == 8)
+-            #expect(right.total == left.total)
++            @Test func `Empty preserves the failure type and earlier effects in composition`() {
++                let empty = Empty<Content>.Renderer()
++                let effect = Renderer.Witness<Empty<Content>, Context, Failure> { _, context throws(Failure) in
++                    context.total += 1
++                    throw .stopped
++                }
++                let input = Empty<Content>()
++                var left = Context()
++                var right = Context()
++
++                do {
++                    try Pair(empty, effect).render(input, into: &left)
++                    Issue.record("Expected a rendering failure")
++                } catch {
++                    let failure: Failure = error
++                    #expect(failure == .stopped)
++                }
++                do {
++                    try Pair(effect, empty).render(input, into: &right)
++                    Issue.record("Expected a rendering failure")
++                } catch {
++                    let failure: Failure = error
++                    #expect(failure == .stopped)
++                }
++
++                #expect(left.total == 8)
++                #expect(right.total == left.total)
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Ownership Tests.swift b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Ownership Tests.swift
+index 36422c9..797c6f2 100644
+--- a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Ownership Tests.swift	
++++ b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Ownership Tests.swift	
+@@ -2,37 +2,41 @@
+     import Renderer
+     import Testing
+ 
+-    @Suite struct `Pair renderer ownership contracts` {
+-        struct Input: ~Copyable { let value: Int }
+-        struct Context: ~Copyable { var total = 0 }
++enum `Pair Renderer Ownership Tests` {}
+ 
+-        @Test func `Paired witnesses preserve noncopyable inputs and contexts`() {
+-            let witness = Renderer.Witness<Input, Context, Never> { input, context in
+-                context.total += input.value
+-            }
+-            let input = Input(value: 3)
+-            var context = Context()
++extension `Pair Renderer Ownership Tests` {
++        @Suite struct `Pair renderer ownership contracts` {
++            struct Input: ~Copyable { let value: Int }
++            struct Context: ~Copyable { var total = 0 }
+ 
+-            Pair(witness, witness).render(input, into: &context)
++            @Test func `Paired witnesses preserve noncopyable inputs and contexts`() {
++                let witness = Renderer.Witness<Input, Context, Never> { input, context in
++                    context.total += input.value
++                }
++                let input = Input(value: 3)
++                var context = Context()
+ 
+-            #expect(context.total == 6)
+-            #expect(input.value == 3)
+-        }
++                Pair(witness, witness).render(input, into: &context)
+ 
+-        @Test func `Paired witnesses accept scoped inputs and contexts`() {
+-            let values = [3, 7]
+-            let input = values.span
+-            var context = PairScopedContext(values.span)
+-            let witness = Renderer.Witness<Span<Int>, PairScopedContext, Never> { input, context in
+-                context.total += input[0] + context.values[1]
++                #expect(context.total == 6)
++                #expect(input.value == 3)
+             }
+ 
+-            Pair(witness, witness).render(input, into: &context)
++            @Test func `Paired witnesses accept scoped inputs and contexts`() {
++                let values = [3, 7]
++                let input = values.span
++                var context = PairScopedContext(values.span)
++                let witness = Renderer.Witness<Span<Int>, PairScopedContext, Never> { input, context in
++                    context.total += input[0] + context.values[1]
++                }
++
++                Pair(witness, witness).render(input, into: &context)
+ 
+-            #expect(context.total == 20)
+-            #expect(input[0] == 3)
++                #expect(context.total == 20)
++                #expect(input[0] == 3)
++            }
+         }
+-    }
++}
+ 
+     struct PairScopedContext: ~Copyable, ~Escapable {
+         let values: Span<Int>
+diff --git a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Tests.swift b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Tests.swift
+index f9e77cb..bee9e68 100644
+--- a/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Tests.swift	
++++ b/Tests/Absorbed/swift-pair-renderer/Pair Renderer Tests/Pair Renderer Tests.swift	
+@@ -2,57 +2,61 @@
+     import Renderer
+     import Testing
+ 
+-    @Suite struct `Pair renderer contracts` {
+-        enum Failure: Swift.Error, Equatable { case stopped }
++enum `Pair Renderer Tests` {}
+ 
+-        struct DecoratedText: Renderer.`Protocol` {
+-            let prefix: String
+-            func render(_ input: borrowing String, into context: inout String) { context += prefix + input }
+-        }
++extension `Pair Renderer Tests` {
++        @Suite struct `Pair renderer contracts` {
++            enum Failure: Swift.Error, Equatable { case stopped }
+ 
+-        struct OwnedInput: ~Copyable { let value: String }
+-        struct OwnedRenderer: ~Copyable, Renderer.`Protocol` {
+-            borrowing func render(_ input: borrowing OwnedInput, into context: inout String) { context += input.value }
+-        }
++            struct DecoratedText: Renderer.`Protocol` {
++                let prefix: String
++                func render(_ input: borrowing String, into context: inout String) { context += prefix + input }
++            }
+ 
+-        @Test func `A pair preserves operation order`() {
+-            var context = ""
+-            Pair(DecoratedText(prefix: "a"), DecoratedText(prefix: "b")).render("!", into: &context)
+-            #expect(context == "a!b!")
+-        }
++            struct OwnedInput: ~Copyable { let value: String }
++            struct OwnedRenderer: ~Copyable, Renderer.`Protocol` {
++                borrowing func render(_ input: borrowing OwnedInput, into context: inout String) { context += input.value }
++            }
+ 
+-        @Test func `Composition is associative`() {
+-            let a = DecoratedText(prefix: "a")
+-            let b = DecoratedText(prefix: "b")
+-            let c = DecoratedText(prefix: "c")
+-            var left = ""
+-            var right = ""
+-            Pair(Pair(a, b), c).render("!", into: &left)
+-            Pair(a, Pair(b, c)).render("!", into: &right)
+-            #expect(left == right)
+-            #expect(left == "a!b!c!")
+-        }
++            @Test func `A pair preserves operation order`() {
++                var context = ""
++                Pair(DecoratedText(prefix: "a"), DecoratedText(prefix: "b")).render("!", into: &context)
++                #expect(context == "a!b!")
++            }
+ 
+-        @Test func `Failure stops later effects and preserves earlier effects`() {
+-            let first = Renderer.Witness<Int, [Int], Failure> { input, context throws(Failure) in
+-                context.append(input)
+-                throw .stopped
++            @Test func `Composition is associative`() {
++                let a = DecoratedText(prefix: "a")
++                let b = DecoratedText(prefix: "b")
++                let c = DecoratedText(prefix: "c")
++                var left = ""
++                var right = ""
++                Pair(Pair(a, b), c).render("!", into: &left)
++                Pair(a, Pair(b, c)).render("!", into: &right)
++                #expect(left == right)
++                #expect(left == "a!b!c!")
+             }
+-            let second = Renderer.Witness<Int, [Int], Failure> { input, context in context.append(input + 1) }
+-            var context: [Int] = []
+-            #expect(throws: Failure.stopped) {
+-                try Pair(first, second).render(1, into: &context)
++
++            @Test func `Failure stops later effects and preserves earlier effects`() {
++                let first = Renderer.Witness<Int, [Int], Failure> { input, context throws(Failure) in
++                    context.append(input)
++                    throw .stopped
++                }
++                let second = Renderer.Witness<Int, [Int], Failure> { input, context in context.append(input + 1) }
++                var context: [Int] = []
++                #expect(throws: Failure.stopped) {
++                    try Pair(first, second).render(1, into: &context)
++                }
++                #expect(context == [1])
+             }
+-            #expect(context == [1])
+-        }
+ 
+-        @Test func `Noncopyable inputs and renderers are borrowed`() {
+-            let renderer = Pair(OwnedRenderer(), OwnedRenderer())
+-            let input = OwnedInput(value: "a")
+-            var context = ""
+-            renderer.render(input, into: &context)
+-            renderer.render(input, into: &context)
+-            #expect(context == "aaaa")
++            @Test func `Noncopyable inputs and renderers are borrowed`() {
++                let renderer = Pair(OwnedRenderer(), OwnedRenderer())
++                let input = OwnedInput(value: "a")
++                var context = ""
++                renderer.render(input, into: &context)
++                renderer.render(input, into: &context)
++                #expect(context == "aaaa")
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Builder Tests.swift b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Builder Tests.swift
+index d13a17c..ad41969 100644
+--- a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Builder Tests.swift	
++++ b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Builder Tests.swift	
+@@ -7,6 +7,9 @@
+     struct BuilderTests {
+         @Suite struct Unit {}
+         @Suite struct Integration {}
++    }
++
++    extension BuilderTests {
+         @Suite struct EdgeCase {}
+     }
+ 
+diff --git a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Composition Tests.swift b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Composition Tests.swift
+index 6f3be39..d5d35fb 100644
+--- a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Composition Tests.swift	
++++ b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Composition Tests.swift	
+@@ -7,6 +7,9 @@
+     struct CompositionTests {
+         @Suite struct Unit {}
+         @Suite struct Integration {}
++    }
++
++    extension CompositionTests {
+         @Suite struct EdgeCase {}
+     }
+ 
+diff --git a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Context Tests.swift b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Context Tests.swift
+index d33443a..1725822 100644
+--- a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Context Tests.swift	
++++ b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/Context Tests.swift	
+@@ -8,7 +8,11 @@
+     struct ContextTests {
+         @Suite struct Unit {}
+         @Suite struct Integration {}
++    }
++
++    extension ContextTests {
+         @Suite struct EdgeCase {}
++
+         @Suite struct Interpret {}
+     }
+ 
+diff --git a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/NonCopyable Tests.swift b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/NonCopyable Tests.swift
+index 2ad77cc..07b2b9e 100644
+--- a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/NonCopyable Tests.swift	
++++ b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/NonCopyable Tests.swift	
+@@ -22,6 +22,9 @@
+     @Suite("NonCopyable")
+     struct NonCopyableTests {
+         @Suite struct Unit {}
++    }
++
++    extension NonCopyableTests {
+         @Suite struct EdgeCase {}
+     }
+ 
+diff --git a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/View Tests.swift b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/View Tests.swift
+index 2fc28fb..7286589 100644
+--- a/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/View Tests.swift	
++++ b/Tests/Absorbed/swift-renderer-document/Renderer Document Tests/View Tests.swift	
+@@ -6,10 +6,13 @@
+     @Suite("Renderer.Document.View")
+     struct ViewTests {
+         @Suite struct Unit {}
+-        @Suite struct EdgeCase {}
+         @Suite struct Integration {}
+     }
+ 
++    extension ViewTests {
++        @Suite struct EdgeCase {}
++    }
++
+     extension ViewTests.Unit {
+         @Test
+         func `leaf view emits text event through _render`() {
+diff --git a/Tests/Renderer Tests/Renderer Composition Tests.swift b/Tests/Renderer Tests/Renderer Composition Tests.swift
+index 8462bb0..c34d827 100644
+--- a/Tests/Renderer Tests/Renderer Composition Tests.swift	
++++ b/Tests/Renderer Tests/Renderer Composition Tests.swift	
+@@ -1,79 +1,83 @@
+ import Renderer
+ import Testing
+ 
+-@Suite struct `Renderer composition preserves effect order and typed failures` {
+-    enum Failure: Swift.Error, Equatable { case stopped(Int) }
++enum `Renderer Composition Tests` {}
+ 
+-    struct Step: Renderer.`Protocol` {
+-        let index: Int
+-        let stop: Int
++extension `Renderer Composition Tests` {
++    @Suite struct `Renderer composition preserves effect order and typed failures` {
++        enum Failure: Swift.Error, Equatable { case stopped(Int) }
+ 
+-        func render(_ input: borrowing Int, into context: inout [Int]) throws(Failure) {
+-            context.append(input + index)
+-            if index == stop { throw .stopped(index) }
++        struct Step: Renderer.`Protocol` {
++            let index: Int
++            let stop: Int
++
++            func render(_ input: borrowing Int, into context: inout [Int]) throws(Failure) {
++                context.append(input + index)
++                if index == stop { throw .stopped(index) }
++            }
+         }
+-    }
+ 
+-    func outcome<R: Renderer.`Protocol`>(
+-        _ renderer: borrowing R,
+-        into context: inout [Int]
+-    ) -> Failure? where R.Input == Int, R.Context == [Int], R.Failure == Failure {
+-        do {
+-            try renderer.render(10, into: &context)
+-            return nil
+-        } catch {
+-            return error
++        func outcome<R: Renderer.`Protocol`>(
++            _ renderer: borrowing R,
++            into context: inout [Int]
++        ) -> Failure? where R.Input == Int, R.Context == [Int], R.Failure == Failure {
++            do {
++                try renderer.render(10, into: &context)
++                return nil
++            } catch {
++                return error
++            }
+         }
+-    }
+ 
+-    @Test(arguments: [-1, 0, 1, 2])
+-    func `Array composition preserves failure and effect order`(stop: Int) {
+-        let operations = (0...2).map { Step(index: $0, stop: stop) }
+-        var context = [99]
++        @Test(arguments: [-1, 0, 1, 2])
++        func `Array composition preserves failure and effect order`(stop: Int) {
++            let operations = (0...2).map { Step(index: $0, stop: stop) }
++            var context = [99]
+ 
+-        let failure = outcome(operations, into: &context)
++            let failure = outcome(operations, into: &context)
+ 
+-        #expect(failure == (stop < 0 ? nil : .stopped(stop)))
+-        #expect(context == [99] + Array(10...(stop < 0 ? 12 : 10 + stop)))
+-    }
++            #expect(failure == (stop < 0 ? nil : .stopped(stop)))
++            #expect(context == [99] + Array(10...(stop < 0 ? 12 : 10 + stop)))
++        }
+ 
+-    @Test func `Empty arrays and absent operations leave the context unchanged`() {
+-        let empty: [Step] = []
+-        let absent: Step? = nil
+-        var context = [99]
++        @Test func `Empty arrays and absent operations leave the context unchanged`() {
++            let empty: [Step] = []
++            let absent: Step? = nil
++            var context = [99]
+ 
+-        #expect(outcome(empty, into: &context) == nil)
+-        #expect(outcome(absent, into: &context) == nil)
+-        #expect(context == [99])
+-    }
+-
+-    @Test(arguments: [-1, 0])
+-    func `Present optional operations preserve typed failures and effects`(stop: Int) {
+-        let operation = Step(index: 0, stop: stop)
+-        let optional: Step? = operation
+-        var direct = [99]
+-        var wrapped = [99]
++            #expect(outcome(empty, into: &context) == nil)
++            #expect(outcome(absent, into: &context) == nil)
++            #expect(context == [99])
++        }
+ 
+-        let directFailure = outcome(operation, into: &direct)
+-        let optionalFailure = outcome(optional, into: &wrapped)
++        @Test(arguments: [-1, 0])
++        func `Present optional operations preserve typed failures and effects`(stop: Int) {
++            let operation = Step(index: 0, stop: stop)
++            let optional: Step? = operation
++            var direct = [99]
++            var wrapped = [99]
+ 
+-        #expect(directFailure == optionalFailure)
+-        #expect(direct == wrapped)
+-        #expect(wrapped == [99, 10])
+-    }
++            let directFailure = outcome(operation, into: &direct)
++            let optionalFailure = outcome(optional, into: &wrapped)
+ 
+-    @Test func `A witness invokes its operation once per render and propagates failure`() {
+-        var calls = 0
+-        let witness = Renderer.Witness<Int, [Int], Failure> { input, context throws(Failure) in
+-            calls += 1
+-            context.append(input)
+-            throw .stopped(input)
++            #expect(directFailure == optionalFailure)
++            #expect(direct == wrapped)
++            #expect(wrapped == [99, 10])
+         }
+-        var context = [99]
+ 
+-        #expect(outcome(witness, into: &context) == .stopped(10))
+-        #expect(outcome(witness, into: &context) == .stopped(10))
+-        #expect(calls == 2)
+-        #expect(context == [99, 10, 10])
++        @Test func `A witness invokes its operation once per render and propagates failure`() {
++            var calls = 0
++            let witness = Renderer.Witness<Int, [Int], Failure> { input, context throws(Failure) in
++                calls += 1
++                context.append(input)
++                throw .stopped(input)
++            }
++            var context = [99]
++
++            #expect(outcome(witness, into: &context) == .stopped(10))
++            #expect(outcome(witness, into: &context) == .stopped(10))
++            #expect(calls == 2)
++            #expect(context == [99, 10, 10])
++        }
+     }
+ }
+diff --git a/Tests/Renderer Tests/Renderer Ownership Tests.swift b/Tests/Renderer Tests/Renderer Ownership Tests.swift
+index 224a4cd..459399c 100644
+--- a/Tests/Renderer Tests/Renderer Ownership Tests.swift	
++++ b/Tests/Renderer Tests/Renderer Ownership Tests.swift	
+@@ -1,103 +1,107 @@
+ import Renderer
+ import Testing
+ 
+-@Suite struct `Renderers preserve borrowed input and context ownership` {
+-    struct Input: ~Copyable { let value: Int }
+-    struct Context: ~Copyable { var total = 0 }
++enum `Renderer Ownership Tests` {}
+ 
+-    struct Operation: ~Copyable, Renderer.`Protocol` {
+-        borrowing func render(_ input: borrowing Input, into context: inout Context) {
+-            context.total += input.value
+-        }
+-    }
+-
+-    struct Content: ~Copyable, Renderable {
+-        let value: Int
++extension `Renderer Ownership Tests` {
++    @Suite struct `Renderers preserve borrowed input and context ownership` {
++        struct Input: ~Copyable { let value: Int }
++        struct Context: ~Copyable { var total = 0 }
+ 
+-        struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
+-            borrowing func render(_ input: borrowing Content, into context: inout Context) {
++        struct Operation: ~Copyable, Renderer.`Protocol` {
++            borrowing func render(_ input: borrowing Input, into context: inout Context) {
+                 context.total += input.value
+             }
+         }
+ 
+-        static var renderer: Renderer { Renderer() }
+-    }
++        struct Content: ~Copyable, Renderable {
++            let value: Int
+ 
+-    @Test func `Optional noncopyable operations can be borrowed repeatedly`() {
+-        let present: Operation? = Operation()
+-        let absent: Operation? = nil
+-        let input = Input(value: 3)
+-        var context = Context()
++            struct Renderer: ~Copyable, Renderer::Renderer.`Protocol` {
++                borrowing func render(_ input: borrowing Content, into context: inout Context) {
++                    context.total += input.value
++                }
++            }
+ 
+-        present.render(input, into: &context)
+-        present.render(input, into: &context)
+-        absent.render(input, into: &context)
++            static var renderer: Renderer { Renderer() }
++        }
+ 
+-        #expect(context.total == 6)
+-    }
++        @Test func `Optional noncopyable operations can be borrowed repeatedly`() {
++            let present: Operation? = Operation()
++            let absent: Operation? = nil
++            let input = Input(value: 3)
++            var context = Context()
+ 
+-    @Test func `Renderable borrows noncopyable values through noncopyable associated operations`() {
+-        let content = Content(value: 4)
+-        var context = Context()
++            present.render(input, into: &context)
++            present.render(input, into: &context)
++            absent.render(input, into: &context)
+ 
+-        content.render(into: &context)
+-        content.render(into: &context)
++            #expect(context.total == 6)
++        }
+ 
+-        #expect(context.total == 8)
+-    }
++        @Test func `Renderable borrows noncopyable values through noncopyable associated operations`() {
++            let content = Content(value: 4)
++            var context = Context()
+ 
+-    @Test func `Array and optional adapters preserve noncopyable inputs and contexts`() {
+-        let witness = Renderer.Witness<Input, Context, Never> { input, context in
+-            context.total += input.value
++            content.render(into: &context)
++            content.render(into: &context)
++
++            #expect(context.total == 8)
+         }
+-        let input = Input(value: 3)
+-        var context = Context()
+-        let optional: Renderer.Witness<Input, Context, Never>? = witness
+ 
+-        [witness, witness].render(input, into: &context)
+-        optional.render(input, into: &context)
++        @Test func `Array and optional adapters preserve noncopyable inputs and contexts`() {
++            let witness = Renderer.Witness<Input, Context, Never> { input, context in
++                context.total += input.value
++            }
++            let input = Input(value: 3)
++            var context = Context()
++            let optional: Renderer.Witness<Input, Context, Never>? = witness
+ 
+-        #expect(context.total == 9)
+-        #expect(input.value == 3)
+-    }
++            [witness, witness].render(input, into: &context)
++            optional.render(input, into: &context)
+ 
+-    @Test func `Array and optional adapters accept scoped inputs and contexts`() {
+-        let values = [3, 7]
+-        let input = values.span
+-        var context = ScopedContext(values.span)
+-        let witness = Renderer.Witness<Span<Int>, ScopedContext, Never> { input, context in
+-            context.total += input[0] + context.values[1]
++            #expect(context.total == 9)
++            #expect(input.value == 3)
+         }
+-        let optional: Renderer.Witness<Span<Int>, ScopedContext, Never>? = witness
+ 
+-        [witness, witness].render(input, into: &context)
+-        optional.render(input, into: &context)
++        @Test func `Array and optional adapters accept scoped inputs and contexts`() {
++            let values = [3, 7]
++            let input = values.span
++            var context = ScopedContext(values.span)
++            let witness = Renderer.Witness<Span<Int>, ScopedContext, Never> { input, context in
++                context.total += input[0] + context.values[1]
++            }
++            let optional: Renderer.Witness<Span<Int>, ScopedContext, Never>? = witness
+ 
+-        #expect(context.total == 30)
+-        #expect(input[0] == 3)
+-    }
++            [witness, witness].render(input, into: &context)
++            optional.render(input, into: &context)
++
++            #expect(context.total == 30)
++            #expect(input[0] == 3)
++        }
+ 
+-    struct ScopedContent: Renderable {
+-        let value: Int
++        struct ScopedContent: Renderable {
++            let value: Int
+ 
+-        struct Renderer: Renderer::Renderer.`Protocol` {
+-            func render(_ input: borrowing ScopedContent, into context: inout ScopedContext) {
+-                context.total += input.value + context.values[0]
++            struct Renderer: Renderer::Renderer.`Protocol` {
++                func render(_ input: borrowing ScopedContent, into context: inout ScopedContext) {
++                    context.total += input.value + context.values[0]
++                }
+             }
+-        }
+ 
+-        static var renderer: Renderer { Renderer() }
+-    }
++            static var renderer: Renderer { Renderer() }
++        }
+ 
+-    @Test func `Renderable forwards a scoped context to its associated operation`() {
+-        let values = [3]
+-        var context = ScopedContext(values.span)
+-        let content = ScopedContent(value: 4)
++        @Test func `Renderable forwards a scoped context to its associated operation`() {
++            let values = [3]
++            var context = ScopedContext(values.span)
++            let content = ScopedContent(value: 4)
+ 
+-        content.render(into: &context)
+-        content.render(into: &context)
++            content.render(into: &context)
++            content.render(into: &context)
+ 
+-        #expect(context.total == 14)
++            #expect(context.total == 14)
++        }
+     }
+ }
+ 
+diff --git a/Tests/Renderer Tests/Renderer Tests.swift b/Tests/Renderer Tests/Renderer Tests.swift
+index 2e1e853..ef1ee05 100644
+--- a/Tests/Renderer Tests/Renderer Tests.swift	
++++ b/Tests/Renderer Tests/Renderer Tests.swift	
+@@ -1,52 +1,56 @@
+ import Renderer
+ import Testing
+ 
+-@Suite struct `Renderers reuse operations across inputs and mutate supplied contexts` {
+-    struct DecoratedText: Renderer.`Protocol` {
+-        let prefix: String
+-        func render(_ input: borrowing String, into context: inout String) { context += prefix + input }
+-    }
++enum `Renderer Tests` {}
+ 
+-    struct Event: Renderer.`Protocol` {
+-        let offset: Int
+-        func render(_ input: borrowing Int, into context: inout [Int]) { context.append(input + offset) }
+-    }
++extension `Renderer Tests` {
++    @Suite struct `Renderers reuse operations across inputs and mutate supplied contexts` {
++        struct DecoratedText: Renderer.`Protocol` {
++            let prefix: String
++            func render(_ input: borrowing String, into context: inout String) { context += prefix + input }
++        }
+ 
+-    struct OwnedInput: ~Copyable { let value: String }
+-    struct OwnedRenderer: ~Copyable, Renderer.`Protocol` {
+-        borrowing func render(_ input: borrowing OwnedInput, into context: inout String) { context += input.value }
+-    }
+-    struct OwnedContext: ~Copyable { var count = 0 }
+-
+-    @Test func `An operation is independent of an input instance`() {
+-        let renderer = DecoratedText(prefix: "[")
+-        var context = ""
+-        renderer.render("a", into: &context)
+-        renderer.render("b", into: &context)
+-        #expect(context == "[a[b")
+-    }
++        struct Event: Renderer.`Protocol` {
++            let offset: Int
++            func render(_ input: borrowing Int, into context: inout [Int]) { context.append(input + offset) }
++        }
+ 
+-    @Test func `A target need not be text or bytes`() {
+-        var context: [Int] = []
+-        [Event(offset: 1), Event(offset: 4)].render(3, into: &context)
+-        let absent: Event? = nil
+-        absent.render(3, into: &context)
+-        #expect(context == [4, 7])
+-    }
++        struct OwnedInput: ~Copyable { let value: String }
++        struct OwnedRenderer: ~Copyable, Renderer.`Protocol` {
++            borrowing func render(_ input: borrowing OwnedInput, into context: inout String) { context += input.value }
++        }
++        struct OwnedContext: ~Copyable { var count = 0 }
+ 
+-    @Test func `Noncopyable inputs and renderers are borrowed`() {
+-        let renderer = OwnedRenderer()
+-        let input = OwnedInput(value: "a")
+-        var context = ""
+-        renderer.render(input, into: &context)
+-        renderer.render(input, into: &context)
+-        #expect(context == "aa")
+-    }
++        @Test func `An operation is independent of an input instance`() {
++            let renderer = DecoratedText(prefix: "[")
++            var context = ""
++            renderer.render("a", into: &context)
++            renderer.render("b", into: &context)
++            #expect(context == "[a[b")
++        }
++
++        @Test func `A target need not be text or bytes`() {
++            var context: [Int] = []
++            [Event(offset: 1), Event(offset: 4)].render(3, into: &context)
++            let absent: Event? = nil
++            absent.render(3, into: &context)
++            #expect(context == [4, 7])
++        }
++
++        @Test func `Noncopyable inputs and renderers are borrowed`() {
++            let renderer = OwnedRenderer()
++            let input = OwnedInput(value: "a")
++            var context = ""
++            renderer.render(input, into: &context)
++            renderer.render(input, into: &context)
++            #expect(context == "aa")
++        }
+ 
+-    @Test func `A witness can mutate a noncopyable context`() {
+-        let renderer = Renderer.Witness<Int, OwnedContext, Never> { input, context in context.count += input }
+-        var context = OwnedContext()
+-        renderer.render(3, into: &context)
+-        #expect(context.count == 3)
++        @Test func `A witness can mutate a noncopyable context`() {
++            let renderer = Renderer.Witness<Int, OwnedContext, Never> { input, context in context.count += input }
++            var context = OwnedContext()
++            renderer.render(3, into: &context)
++            #expect(context.count == 3)
++        }
+     }
+ }
+-- 
+2.43.0
+

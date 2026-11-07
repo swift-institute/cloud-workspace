@@ -1,0 +1,324 @@
+From 2b30d5ea7901b9db5908b56276440ab1570c2463 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:04 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Complex Numeric Relaxed Tests.swift       |  8 ++-
+ Tests/Numeric Tests/Augmented Tests.swift     | 20 ++++--
+ .../Numeric Elementary Contract Tests.swift   | 64 ++++++++++---------
+ Tests/Numeric Tests/Numeric Pair Tests.swift  | 30 +++++----
+ Tests/Numeric Tests/Optionator Tests.swift    |  7 +-
+ Tests/Numeric Tests/Relaxed Tests.swift       | 20 ++++--
+ Tests/Numeric Tests/Saturating Tests.swift    | 18 ++++--
+ 7 files changed, 106 insertions(+), 61 deletions(-)
+
+diff --git a/Tests/Numeric Complex Integration Tests/Complex Numeric Relaxed Tests.swift b/Tests/Numeric Complex Integration Tests/Complex Numeric Relaxed Tests.swift
+index 91cf2c6..1c6b1da 100644
+--- a/Tests/Numeric Complex Integration Tests/Complex Numeric Relaxed Tests.swift	
++++ b/Tests/Numeric Complex Integration Tests/Complex Numeric Relaxed Tests.swift	
+@@ -3,10 +3,12 @@
+     import Numeric
+     import Testing
+ 
+-    @Suite
+-    struct `Complex Numeric Relaxed Tests` {}
++extension `Complex Numeric Relaxed Tests`.`Complex Numeric Relaxed Tests` {
++        @Suite
++        struct `Complex Numeric Relaxed Tests` {}
++}
+ 
+-    extension `Complex Numeric Relaxed Tests` {
++    extension `Complex Numeric Relaxed Tests`.`Complex Numeric Relaxed Tests` {
+ 
+         @Test
+         func `double operations use relaxed scalar arithmetic`() {
+diff --git a/Tests/Numeric Tests/Augmented Tests.swift b/Tests/Numeric Tests/Augmented Tests.swift
+index 9a8f632..0fff698 100644
+--- a/Tests/Numeric Tests/Augmented Tests.swift	
++++ b/Tests/Numeric Tests/Augmented Tests.swift	
+@@ -1,15 +1,25 @@
+ import Numeric
+ import Testing
+ 
+-@Suite
+-struct `Augmented arithmetic forwards to the owning operations` {
++enum `Augmented Tests` {}
++
++extension `Augmented Tests` {
++    @Suite
++    struct `Augmented arithmetic forwards to the owning operations` {
++    }
++}
++
++extension `Augmented Tests`.`Augmented arithmetic forwards to the owning operations` {
+     @Suite struct `Unit tests` {}
++
+     @Suite struct `Edge cases` {}
++
+     @Suite struct `Integration tests` {}
++
+     @Suite(.serialized) struct `Performance tests` {}
+ }
+ 
+-extension `Augmented arithmetic forwards to the owning operations`.`Unit tests` {
++extension `Augmented Tests`.`Augmented arithmetic forwards to the owning operations`.`Unit tests` {
+     @Test
+     func `exact product has zero tail`() {
+         let (head, tail) = Numeric.Augmented.product(2.0, 3.0)
+@@ -99,7 +109,7 @@ extension `Augmented arithmetic forwards to the owning operations`.`Unit tests`
+     }
+ }
+ 
+-extension `Augmented arithmetic forwards to the owning operations`.`Edge cases` {
++extension `Augmented Tests`.`Augmented arithmetic forwards to the owning operations`.`Edge cases` {
+     @Test
+     func `infinity handling in sum`() {
+         let (head, _) = Numeric.Augmented.sum(0.0, Double.infinity)
+@@ -146,7 +156,7 @@ extension `Augmented arithmetic forwards to the owning operations`.`Edge cases`
+     }
+ }
+ 
+-extension `Augmented arithmetic forwards to the owning operations`.`Integration tests` {
++extension `Augmented Tests`.`Augmented arithmetic forwards to the owning operations`.`Integration tests` {
+     @Test
+     func `compensated sum captures lost precision`() {
+         let big = 1e16
+diff --git a/Tests/Numeric Tests/Numeric Elementary Contract Tests.swift b/Tests/Numeric Tests/Numeric Elementary Contract Tests.swift
+index 7032b66..b8b0a88 100644
+--- a/Tests/Numeric Tests/Numeric Elementary Contract Tests.swift	
++++ b/Tests/Numeric Tests/Numeric Elementary Contract Tests.swift	
+@@ -1,38 +1,42 @@
+ import Numeric
+ import Testing
+ 
+-@Suite struct `The compatibility backend supplies the elementary atom contracts` {
+-    @Test func `Single and double precision witnesses preserve domains and cancellation`() {
+-        check(Float.self)
+-        check(Double.self)
+-    }
++enum `Numeric Elementary Contract Tests` {}
+ 
+-    #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || ((os(macOS) || targetEnvironment(macCatalyst)) && arch(arm64))
+-        @Test func `Half precision witnesses preserve domains and cancellation`() {
+-            check(Float16.self)
++extension `Numeric Elementary Contract Tests` {
++    @Suite struct `The compatibility backend supplies the elementary atom contracts` {
++        @Test func `Single and double precision witnesses preserve domains and cancellation`() {
++            check(Float.self)
++            check(Double.self)
+         }
+-    #endif
+ 
+-    private func check<Scalar: BinaryFloatingPoint & Trigonometry.`Protocol` & Exponential.`Protocol`>(
+-        _: Scalar.Type
+-    ) {
+-        let negativeZero = -Scalar.zero
+-        #expect(Scalar.sin(negativeZero).sign == .minus)
+-        #expect(Scalar.cos(0) == 1 && Scalar.tan(0) == 0)
+-        #expect(Scalar.atan2(negativeZero, -1).sign == .minus)
+-        #expect(Scalar.asin(2).isNaN && Scalar.acos(-2).isNaN)
+-        #expect(Scalar.atan(.infinity).isFinite)
+-        #expect(Scalar.sinh(negativeZero).sign == .minus)
+-        #expect(Scalar.cosh(0) == 1 && Scalar.tanh(.infinity) == 1)
+-        #expect(Scalar.asinh(-.infinity) == -.infinity)
+-        #expect(Scalar.acosh(0).isNaN && Scalar.atanh(1) == .infinity)
+-        #expect(Scalar.exp(-.infinity) == 0 && Scalar.exp2(3) == 8)
+-        #expect(Scalar.log(0) == -.infinity && Scalar.log(-1).isNaN)
+-        #expect(Scalar.log2(8) == 3 && Scalar.log10(100) == 2)
+-        let tiny = Scalar.ulpOfOne / 4
+-        #expect(1 + tiny == 1)
+-        #expect(Scalar.expm1(tiny) == tiny && Scalar.log1p(tiny) == tiny)
+-        #expect(Scalar.expm1(negativeZero).sign == .minus)
+-        #expect(Scalar.log1p(negativeZero).sign == .minus)
++        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || ((os(macOS) || targetEnvironment(macCatalyst)) && arch(arm64))
++            @Test func `Half precision witnesses preserve domains and cancellation`() {
++                check(Float16.self)
++            }
++        #endif
++
++        private func check<Scalar: BinaryFloatingPoint & Trigonometry.`Protocol` & Exponential.`Protocol`>(
++            _: Scalar.Type
++        ) {
++            let negativeZero = -Scalar.zero
++            #expect(Scalar.sin(negativeZero).sign == .minus)
++            #expect(Scalar.cos(0) == 1 && Scalar.tan(0) == 0)
++            #expect(Scalar.atan2(negativeZero, -1).sign == .minus)
++            #expect(Scalar.asin(2).isNaN && Scalar.acos(-2).isNaN)
++            #expect(Scalar.atan(.infinity).isFinite)
++            #expect(Scalar.sinh(negativeZero).sign == .minus)
++            #expect(Scalar.cosh(0) == 1 && Scalar.tanh(.infinity) == 1)
++            #expect(Scalar.asinh(-.infinity) == -.infinity)
++            #expect(Scalar.acosh(0).isNaN && Scalar.atanh(1) == .infinity)
++            #expect(Scalar.exp(-.infinity) == 0 && Scalar.exp2(3) == 8)
++            #expect(Scalar.log(0) == -.infinity && Scalar.log(-1).isNaN)
++            #expect(Scalar.log2(8) == 3 && Scalar.log10(100) == 2)
++            let tiny = Scalar.ulpOfOne / 4
++            #expect(1 + tiny == 1)
++            #expect(Scalar.expm1(tiny) == tiny && Scalar.log1p(tiny) == tiny)
++            #expect(Scalar.expm1(negativeZero).sign == .minus)
++            #expect(Scalar.log1p(negativeZero).sign == .minus)
++        }
+     }
+ }
+diff --git a/Tests/Numeric Tests/Numeric Pair Tests.swift b/Tests/Numeric Tests/Numeric Pair Tests.swift
+index d177be7..c37e7e1 100644
+--- a/Tests/Numeric Tests/Numeric Pair Tests.swift	
++++ b/Tests/Numeric Tests/Numeric Pair Tests.swift	
+@@ -1,20 +1,24 @@
+ import Numeric
+ import Testing
+ 
+-@Suite
+-struct `Numeric Pair` {
++enum `Numeric Pair Tests` {}
+ 
+-    @Test
+-    func `sign value pairs a sign with a payload`() {
+-        let value: Numeric.Sign.Value<Int> = .init(.positive, 1)
+-        #expect(value.first == .positive)
+-        #expect(value.second == 1)
+-    }
++extension `Numeric Pair Tests` {
++    @Suite
++    struct `Numeric Pair` {
++
++        @Test
++        func `sign value pairs a sign with a payload`() {
++            let value: Numeric.Sign.Value<Int> = .init(.positive, 1)
++            #expect(value.first == .positive)
++            #expect(value.second == 1)
++        }
+ 
+-    @Test
+-    func `ternary value pairs a ternary digit with a payload`() {
+-        let value: Numeric.Ternary.Value<String> = .init(.negative, "coefficient")
+-        #expect(value.first == .negative)
+-        #expect(value.second == "coefficient")
++        @Test
++        func `ternary value pairs a ternary digit with a payload`() {
++            let value: Numeric.Ternary.Value<String> = .init(.negative, "coefficient")
++            #expect(value.first == .negative)
++            #expect(value.second == "coefficient")
++        }
+     }
+ }
+diff --git a/Tests/Numeric Tests/Optionator Tests.swift b/Tests/Numeric Tests/Optionator Tests.swift
+index cc8dac6..c325cd0 100644
+--- a/Tests/Numeric Tests/Optionator Tests.swift	
++++ b/Tests/Numeric Tests/Optionator Tests.swift	
+@@ -4,9 +4,14 @@ import Testing
+ 
+ @Suite
+ struct `Optionator Tests` {
+-    @Suite struct `Unit tests` {}
+     @Suite struct `Edge Case` {}
++}
++
++extension `Optionator Tests` {
++    @Suite struct `Unit tests` {}
++
+     @Suite struct `Integration tests` {}
++
+     @Suite(.serialized) struct `Performance tests` {}
+ }
+ 
+diff --git a/Tests/Numeric Tests/Relaxed Tests.swift b/Tests/Numeric Tests/Relaxed Tests.swift
+index 81678bc..a977a2d 100644
+--- a/Tests/Numeric Tests/Relaxed Tests.swift	
++++ b/Tests/Numeric Tests/Relaxed Tests.swift	
+@@ -2,15 +2,25 @@ import Numeric
+ import Numeric_Test_Support
+ import Testing
+ 
+-@Suite
+-struct `Relaxed arithmetic uses Swift operations` {
++enum `Relaxed Tests` {}
++
++extension `Relaxed Tests` {
++    @Suite
++    struct `Relaxed arithmetic uses Swift operations` {
++    }
++}
++
++extension `Relaxed Tests`.`Relaxed arithmetic uses Swift operations` {
+     @Suite struct `Unit tests` {}
++
+     @Suite struct `Edge cases` {}
++
+     @Suite struct `Integration tests` {}
++
+     @Suite(.serialized) struct `Performance tests` {}
+ }
+ 
+-extension `Relaxed arithmetic uses Swift operations`.`Unit tests` {
++extension `Relaxed Tests`.`Relaxed arithmetic uses Swift operations`.`Unit tests` {
+     @Test
+     func `sum equals standard addition`() {
+         let a = 1.5
+@@ -92,7 +102,7 @@ extension `Relaxed arithmetic uses Swift operations`.`Unit tests` {
+     }
+ }
+ 
+-extension `Relaxed arithmetic uses Swift operations`.`Edge cases` {
++extension `Relaxed Tests`.`Relaxed arithmetic uses Swift operations`.`Edge cases` {
+     @Test
+     func `infinity handling`() {
+         #expect(Numeric::Numeric.Relaxed.sum(Double.infinity, 1.0) == Double.infinity)
+@@ -114,7 +124,7 @@ extension `Relaxed arithmetic uses Swift operations`.`Edge cases` {
+     }
+ }
+ 
+-extension `Relaxed arithmetic uses Swift operations`.`Integration tests` {
++extension `Relaxed Tests`.`Relaxed arithmetic uses Swift operations`.`Integration tests` {
+     @Test
+     func `sum of squares pattern`() {
+         let values: [Double] = [1.0, 2.0, 3.0, 4.0, 5.0]
+diff --git a/Tests/Numeric Tests/Saturating Tests.swift b/Tests/Numeric Tests/Saturating Tests.swift
+index 233e35f..9c90d8c 100644
+--- a/Tests/Numeric Tests/Saturating Tests.swift	
++++ b/Tests/Numeric Tests/Saturating Tests.swift	
+@@ -1,15 +1,25 @@
+ import Numeric
+ import Testing
+ 
+-@Suite
+-struct `Saturating arithmetic clamps at storage boundaries` {
++enum `Saturating Tests` {}
++
++extension `Saturating Tests` {
++    @Suite
++    struct `Saturating arithmetic clamps at storage boundaries` {
++    }
++}
++
++extension `Saturating Tests`.`Saturating arithmetic clamps at storage boundaries` {
+     @Suite struct `Unit tests` {}
++
+     @Suite struct `Edge cases` {}
++
+     @Suite struct `Integration tests` {}
++
+     @Suite(.serialized) struct `Performance tests` {}
+ }
+ 
+-extension `Saturating arithmetic clamps at storage boundaries`.`Unit tests` {
++extension `Saturating Tests`.`Saturating arithmetic clamps at storage boundaries`.`Unit tests` {
+     @Test
+     func `saturating add within bounds`() {
+         #expect(Int8(100).saturating.add(10) == 110)
+@@ -31,7 +41,7 @@ extension `Saturating arithmetic clamps at storage boundaries`.`Unit tests` {
+     }
+ }
+ 
+-extension `Saturating arithmetic clamps at storage boundaries`.`Edge cases` {
++extension `Saturating Tests`.`Saturating arithmetic clamps at storage boundaries`.`Edge cases` {
+     @Test
+     func `saturating add clamps at max`() {
+         #expect(Int8.max.saturating.add(10) == Int8.max)
+-- 
+2.43.0
+

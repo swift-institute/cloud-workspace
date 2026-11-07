@@ -1,0 +1,554 @@
+From 2b6ebdaf3925edd64b54b4adb665e6333238d163 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:59 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Compiler Tests.swift                      |  84 ++++-----
+ .../Index.Cyclic Tests.swift                  |  19 +-
+ .../Index.Modular Tests.swift                 |  20 ++-
+ .../Index.Modular full width Tests.swift      | 170 +++++++++---------
+ .../Iterator Tests.swift                      |  14 +-
+ .../Cyclic full width Tests.swift             |  54 +++---
+ Tests/Cyclic Tests/Cyclic.Group Tests.swift   |   8 +-
+ .../Cyclic.Group.Static Element Tests.swift   |   8 +-
+ 8 files changed, 209 insertions(+), 168 deletions(-)
+
+diff --git a/Tests/Absorbed swift-cyclic-index Tests/Compiler Tests.swift b/Tests/Absorbed swift-cyclic-index Tests/Compiler Tests.swift
+index 1e07496..5866ecf 100644
+--- a/Tests/Absorbed swift-cyclic-index Tests/Compiler Tests.swift	
++++ b/Tests/Absorbed swift-cyclic-index Tests/Compiler Tests.swift	
+@@ -3,47 +3,51 @@
+         import Foundation
+         import Testing
+ 
+-        @Suite struct `Modular arithmetic requires matching domains` {
+-            @Test(arguments: ["MATCHING", "MISMATCH_OFFSET", "MISMATCH_CAPACITY"])
+-            func `the compiler checks both offset and capacity domains`(
+-                configuration: String
+-            ) throws {
+-                var products = Bundle.module.bundleURL
+-                while !FileManager.default.fileExists(
+-                    atPath: products.appendingPathComponent("Cyclic.swiftmodule").path
+-                ) {
+-                    let parent = products.deletingLastPathComponent()
+-                    products = try #require(parent != products ? parent : nil)
+-                }
+-                let source = try #require(Bundle.module.resourceURL)
+-                    .appendingPathComponent("Fixtures/Modular domains.swift")
+-                let process = Process()
+-                let errors = Pipe()
+-                process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+-                process.arguments = [
+-                    "swiftc", "-typecheck", "-swift-version", "6",
+-                    "-enable-experimental-feature", "Lifetimes",
+-                    "-module-name", "Client", "-I", products.path,
+-                    "-D", configuration, source.path,
+-                ]
+-                process.standardError = errors
+-                try process.run()
+-                let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+-                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: watchdog)
+-                defer { watchdog.cancel() }
+-                let diagnostic = String(
+-                    decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+-                    as: UTF8.self
+-                )
+-                process.waitUntilExit()
+-                #expect(process.terminationReason == .exit, "\(diagnostic)")
+-                let mismatched = configuration != "MATCHING"
+-                #expect((process.terminationStatus != 0) == mismatched, "\(diagnostic)")
+-                if mismatched {
+-                    #expect(diagnostic.contains("First") && diagnostic.contains("Second"))
++enum `Compiler Tests` {}
++
++extension `Compiler Tests` {
++            @Suite struct `Modular arithmetic requires matching domains` {
++                @Test(arguments: ["MATCHING", "MISMATCH_OFFSET", "MISMATCH_CAPACITY"])
++                func `the compiler checks both offset and capacity domains`(
++                    configuration: String
++                ) throws {
++                    var products = Bundle.module.bundleURL
++                    while !FileManager.default.fileExists(
++                        atPath: products.appendingPathComponent("Cyclic.swiftmodule").path
++                    ) {
++                        let parent = products.deletingLastPathComponent()
++                        products = try #require(parent != products ? parent : nil)
++                    }
++                    let source = try #require(Bundle.module.resourceURL)
++                        .appendingPathComponent("Fixtures/Modular domains.swift")
++                    let process = Process()
++                    let errors = Pipe()
++                    process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
++                    process.arguments = [
++                        "swiftc", "-typecheck", "-swift-version", "6",
++                        "-enable-experimental-feature", "Lifetimes",
++                        "-module-name", "Client", "-I", products.path,
++                        "-D", configuration, source.path,
++                    ]
++                    process.standardError = errors
++                    try process.run()
++                    let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
++                    DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: watchdog)
++                    defer { watchdog.cancel() }
++                    let diagnostic = String(
++                        decoding: errors.fileHandleForReading.readDataToEndOfFile(),
++                        as: UTF8.self
++                    )
++                    process.waitUntilExit()
++                    #expect(process.terminationReason == .exit, "\(diagnostic)")
++                    let mismatched = configuration != "MATCHING"
++                    #expect((process.terminationStatus != 0) == mismatched, "\(diagnostic)")
++                    if mismatched {
++                        #expect(diagnostic.contains("First") && diagnostic.contains("Second"))
++                    }
++                    #expect(!diagnostic.contains("no such module"))
+                 }
+-                #expect(!diagnostic.contains("no such module"))
+             }
+-        }
++}
+     #endif
+ #endif
+diff --git a/Tests/Absorbed swift-cyclic-index Tests/Index.Cyclic Tests.swift b/Tests/Absorbed swift-cyclic-index Tests/Index.Cyclic Tests.swift
+index f3dcff0..144c58f 100644
+--- a/Tests/Absorbed swift-cyclic-index Tests/Index.Cyclic Tests.swift	
++++ b/Tests/Absorbed swift-cyclic-index Tests/Index.Cyclic Tests.swift	
+@@ -10,14 +10,23 @@
+     private enum Slot {}
+     private enum OtherSlot {}
+ 
+-    @Suite
+-    struct `Index Cyclic Tests` {
++enum `Index.Cyclic Tests` {}
++
++extension `Index.Cyclic Tests` {
++        @Suite
++        struct `Index Cyclic Tests` {
++        }
++}
++
++    extension `Index.Cyclic Tests`.`Index Cyclic Tests` {
+         @Suite struct `Construction respects the modulus` {}
++
+         @Suite struct `Arithmetic retains the domain` {}
++
+         @Suite struct `Value semantics retain the domain` {}
+     }
+ 
+-    extension `Index Cyclic Tests`.`Construction respects the modulus` {
++    extension `Index.Cyclic Tests`.`Index Cyclic Tests`.`Construction respects the modulus` {
+ 
+         @Test
+         func `typed ordinal constructs a cyclic index`() throws {
+@@ -52,7 +61,7 @@
+         }
+     }
+ 
+-    extension `Index Cyclic Tests`.`Arithmetic retains the domain` {
++    extension `Index.Cyclic Tests`.`Index Cyclic Tests`.`Arithmetic retains the domain` {
+ 
+         @Test
+         func `tagged addition wraps`() throws {
+@@ -83,7 +92,7 @@
+         }
+     }
+ 
+-    extension `Index Cyclic Tests`.`Value semantics retain the domain` {
++    extension `Index.Cyclic Tests`.`Index Cyclic Tests`.`Value semantics retain the domain` {
+ 
+         @Test
+         func `cyclic indices have intrinsic value semantics`() throws {
+diff --git a/Tests/Absorbed swift-cyclic-index Tests/Index.Modular Tests.swift b/Tests/Absorbed swift-cyclic-index Tests/Index.Modular Tests.swift
+index eee1157..95b4960 100644
+--- a/Tests/Absorbed swift-cyclic-index Tests/Index.Modular Tests.swift	
++++ b/Tests/Absorbed swift-cyclic-index Tests/Index.Modular Tests.swift	
+@@ -23,14 +23,22 @@
+         Index<Slot>.Offset(rawValue)
+     }
+ 
+-    @Suite
+-    struct `Index Modular Tests` {
++enum `Index.Modular Tests` {}
++
++extension `Index.Modular Tests` {
++        @Suite
++        struct `Index Modular Tests` {
++            @Suite struct `Edge Case` {}
++        }
++}
++
++    extension `Index.Modular Tests`.`Index Modular Tests` {
+         @Suite struct `Valid modular operations` {}
+-        @Suite struct `Edge Case` {}
++
+         @Suite struct `Ring buffer integration` {}
+     }
+ 
+-    extension `Index Modular Tests`.`Valid modular operations` {
++    extension `Index.Modular Tests`.`Index Modular Tests`.`Valid modular operations` {
+ 
+         @Test
+         func `successor without wrap`() {
+@@ -73,7 +81,7 @@
+         }
+     }
+ 
+-    extension `Index Modular Tests`.`Edge Case` {
++    extension `Index.Modular Tests`.`Index Modular Tests`.`Edge Case` {
+ 
+         @Test
+         func `successor and predecessor wrap`() {
+@@ -102,7 +110,7 @@
+         }
+     }
+ 
+-    extension `Index Modular Tests`.`Ring buffer integration` {
++    extension `Index.Modular Tests`.`Index Modular Tests`.`Ring buffer integration` {
+ 
+         @Test
+         func `ring buffer simulation remains in its typed domain`() {
+diff --git a/Tests/Absorbed swift-cyclic-index Tests/Index.Modular full width Tests.swift b/Tests/Absorbed swift-cyclic-index Tests/Index.Modular full width Tests.swift
+index b826e28..983be9e 100644
+--- a/Tests/Absorbed swift-cyclic-index Tests/Index.Modular full width Tests.swift	
++++ b/Tests/Absorbed swift-cyclic-index Tests/Index.Modular full width Tests.swift	
+@@ -9,107 +9,111 @@
+ 
+     private struct Domain: ~Copyable, ~Escapable {}
+ 
+-    @Suite struct `Modular indices preserve full width offsets` {
+-        @Test(arguments: [UInt(1), 2, 3, 5, 97, UInt(Int.max) + 1, UInt.max])
+-        func `signed offsets agree with an exact integer oracle`(capacity: UInt) {
+-            let count = Index<Domain>.Count(Cardinal(capacity))
+-            let magnitudes: [UInt] = [
+-                0, 1, 2, UInt(Int.max), UInt(Int.max) + 1, UInt.max - 1, UInt.max,
+-            ]
+-            for position in [0, 1, 2, capacity - 1, UInt.max] {
+-                let index = Index<Domain>(Ordinal(position))
+-                for magnitude in magnitudes {
+-                    for negative in [false, true] {
+-                        let difference = Difference(
+-                            polarity: negative ? .negative : .positive,
+-                            magnitude: .init(Cardinal(magnitude))
+-                        )
+-                        let offset = Index<Domain>.Offset(difference)
+-                        let result = Index<Domain>.Modular.advanced(
+-                            index,
+-                            by: offset,
+-                            capacity: count
+-                        )
+-                        let signed = negative ? -Int128(magnitude) : Int128(magnitude)
++enum `Index.Modular full width Tests` {}
+ 
+-                        #expect(
+-                            result.underlying.rawValue
+-                                == reduced(Int128(position) + signed, capacity)
+-                        )
+-                        #expect(result.underlying.rawValue < capacity)
++extension `Index.Modular full width Tests` {
++        @Suite struct `Modular indices preserve full width offsets` {
++            @Test(arguments: [UInt(1), 2, 3, 5, 97, UInt(Int.max) + 1, UInt.max])
++            func `signed offsets agree with an exact integer oracle`(capacity: UInt) {
++                let count = Index<Domain>.Count(Cardinal(capacity))
++                let magnitudes: [UInt] = [
++                    0, 1, 2, UInt(Int.max), UInt(Int.max) + 1, UInt.max - 1, UInt.max,
++                ]
++                for position in [0, 1, 2, capacity - 1, UInt.max] {
++                    let index = Index<Domain>(Ordinal(position))
++                    for magnitude in magnitudes {
++                        for negative in [false, true] {
++                            let difference = Difference(
++                                polarity: negative ? .negative : .positive,
++                                magnitude: .init(Cardinal(magnitude))
++                            )
++                            let offset = Index<Domain>.Offset(difference)
++                            let result = Index<Domain>.Modular.advanced(
++                                index,
++                                by: offset,
++                                capacity: count
++                            )
++                            let signed = negative ? -Int128(magnitude) : Int128(magnitude)
++
++                            #expect(
++                                result.underlying.rawValue
++                                    == reduced(Int128(position) + signed, capacity)
++                            )
++                            #expect(result.underlying.rawValue < capacity)
++                        }
+                     }
+                 }
+             }
+-        }
+ 
+-        @Test
+-        func `count conversion cannot reverse a positive offset`() {
+-            let count = Index<Domain>.Count(Cardinal(UInt.max))
+-            let result = Index<Domain>.Modular.advanced(
+-                Index<Domain>(Ordinal(2)),
+-                by: Index<Domain>.Offset(count),
+-                capacity: Index<Domain>.Count(Cardinal(5))
+-            )
+-            #expect(result.underlying == Ordinal(2))
+-        }
++            @Test
++            func `count conversion cannot reverse a positive offset`() {
++                let count = Index<Domain>.Count(Cardinal(UInt.max))
++                let result = Index<Domain>.Modular.advanced(
++                    Index<Domain>(Ordinal(2)),
++                    by: Index<Domain>.Offset(count),
++                    capacity: Index<Domain>.Count(Cardinal(5))
++                )
++                #expect(result.underlying == Ordinal(2))
++            }
+ 
+-        @Test
+-        func `minimum signed offset retains its magnitude`() {
+-            let result = Index<Domain>.Modular.advanced(
+-                Index<Domain>(Ordinal(UInt.max)),
+-                by: Index<Domain>.Offset(Int.min),
+-                capacity: Index<Domain>.Count(Cardinal(UInt.max))
+-            )
+-            #expect(
+-                result.underlying.rawValue == reduced(Int128(UInt.max) + Int128(Int.min), UInt.max)
+-            )
+-        }
++            @Test
++            func `minimum signed offset retains its magnitude`() {
++                let result = Index<Domain>.Modular.advanced(
++                    Index<Domain>(Ordinal(UInt.max)),
++                    by: Index<Domain>.Offset(Int.min),
++                    capacity: Index<Domain>.Count(Cardinal(UInt.max))
++                )
++                #expect(
++                    result.underlying.rawValue == reduced(Int128(UInt.max) + Int128(Int.min), UInt.max)
++                )
++            }
+ 
+-        @Test
+-        func `physical indexing avoids overflow before reduction`() {
+-            let result = Index<Domain>.Modular.physical(
+-                forLogical: Index<Domain>(Ordinal(UInt.max - 1)),
+-                head: Index<Domain>(Ordinal(UInt.max - 1)),
+-                capacity: Index<Domain>.Count(Cardinal(UInt.max))
+-            )
+-            #expect(result.underlying.rawValue == UInt.max - 2)
+-        }
++            @Test
++            func `physical indexing avoids overflow before reduction`() {
++                let result = Index<Domain>.Modular.physical(
++                    forLogical: Index<Domain>(Ordinal(UInt.max - 1)),
++                    head: Index<Domain>(Ordinal(UInt.max - 1)),
++                    capacity: Index<Domain>.Count(Cardinal(UInt.max))
++                )
++                #expect(result.underlying.rawValue == UInt.max - 2)
++            }
+ 
+-        @Test
+-        func `checked typed modulus rejects zero`() {
+-            #expect(throws: Cyclic.Group.Modulus.Error.zeroModulus) {
+-                try Cyclic.Group.Modulus(Index<Domain>.Count(Cardinal(UInt.zero)))
++            @Test
++            func `checked typed modulus rejects zero`() {
++                #expect(throws: Cyclic.Group.Modulus.Error.zeroModulus) {
++                    try Cyclic.Group.Modulus(Index<Domain>.Count(Cardinal(UInt.zero)))
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `successor requires positive capacity`() async {
+-            await #expect(processExitsWith: .failure) {
+-                _ = Index<Domain>.Modular.successor(of: .zero, capacity: .zero)
++            @Test
++            func `successor requires positive capacity`() async {
++                await #expect(processExitsWith: .failure) {
++                    _ = Index<Domain>.Modular.successor(of: .zero, capacity: .zero)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `predecessor requires positive capacity`() async {
+-            await #expect(processExitsWith: .failure) {
+-                _ = Index<Domain>.Modular.predecessor(of: .zero, capacity: .zero)
++            @Test
++            func `predecessor requires positive capacity`() async {
++                await #expect(processExitsWith: .failure) {
++                    _ = Index<Domain>.Modular.predecessor(of: .zero, capacity: .zero)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `advancement requires positive capacity`() async {
+-            await #expect(processExitsWith: .failure) {
+-                _ = Index<Domain>.Modular.advanced(.zero, by: .zero, capacity: .zero)
++            @Test
++            func `advancement requires positive capacity`() async {
++                await #expect(processExitsWith: .failure) {
++                    _ = Index<Domain>.Modular.advanced(.zero, by: .zero, capacity: .zero)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `physical indexing requires positive capacity`() async {
+-            await #expect(processExitsWith: .failure) {
+-                _ = Index<Domain>.Modular.physical(forLogical: .zero, head: .zero, capacity: .zero)
++            @Test
++            func `physical indexing requires positive capacity`() async {
++                await #expect(processExitsWith: .failure) {
++                    _ = Index<Domain>.Modular.physical(forLogical: .zero, head: .zero, capacity: .zero)
++                }
+             }
+         }
+-    }
++}
+ 
+     private func reduced(_ value: Int128, _ capacity: UInt) -> UInt {
+         let modulus = Int128(capacity)
+diff --git a/Tests/Cyclic Iterator Tests/Iterator Tests.swift b/Tests/Cyclic Iterator Tests/Iterator Tests.swift
+index 396dbad..c3eb3c7 100644
+--- a/Tests/Cyclic Iterator Tests/Iterator Tests.swift	
++++ b/Tests/Cyclic Iterator Tests/Iterator Tests.swift	
+@@ -2,12 +2,16 @@
+     import Cyclic
+     import Testing
+ 
+-    @Suite
+-    struct `Cyclic Iterator Tests` {
+-        @Suite struct Unit {}
+-    }
++enum `Iterator Tests` {}
++
++extension `Iterator Tests` {
++        @Suite
++        struct `Cyclic Iterator Tests` {
++            @Suite struct Unit {}
++        }
++}
+ 
+-    extension `Cyclic Iterator Tests`.Unit {
++    extension `Iterator Tests`.`Cyclic Iterator Tests`.Unit {
+         @Test
+         func `count equals the modulus`() {
+             let count: Cardinal = Cyclic.Group.Static<5>.count
+diff --git a/Tests/Cyclic Tests/Cyclic full width Tests.swift b/Tests/Cyclic Tests/Cyclic full width Tests.swift
+index 1f91448..cde0059 100644
+--- a/Tests/Cyclic Tests/Cyclic full width Tests.swift	
++++ b/Tests/Cyclic Tests/Cyclic full width Tests.swift	
+@@ -3,35 +3,39 @@ import Cyclic
+ import Ordinal
+ import Testing
+ 
+-@Suite struct `Cyclic operations preserve full width residues` {
+-    @Test(arguments: [UInt(1), 2, 3, 5, 97, UInt(Int.max) + 1, UInt.max])
+-    func `group operations agree with exact integer arithmetic`(capacity: UInt) throws {
+-        let modulus = try Cyclic.Group.Modulus(Cardinal(capacity))
+-        let values: [UInt] = [0, 1, 2, capacity - 1, UInt(Int.max), UInt.max - 1, UInt.max]
+-        for lhs in values {
+-            let a = Cyclic.Group.Element(__unchecked: Ordinal(lhs))
+-            #expect(
+-                Cyclic.Group.successor(a, modulus: modulus).residue.rawValue
+-                    == reduced(Int128(lhs) + 1, capacity)
+-            )
+-            #expect(
+-                Cyclic.Group.predecessor(a, modulus: modulus).residue.rawValue
+-                    == reduced(Int128(lhs) - 1, capacity)
+-            )
+-            #expect(
+-                Cyclic.Group.inverse(a, modulus: modulus).residue.rawValue
+-                    == reduced(-Int128(lhs), capacity)
+-            )
+-            for rhs in values {
+-                let b = Cyclic.Group.Element(__unchecked: Ordinal(rhs))
++enum `Cyclic full width Tests` {}
++
++extension `Cyclic full width Tests` {
++    @Suite struct `Cyclic operations preserve full width residues` {
++        @Test(arguments: [UInt(1), 2, 3, 5, 97, UInt(Int.max) + 1, UInt.max])
++        func `group operations agree with exact integer arithmetic`(capacity: UInt) throws {
++            let modulus = try Cyclic.Group.Modulus(Cardinal(capacity))
++            let values: [UInt] = [0, 1, 2, capacity - 1, UInt(Int.max), UInt.max - 1, UInt.max]
++            for lhs in values {
++                let a = Cyclic.Group.Element(__unchecked: Ordinal(lhs))
++                #expect(
++                    Cyclic.Group.successor(a, modulus: modulus).residue.rawValue
++                        == reduced(Int128(lhs) + 1, capacity)
++                )
+                 #expect(
+-                    Cyclic.Group.add(a, b, modulus: modulus).residue.rawValue
+-                        == reduced(Int128(lhs) + Int128(rhs), capacity)
++                    Cyclic.Group.predecessor(a, modulus: modulus).residue.rawValue
++                        == reduced(Int128(lhs) - 1, capacity)
+                 )
+                 #expect(
+-                    Cyclic.Group.subtract(a, b, modulus: modulus).residue.rawValue
+-                        == reduced(Int128(lhs) - Int128(rhs), capacity)
++                    Cyclic.Group.inverse(a, modulus: modulus).residue.rawValue
++                        == reduced(-Int128(lhs), capacity)
+                 )
++                for rhs in values {
++                    let b = Cyclic.Group.Element(__unchecked: Ordinal(rhs))
++                    #expect(
++                        Cyclic.Group.add(a, b, modulus: modulus).residue.rawValue
++                            == reduced(Int128(lhs) + Int128(rhs), capacity)
++                    )
++                    #expect(
++                        Cyclic.Group.subtract(a, b, modulus: modulus).residue.rawValue
++                            == reduced(Int128(lhs) - Int128(rhs), capacity)
++                    )
++                }
+             }
+         }
+     }
+diff --git a/Tests/Cyclic Tests/Cyclic.Group Tests.swift b/Tests/Cyclic Tests/Cyclic.Group Tests.swift
+index 59c12a0..41f18d6 100644
+--- a/Tests/Cyclic Tests/Cyclic.Group Tests.swift	
++++ b/Tests/Cyclic Tests/Cyclic.Group Tests.swift	
+@@ -9,11 +9,15 @@ enum `Cyclic.Group Tests` {}
+ extension `Cyclic.Group Tests` {
+     @Suite
+     struct `Dynamic cyclic groups normalize residues under a positive modulus` {
+-        @Suite struct `Cyclic group arithmetic wraps residues and preserves group laws` {}
+-        @Suite struct `Cyclic group construction rejects a zero modulus` {}
+     }
+ }
+ 
++extension `Cyclic.Group Tests`.`Dynamic cyclic groups normalize residues under a positive modulus` {
++    @Suite struct `Cyclic group arithmetic wraps residues and preserves group laws` {}
++
++    @Suite struct `Cyclic group construction rejects a zero modulus` {}
++}
++
+ extension `Cyclic.Group Tests`.`Dynamic cyclic groups normalize residues under a positive modulus`
+     .`Cyclic group arithmetic wraps residues and preserves group laws`
+ {
+diff --git a/Tests/Cyclic Tests/Cyclic.Group.Static Element Tests.swift b/Tests/Cyclic Tests/Cyclic.Group.Static Element Tests.swift
+index d797be9..32ba369 100644
+--- a/Tests/Cyclic Tests/Cyclic.Group.Static Element Tests.swift	
++++ b/Tests/Cyclic Tests/Cyclic.Group.Static Element Tests.swift	
+@@ -8,11 +8,15 @@ import Testing
+ extension `Cyclic.Group Tests` {
+     @Suite
+     struct `Static cyclic elements preserve their order through construction and arithmetic` {
+-        @Suite struct `Static cyclic arithmetic wraps positions and preserves group identities` {}
+-        @Suite struct `Static cyclic boundaries reject invalid orders and positions` {}
+     }
+ }
+ 
++extension `Cyclic.Group Tests`.`Static cyclic elements preserve their order through construction and arithmetic` {
++    @Suite struct `Static cyclic arithmetic wraps positions and preserves group identities` {}
++
++    @Suite struct `Static cyclic boundaries reject invalid orders and positions` {}
++}
++
+ extension `Cyclic.Group Tests`.`Static cyclic elements preserve their order through construction and arithmetic`
+     .`Static cyclic arithmetic wraps positions and preserves group identities`
+ {
+-- 
+2.43.0
+

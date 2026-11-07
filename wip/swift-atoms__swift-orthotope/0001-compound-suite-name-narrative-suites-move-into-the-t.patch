@@ -1,0 +1,396 @@
+From e3e3ec39ac9a1f974fea03ab5b5190444ebe3de5 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:04 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Orthotope Boundary Tests.swift            | 108 +++++++-------
+ Tests/Orthotope Tests/Hypercube Tests.swift   |  80 ++++++-----
+ Tests/Orthotope Tests/Orthotope Tests.swift   | 134 +++++++++---------
+ 3 files changed, 168 insertions(+), 154 deletions(-)
+
+diff --git a/Tests/Orthotope Boundary Tests/Orthotope Boundary Tests.swift b/Tests/Orthotope Boundary Tests/Orthotope Boundary Tests.swift
+index 2daf3b3..eda27d6 100644
+--- a/Tests/Orthotope Boundary Tests/Orthotope Boundary Tests.swift	
++++ b/Tests/Orthotope Boundary Tests/Orthotope Boundary Tests.swift	
+@@ -2,64 +2,68 @@
+     import Orthotope
+     import Testing
+ 
+-    @Suite struct `Orthotope corner interpretation` {
+-        @Test func `All four corners preserve the legacy positive y top convention`() throws {
+-            let box = Orthotope(center: Point(x: 1.5, y: 2.0), halfExtents: try Size<2, Double>(width: 3.5, height: 5))
+-            let affine = Point<2, Double>.cartesian
+-            #expect(box.corner(.bottomLeft, using: affine) == Point(x: -2.0, y: -3.0))
+-            #expect(box.corner(.bottomRight, using: affine) == Point(x: 5.0, y: -3.0))
+-            #expect(box.corner(.topLeft, using: affine) == Point(x: -2.0, y: 7.0))
+-            #expect(box.corner(.topRight, using: affine) == Point(x: 5.0, y: 7.0))
+-        }
++enum `Orthotope Boundary Tests` {}
+ 
+-        @Test func `Degenerate boxes retain labels even when corner points coincide`() throws {
+-            let point = Point(x: 2, y: 3)
+-            let collapsed = Orthotope(center: point, halfExtents: try Size<2, Int>(width: 0, height: 0))
+-            let line = Orthotope(center: point, halfExtents: try Size<2, Int>(width: 0, height: 4))
+-            for corner in Boundary.Corner.allCases {
+-                #expect(collapsed.corner(corner, using: Point<2, Int>.cartesian) == point)
++extension `Orthotope Boundary Tests` {
++        @Suite struct `Orthotope corner interpretation` {
++            @Test func `All four corners preserve the legacy positive y top convention`() throws {
++                let box = Orthotope(center: Point(x: 1.5, y: 2.0), halfExtents: try Size<2, Double>(width: 3.5, height: 5))
++                let affine = Point<2, Double>.cartesian
++                #expect(box.corner(.bottomLeft, using: affine) == Point(x: -2.0, y: -3.0))
++                #expect(box.corner(.bottomRight, using: affine) == Point(x: 5.0, y: -3.0))
++                #expect(box.corner(.topLeft, using: affine) == Point(x: -2.0, y: 7.0))
++                #expect(box.corner(.topRight, using: affine) == Point(x: 5.0, y: 7.0))
+             }
+-            #expect(line.corner(.topLeft, using: Point<2, Int>.cartesian) == Point(x: 2, y: 7))
+-            #expect(line.corner(.topRight, using: Point<2, Int>.cartesian) == Point(x: 2, y: 7))
+-        }
+ 
+-        @Test func `Opposite corners are opposite displacements from the center`() throws {
+-            let box = Orthotope(center: Point(x: 7, y: -9), halfExtents: try Size<2, Int>(width: 2, height: 5))
+-            let affine = Point<2, Int>.cartesian
+-            for corner in Boundary.Corner.allCases {
+-                let a = affine.displacement(from: box.center, to: box.corner(corner, using: affine))
+-                let b = affine.displacement(from: box.center, to: box.corner(corner.opposite, using: affine))
+-                #expect(a + b == .zero)
++            @Test func `Degenerate boxes retain labels even when corner points coincide`() throws {
++                let point = Point(x: 2, y: 3)
++                let collapsed = Orthotope(center: point, halfExtents: try Size<2, Int>(width: 0, height: 0))
++                let line = Orthotope(center: point, halfExtents: try Size<2, Int>(width: 0, height: 4))
++                for corner in Boundary.Corner.allCases {
++                    #expect(collapsed.corner(corner, using: Point<2, Int>.cartesian) == point)
++                }
++                #expect(line.corner(.topLeft, using: Point<2, Int>.cartesian) == Point(x: 2, y: 7))
++                #expect(line.corner(.topRight, using: Point<2, Int>.cartesian) == Point(x: 2, y: 7))
++            }
++
++            @Test func `Opposite corners are opposite displacements from the center`() throws {
++                let box = Orthotope(center: Point(x: 7, y: -9), halfExtents: try Size<2, Int>(width: 2, height: 5))
++                let affine = Point<2, Int>.cartesian
++                for corner in Boundary.Corner.allCases {
++                    let a = affine.displacement(from: box.center, to: box.corner(corner, using: affine))
++                    let b = affine.displacement(from: box.center, to: box.corner(corner.opposite, using: affine))
++                    #expect(a + b == .zero)
++                }
+             }
+-        }
+ 
+-        private enum Failure: Swift.Error { case overflow }
+-        @Test func `Checked affine failures propagate with their concrete type`() throws {
+-            let box = Orthotope(center: Point(x: Int.max, y: 0), halfExtents: try Size<2, Int>(width: 1, height: 0))
+-            let checked = Affine<Point<2, Int>, Displacement<2, Int>, Failure>.componentwise(
+-                coordinates: { $0.coordinates },
+-                point: Point.init,
+-                components: { $0.components },
+-                displacement: Displacement.init,
+-                translating: { (value, delta) throws(Failure) in
+-                    let result = value.addingReportingOverflow(delta)
+-                    guard !result.overflow else { throw .overflow }
+-                    return result.partialValue
+-                },
+-                subtracting: { (a, b) throws(Failure) in
+-                    let result = b.subtractingReportingOverflow(a)
+-                    guard !result.overflow else { throw .overflow }
+-                    return result.partialValue
++            private enum Failure: Swift.Error { case overflow }
++            @Test func `Checked affine failures propagate with their concrete type`() throws {
++                let box = Orthotope(center: Point(x: Int.max, y: 0), halfExtents: try Size<2, Int>(width: 1, height: 0))
++                let checked = Affine<Point<2, Int>, Displacement<2, Int>, Failure>.componentwise(
++                    coordinates: { $0.coordinates },
++                    point: Point.init,
++                    components: { $0.components },
++                    displacement: Displacement.init,
++                    translating: { (value, delta) throws(Failure) in
++                        let result = value.addingReportingOverflow(delta)
++                        guard !result.overflow else { throw .overflow }
++                        return result.partialValue
++                    },
++                    subtracting: { (a, b) throws(Failure) in
++                        let result = b.subtractingReportingOverflow(a)
++                        guard !result.overflow else { throw .overflow }
++                        return result.partialValue
++                    }
++                )
++                do {
++                    _ = try box.corner(.topRight, using: checked)
++                    Issue.record("Expected overflow")
++                } catch {
++                    let failure: Failure = error
++                    #expect(failure == .overflow)
+                 }
+-            )
+-            do {
+-                _ = try box.corner(.topRight, using: checked)
+-                Issue.record("Expected overflow")
+-            } catch {
+-                let failure: Failure = error
+-                #expect(failure == .overflow)
++                #expect(try box.corner(.topLeft, using: checked).x == Int.max - 1)
+             }
+-            #expect(try box.corner(.topLeft, using: checked).x == Int.max - 1)
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Orthotope Tests/Hypercube Tests.swift b/Tests/Orthotope Tests/Hypercube Tests.swift
+index 54d6c38..4dfb126 100644
+--- a/Tests/Orthotope Tests/Hypercube Tests.swift	
++++ b/Tests/Orthotope Tests/Hypercube Tests.swift	
+@@ -2,49 +2,53 @@ import Foundation
+ import Orthotope
+ import Testing
+ 
+-@Suite struct `Hypercube specialization contracts` {
+-    @Test func `One half side expands equally across all dimensions`() throws {
+-        var cube = Hypercube(center: Point(x: 1, y: 2, z: 3), halfSide: try Magnitude(validating: 4))
+-        #expect(cube.orthotope.halfExtents == (try Size(width: 4, height: 4, depth: 4)))
+-        cube.halfSide = try Magnitude(validating: 7)
+-        #expect(cube.orthotope.halfExtents == (try Size(width: 7, height: 7, depth: 7)))
+-        #expect(cube.orthotope.center == Point(x: 1, y: 2, z: 3))
+-    }
++enum `Hypercube Tests` {}
+ 
+-    @Test func `Conversion requires exactly equal extents`() throws {
+-        let equal = Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: 2, height: 2))
+-        #expect(Hypercube(equal)?.orthotope == equal)
+-        let unequal = Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: 2, height: 3))
+-        #expect(Hypercube(unequal) == nil)
+-    }
++extension `Hypercube Tests` {
++    @Suite struct `Hypercube specialization contracts` {
++        @Test func `One half side expands equally across all dimensions`() throws {
++            var cube = Hypercube(center: Point(x: 1, y: 2, z: 3), halfSide: try Magnitude(validating: 4))
++            #expect(cube.orthotope.halfExtents == (try Size(width: 4, height: 4, depth: 4)))
++            cube.halfSide = try Magnitude(validating: 7)
++            #expect(cube.orthotope.halfExtents == (try Size(width: 7, height: 7, depth: 7)))
++            #expect(cube.orthotope.center == Point(x: 1, y: 2, z: 3))
++        }
+ 
+-    @Test func `Zero half side remains a valid degenerate box`() {
+-        let cube = Hypercube(center: Point(x: 0), halfSide: Magnitude<Int>.zero)
+-        #expect(cube.orthotope.contains(Point(x: 0)) { _, p in p.coordinates })
+-        #expect(!cube.orthotope.containsInterior(Point(x: 0)) { _, p in p.coordinates })
+-    }
++        @Test func `Conversion requires exactly equal extents`() throws {
++            let equal = Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: 2, height: 2))
++            #expect(Hypercube(equal)?.orthotope == equal)
++            let unequal = Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: 2, height: 3))
++            #expect(Hypercube(unequal) == nil)
++        }
+ 
+-    @Test func `Zero dimensions do not read a first extent`() throws {
+-        let point = Point(coordinates: Vector<0, Int>(repeating: 0))
+-        let cube = Hypercube(center: point, halfSide: try Magnitude(validating: 5))
+-        #expect(cube.orthotope.halfExtents == Size<0, Int>.zero)
+-        #expect(Hypercube(cube.orthotope)?.halfSide == .zero)
+-    }
++        @Test func `Zero half side remains a valid degenerate box`() {
++            let cube = Hypercube(center: Point(x: 0), halfSide: Magnitude<Int>.zero)
++            #expect(cube.orthotope.contains(Point(x: 0)) { _, p in p.coordinates })
++            #expect(!cube.orthotope.containsInterior(Point(x: 0)) { _, p in p.coordinates })
++        }
+ 
+-    @Test func `Mutating an expanded box does not change the equal side value`() throws {
+-        let cube = Hypercube(center: Point(x: 0, y: 0), halfSide: try Magnitude(validating: 2))
+-        var box = cube.orthotope
+-        box.halfExtents = try Size(width: 3, height: 4)
+-        #expect(cube.halfSide.value == 2)
+-        #expect(Hypercube(box) == nil)
+-        #expect(Set([cube, cube]).count == 1)
+-    }
++        @Test func `Zero dimensions do not read a first extent`() throws {
++            let point = Point(coordinates: Vector<0, Int>(repeating: 0))
++            let cube = Hypercube(center: point, halfSide: try Magnitude(validating: 5))
++            #expect(cube.orthotope.halfExtents == Size<0, Int>.zero)
++            #expect(Hypercube(cube.orthotope)?.halfSide == .zero)
++        }
++
++        @Test func `Mutating an expanded box does not change the equal side value`() throws {
++            let cube = Hypercube(center: Point(x: 0, y: 0), halfSide: try Magnitude(validating: 2))
++            var box = cube.orthotope
++            box.halfExtents = try Size(width: 3, height: 4)
++            #expect(cube.halfSide.value == 2)
++            #expect(Hypercube(box) == nil)
++            #expect(Set([cube, cube]).count == 1)
++        }
+ 
+-    @Test func `Coding round trips while rejecting negative half sides`() throws {
+-        let cube = Hypercube(center: Point(x: 1, y: 2), halfSide: try Magnitude(validating: 3))
+-        #expect(try JSONDecoder().decode(Hypercube<2, Int>.self, from: JSONEncoder().encode(cube)) == cube)
+-        #expect(throws: DecodingError.self) {
+-            try JSONDecoder().decode(Hypercube<2, Int>.self, from: Data(#"{"center":[1,2],"halfSide":-1}"#.utf8))
++        @Test func `Coding round trips while rejecting negative half sides`() throws {
++            let cube = Hypercube(center: Point(x: 1, y: 2), halfSide: try Magnitude(validating: 3))
++            #expect(try JSONDecoder().decode(Hypercube<2, Int>.self, from: JSONEncoder().encode(cube)) == cube)
++            #expect(throws: DecodingError.self) {
++                try JSONDecoder().decode(Hypercube<2, Int>.self, from: Data(#"{"center":[1,2],"halfSide":-1}"#.utf8))
++            }
+         }
+     }
+ }
+diff --git a/Tests/Orthotope Tests/Orthotope Tests.swift b/Tests/Orthotope Tests/Orthotope Tests.swift
+index d227f8c..4c46ae8 100644
+--- a/Tests/Orthotope Tests/Orthotope Tests.swift	
++++ b/Tests/Orthotope Tests/Orthotope Tests.swift	
+@@ -3,83 +3,89 @@ import Orthotope
+ import Tagged
+ import Testing
+ 
+-@Suite struct `Orthotope coordinate contracts` {
+-    private func displacement(_ a: Point<2, Int>, _ b: Point<2, Int>) -> Vector<2, Int> {
+-        Vector(x: b.x - a.x, y: b.y - a.y)
+-    }
++enum `Orthotope Tests` {}
+ 
+-    @Test func `Center and extents share dimensional public types`() throws {
+-        let box = Orthotope(center: Point(x: 10, y: 20), halfExtents: try Size(width: 2, height: 3))
+-        let center: Point<2, Int> = box.center
+-        let extents: Size<2, Int> = box.halfExtents
+-        #expect(center.y == 20)
+-        #expect(extents.width.value == 2)
+-        #expect(box.contains(Point(x: 12, y: 23), using: displacement))
+-        #expect(!box.containsInterior(Point(x: 12, y: 23), using: displacement))
+-        #expect(box.containsInterior(Point(x: 10, y: 20), using: displacement))
+-        #expect(!box.contains(Point(x: 13, y: 20), using: displacement))
+-    }
++extension `Orthotope Tests` {
++    @Suite struct `Orthotope coordinate contracts` {
++        private func displacement(_ a: Point<2, Int>, _ b: Point<2, Int>) -> Vector<2, Int> {
++            Vector(x: b.x - a.x, y: b.y - a.y)
++        }
+ 
+-    @Test func `A zero extent is a degenerate closed box rather than an empty set`() throws {
+-        let box = Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: 0, height: 2))
+-        #expect(box.contains(Point(x: 0, y: 1), using: displacement))
+-        #expect(!box.containsInterior(Point(x: 0, y: 1), using: displacement))
+-        #expect(!box.contains(Point(x: 1, y: 1), using: displacement))
+-    }
++        @Test func `Center and extents share dimensional public types`() throws {
++            let box = Orthotope(center: Point(x: 10, y: 20), halfExtents: try Size(width: 2, height: 3))
++            let center: Point<2, Int> = box.center
++            let extents: Size<2, Int> = box.halfExtents
++            #expect(center.y == 20)
++            #expect(extents.width.value == 2)
++            #expect(box.contains(Point(x: 12, y: 23), using: displacement))
++            #expect(!box.containsInterior(Point(x: 12, y: 23), using: displacement))
++            #expect(box.containsInterior(Point(x: 10, y: 20), using: displacement))
++            #expect(!box.contains(Point(x: 13, y: 20), using: displacement))
++        }
+ 
+-    @Test func `Half extents retain the Size validation invariant`() {
+-        #expect(throws: Magnitude<Int>.Error.negative) {
+-            Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: -1, height: 2))
++        @Test func `A zero extent is a degenerate closed box rather than an empty set`() throws {
++            let box = Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: 0, height: 2))
++            #expect(box.contains(Point(x: 0, y: 1), using: displacement))
++            #expect(!box.containsInterior(Point(x: 0, y: 1), using: displacement))
++            #expect(!box.contains(Point(x: 1, y: 1), using: displacement))
+         }
+-    }
+ 
+-    @Test func `Minimum integer offsets are compared without absolute value overflow`() throws {
+-        let box = Orthotope(center: Point(x: 0), halfExtents: try Size(length: Int.max))
+-        #expect(!box.contains(Point(x: Int.min)) { _, p in p.coordinates })
+-        #expect(box.contains(Point(x: Int.max)) { _, p in p.coordinates })
+-    }
++        @Test func `Half extents retain the Size validation invariant`() {
++            #expect(throws: Magnitude<Int>.Error.negative) {
++                Orthotope(center: Point(x: 0, y: 0), halfExtents: try Size(width: -1, height: 2))
++            }
++        }
+ 
+-    @Test func `Displacement errors retain their failure type`() throws {
+-        enum Failure: Swift.Error { case overflow }
+-        let box = Orthotope(center: Point(x: 0), halfExtents: Size<1, Int>.zero)
+-        func subtract(_ a: Point<1, Int>, _ b: Point<1, Int>) throws(Failure) -> Vector<1, Int> {
+-            throw .overflow
++        @Test func `Minimum integer offsets are compared without absolute value overflow`() throws {
++            let box = Orthotope(center: Point(x: 0), halfExtents: try Size(length: Int.max))
++            #expect(!box.contains(Point(x: Int.min)) { _, p in p.coordinates })
++            #expect(box.contains(Point(x: Int.max)) { _, p in p.coordinates })
+         }
+-        #expect(throws: Failure.overflow) { try box.contains(Point(x: 1), using: subtract) }
+-        #expect(throws: Failure.overflow) { try box.containsInterior(Point(x: 1), using: subtract) }
+-    }
+ 
+-    @Test func `Frame identity can wrap the whole coordinate representation`() throws {
+-        enum World {}
+-        let box = Orthotope(center: Point(x: 0, y: 0, z: 0), halfExtents: try Size(width: 1, height: 2, depth: 3))
+-        let framed = Tagged<World, Orthotope<3, Int>>(_unchecked: box)
+-        #expect(framed.underlying == box)
+-        #expect(Set([box, box]).count == 1)
+-    }
++        @Test func `Displacement errors retain their failure type`() throws {
++            enum Failure: Swift.Error { case overflow }
++            let box = Orthotope(center: Point(x: 0), halfExtents: Size<1, Int>.zero)
++            func subtract(_ a: Point<1, Int>, _ b: Point<1, Int>) throws(Failure) -> Vector<1, Int> {
++                throw .overflow
++            }
++            #expect(throws: Failure.overflow) { try box.contains(Point(x: 1), using: subtract) }
++            #expect(throws: Failure.overflow) { try box.containsInterior(Point(x: 1), using: subtract) }
++        }
++
++        @Test func `Frame identity can wrap the whole coordinate representation`() throws {
++            enum World {}
++            let box = Orthotope(center: Point(x: 0, y: 0, z: 0), halfExtents: try Size(width: 1, height: 2, depth: 3))
++            let framed = Tagged<World, Orthotope<3, Int>>(_unchecked: box)
++            #expect(framed.underlying == box)
++            #expect(Set([box, box]).count == 1)
++        }
+ 
+-    @Test func `Zero dimensional boxes use vacuous coordinate membership`() {
+-        let point = Point(coordinates: Vector<0, Int>(repeating: 0))
+-        let box = Orthotope(center: point, halfExtents: Size<0, Int>.zero)
+-        #expect(box.contains(point) { _, p in p.coordinates })
+-        #expect(box.containsInterior(point) { _, p in p.coordinates })
++        @Test func `Zero dimensional boxes use vacuous coordinate membership`() {
++            let point = Point(coordinates: Vector<0, Int>(repeating: 0))
++            let box = Orthotope(center: point, halfExtents: Size<0, Int>.zero)
++            #expect(box.contains(point) { _, p in p.coordinates })
++            #expect(box.containsInterior(point) { _, p in p.coordinates })
++        }
+     }
+ }
+ 
+-@Suite struct `Orthotope coding contracts` {
+-    @Test func `Coding preserves dimensional coordinates and half extents`() throws {
+-        let box = Orthotope(center: Point(x: 1, y: 2), halfExtents: try Size(width: 3, height: 4))
+-        let decoded = try JSONDecoder().decode(Orthotope<2, Int>.self, from: JSONEncoder().encode(box))
+-        #expect(decoded == box)
+-    }
++extension `Orthotope Tests` {
++    @Suite struct `Orthotope coding contracts` {
++        @Test func `Coding preserves dimensional coordinates and half extents`() throws {
++            let box = Orthotope(center: Point(x: 1, y: 2), halfExtents: try Size(width: 3, height: 4))
++            let decoded = try JSONDecoder().decode(Orthotope<2, Int>.self, from: JSONEncoder().encode(box))
++            #expect(decoded == box)
++        }
+ 
+-    @Test(arguments: [
+-        #"{"center":[1],"halfExtents":[2,3]}"#,
+-        #"{"center":[1,2],"halfExtents":[3]}"#,
+-        #"{"center":[1,2],"halfExtents":[-1,3]}"#,
+-    ])
+-    func `Decoding cannot bypass dimension and extent validity`(_ json: String) {
+-        #expect(throws: DecodingError.self) {
+-            try JSONDecoder().decode(Orthotope<2, Int>.self, from: Data(json.utf8))
++        @Test(arguments: [
++            #"{"center":[1],"halfExtents":[2,3]}"#,
++            #"{"center":[1,2],"halfExtents":[3]}"#,
++            #"{"center":[1,2],"halfExtents":[-1,3]}"#,
++        ])
++        func `Decoding cannot bypass dimension and extent validity`(_ json: String) {
++            #expect(throws: DecodingError.self) {
++                try JSONDecoder().decode(Orthotope<2, Int>.self, from: Data(json.utf8))
++            }
+         }
+     }
+ }
+-- 
+2.43.0
+

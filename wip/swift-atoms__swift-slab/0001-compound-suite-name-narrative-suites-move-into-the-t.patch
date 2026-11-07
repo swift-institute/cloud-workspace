@@ -1,0 +1,820 @@
+From 9d7e36564a9bb9e97496a58755f4ee7e839291ca Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:08 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Slab Differential Tests.swift             | 168 +++++++--------
+ .../Slab Seam Tests.swift                     | 198 +++++++++---------
+ .../Slab Tests/Slab Differential Tests.swift  | 168 +++++++--------
+ Tests/Slab Tests/Slab Seam Tests.swift        | 198 +++++++++---------
+ 4 files changed, 370 insertions(+), 362 deletions(-)
+
+diff --git a/Tests/Decision Slab Integration Tests/Slab Differential Tests.swift b/Tests/Decision Slab Integration Tests/Slab Differential Tests.swift
+index 9354e71..3a09fac 100644
+--- a/Tests/Decision Slab Integration Tests/Slab Differential Tests.swift	
++++ b/Tests/Decision Slab Integration Tests/Slab Differential Tests.swift	
+@@ -22,95 +22,97 @@ extension SplitMix64 {
+     }
+ }
+ 
+-@Suite
+-struct `Slab Differential Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `600 mixed ops: duplicates, interleaved insert/remove/update/peek, slot reuse`() throws {
+-        var rng = SplitMix64(seed: 0x5EED_5148_ABCD_0001)
+-        var slab = Slab<Int>(minimumCapacity: 64)
+-
+-        var live: [(index: Index<Int>, value: Int)] = []
+-
+-        var inserts = 0
+-        var removes = 0
+-        var updates = 0
+-        var fullHits = 0
+-
+-        for _ in 0..<600 {
+-
+-            let stepCount = Int(clamping: slab.count)
+-            let stepOccupancy = Int(clamping: slab.occupancy)
+-            let stepEmpty = slab.isEmpty
+-            #expect(stepCount == live.count)
+-            #expect(stepOccupancy == live.count)
+-            #expect(stepEmpty == live.isEmpty)
+-
+-            let roll = Int(rng.next() % 100)
+-
+-            if live.isEmpty || (roll < 55) {
+-
+-                let value = Int(rng.next() % 32)
+-                let full = slab.isFull()
+-                if full {
+-                    fullHits += 1
+-
+-                    #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(value) }
++extension `Slab Differential Tests`.`Slab Differential Tests` {
++    @Suite
++    struct `Slab Differential Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `600 mixed ops: duplicates, interleaved insert/remove/update/peek, slot reuse`() throws {
++            var rng = SplitMix64(seed: 0x5EED_5148_ABCD_0001)
++            var slab = Slab<Int>(minimumCapacity: 64)
++
++            var live: [(index: Index<Int>, value: Int)] = []
++
++            var inserts = 0
++            var removes = 0
++            var updates = 0
++            var fullHits = 0
++
++            for _ in 0..<600 {
++
++                let stepCount = Int(clamping: slab.count)
++                let stepOccupancy = Int(clamping: slab.occupancy)
++                let stepEmpty = slab.isEmpty
++                #expect(stepCount == live.count)
++                #expect(stepOccupancy == live.count)
++                #expect(stepEmpty == live.isEmpty)
++
++                let roll = Int(rng.next() % 100)
++
++                if live.isEmpty || (roll < 55) {
++
++                    let value = Int(rng.next() % 32)
++                    let full = slab.isFull()
++                    if full {
++                        fullHits += 1
++
++                        #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(value) }
++                    } else {
++                        let index = try slab.insert(value)
++
++                        let fresh = !live.contains { $0.index == index }
++                        #expect(fresh)
++                        live.append((index, value))
++                        let occupied = slab.isOccupied(at: index)
++                        #expect(occupied)
++                        inserts += 1
++                    }
++                } else if roll < 78 {
++
++                    let p = Int(rng.next() % UInt64(live.count))
++                    let (idx, expected) = live[p]
++                    let got = try slab.remove(at: idx)
++                    #expect(got == expected)
++                    live.remove(at: p)
++                    let stillOccupied = slab.isOccupied(at: idx)
++                    #expect(!stillOccupied)
++                    removes += 1
++                } else if roll < 90 {
++
++                    let p = Int(rng.next() % UInt64(live.count))
++                    let (idx, expected) = live[p]
++                    let newValue = Int(rng.next() % 32)
++                    let old = try slab.update(at: idx, with: newValue)
++                    #expect(old == expected)
++                    live[p].value = newValue
++                    updates += 1
+                 } else {
+-                    let index = try slab.insert(value)
+-
+-                    let fresh = !live.contains { $0.index == index }
+-                    #expect(fresh)
+-                    live.append((index, value))
+-                    let occupied = slab.isOccupied(at: index)
+-                    #expect(occupied)
+-                    inserts += 1
++
++                    let p = Int(rng.next() % UInt64(live.count))
++                    let (idx, expected) = live[p]
++                    let peeked = slab.peek(at: idx)
++                    #expect(peeked == expected)
+                 }
+-            } else if roll < 78 {
++            }
+ 
+-                let p = Int(rng.next() % UInt64(live.count))
+-                let (idx, expected) = live[p]
+-                let got = try slab.remove(at: idx)
+-                #expect(got == expected)
+-                live.remove(at: p)
+-                let stillOccupied = slab.isOccupied(at: idx)
+-                #expect(!stillOccupied)
+-                removes += 1
+-            } else if roll < 90 {
+-
+-                let p = Int(rng.next() % UInt64(live.count))
+-                let (idx, expected) = live[p]
+-                let newValue = Int(rng.next() % 32)
+-                let old = try slab.update(at: idx, with: newValue)
+-                #expect(old == expected)
+-                live[p].value = newValue
+-                updates += 1
+-            } else {
+-
+-                let p = Int(rng.next() % UInt64(live.count))
+-                let (idx, expected) = live[p]
++            for (idx, expected) in live {
+                 let peeked = slab.peek(at: idx)
+                 #expect(peeked == expected)
++                let got = try slab.remove(at: idx)
++                #expect(got == expected)
+             }
++            let emptyAfter = slab.isEmpty
++            #expect(emptyAfter)
++            let finalCount = Int(clamping: slab.count)
++            #expect(finalCount == 0)
++
++            #expect(inserts >= 200)
++            #expect(removes >= 60)
++            #expect(updates >= 30)
++            #expect(fullHits >= 1)
+         }
+-
+-        for (idx, expected) in live {
+-            let peeked = slab.peek(at: idx)
+-            #expect(peeked == expected)
+-            let got = try slab.remove(at: idx)
+-            #expect(got == expected)
+-        }
+-        let emptyAfter = slab.isEmpty
+-        #expect(emptyAfter)
+-        let finalCount = Int(clamping: slab.count)
+-        #expect(finalCount == 0)
+-
+-        #expect(inserts >= 200)
+-        #expect(removes >= 60)
+-        #expect(updates >= 30)
+-        #expect(fullHits >= 1)
+     }
+ }
+diff --git a/Tests/Decision Slab Integration Tests/Slab Seam Tests.swift b/Tests/Decision Slab Integration Tests/Slab Seam Tests.swift
+index 03de397..b3d98db 100644
+--- a/Tests/Decision Slab Integration Tests/Slab Seam Tests.swift	
++++ b/Tests/Decision Slab Integration Tests/Slab Seam Tests.swift	
+@@ -7,111 +7,113 @@ import Slab_Inline_Primitive
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Slab Seam Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `[DS-024]-style L1: count == occupancy == #occupied at every step`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 16)
+-        let empty0 = slab.isEmpty
+-        let count0 = Int(clamping: slab.count)
+-        let occ0 = Int(clamping: slab.occupancy)
+-        #expect(empty0)
+-        #expect(count0 == 0)
+-        #expect(occ0 == 0)
+-
+-        let i0 = try slab.insert(10)
+-        let i1 = try slab.insert(20)
+-        let i2 = try slab.insert(30)
+-        let count3 = Int(clamping: slab.count)
+-        let occ3 = Int(clamping: slab.occupancy)
+-        #expect(count3 == 3)
+-        #expect(occ3 == 3)
+-
+-        _ = try slab.remove(at: i1)
+-        let count2 = Int(clamping: slab.count)
+-        let occ2 = Int(clamping: slab.occupancy)
+-        #expect(count2 == 2)
+-        #expect(occ2 == 2)
+-
+-        _ = try slab.update(at: i0, with: 11)
+-        let countAfterUpdate = Int(clamping: slab.count)
+-        #expect(countAfterUpdate == 2)
+-
+-        _ = try slab.remove(at: i0)
+-        _ = try slab.remove(at: i2)
+-        let emptyEnd = slab.isEmpty
+-        let countEnd = Int(clamping: slab.count)
+-        #expect(emptyEnd)
+-        #expect(countEnd == 0)
+-    }
++extension `Slab Seam Tests`.`Slab Seam Tests` {
++    @Suite
++    struct `Slab Seam Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `[DS-024]-style L1: count == occupancy == #occupied at every step`() throws {
++            var slab = Slab<Int>(minimumCapacity: 16)
++            let empty0 = slab.isEmpty
++            let count0 = Int(clamping: slab.count)
++            let occ0 = Int(clamping: slab.occupancy)
++            #expect(empty0)
++            #expect(count0 == 0)
++            #expect(occ0 == 0)
++
++            let i0 = try slab.insert(10)
++            let i1 = try slab.insert(20)
++            let i2 = try slab.insert(30)
++            let count3 = Int(clamping: slab.count)
++            let occ3 = Int(clamping: slab.occupancy)
++            #expect(count3 == 3)
++            #expect(occ3 == 3)
++
++            _ = try slab.remove(at: i1)
++            let count2 = Int(clamping: slab.count)
++            let occ2 = Int(clamping: slab.occupancy)
++            #expect(count2 == 2)
++            #expect(occ2 == 2)
++
++            _ = try slab.update(at: i0, with: 11)
++            let countAfterUpdate = Int(clamping: slab.count)
++            #expect(countAfterUpdate == 2)
++
++            _ = try slab.remove(at: i0)
++            _ = try slab.remove(at: i2)
++            let emptyEnd = slab.isEmpty
++            let countEnd = Int(clamping: slab.count)
++            #expect(emptyEnd)
++            #expect(countEnd == 0)
++        }
+ 
+-    @Test
+-    func `[DS-024]-style L2: an index survives other slots' removal (stable index)`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 16)
+-        let a = try slab.insert(100)
+-        let b = try slab.insert(200)
+-        let c = try slab.insert(300)
+-
+-        let removedB = try slab.remove(at: b)
+-        #expect(removedB == 200)
+-        let peekA = slab.peek(at: a)
+-        let peekC = slab.peek(at: c)
+-        let occA = slab.isOccupied(at: a)
+-        let occC = slab.isOccupied(at: c)
+-        let occB = slab.isOccupied(at: b)
+-        #expect(peekA == 100)
+-        #expect(peekC == 300)
+-        #expect(occA)
+-        #expect(occC)
+-        #expect(!occB)
+-
+-        _ = try slab.remove(at: a)
+-        let peekCAfter = slab.peek(at: c)
+-        #expect(peekCAfter == 300)
+-        let removedC = try slab.remove(at: c)
+-        #expect(removedC == 300)
+-    }
++        @Test
++        func `[DS-024]-style L2: an index survives other slots' removal (stable index)`() throws {
++            var slab = Slab<Int>(minimumCapacity: 16)
++            let a = try slab.insert(100)
++            let b = try slab.insert(200)
++            let c = try slab.insert(300)
++
++            let removedB = try slab.remove(at: b)
++            #expect(removedB == 200)
++            let peekA = slab.peek(at: a)
++            let peekC = slab.peek(at: c)
++            let occA = slab.isOccupied(at: a)
++            let occC = slab.isOccupied(at: c)
++            let occB = slab.isOccupied(at: b)
++            #expect(peekA == 100)
++            #expect(peekC == 300)
++            #expect(occA)
++            #expect(occC)
++            #expect(!occB)
++
++            _ = try slab.remove(at: a)
++            let peekCAfter = slab.peek(at: c)
++            #expect(peekCAfter == 300)
++            let removedC = try slab.remove(at: c)
++            #expect(removedC == 300)
++        }
+ 
+-    @Test
+-    func `[DS-024]-style L3: slot reuse after removal`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 16)
+-        let a = try slab.insert(1)
+-        _ = try slab.insert(2)
+-        _ = try slab.remove(at: a)
+-
+-        let vacant = slab.firstVacant()
+-        #expect(vacant == a)
+-
+-        try slab.insert(9, at: a)
+-        let peekReused = slab.peek(at: a)
+-        #expect(peekReused == 9)
+-        let removedReused = try slab.remove(at: a)
+-        #expect(removedReused == 9)
+-    }
++        @Test
++        func `[DS-024]-style L3: slot reuse after removal`() throws {
++            var slab = Slab<Int>(minimumCapacity: 16)
++            let a = try slab.insert(1)
++            _ = try slab.insert(2)
++            _ = try slab.remove(at: a)
++
++            let vacant = slab.firstVacant()
++            #expect(vacant == a)
++
++            try slab.insert(9, at: a)
++            let peekReused = slab.peek(at: a)
++            #expect(peekReused == 9)
++            let removedReused = try slab.remove(at: a)
++            #expect(removedReused == 9)
++        }
+ 
+-    @Test
+-    func `[DS-024]-style L4: capacity fence and addressed-miss errors`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 1)
++        @Test
++        func `[DS-024]-style L4: capacity fence and addressed-miss errors`() throws {
++            var slab = Slab<Int>(minimumCapacity: 1)
+ 
+-        while !slab.isFull() {
++            while !slab.isFull() {
+ 
+-            slab.insert(0, __unchecked: slab.firstVacant()!)
+-        }
++                slab.insert(0, __unchecked: slab.firstVacant()!)
++            }
+ 
+-        #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(7) }
+-        let vacant = slab.firstVacant()
+-        #expect(vacant == nil)
++            #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(7) }
++            let vacant = slab.firstVacant()
++            #expect(vacant == nil)
+ 
+-        var fresh = Slab<Int>(minimumCapacity: 4)
+-        let idx: Index<Int> = 0
+-        #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.remove(at: idx) }
+-        #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.update(at: idx, with: 1) }
++            var fresh = Slab<Int>(minimumCapacity: 4)
++            let idx: Index<Int> = 0
++            #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.remove(at: idx) }
++            #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.update(at: idx, with: 1) }
+ 
+-        let live = try fresh.insert(5)
+-        #expect(throws: Slab<Int>.Error.occupied) { try fresh.insert(6, at: live) }
++            let live = try fresh.insert(5)
++            #expect(throws: Slab<Int>.Error.occupied) { try fresh.insert(6, at: live) }
++        }
+     }
+ }
+diff --git a/Tests/Slab Tests/Slab Differential Tests.swift b/Tests/Slab Tests/Slab Differential Tests.swift
+index 52b48fc..99f7592 100644
+--- a/Tests/Slab Tests/Slab Differential Tests.swift	
++++ b/Tests/Slab Tests/Slab Differential Tests.swift	
+@@ -17,95 +17,97 @@ extension SplitMix64 {
+     }
+ }
+ 
+-@Suite
+-struct `Slab Differential Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `600 mixed ops: duplicates, interleaved insert/remove/update/peek, slot reuse`() throws {
+-        var rng = SplitMix64(seed: 0x5EED_5148_ABCD_0001)
+-        var slab = Slab<Int>(minimumCapacity: 64)
+-
+-        var live: [(index: Index<Int>, value: Int)] = []
+-
+-        var inserts = 0
+-        var removes = 0
+-        var updates = 0
+-        var fullHits = 0
+-
+-        for _ in 0..<600 {
+-
+-            let stepCount = Int(clamping: slab.count)
+-            let stepOccupancy = Int(clamping: slab.occupancy)
+-            let stepEmpty = slab.isEmpty
+-            #expect(stepCount == live.count)
+-            #expect(stepOccupancy == live.count)
+-            #expect(stepEmpty == live.isEmpty)
+-
+-            let roll = Int(rng.next() % 100)
+-
+-            if live.isEmpty || (roll < 55) {
+-
+-                let value = Int(rng.next() % 32)
+-                let full = slab.isFull()
+-                if full {
+-                    fullHits += 1
+-
+-                    #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(value) }
++extension `Slab Differential Tests`.`Slab Differential Tests` {
++    @Suite
++    struct `Slab Differential Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `600 mixed ops: duplicates, interleaved insert/remove/update/peek, slot reuse`() throws {
++            var rng = SplitMix64(seed: 0x5EED_5148_ABCD_0001)
++            var slab = Slab<Int>(minimumCapacity: 64)
++
++            var live: [(index: Index<Int>, value: Int)] = []
++
++            var inserts = 0
++            var removes = 0
++            var updates = 0
++            var fullHits = 0
++
++            for _ in 0..<600 {
++
++                let stepCount = Int(clamping: slab.count)
++                let stepOccupancy = Int(clamping: slab.occupancy)
++                let stepEmpty = slab.isEmpty
++                #expect(stepCount == live.count)
++                #expect(stepOccupancy == live.count)
++                #expect(stepEmpty == live.isEmpty)
++
++                let roll = Int(rng.next() % 100)
++
++                if live.isEmpty || (roll < 55) {
++
++                    let value = Int(rng.next() % 32)
++                    let full = slab.isFull()
++                    if full {
++                        fullHits += 1
++
++                        #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(value) }
++                    } else {
++                        let index = try slab.insert(value)
++
++                        let fresh = !live.contains { $0.index == index }
++                        #expect(fresh)
++                        live.append((index, value))
++                        let occupied = slab.isOccupied(at: index)
++                        #expect(occupied)
++                        inserts += 1
++                    }
++                } else if roll < 78 {
++
++                    let p = Int(rng.next() % UInt64(live.count))
++                    let (idx, expected) = live[p]
++                    let got = try slab.remove(at: idx)
++                    #expect(got == expected)
++                    live.remove(at: p)
++                    let stillOccupied = slab.isOccupied(at: idx)
++                    #expect(!stillOccupied)
++                    removes += 1
++                } else if roll < 90 {
++
++                    let p = Int(rng.next() % UInt64(live.count))
++                    let (idx, expected) = live[p]
++                    let newValue = Int(rng.next() % 32)
++                    let old = try slab.update(at: idx, with: newValue)
++                    #expect(old == expected)
++                    live[p].value = newValue
++                    updates += 1
+                 } else {
+-                    let index = try slab.insert(value)
+-
+-                    let fresh = !live.contains { $0.index == index }
+-                    #expect(fresh)
+-                    live.append((index, value))
+-                    let occupied = slab.isOccupied(at: index)
+-                    #expect(occupied)
+-                    inserts += 1
++
++                    let p = Int(rng.next() % UInt64(live.count))
++                    let (idx, expected) = live[p]
++                    let peeked = slab.peek(at: idx)
++                    #expect(peeked == expected)
+                 }
+-            } else if roll < 78 {
++            }
+ 
+-                let p = Int(rng.next() % UInt64(live.count))
+-                let (idx, expected) = live[p]
+-                let got = try slab.remove(at: idx)
+-                #expect(got == expected)
+-                live.remove(at: p)
+-                let stillOccupied = slab.isOccupied(at: idx)
+-                #expect(!stillOccupied)
+-                removes += 1
+-            } else if roll < 90 {
+-
+-                let p = Int(rng.next() % UInt64(live.count))
+-                let (idx, expected) = live[p]
+-                let newValue = Int(rng.next() % 32)
+-                let old = try slab.update(at: idx, with: newValue)
+-                #expect(old == expected)
+-                live[p].value = newValue
+-                updates += 1
+-            } else {
+-
+-                let p = Int(rng.next() % UInt64(live.count))
+-                let (idx, expected) = live[p]
++            for (idx, expected) in live {
+                 let peeked = slab.peek(at: idx)
+                 #expect(peeked == expected)
++                let got = try slab.remove(at: idx)
++                #expect(got == expected)
+             }
++            let emptyAfter = slab.isEmpty
++            #expect(emptyAfter)
++            let finalCount = Int(clamping: slab.count)
++            #expect(finalCount == 0)
++
++            #expect(inserts >= 200)
++            #expect(removes >= 60)
++            #expect(updates >= 30)
++            #expect(fullHits >= 1)
+         }
+-
+-        for (idx, expected) in live {
+-            let peeked = slab.peek(at: idx)
+-            #expect(peeked == expected)
+-            let got = try slab.remove(at: idx)
+-            #expect(got == expected)
+-        }
+-        let emptyAfter = slab.isEmpty
+-        #expect(emptyAfter)
+-        let finalCount = Int(clamping: slab.count)
+-        #expect(finalCount == 0)
+-
+-        #expect(inserts >= 200)
+-        #expect(removes >= 60)
+-        #expect(updates >= 30)
+-        #expect(fullHits >= 1)
+     }
+ }
+diff --git a/Tests/Slab Tests/Slab Seam Tests.swift b/Tests/Slab Tests/Slab Seam Tests.swift
+index 0bdb913..1f4a1bb 100644
+--- a/Tests/Slab Tests/Slab Seam Tests.swift	
++++ b/Tests/Slab Tests/Slab Seam Tests.swift	
+@@ -2,111 +2,113 @@ import Testing
+ 
+ @testable import Slab
+ 
+-@Suite
+-struct `Slab Seam Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
+-
+-    @Test
+-    func `[DS-024]-style L1: count == occupancy == #occupied at every step`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 16)
+-        let empty0 = slab.isEmpty
+-        let count0 = Int(clamping: slab.count)
+-        let occ0 = Int(clamping: slab.occupancy)
+-        #expect(empty0)
+-        #expect(count0 == 0)
+-        #expect(occ0 == 0)
+-
+-        let i0 = try slab.insert(10)
+-        let i1 = try slab.insert(20)
+-        let i2 = try slab.insert(30)
+-        let count3 = Int(clamping: slab.count)
+-        let occ3 = Int(clamping: slab.occupancy)
+-        #expect(count3 == 3)
+-        #expect(occ3 == 3)
+-
+-        _ = try slab.remove(at: i1)
+-        let count2 = Int(clamping: slab.count)
+-        let occ2 = Int(clamping: slab.occupancy)
+-        #expect(count2 == 2)
+-        #expect(occ2 == 2)
+-
+-        _ = try slab.update(at: i0, with: 11)
+-        let countAfterUpdate = Int(clamping: slab.count)
+-        #expect(countAfterUpdate == 2)
+-
+-        _ = try slab.remove(at: i0)
+-        _ = try slab.remove(at: i2)
+-        let emptyEnd = slab.isEmpty
+-        let countEnd = Int(clamping: slab.count)
+-        #expect(emptyEnd)
+-        #expect(countEnd == 0)
+-    }
++extension `Slab Seam Tests`.`Slab Seam Tests` {
++    @Suite
++    struct `Slab Seam Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++
++        @Test
++        func `[DS-024]-style L1: count == occupancy == #occupied at every step`() throws {
++            var slab = Slab<Int>(minimumCapacity: 16)
++            let empty0 = slab.isEmpty
++            let count0 = Int(clamping: slab.count)
++            let occ0 = Int(clamping: slab.occupancy)
++            #expect(empty0)
++            #expect(count0 == 0)
++            #expect(occ0 == 0)
++
++            let i0 = try slab.insert(10)
++            let i1 = try slab.insert(20)
++            let i2 = try slab.insert(30)
++            let count3 = Int(clamping: slab.count)
++            let occ3 = Int(clamping: slab.occupancy)
++            #expect(count3 == 3)
++            #expect(occ3 == 3)
++
++            _ = try slab.remove(at: i1)
++            let count2 = Int(clamping: slab.count)
++            let occ2 = Int(clamping: slab.occupancy)
++            #expect(count2 == 2)
++            #expect(occ2 == 2)
++
++            _ = try slab.update(at: i0, with: 11)
++            let countAfterUpdate = Int(clamping: slab.count)
++            #expect(countAfterUpdate == 2)
++
++            _ = try slab.remove(at: i0)
++            _ = try slab.remove(at: i2)
++            let emptyEnd = slab.isEmpty
++            let countEnd = Int(clamping: slab.count)
++            #expect(emptyEnd)
++            #expect(countEnd == 0)
++        }
+ 
+-    @Test
+-    func `[DS-024]-style L2: an index survives other slots' removal (stable index)`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 16)
+-        let a = try slab.insert(100)
+-        let b = try slab.insert(200)
+-        let c = try slab.insert(300)
+-
+-        let removedB = try slab.remove(at: b)
+-        #expect(removedB == 200)
+-        let peekA = slab.peek(at: a)
+-        let peekC = slab.peek(at: c)
+-        let occA = slab.isOccupied(at: a)
+-        let occC = slab.isOccupied(at: c)
+-        let occB = slab.isOccupied(at: b)
+-        #expect(peekA == 100)
+-        #expect(peekC == 300)
+-        #expect(occA)
+-        #expect(occC)
+-        #expect(!occB)
+-
+-        _ = try slab.remove(at: a)
+-        let peekCAfter = slab.peek(at: c)
+-        #expect(peekCAfter == 300)
+-        let removedC = try slab.remove(at: c)
+-        #expect(removedC == 300)
+-    }
++        @Test
++        func `[DS-024]-style L2: an index survives other slots' removal (stable index)`() throws {
++            var slab = Slab<Int>(minimumCapacity: 16)
++            let a = try slab.insert(100)
++            let b = try slab.insert(200)
++            let c = try slab.insert(300)
++
++            let removedB = try slab.remove(at: b)
++            #expect(removedB == 200)
++            let peekA = slab.peek(at: a)
++            let peekC = slab.peek(at: c)
++            let occA = slab.isOccupied(at: a)
++            let occC = slab.isOccupied(at: c)
++            let occB = slab.isOccupied(at: b)
++            #expect(peekA == 100)
++            #expect(peekC == 300)
++            #expect(occA)
++            #expect(occC)
++            #expect(!occB)
++
++            _ = try slab.remove(at: a)
++            let peekCAfter = slab.peek(at: c)
++            #expect(peekCAfter == 300)
++            let removedC = try slab.remove(at: c)
++            #expect(removedC == 300)
++        }
+ 
+-    @Test
+-    func `[DS-024]-style L3: slot reuse after removal`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 16)
+-        let a = try slab.insert(1)
+-        _ = try slab.insert(2)
+-        _ = try slab.remove(at: a)
+-
+-        let vacant = slab.firstVacant()
+-        #expect(vacant == a)
+-
+-        try slab.insert(9, at: a)
+-        let peekReused = slab.peek(at: a)
+-        #expect(peekReused == 9)
+-        let removedReused = try slab.remove(at: a)
+-        #expect(removedReused == 9)
+-    }
++        @Test
++        func `[DS-024]-style L3: slot reuse after removal`() throws {
++            var slab = Slab<Int>(minimumCapacity: 16)
++            let a = try slab.insert(1)
++            _ = try slab.insert(2)
++            _ = try slab.remove(at: a)
++
++            let vacant = slab.firstVacant()
++            #expect(vacant == a)
++
++            try slab.insert(9, at: a)
++            let peekReused = slab.peek(at: a)
++            #expect(peekReused == 9)
++            let removedReused = try slab.remove(at: a)
++            #expect(removedReused == 9)
++        }
+ 
+-    @Test
+-    func `[DS-024]-style L4: capacity fence and addressed-miss errors`() throws {
+-        var slab = Slab<Int>(minimumCapacity: 1)
++        @Test
++        func `[DS-024]-style L4: capacity fence and addressed-miss errors`() throws {
++            var slab = Slab<Int>(minimumCapacity: 1)
+ 
+-        while !slab.isFull() {
++            while !slab.isFull() {
+ 
+-            slab.insert(0, __unchecked: slab.firstVacant()!)
+-        }
++                slab.insert(0, __unchecked: slab.firstVacant()!)
++            }
+ 
+-        #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(7) }
+-        let vacant = slab.firstVacant()
+-        #expect(vacant == nil)
++            #expect(throws: Slab<Int>.Error.full) { _ = try slab.insert(7) }
++            let vacant = slab.firstVacant()
++            #expect(vacant == nil)
+ 
+-        var fresh = Slab<Int>(minimumCapacity: 4)
+-        let idx: Index<Int> = 0
+-        #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.remove(at: idx) }
+-        #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.update(at: idx, with: 1) }
++            var fresh = Slab<Int>(minimumCapacity: 4)
++            let idx: Index<Int> = 0
++            #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.remove(at: idx) }
++            #expect(throws: Slab<Int>.Error.vacant) { _ = try fresh.update(at: idx, with: 1) }
+ 
+-        let live = try fresh.insert(5)
+-        #expect(throws: Slab<Int>.Error.occupied) { try fresh.insert(6, at: live) }
++            let live = try fresh.insert(5)
++            #expect(throws: Slab<Int>.Error.occupied) { try fresh.insert(6, at: live) }
++        }
+     }
+ }
+-- 
+2.43.0
+

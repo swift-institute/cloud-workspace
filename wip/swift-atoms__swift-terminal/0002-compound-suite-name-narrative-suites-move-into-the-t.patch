@@ -1,0 +1,1695 @@
+From 99928140f29aadda738610b5315a247732847cb4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:09 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Terminal.Error Tests.swift                |  92 ++--
+ .../Terminal.Error Unsupported Tests.swift    |  18 +-
+ .../Terminal.Input.Parser Tests.swift         | 392 +++++++++---------
+ .../Terminal.Input.Parser.CSI Tests.swift     | 372 +++++++++--------
+ .../Terminal.Input.Parser.Kitty Tests.swift   | 212 +++++-----
+ .../Terminal.Input.Parser.Mouse Tests.swift   | 228 +++++-----
+ .../Terminal.Mode.Keyboard Tests.swift        |   8 +-
+ .../Terminal.Mode.Mouse Tests.swift           |   8 +-
+ .../Terminal.Mode.Paste Tests.swift           |   8 +-
+ .../Terminal.Stream Tests.swift               |  24 +-
+ .../Terminal.Stream.Read Tests.swift          |   8 +-
+ .../Terminal.Stream.Write Tests.swift         |   5 +-
+ 12 files changed, 729 insertions(+), 646 deletions(-)
+
+diff --git a/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Tests.swift b/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Tests.swift
+index abab6b7..7beecfd 100644
+--- a/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Tests.swift	
++++ b/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Tests.swift	
+@@ -3,59 +3,63 @@
+     import Terminal
+     import Testing
+ 
+-    @Suite
+-    struct `Terminal diagnostics preserve their operation and cause` {
++enum `Terminal.Error Tests` {}
+ 
+-        @Test
+-        func `A terminal diagnostic preserves its typed kernel cause`() {
+-            let cause = Error(code: .posix(25))
+-            let failure = Terminal.Error(
+-                operation: .querySize,
+-                underlying: .kernel(cause)
+-            )
++extension `Terminal.Error Tests` {
++        @Suite
++        struct `Terminal diagnostics preserve their operation and cause` {
+ 
+-            #expect(failure.operation == .querySize)
+-            guard case .kernel(let storedCause) = failure.underlying else {
+-                Issue.record("Expected a kernel error")
+-                return
++            @Test
++            func `A terminal diagnostic preserves its typed kernel cause`() {
++                let cause = Error(code: .posix(25))
++                let failure = Terminal.Error(
++                    operation: .querySize,
++                    underlying: .kernel(cause)
++                )
++
++                #expect(failure.operation == .querySize)
++                guard case .kernel(let storedCause) = failure.underlying else {
++                    Issue.record("Expected a kernel error")
++                    return
++                }
++                #expect(storedCause == cause)
++                #expect(failure.description == "Terminal.querySize: posix(25)")
+             }
+-            #expect(storedCause == cause)
+-            #expect(failure.description == "Terminal.querySize: posix(25)")
+-        }
+ 
+-        @Test
+-        func `A terminal diagnostic preserves its typed platform cause`() {
+-            let cause = Error(code: .win32(6))
+-            let failure = Terminal.Error(
+-                operation: .enableVT,
+-                underlying: .platform(cause)
+-            )
++            @Test
++            func `A terminal diagnostic preserves its typed platform cause`() {
++                let cause = Error(code: .win32(6))
++                let failure = Terminal.Error(
++                    operation: .enableVT,
++                    underlying: .platform(cause)
++                )
+ 
+-            #expect(failure.operation == .enableVT)
+-            guard case .platform(let storedCause) = failure.underlying else {
+-                Issue.record("Expected a platform error")
+-                return
++                #expect(failure.operation == .enableVT)
++                guard case .platform(let storedCause) = failure.underlying else {
++                    Issue.record("Expected a platform error")
++                    return
++                }
++                #expect(storedCause == cause)
++                #expect(failure.description == "Terminal.enableVT: win32(6)")
+             }
+-            #expect(storedCause == cause)
+-            #expect(failure.description == "Terminal.enableVT: win32(6)")
+-        }
+ 
+-        @Test(arguments: [
+-            (Terminal.Error.Operation.querySize, "Terminal.querySize: not supported on this platform"),
+-            (Terminal.Error.Operation.enterRaw, "Terminal.enterRaw: not supported on this platform"),
+-            (Terminal.Error.Operation.exitRaw, "Terminal.exitRaw: not supported on this platform"),
+-            (Terminal.Error.Operation.enableVT, "Terminal.enableVT: not supported on this platform"),
+-        ])
+-        func `Unsupported diagnostics describe each operation`(
+-            operation: Terminal.Error.Operation,
+-            expected: String
+-        ) {
+-            let failure = Terminal.Error(operation: operation, underlying: .unsupported)
+-            #expect(failure.description == expected)
++            @Test(arguments: [
++                (Terminal.Error.Operation.querySize, "Terminal.querySize: not supported on this platform"),
++                (Terminal.Error.Operation.enterRaw, "Terminal.enterRaw: not supported on this platform"),
++                (Terminal.Error.Operation.exitRaw, "Terminal.exitRaw: not supported on this platform"),
++                (Terminal.Error.Operation.enableVT, "Terminal.enableVT: not supported on this platform"),
++            ])
++            func `Unsupported diagnostics describe each operation`(
++                operation: Terminal.Error.Operation,
++                expected: String
++            ) {
++                let failure = Terminal.Error(operation: operation, underlying: .unsupported)
++                #expect(failure.description == expected)
++            }
+         }
+-    }
++}
+ 
+-    extension `Terminal diagnostics preserve their operation and cause` {
++    extension `Terminal.Error Tests`.`Terminal diagnostics preserve their operation and cause` {
+         @Test(
+             arguments: [
+                 Error::Error.Code.posix(.min),
+diff --git a/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Unsupported Tests.swift b/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Unsupported Tests.swift
+index b86a611..ea6e443 100644
+--- a/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Unsupported Tests.swift	
++++ b/Tests/Absorbed swift-terminal-error/Terminal Error Tests/Terminal.Error Unsupported Tests.swift	
+@@ -2,13 +2,17 @@
+     import Terminal
+     import Testing
+ 
+-    @Suite
+-    struct `Unsupported terminal errors identify their operations` {
+-        @Test
+-        func `unsupported errors identify their operation`() {
+-            let error = Terminal.Error(operation: .querySize, underlying: .unsupported)
+-            #expect(error.description == "Terminal.querySize: not supported on this platform")
++enum `Terminal.Error Unsupported Tests` {}
++
++extension `Terminal.Error Unsupported Tests` {
++        @Suite
++        struct `Unsupported terminal errors identify their operations` {
++            @Test
++            func `unsupported errors identify their operation`() {
++                let error = Terminal.Error(operation: .querySize, underlying: .unsupported)
++                #expect(error.description == "Terminal.querySize: not supported on this platform")
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser Tests.swift
+index 12e5e62..1ea0df7 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser Tests.swift	
+@@ -13,243 +13,257 @@
+         return try Parser.parse(&buffer)
+     }
+ 
+-    @Suite
+-    struct `Parser — Single Bytes` {
++enum `Terminal.Input.Parser Tests` {}
+ 
+-        @Test
+-        func `Printable ASCII characters`() throws {
+-            let event = try parse([0x61])
+-            #expect(event == .key(Key(code: .character("a"))))
+-        }
++extension `Terminal.Input.Parser Tests` {
++        @Suite
++        struct `Parser — Single Bytes` {
+ 
+-        @Test
+-        func `Space character`() throws {
+-            let event = try parse([0x20])
+-            #expect(event == .key(Key(code: .character(" "))))
+-        }
++            @Test
++            func `Printable ASCII characters`() throws {
++                let event = try parse([0x61])
++                #expect(event == .key(Key(code: .character("a"))))
++            }
+ 
+-        @Test
+-        func `Tilde character`() throws {
+-            let event = try parse([0x7E])
+-            #expect(event == .key(Key(code: .character("~"))))
+-        }
++            @Test
++            func `Space character`() throws {
++                let event = try parse([0x20])
++                #expect(event == .key(Key(code: .character(" "))))
++            }
+ 
+-        @Test
+-        func `DEL produces backspace`() throws {
+-            let event = try parse([0x7F])
+-            #expect(event == .key(Key(code: .backspace)))
+-        }
++            @Test
++            func `Tilde character`() throws {
++                let event = try parse([0x7E])
++                #expect(event == .key(Key(code: .character("~"))))
++            }
+ 
+-        @Test
+-        func `Empty input throws emptyInput`() {
+-            #expect(throws: ParseError.emptyInput) {
+-                try parse([])
++            @Test
++            func `DEL produces backspace`() throws {
++                let event = try parse([0x7F])
++                #expect(event == .key(Key(code: .backspace)))
++            }
++
++            @Test
++            func `Empty input throws emptyInput`() {
++                #expect(throws: ParseError.emptyInput) {
++                    try parse([])
++                }
+             }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — Control Characters` {
++extension `Terminal.Input.Parser Tests` {
++        @Suite
++        struct `Parser — Control Characters` {
+ 
+-        @Test
+-        func `Enter (CR)`() throws {
+-            let event = try parse([0x0D])
+-            #expect(event == .key(Key(code: .enter)))
+-        }
++            @Test
++            func `Enter (CR)`() throws {
++                let event = try parse([0x0D])
++                #expect(event == .key(Key(code: .enter)))
++            }
+ 
+-        @Test
+-        func `Tab`() throws {
+-            let event = try parse([0x09])
+-            #expect(event == .key(Key(code: .tab)))
+-        }
++            @Test
++            func `Tab`() throws {
++                let event = try parse([0x09])
++                #expect(event == .key(Key(code: .tab)))
++            }
+ 
+-        @Test
+-        func `Backspace (BS)`() throws {
+-            let event = try parse([0x08])
+-            #expect(event == .key(Key(code: .backspace)))
+-        }
++            @Test
++            func `Backspace (BS)`() throws {
++                let event = try parse([0x08])
++                #expect(event == .key(Key(code: .backspace)))
++            }
+ 
+-        @Test
+-        func `Ctrl+A`() throws {
+-            let event = try parse([0x01])
+-            #expect(event == .key(Key(code: .character("a"), modifiers: .control)))
+-        }
++            @Test
++            func `Ctrl+A`() throws {
++                let event = try parse([0x01])
++                #expect(event == .key(Key(code: .character("a"), modifiers: .control)))
++            }
+ 
+-        @Test
+-        func `Ctrl+C`() throws {
+-            let event = try parse([0x03])
+-            #expect(event == .key(Key(code: .character("c"), modifiers: .control)))
+-        }
++            @Test
++            func `Ctrl+C`() throws {
++                let event = try parse([0x03])
++                #expect(event == .key(Key(code: .character("c"), modifiers: .control)))
++            }
+ 
+-        @Test
+-        func `Ctrl+Z`() throws {
+-            let event = try parse([0x1A])
+-            #expect(event == .key(Key(code: .character("z"), modifiers: .control)))
+-        }
++            @Test
++            func `Ctrl+Z`() throws {
++                let event = try parse([0x1A])
++                #expect(event == .key(Key(code: .character("z"), modifiers: .control)))
++            }
+ 
+-        @Test
+-        func `Ctrl+Space (NUL)`() throws {
+-            let event = try parse([0x00])
+-            #expect(event == .key(Key(code: .character(" "), modifiers: .control)))
+-        }
++            @Test
++            func `Ctrl+Space (NUL)`() throws {
++                let event = try parse([0x00])
++                #expect(event == .key(Key(code: .character(" "), modifiers: .control)))
++            }
+ 
+-        @Test
+-        func `Ctrl+Backslash (FS)`() throws {
+-            let event = try parse([0x1C])
+-            #expect(event == .key(Key(code: .character("\\"), modifiers: .control)))
++            @Test
++            func `Ctrl+Backslash (FS)`() throws {
++                let event = try parse([0x1C])
++                #expect(event == .key(Key(code: .character("\\"), modifiers: .control)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — Escape Sequences` {
++extension `Terminal.Input.Parser Tests` {
++        @Suite
++        struct `Parser — Escape Sequences` {
+ 
+-        @Test
+-        func `Bare ESC throws incompleteSequence`() {
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try parse([0x1B])
++            @Test
++            func `Bare ESC throws incompleteSequence`() {
++                #expect(throws: ParseError.incompleteSequence) {
++                    try parse([0x1B])
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `Bare ESC restores buffer position`() {
+-            var buffer = ArraySlice([UInt8]([0x1B]).map(Byte.init(bitPattern:)))
+-            let saved = buffer
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try Parser.parse(&buffer)
++            @Test
++            func `Bare ESC restores buffer position`() {
++                var buffer = ArraySlice([UInt8]([0x1B]).map(Byte.init(bitPattern:)))
++                let saved = buffer
++                #expect(throws: ParseError.incompleteSequence) {
++                    try Parser.parse(&buffer)
++                }
++                #expect(buffer == saved)
+             }
+-            #expect(buffer == saved)
+-        }
+ 
+-        @Test
+-        func `Alt+a`() throws {
+-            let event = try parse([0x1B, 0x61])
+-            #expect(event == .key(Key(code: .character("a"), modifiers: .alt)))
+-        }
++            @Test
++            func `Alt+a`() throws {
++                let event = try parse([0x1B, 0x61])
++                #expect(event == .key(Key(code: .character("a"), modifiers: .alt)))
++            }
+ 
+-        @Test
+-        func `Alt+Z`() throws {
+-            let event = try parse([0x1B, 0x5A])
+-            #expect(event == .key(Key(code: .character("Z"), modifiers: .alt)))
++            @Test
++            func `Alt+Z`() throws {
++                let event = try parse([0x1B, 0x5A])
++                #expect(event == .key(Key(code: .character("Z"), modifiers: .alt)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — UTF-8` {
++extension `Terminal.Input.Parser Tests` {
++        @Suite
++        struct `Parser — UTF-8` {
+ 
+-        @Test
+-        func `2-byte UTF-8 (é)`() throws {
++            @Test
++            func `2-byte UTF-8 (é)`() throws {
+ 
+-            let event = try parse([0xC3, 0xA9])
+-            #expect(event == .key(Key(code: .character("\u{00E9}"))))
+-        }
++                let event = try parse([0xC3, 0xA9])
++                #expect(event == .key(Key(code: .character("\u{00E9}"))))
++            }
+ 
+-        @Test
+-        func `3-byte UTF-8 (€)`() throws {
++            @Test
++            func `3-byte UTF-8 (€)`() throws {
+ 
+-            let event = try parse([0xE2, 0x82, 0xAC])
+-            #expect(event == .key(Key(code: .character("\u{20AC}"))))
+-        }
++                let event = try parse([0xE2, 0x82, 0xAC])
++                #expect(event == .key(Key(code: .character("\u{20AC}"))))
++            }
+ 
+-        @Test
+-        func `4-byte UTF-8 (😀)`() throws {
++            @Test
++            func `4-byte UTF-8 (😀)`() throws {
+ 
+-            let event = try parse([0xF0, 0x9F, 0x98, 0x80])
+-            #expect(event == .key(Key(code: .character("\u{1F600}"))))
+-        }
++                let event = try parse([0xF0, 0x9F, 0x98, 0x80])
++                #expect(event == .key(Key(code: .character("\u{1F600}"))))
++            }
+ 
+-        @Test
+-        func `Incomplete UTF-8 throws incompleteSequence`() {
++            @Test
++            func `Incomplete UTF-8 throws incompleteSequence`() {
+ 
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try parse([0xC3])
++                #expect(throws: ParseError.incompleteSequence) {
++                    try parse([0xC3])
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `Invalid continuation byte throws invalidUTF8`() {
++            @Test
++            func `Invalid continuation byte throws invalidUTF8`() {
+ 
+-            #expect(throws: ParseError.invalidUTF8) {
+-                try parse([0xC3, 0x41])
++                #expect(throws: ParseError.invalidUTF8) {
++                    try parse([0xC3, 0x41])
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `Incomplete UTF-8 restores buffer position`() {
+-            var buffer = ArraySlice([UInt8]([0xC3]).map(Byte.init(bitPattern:)))
+-            let saved = buffer
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try Parser.parse(&buffer)
++            @Test
++            func `Incomplete UTF-8 restores buffer position`() {
++                var buffer = ArraySlice([UInt8]([0xC3]).map(Byte.init(bitPattern:)))
++                let saved = buffer
++                #expect(throws: ParseError.incompleteSequence) {
++                    try Parser.parse(&buffer)
++                }
++                #expect(buffer == saved)
+             }
+-            #expect(buffer == saved)
+         }
+-    }
+-
+-    @Suite
+-    struct `Parser — Sequential Events` {
++}
+ 
+-        @Test
+-        func `Parse multiple events from one buffer`() throws {
++extension `Terminal.Input.Parser Tests` {
++        @Suite
++        struct `Parser — Sequential Events` {
+ 
+-            var buffer = ArraySlice([UInt8]([0x61, 0x62]).map(Byte.init(bitPattern:)))
+-            let first = try Parser.parse(&buffer)
+-            let second = try Parser.parse(&buffer)
+-            #expect(first == .key(Key(code: .character("a"))))
+-            #expect(second == .key(Key(code: .character("b"))))
+-        }
++            @Test
++            func `Parse multiple events from one buffer`() throws {
+ 
+-        @Test
+-        func `Buffer is empty after consuming all bytes`() throws {
+-            var buffer = ArraySlice([UInt8]([0x61]).map(Byte.init(bitPattern:)))
+-            _ = try Parser.parse(&buffer)
+-            let empty = buffer.isEmpty
+-            #expect(empty)
+-        }
+-    }
++                var buffer = ArraySlice([UInt8]([0x61, 0x62]).map(Byte.init(bitPattern:)))
++                let first = try Parser.parse(&buffer)
++                let second = try Parser.parse(&buffer)
++                #expect(first == .key(Key(code: .character("a"))))
++                #expect(second == .key(Key(code: .character("b"))))
++            }
+ 
+-    @Suite
+-    struct `Byte parsing preserves the selected slice and its remaining input` {
+-        @Test(arguments: [
+-            ([UInt8]([0x00]), Event.key(Key(code: .character(" "), modifiers: .control))),
+-            ([UInt8]([0x1C]), Event.key(Key(code: .character("\\"), modifiers: .control))),
+-            ([UInt8]([0x7E]), Event.key(Key(code: .character("~")))),
+-            ([UInt8]([0xC2, 0x80]), Event.key(Key(code: .character("\u{0080}")))),
+-            ([UInt8]([0xF4, 0x8F, 0xBF, 0xBF]), Event.key(Key(code: .character("\u{10FFFF}")))),
+-            ([UInt8]([0x1B, 0x5B, 0x31, 0x3B, 0x35, 0x41]), Event.key(Key(code: .up, modifiers: .control))),
+-        ])
+-        func `Parsing consumes one event and leaves the following byte untouched`(
+-            payload: [UInt8],
+-            expected: Event
+-        ) throws {
+-            let bytes = ([0xAA] + payload + [0xFF]).map(Byte.init(bitPattern:))
+-            var input = bytes[1...]
+-
+-            let event = try Parser.parse(&input)
+-
+-            #expect(event == expected)
+-            #expect(input.startIndex == payload.count + 1)
+-            #expect(input.count == 1)
+-            #expect(input.first?.bitPattern == 0xFF)
++            @Test
++            func `Buffer is empty after consuming all bytes`() throws {
++                var buffer = ArraySlice([UInt8]([0x61]).map(Byte.init(bitPattern:)))
++                _ = try Parser.parse(&buffer)
++                let empty = buffer.isEmpty
++                #expect(empty)
++            }
+         }
+-
+-        @Test(arguments: [
+-            [UInt8]([0x1B]),
+-            [UInt8]([0x1B, 0x5B]),
+-            [UInt8]([0xC2]),
+-            [UInt8]([0xF4, 0x8F, 0xBF]),
+-        ])
+-        func `Incomplete sequences restore the original slice and byte values`(payload: [UInt8]) {
+-            let bytes = ([0xAA] + payload).map(Byte.init(bitPattern:))
+-            var input = bytes[1...]
+-            let saved = input
+-
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try Parser.parse(&input)
++}
++
++extension `Terminal.Input.Parser Tests` {
++        @Suite
++        struct `Byte parsing preserves the selected slice and its remaining input` {
++            @Test(arguments: [
++                ([UInt8]([0x00]), Event.key(Key(code: .character(" "), modifiers: .control))),
++                ([UInt8]([0x1C]), Event.key(Key(code: .character("\\"), modifiers: .control))),
++                ([UInt8]([0x7E]), Event.key(Key(code: .character("~")))),
++                ([UInt8]([0xC2, 0x80]), Event.key(Key(code: .character("\u{0080}")))),
++                ([UInt8]([0xF4, 0x8F, 0xBF, 0xBF]), Event.key(Key(code: .character("\u{10FFFF}")))),
++                ([UInt8]([0x1B, 0x5B, 0x31, 0x3B, 0x35, 0x41]), Event.key(Key(code: .up, modifiers: .control))),
++            ])
++            func `Parsing consumes one event and leaves the following byte untouched`(
++                payload: [UInt8],
++                expected: Event
++            ) throws {
++                let bytes = ([0xAA] + payload + [0xFF]).map(Byte.init(bitPattern:))
++                var input = bytes[1...]
++
++                let event = try Parser.parse(&input)
++
++                #expect(event == expected)
++                #expect(input.startIndex == payload.count + 1)
++                #expect(input.count == 1)
++                #expect(input.first?.bitPattern == 0xFF)
+             }
+ 
+-            #expect(input == saved)
+-            #expect(input.startIndex == 1)
+-            #expect(input.map(\.bitPattern) == payload)
++            @Test(arguments: [
++                [UInt8]([0x1B]),
++                [UInt8]([0x1B, 0x5B]),
++                [UInt8]([0xC2]),
++                [UInt8]([0xF4, 0x8F, 0xBF]),
++            ])
++            func `Incomplete sequences restore the original slice and byte values`(payload: [UInt8]) {
++                let bytes = ([0xAA] + payload).map(Byte.init(bitPattern:))
++                var input = bytes[1...]
++                let saved = input
++
++                #expect(throws: ParseError.incompleteSequence) {
++                    try Parser.parse(&input)
++                }
++
++                #expect(input == saved)
++                #expect(input.startIndex == 1)
++                #expect(input.map(\.bitPattern) == payload)
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.CSI Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.CSI Tests.swift
+index ccc6c3e..ed03f93 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.CSI Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.CSI Tests.swift	
+@@ -2,230 +2,248 @@
+     import Terminal
+     import Testing
+ 
+-    @Suite
+-    struct `Parser — CSI Arrow Keys` {
++enum `Terminal.Input.Parser.CSI Tests` {}
+ 
+-        @Test
+-        func `Arrow up: ESC [ A`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x41])
+-            #expect(event == .key(Key(code: .up)))
+-        }
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — CSI Arrow Keys` {
+ 
+-        @Test
+-        func `Arrow down: ESC [ B`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x42])
+-            #expect(event == .key(Key(code: .down)))
+-        }
++            @Test
++            func `Arrow up: ESC [ A`() throws {
++                let event = try parse([0x1B, 0x5B, 0x41])
++                #expect(event == .key(Key(code: .up)))
++            }
+ 
+-        @Test
+-        func `Arrow right: ESC [ C`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x43])
+-            #expect(event == .key(Key(code: .right)))
+-        }
++            @Test
++            func `Arrow down: ESC [ B`() throws {
++                let event = try parse([0x1B, 0x5B, 0x42])
++                #expect(event == .key(Key(code: .down)))
++            }
++
++            @Test
++            func `Arrow right: ESC [ C`() throws {
++                let event = try parse([0x1B, 0x5B, 0x43])
++                #expect(event == .key(Key(code: .right)))
++            }
+ 
+-        @Test
+-        func `Arrow left: ESC [ D`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x44])
+-            #expect(event == .key(Key(code: .left)))
++            @Test
++            func `Arrow left: ESC [ D`() throws {
++                let event = try parse([0x1B, 0x5B, 0x44])
++                #expect(event == .key(Key(code: .left)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — CSI Modified Keys` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — CSI Modified Keys` {
+ 
+-        @Test
+-        func `Ctrl+Up: ESC [ 1 ; 5 A`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x35, 0x41])
+-            #expect(event == .key(Key(code: .up, modifiers: .control)))
+-        }
++            @Test
++            func `Ctrl+Up: ESC [ 1 ; 5 A`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x35, 0x41])
++                #expect(event == .key(Key(code: .up, modifiers: .control)))
++            }
+ 
+-        @Test
+-        func `Shift+Right: ESC [ 1 ; 2 C`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x32, 0x43])
+-            #expect(event == .key(Key(code: .right, modifiers: .shift)))
+-        }
++            @Test
++            func `Shift+Right: ESC [ 1 ; 2 C`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x32, 0x43])
++                #expect(event == .key(Key(code: .right, modifiers: .shift)))
++            }
+ 
+-        @Test
+-        func `Alt+Down: ESC [ 1 ; 3 B`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x42])
+-            #expect(event == .key(Key(code: .down, modifiers: .alt)))
+-        }
++            @Test
++            func `Alt+Down: ESC [ 1 ; 3 B`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x42])
++                #expect(event == .key(Key(code: .down, modifiers: .alt)))
++            }
+ 
+-        @Test
+-        func `Ctrl+Shift+Left: ESC [ 1 ; 6 D`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x36, 0x44])
+-            #expect(event == .key(Key(code: .left, modifiers: [.shift, .control])))
++            @Test
++            func `Ctrl+Shift+Left: ESC [ 1 ; 6 D`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x3B, 0x36, 0x44])
++                #expect(event == .key(Key(code: .left, modifiers: [.shift, .control])))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — CSI Navigation Keys` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — CSI Navigation Keys` {
+ 
+-        @Test
+-        func `Home: ESC [ H`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x48])
+-            #expect(event == .key(Key(code: .home)))
+-        }
++            @Test
++            func `Home: ESC [ H`() throws {
++                let event = try parse([0x1B, 0x5B, 0x48])
++                #expect(event == .key(Key(code: .home)))
++            }
+ 
+-        @Test
+-        func `End: ESC [ F`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x46])
+-            #expect(event == .key(Key(code: .end)))
+-        }
++            @Test
++            func `End: ESC [ F`() throws {
++                let event = try parse([0x1B, 0x5B, 0x46])
++                #expect(event == .key(Key(code: .end)))
++            }
+ 
+-        @Test
+-        func `Backtab: ESC [ Z`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x5A])
+-            #expect(event == .key(Key(code: .backtab)))
++            @Test
++            func `Backtab: ESC [ Z`() throws {
++                let event = try parse([0x1B, 0x5B, 0x5A])
++                #expect(event == .key(Key(code: .backtab)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — CSI Tilde Keys` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — CSI Tilde Keys` {
+ 
+-        @Test
+-        func `Insert: ESC [ 2 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x32, 0x7E])
+-            #expect(event == .key(Key(code: .insert)))
+-        }
++            @Test
++            func `Insert: ESC [ 2 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x32, 0x7E])
++                #expect(event == .key(Key(code: .insert)))
++            }
+ 
+-        @Test
+-        func `Delete: ESC [ 3 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x33, 0x7E])
+-            #expect(event == .key(Key(code: .delete)))
+-        }
++            @Test
++            func `Delete: ESC [ 3 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x33, 0x7E])
++                #expect(event == .key(Key(code: .delete)))
++            }
+ 
+-        @Test
+-        func `Page Up: ESC [ 5 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x35, 0x7E])
+-            #expect(event == .key(Key(code: .pageUp)))
+-        }
++            @Test
++            func `Page Up: ESC [ 5 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x35, 0x7E])
++                #expect(event == .key(Key(code: .pageUp)))
++            }
+ 
+-        @Test
+-        func `Page Down: ESC [ 6 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x36, 0x7E])
+-            #expect(event == .key(Key(code: .pageDown)))
+-        }
++            @Test
++            func `Page Down: ESC [ 6 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x36, 0x7E])
++                #expect(event == .key(Key(code: .pageDown)))
++            }
+ 
+-        @Test
+-        func `Home (tilde): ESC [ 1 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x7E])
+-            #expect(event == .key(Key(code: .home)))
+-        }
++            @Test
++            func `Home (tilde): ESC [ 1 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x7E])
++                #expect(event == .key(Key(code: .home)))
++            }
+ 
+-        @Test
+-        func `End (tilde): ESC [ 4 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x34, 0x7E])
+-            #expect(event == .key(Key(code: .end)))
++            @Test
++            func `End (tilde): ESC [ 4 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x34, 0x7E])
++                #expect(event == .key(Key(code: .end)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — CSI Function Keys` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — CSI Function Keys` {
+ 
+-        @Test
+-        func `F5: ESC [ 15 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x35, 0x7E])
+-            #expect(event == .key(Key(code: .function(5))))
+-        }
++            @Test
++            func `F5: ESC [ 15 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x35, 0x7E])
++                #expect(event == .key(Key(code: .function(5))))
++            }
+ 
+-        @Test
+-        func `F6: ESC [ 17 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x37, 0x7E])
+-            #expect(event == .key(Key(code: .function(6))))
+-        }
++            @Test
++            func `F6: ESC [ 17 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x37, 0x7E])
++                #expect(event == .key(Key(code: .function(6))))
++            }
+ 
+-        @Test
+-        func `F10: ESC [ 21 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x32, 0x31, 0x7E])
+-            #expect(event == .key(Key(code: .function(10))))
+-        }
++            @Test
++            func `F10: ESC [ 21 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x32, 0x31, 0x7E])
++                #expect(event == .key(Key(code: .function(10))))
++            }
+ 
+-        @Test
+-        func `F12: ESC [ 24 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x32, 0x34, 0x7E])
+-            #expect(event == .key(Key(code: .function(12))))
+-        }
++            @Test
++            func `F12: ESC [ 24 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x32, 0x34, 0x7E])
++                #expect(event == .key(Key(code: .function(12))))
++            }
+ 
+-        @Test
+-        func `Ctrl+F5: ESC [ 15 ; 5 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x35, 0x3B, 0x35, 0x7E])
+-            #expect(event == .key(Key(code: .function(5), modifiers: .control)))
++            @Test
++            func `Ctrl+F5: ESC [ 15 ; 5 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x31, 0x35, 0x3B, 0x35, 0x7E])
++                #expect(event == .key(Key(code: .function(5), modifiers: .control)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — SS3 Function Keys` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — SS3 Function Keys` {
+ 
+-        @Test
+-        func `F1: ESC O P`() throws {
+-            let event = try parse([0x1B, 0x4F, 0x50])
+-            #expect(event == .key(Key(code: .function(1))))
+-        }
++            @Test
++            func `F1: ESC O P`() throws {
++                let event = try parse([0x1B, 0x4F, 0x50])
++                #expect(event == .key(Key(code: .function(1))))
++            }
+ 
+-        @Test
+-        func `F2: ESC O Q`() throws {
+-            let event = try parse([0x1B, 0x4F, 0x51])
+-            #expect(event == .key(Key(code: .function(2))))
+-        }
++            @Test
++            func `F2: ESC O Q`() throws {
++                let event = try parse([0x1B, 0x4F, 0x51])
++                #expect(event == .key(Key(code: .function(2))))
++            }
+ 
+-        @Test
+-        func `F3: ESC O R`() throws {
+-            let event = try parse([0x1B, 0x4F, 0x52])
+-            #expect(event == .key(Key(code: .function(3))))
+-        }
++            @Test
++            func `F3: ESC O R`() throws {
++                let event = try parse([0x1B, 0x4F, 0x52])
++                #expect(event == .key(Key(code: .function(3))))
++            }
+ 
+-        @Test
+-        func `F4: ESC O S`() throws {
+-            let event = try parse([0x1B, 0x4F, 0x53])
+-            #expect(event == .key(Key(code: .function(4))))
+-        }
++            @Test
++            func `F4: ESC O S`() throws {
++                let event = try parse([0x1B, 0x4F, 0x53])
++                #expect(event == .key(Key(code: .function(4))))
++            }
+ 
+-        @Test
+-        func `Home (SS3): ESC O H`() throws {
+-            let event = try parse([0x1B, 0x4F, 0x48])
+-            #expect(event == .key(Key(code: .home)))
+-        }
++            @Test
++            func `Home (SS3): ESC O H`() throws {
++                let event = try parse([0x1B, 0x4F, 0x48])
++                #expect(event == .key(Key(code: .home)))
++            }
+ 
+-        @Test
+-        func `End (SS3): ESC O F`() throws {
+-            let event = try parse([0x1B, 0x4F, 0x46])
+-            #expect(event == .key(Key(code: .end)))
++            @Test
++            func `End (SS3): ESC O F`() throws {
++                let event = try parse([0x1B, 0x4F, 0x46])
++                #expect(event == .key(Key(code: .end)))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — Bracketed Paste` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — Bracketed Paste` {
+ 
+-        @Test
+-        func `Paste start: ESC [ 200 ~`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E])
+-            #expect(event == .paste(""))
++            @Test
++            func `Paste start: ESC [ 200 ~`() throws {
++                let event = try parse([0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E])
++                #expect(event == .paste(""))
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Parser — Incomplete Sequences` {
++extension `Terminal.Input.Parser.CSI Tests` {
++        @Suite
++        struct `Parser — Incomplete Sequences` {
+ 
+-        @Test
+-        func `Incomplete CSI restores position: ESC [`() {
+-            var buffer = ArraySlice([UInt8]([0x1B, 0x5B]).map(Byte.init(bitPattern:)))
+-            let saved = buffer
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try Parser.parse(&buffer)
++            @Test
++            func `Incomplete CSI restores position: ESC [`() {
++                var buffer = ArraySlice([UInt8]([0x1B, 0x5B]).map(Byte.init(bitPattern:)))
++                let saved = buffer
++                #expect(throws: ParseError.incompleteSequence) {
++                    try Parser.parse(&buffer)
++                }
++                #expect(buffer == saved)
+             }
+-            #expect(buffer == saved)
+-        }
+ 
+-        @Test
+-        func `Incomplete arrow restores position: ESC [ 1 ;`() {
+-            var buffer = ArraySlice([UInt8]([0x1B, 0x5B, 0x31, 0x3B]).map(Byte.init(bitPattern:)))
+-            let saved = buffer
+-            #expect(throws: ParseError.incompleteSequence) {
+-                try Parser.parse(&buffer)
++            @Test
++            func `Incomplete arrow restores position: ESC [ 1 ;`() {
++                var buffer = ArraySlice([UInt8]([0x1B, 0x5B, 0x31, 0x3B]).map(Byte.init(bitPattern:)))
++                let saved = buffer
++                #expect(throws: ParseError.incompleteSequence) {
++                    try Parser.parse(&buffer)
++                }
++                #expect(buffer == saved)
+             }
+-            #expect(buffer == saved)
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Kitty Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Kitty Tests.swift
+index 05e00cc..7bc7b92 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Kitty Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Kitty Tests.swift	
+@@ -2,126 +2,130 @@
+     import Terminal
+     import Testing
+ 
+-    @Suite
+-    struct `Parser — Kitty Keyboard` {
+-
+-        @Test
+-        func `Ctrl+a: ESC [ 97 ; 5 u`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x39, 0x37, 0x3B, 0x35, 0x75])
+-            #expect(
+-                event
+-                    == .key(
+-                        Key(
+-                            code: .character("a"),
+-                            modifiers: .control,
+-                            text: "a"
++enum `Terminal.Input.Parser.Kitty Tests` {}
++
++extension `Terminal.Input.Parser.Kitty Tests` {
++        @Suite
++        struct `Parser — Kitty Keyboard` {
++
++            @Test
++            func `Ctrl+a: ESC [ 97 ; 5 u`() throws {
++                let event = try parse([0x1B, 0x5B, 0x39, 0x37, 0x3B, 0x35, 0x75])
++                #expect(
++                    event
++                        == .key(
++                            Key(
++                                code: .character("a"),
++                                modifiers: .control,
++                                text: "a"
++                            )
+                         )
+-                    )
+-            )
+-        }
++                )
++            }
+ 
+-        @Test
+-        func `Simple 'a' key: ESC [ 97 u`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x39, 0x37, 0x75])
+-            #expect(
+-                event
+-                    == .key(
+-                        Key(
+-                            code: .character("a"),
+-                            text: "a"
++            @Test
++            func `Simple 'a' key: ESC [ 97 u`() throws {
++                let event = try parse([0x1B, 0x5B, 0x39, 0x37, 0x75])
++                #expect(
++                    event
++                        == .key(
++                            Key(
++                                code: .character("a"),
++                                text: "a"
++                            )
+                         )
+-                    )
+-            )
+-        }
++                )
++            }
+ 
+-        @Test
+-        func `Enter in Kitty: ESC [ 13 u`() throws {
++            @Test
++            func `Enter in Kitty: ESC [ 13 u`() throws {
+ 
+-            let event = try parse([0x1B, 0x5B, 0x31, 0x33, 0x75])
+-            #expect(event == .key(Key(code: .enter)))
+-        }
++                let event = try parse([0x1B, 0x5B, 0x31, 0x33, 0x75])
++                #expect(event == .key(Key(code: .enter)))
++            }
+ 
+-        @Test
+-        func `Tab in Kitty: ESC [ 9 u`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x39, 0x75])
+-            #expect(event == .key(Key(code: .tab)))
+-        }
++            @Test
++            func `Tab in Kitty: ESC [ 9 u`() throws {
++                let event = try parse([0x1B, 0x5B, 0x39, 0x75])
++                #expect(event == .key(Key(code: .tab)))
++            }
+ 
+-        @Test
+-        func `Escape in Kitty: ESC [ 27 u`() throws {
++            @Test
++            func `Escape in Kitty: ESC [ 27 u`() throws {
+ 
+-            let event = try parse([0x1B, 0x5B, 0x32, 0x37, 0x75])
+-            #expect(event == .key(Key(code: .escape)))
+-        }
++                let event = try parse([0x1B, 0x5B, 0x32, 0x37, 0x75])
++                #expect(event == .key(Key(code: .escape)))
++            }
++
++            @Test
++            func `Kitty key release: ESC [ 97 ; 1 : 3 u`() throws {
+ 
+-        @Test
+-        func `Kitty key release: ESC [ 97 ; 1 : 3 u`() throws {
+-
+-            let event = try parse([
+-                0x1B, 0x5B,
+-                0x39, 0x37, 0x3B,
+-                0x31, 0x3A,
+-                0x33,
+-                0x75,
+-            ])
+-            #expect(
+-                event
+-                    == .key(
+-                        Key(
+-                            code: .character("a"),
+-                            text: "a",
+-                            kind: .release
++                let event = try parse([
++                    0x1B, 0x5B,
++                    0x39, 0x37, 0x3B,
++                    0x31, 0x3A,
++                    0x33,
++                    0x75,
++                ])
++                #expect(
++                    event
++                        == .key(
++                            Key(
++                                code: .character("a"),
++                                text: "a",
++                                kind: .release
++                            )
+                         )
+-                    )
+-            )
+-        }
++                )
++            }
+ 
+-        @Test
+-        func `Kitty key repeat: ESC [ 97 ; 1 : 2 u`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B,
+-                0x39, 0x37, 0x3B,
+-                0x31, 0x3A,
+-                0x32,
+-                0x75,
+-            ])
+-            #expect(
+-                event
+-                    == .key(
+-                        Key(
+-                            code: .character("a"),
+-                            text: "a",
+-                            kind: .repeat
++            @Test
++            func `Kitty key repeat: ESC [ 97 ; 1 : 2 u`() throws {
++                let event = try parse([
++                    0x1B, 0x5B,
++                    0x39, 0x37, 0x3B,
++                    0x31, 0x3A,
++                    0x32,
++                    0x75,
++                ])
++                #expect(
++                    event
++                        == .key(
++                            Key(
++                                code: .character("a"),
++                                text: "a",
++                                kind: .repeat
++                            )
+                         )
+-                    )
+-            )
+-        }
++                )
++            }
+ 
+-        @Test
+-        func `Kitty functional key (private use area)`() throws {
++            @Test
++            func `Kitty functional key (private use area)`() throws {
+ 
+-            let event = try parse([
+-                0x1B, 0x5B,
+-                0x35, 0x37, 0x33, 0x34, 0x34,
+-                0x75,
+-            ])
+-            #expect(event == .key(Key(code: .kitty(57344))))
+-        }
++                let event = try parse([
++                    0x1B, 0x5B,
++                    0x35, 0x37, 0x33, 0x34, 0x34,
++                    0x75,
++                ])
++                #expect(event == .key(Key(code: .kitty(57344))))
++            }
+ 
+-        @Test
+-        func `Shift+a: ESC [ 97 ; 2 u`() throws {
+-            let event = try parse([0x1B, 0x5B, 0x39, 0x37, 0x3B, 0x32, 0x75])
+-            #expect(
+-                event
+-                    == .key(
+-                        Key(
+-                            code: .character("a"),
+-                            modifiers: .shift,
+-                            text: "a"
++            @Test
++            func `Shift+a: ESC [ 97 ; 2 u`() throws {
++                let event = try parse([0x1B, 0x5B, 0x39, 0x37, 0x3B, 0x32, 0x75])
++                #expect(
++                    event
++                        == .key(
++                            Key(
++                                code: .character("a"),
++                                modifiers: .shift,
++                                text: "a"
++                            )
+                         )
+-                    )
+-            )
++                )
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Mouse Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Mouse Tests.swift
+index 9cad76a..7c673fc 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Mouse Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Input.Parser.Mouse Tests.swift	
+@@ -2,128 +2,132 @@
+     import Terminal
+     import Testing
+ 
+-    @Suite
+-    struct `Parser — SGR Mouse` {
++enum `Terminal.Input.Parser.Mouse Tests` {}
+ 
+-        @Test
+-        func `Left press at (10, 20): ESC [ < 0 ; 10 ; 20 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x30, 0x3B,
+-                0x31, 0x30, 0x3B,
+-                0x32, 0x30,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .press(.left), column: 10, row: 20)))
+-        }
++extension `Terminal.Input.Parser.Mouse Tests` {
++        @Suite
++        struct `Parser — SGR Mouse` {
+ 
+-        @Test
+-        func `Left release at (10, 20): ESC [ < 0 ; 10 ; 20 m`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x30, 0x3B,
+-                0x31, 0x30, 0x3B,
+-                0x32, 0x30,
+-                0x6D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .release(.left), column: 10, row: 20)))
+-        }
++            @Test
++            func `Left press at (10, 20): ESC [ < 0 ; 10 ; 20 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x30, 0x3B,
++                    0x31, 0x30, 0x3B,
++                    0x32, 0x30,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .press(.left), column: 10, row: 20)))
++            }
+ 
+-        @Test
+-        func `Middle press: ESC [ < 1 ; 5 ; 5 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x31, 0x3B,
+-                0x35, 0x3B,
+-                0x35,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .press(.middle), column: 5, row: 5)))
+-        }
++            @Test
++            func `Left release at (10, 20): ESC [ < 0 ; 10 ; 20 m`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x30, 0x3B,
++                    0x31, 0x30, 0x3B,
++                    0x32, 0x30,
++                    0x6D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .release(.left), column: 10, row: 20)))
++            }
+ 
+-        @Test
+-        func `Right press: ESC [ < 2 ; 1 ; 1 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x32, 0x3B,
+-                0x31, 0x3B,
+-                0x31,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .press(.right), column: 1, row: 1)))
+-        }
++            @Test
++            func `Middle press: ESC [ < 1 ; 5 ; 5 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x31, 0x3B,
++                    0x35, 0x3B,
++                    0x35,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .press(.middle), column: 5, row: 5)))
++            }
+ 
+-        @Test
+-        func `Scroll up: ESC [ < 64 ; 1 ; 1 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x36, 0x34, 0x3B,
+-                0x31, 0x3B,
+-                0x31,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .scrollUp, column: 1, row: 1)))
+-        }
++            @Test
++            func `Right press: ESC [ < 2 ; 1 ; 1 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x32, 0x3B,
++                    0x31, 0x3B,
++                    0x31,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .press(.right), column: 1, row: 1)))
++            }
+ 
+-        @Test
+-        func `Scroll down: ESC [ < 65 ; 1 ; 1 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x36, 0x35, 0x3B,
+-                0x31, 0x3B,
+-                0x31,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .scrollDown, column: 1, row: 1)))
+-        }
++            @Test
++            func `Scroll up: ESC [ < 64 ; 1 ; 1 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x36, 0x34, 0x3B,
++                    0x31, 0x3B,
++                    0x31,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .scrollUp, column: 1, row: 1)))
++            }
+ 
+-        @Test
+-        func `Left drag: ESC [ < 32 ; 10 ; 20 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x33, 0x32, 0x3B,
+-                0x31, 0x30, 0x3B,
+-                0x32, 0x30,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .drag(.left), column: 10, row: 20)))
+-        }
++            @Test
++            func `Scroll down: ESC [ < 65 ; 1 ; 1 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x36, 0x35, 0x3B,
++                    0x31, 0x3B,
++                    0x31,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .scrollDown, column: 1, row: 1)))
++            }
+ 
+-        @Test
+-        func `Mouse move: ESC [ < 35 ; 10 ; 20 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x33, 0x35, 0x3B,
+-                0x31, 0x30, 0x3B,
+-                0x32, 0x30,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .move, column: 10, row: 20)))
+-        }
++            @Test
++            func `Left drag: ESC [ < 32 ; 10 ; 20 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x33, 0x32, 0x3B,
++                    0x31, 0x30, 0x3B,
++                    0x32, 0x30,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .drag(.left), column: 10, row: 20)))
++            }
+ 
+-        @Test
+-        func `Shift+Left press: ESC [ < 4 ; 1 ; 1 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x34, 0x3B,
+-                0x31, 0x3B,
+-                0x31,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .press(.left), column: 1, row: 1, modifiers: .shift)))
+-        }
++            @Test
++            func `Mouse move: ESC [ < 35 ; 10 ; 20 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x33, 0x35, 0x3B,
++                    0x31, 0x30, 0x3B,
++                    0x32, 0x30,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .move, column: 10, row: 20)))
++            }
++
++            @Test
++            func `Shift+Left press: ESC [ < 4 ; 1 ; 1 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x34, 0x3B,
++                    0x31, 0x3B,
++                    0x31,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .press(.left), column: 1, row: 1, modifiers: .shift)))
++            }
+ 
+-        @Test
+-        func `Ctrl+Left press: ESC [ < 16 ; 1 ; 1 M`() throws {
+-            let event = try parse([
+-                0x1B, 0x5B, 0x3C,
+-                0x31, 0x36, 0x3B,
+-                0x31, 0x3B,
+-                0x31,
+-                0x4D,
+-            ])
+-            #expect(event == .mouse(Mouse(kind: .press(.left), column: 1, row: 1, modifiers: .control)))
++            @Test
++            func `Ctrl+Left press: ESC [ < 16 ; 1 ; 1 M`() throws {
++                let event = try parse([
++                    0x1B, 0x5B, 0x3C,
++                    0x31, 0x36, 0x3B,
++                    0x31, 0x3B,
++                    0x31,
++                    0x4D,
++                ])
++                #expect(event == .mouse(Mouse(kind: .press(.left), column: 1, row: 1, modifiers: .control)))
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Keyboard Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Keyboard Tests.swift
+index fc8ed0e..900ca07 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Keyboard Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Keyboard Tests.swift	
+@@ -5,11 +5,15 @@
+     extension Terminal.Mode.Keyboard {
+         @Suite
+         struct `Keyboard mode sequences encode Kitty enable and disable operations` {
+-            @Suite struct `Keyboard mode enable pushes flags one and disable pops the mode` {}
+-            @Suite struct `Keyboard mode sequences retain distinct CSI forms and the u suffix` {}
+         }
+     }
+ 
++    extension Terminal.Mode.Keyboard.`Keyboard mode sequences encode Kitty enable and disable operations` {
++        @Suite struct `Keyboard mode enable pushes flags one and disable pops the mode` {}
++
++        @Suite struct `Keyboard mode sequences retain distinct CSI forms and the u suffix` {}
++    }
++
+     extension Terminal.Mode.Keyboard.`Keyboard mode sequences encode Kitty enable and disable operations`.`Keyboard mode enable pushes flags one and disable pops the mode` {
+         @Test
+         func `Enable pushes Kitty keyboard mode with flags 1`() {
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Mouse Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Mouse Tests.swift
+index 023d0e5..9946e9d 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Mouse Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Mouse Tests.swift	
+@@ -5,11 +5,15 @@
+     extension Terminal.Mode.Mouse {
+         @Suite
+         struct `Mouse mode sequences encode distinct DEC private modes` {
+-            @Suite struct `Mouse mode enable and disable sequences retain their assigned mode numbers` {}
+-            @Suite struct `Mouse modes preserve distinct numbers and common control sequence structure` {}
+         }
+     }
+ 
++    extension Terminal.Mode.Mouse.`Mouse mode sequences encode distinct DEC private modes` {
++        @Suite struct `Mouse mode enable and disable sequences retain their assigned mode numbers` {}
++
++        @Suite struct `Mouse modes preserve distinct numbers and common control sequence structure` {}
++    }
++
+     extension Terminal.Mode.Mouse.`Mouse mode sequences encode distinct DEC private modes`.`Mouse mode enable and disable sequences retain their assigned mode numbers` {
+         @Test
+         func `Normal enable is DEC private mode 1000h`() {
+diff --git a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Paste Tests.swift b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Paste Tests.swift
+index e9ac217..950f8d3 100644
+--- a/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Paste Tests.swift	
++++ b/Tests/Absorbed swift-terminal-input/Terminal Input Tests/Terminal.Mode.Paste Tests.swift	
+@@ -5,11 +5,15 @@
+     extension Terminal.Mode.Paste {
+         @Suite
+         struct `Paste mode sequences enable and disable bracketed paste` {
+-            @Suite struct `Bracketed paste enable and disable use private mode 2004` {}
+-            @Suite struct `Paste mode sequences share the CSI prefix and differ in their final byte` {}
+         }
+     }
+ 
++    extension Terminal.Mode.Paste.`Paste mode sequences enable and disable bracketed paste` {
++        @Suite struct `Bracketed paste enable and disable use private mode 2004` {}
++
++        @Suite struct `Paste mode sequences share the CSI prefix and differ in their final byte` {}
++    }
++
+     extension Terminal.Mode.Paste.`Paste mode sequences enable and disable bracketed paste`.`Bracketed paste enable and disable use private mode 2004` {
+         @Test
+         func `Enable is DEC private mode 2004h`() {
+diff --git a/Tests/Terminal Tests/Terminal.Stream Tests.swift b/Tests/Terminal Tests/Terminal.Stream Tests.swift
+index 9fcaac0..4f7641c 100644
+--- a/Tests/Terminal Tests/Terminal.Stream Tests.swift	
++++ b/Tests/Terminal Tests/Terminal.Stream Tests.swift	
+@@ -2,13 +2,22 @@ import Testing
+ 
+ @testable import Terminal
+ 
+-@Suite struct `Terminal streams preserve descriptor values and enumeration` {
++enum `Terminal.Stream Tests` {}
++
++extension `Terminal.Stream Tests` {
++    @Suite struct `Terminal streams preserve descriptor values and enumeration` {
++    }
++}
++
++extension `Terminal.Stream Tests`.`Terminal streams preserve descriptor values and enumeration` {
+     @Suite struct `Standard terminal streams retain their descriptor values and complete enumeration` {}
++
+     @Suite struct `No terminal stream boundary cases are defined` {}
++
+     @Suite struct `No terminal stream integration cases are defined` {}
+ }
+ 
+-extension `Terminal streams preserve descriptor values and enumeration`.`Standard terminal streams retain their descriptor values and complete enumeration` {
++extension `Terminal.Stream Tests`.`Terminal streams preserve descriptor values and enumeration`.`Standard terminal streams retain their descriptor values and complete enumeration` {
+     @Test
+     func `Stream raw values are correct`() {
+         #expect(Terminal.Stream.stdin.rawValue == 0)
+@@ -26,13 +35,20 @@ extension `Terminal streams preserve descriptor values and enumeration`.`Standar
+     }
+ }
+ 
+-@Suite struct `Terminal sizes preserve dimensions and compare stored values` {
++extension `Terminal.Stream Tests` {
++    @Suite struct `Terminal sizes preserve dimensions and compare stored values` {
++    }
++}
++
++extension `Terminal.Stream Tests`.`Terminal sizes preserve dimensions and compare stored values` {
+     @Suite struct `Terminal size construction retains dimensions and equality distinguishes sizes` {}
++
+     @Suite struct `No terminal size boundary cases are defined` {}
++
+     @Suite struct `No terminal size integration cases are defined` {}
+ }
+ 
+-extension `Terminal sizes preserve dimensions and compare stored values`.`Terminal size construction retains dimensions and equality distinguishes sizes` {
++extension `Terminal.Stream Tests`.`Terminal sizes preserve dimensions and compare stored values`.`Terminal size construction retains dimensions and equality distinguishes sizes` {
+     @Test
+     func `Size can be created`() {
+         let size = Terminal.Size(rows: 24, columns: 80)
+diff --git a/Tests/Terminal Tests/Terminal.Stream.Read Tests.swift b/Tests/Terminal Tests/Terminal.Stream.Read Tests.swift
+index d84c02e..a5d795c 100644
+--- a/Tests/Terminal Tests/Terminal.Stream.Read Tests.swift	
++++ b/Tests/Terminal Tests/Terminal.Stream.Read Tests.swift	
+@@ -6,11 +6,15 @@ enum `Terminal.Stream.Read Tests` {}
+ extension `Terminal.Stream.Read Tests` {
+     @Suite
+     struct `Read accessors preserve their terminal stream identities` {
+-        @Suite struct `Read construction and stream accessors retain the selected stream` {}
+-        @Suite struct `Different streams produce distinct read accessors` {}
+     }
+ }
+ 
++extension `Terminal.Stream.Read Tests`.`Read accessors preserve their terminal stream identities` {
++    @Suite struct `Read construction and stream accessors retain the selected stream` {}
++
++    @Suite struct `Different streams produce distinct read accessors` {}
++}
++
+ extension `Terminal.Stream.Read Tests`.`Read accessors preserve their terminal stream identities`.`Read construction and stream accessors retain the selected stream` {
+     @Test
+     func `Init stores stream`() {
+diff --git a/Tests/Terminal Tests/Terminal.Stream.Write Tests.swift b/Tests/Terminal Tests/Terminal.Stream.Write Tests.swift
+index a33714b..c3db3a4 100644
+--- a/Tests/Terminal Tests/Terminal.Stream.Write Tests.swift	
++++ b/Tests/Terminal Tests/Terminal.Stream.Write Tests.swift	
+@@ -6,10 +6,13 @@ enum `Terminal.Stream.Write Tests` {}
+ extension `Terminal.Stream.Write Tests` {
+     @Suite
+     struct `Write accessors preserve stream identities across isolation boundaries` {
+-        @Suite struct `Write accessors retain standard stream identities and support task transfer` {}
+     }
+ }
+ 
++extension `Terminal.Stream.Write Tests`.`Write accessors preserve stream identities across isolation boundaries` {
++    @Suite struct `Write accessors retain standard stream identities and support task transfer` {}
++}
++
+ extension `Terminal.Stream.Write Tests`.`Write accessors preserve stream identities across isolation boundaries`.`Write accessors retain standard stream identities and support task transfer` {
+     @Test
+     func `write accessor preserves stream identity`() {
+-- 
+2.43.0
+

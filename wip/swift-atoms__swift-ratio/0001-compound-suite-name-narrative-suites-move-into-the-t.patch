@@ -1,0 +1,200 @@
+From b7740e3e28ad283a6632037d93f50647532ec8eb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:06 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Bit.Pack.Exact.Factors Tests.swift        | 44 +++++-----
+ Tests/Ratio Tests/Ratio Rational Tests.swift  | 10 ++-
+ Tests/Ratio Tests/Ratio.Error Tests.swift     | 86 ++++++++++---------
+ 3 files changed, 76 insertions(+), 64 deletions(-)
+
+diff --git a/Tests/Ratio Bit Integration Tests/Bit.Pack.Exact.Factors Tests.swift b/Tests/Ratio Bit Integration Tests/Bit.Pack.Exact.Factors Tests.swift
+index f3feaa7..a0c3eaa 100644
+--- a/Tests/Ratio Bit Integration Tests/Bit.Pack.Exact.Factors Tests.swift	
++++ b/Tests/Ratio Bit Integration Tests/Bit.Pack.Exact.Factors Tests.swift	
+@@ -10,29 +10,33 @@
+     import Ratio
+     import Testing
+ 
+-    @Suite
+-    struct `Bit packing preserves exact unsigned factors` {
+-        @Test
+-        func `Packing preserves unused bits above the signed integer maximum`() throws {
+-            let factor = try Ratio<UInt, Bit>(numerator: UInt128(UInt.max))
+-            let count = Tagged<Bit, Cardinal>(_unchecked: Cardinal(UInt(1)))
+-            let pack = Bit.Pack<UInt>(count: count, bitsPerWord: factor)
++enum `Bit.Pack.Exact.Factors Tests` {}
+ 
+-            #expect(pack.words.count.underlying.rawValue == 1)
+-            #expect(pack.bits.unused.underlying.rawValue == UInt.max - 1)
+-        }
++extension `Bit.Pack.Exact.Factors Tests` {
++        @Suite
++        struct `Bit packing preserves exact unsigned factors` {
++            @Test
++            func `Packing preserves unused bits above the signed integer maximum`() throws {
++                let factor = try Ratio<UInt, Bit>(numerator: UInt128(UInt.max))
++                let count = Tagged<Bit, Cardinal>(_unchecked: Cardinal(UInt(1)))
++                let pack = Bit.Pack<UInt>(count: count, bitsPerWord: factor)
++
++                #expect(pack.words.count.underlying.rawValue == 1)
++                #expect(pack.bits.unused.underlying.rawValue == UInt.max - 1)
++            }
+ 
+-        @Test
+-        func `A location reconstructs the maximum unsigned index exactly`() throws {
+-            let factor = try Ratio<UInt, Bit>(numerator: UInt128(UInt.max))
+-            let location = Bit.Pack<UInt>.Location(
+-                word: Index<UInt>(_unchecked: Ordinal(UInt(1))),
+-                bit: Tagged<Bit, Difference>(_unchecked: .zero)
+-            )
++            @Test
++            func `A location reconstructs the maximum unsigned index exactly`() throws {
++                let factor = try Ratio<UInt, Bit>(numerator: UInt128(UInt.max))
++                let location = Bit.Pack<UInt>.Location(
++                    word: Index<UInt>(_unchecked: Ordinal(UInt(1))),
++                    bit: Tagged<Bit, Difference>(_unchecked: .zero)
++                )
+ 
+-            #expect(location.index(bitsPerWord: factor).underlying.rawValue == UInt.max)
+-            #expect(location.mask == 1)
++                #expect(location.index(bitsPerWord: factor).underlying.rawValue == UInt.max)
++                #expect(location.mask == 1)
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Ratio Tests/Ratio Rational Tests.swift b/Tests/Ratio Tests/Ratio Rational Tests.swift
+index bc8fd53..c96ccc2 100644
+--- a/Tests/Ratio Tests/Ratio Rational Tests.swift	
++++ b/Tests/Ratio Tests/Ratio Rational Tests.swift	
+@@ -9,10 +9,14 @@ private enum Second {}
+ private enum Minute {}
+ private enum Yoctosecond {}
+ 
+-@Suite
+-struct `Ratios preserve exact rational quantities` {}
++enum `Ratio Rational Tests` {}
+ 
+-extension `Ratios preserve exact rational quantities` {
++extension `Ratio Rational Tests` {
++    @Suite
++    struct `Ratios preserve exact rational quantities` {}
++}
++
++extension `Ratio Rational Tests`.`Ratios preserve exact rational quantities` {
+     @Test
+     func `inverse minute conversion preserves fractions and domains`() throws {
+         let seconds = try Ratio<Minute, Second>(numerator: 60)
+diff --git a/Tests/Ratio Tests/Ratio.Error Tests.swift b/Tests/Ratio Tests/Ratio.Error Tests.swift
+index e29b2d6..e6562de 100644
+--- a/Tests/Ratio Tests/Ratio.Error Tests.swift	
++++ b/Tests/Ratio Tests/Ratio.Error Tests.swift	
+@@ -3,53 +3,57 @@ import Ratio
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Ratio errors belong to their conversion domains` {
+-    private final class Source {}
+-    private final class Destination {}
++enum `Ratio.Error Tests` {}
+ 
+-    private func scale<From: ~Copyable & ~Escapable, To: ~Copyable & ~Escapable>(
+-        _ count: Tagged<From, Cardinal>,
+-        by ratio: Ratio<From, To>
+-    ) throws(Ratio<From, To>.Error) -> Tagged<To, Cardinal> {
+-        try ratio.multiply.exact(by: count)
+-    }
++extension `Ratio.Error Tests` {
++    @Suite
++    struct `Ratio errors belong to their conversion domains` {
++        private final class Source {}
++        private final class Destination {}
+ 
+-    @Test
+-    func `generic scaling preserves its typed domain error`() {
+-        let ratio = Ratio<Source, Destination>(Int(2))
+-        let count = Tagged<Source, Cardinal>(_unchecked: .max)
+-        #expect(throws: Ratio<Source, Destination>.Error.overflow) {
+-            try scale(count, by: ratio)
++        private func scale<From: ~Copyable & ~Escapable, To: ~Copyable & ~Escapable>(
++            _ count: Tagged<From, Cardinal>,
++            by ratio: Ratio<From, To>
++        ) throws(Ratio<From, To>.Error) -> Tagged<To, Cardinal> {
++            try ratio.multiply.exact(by: count)
+         }
+-        #expect(count.underlying == .max)
+-    }
+ 
+-    @Test
+-    func `zero denominators fail in the declared ratio domain`() {
+-        #expect(throws: Ratio<Source, Destination>.Error.denominator) {
+-            try Ratio<Source, Destination>(numerator: 1, denominator: 0)
++        @Test
++        func `generic scaling preserves its typed domain error`() {
++            let ratio = Ratio<Source, Destination>(Int(2))
++            let count = Tagged<Source, Cardinal>(_unchecked: .max)
++            #expect(throws: Ratio<Source, Destination>.Error.overflow) {
++                try scale(count, by: ratio)
++            }
++            #expect(count.underlying == .max)
+         }
+-    }
+ 
+-    @Test
+-    func `conversion errors cross tasks without requiring sendable domain tags`() async {
+-        typealias Conversion = Ratio<Source, Destination>
+-        let error = await Task.detached { () -> Conversion.Error? in
+-            do throws(Conversion.Error) {
+-                _ = try Conversion(Int(2)).applying(
+-                    to: Tagged<Source, Cardinal>(_unchecked: .max)
+-                )
+-                return nil
+-            } catch {
+-                return error
++        @Test
++        func `zero denominators fail in the declared ratio domain`() {
++            #expect(throws: Ratio<Source, Destination>.Error.denominator) {
++                try Ratio<Source, Destination>(numerator: 1, denominator: 0)
+             }
+-        }.value
+-        #expect(error == .overflow)
+-        #expect(Set<Conversion.Error>([.overflow, .inexact, .overflow]).count == 2)
+-        #expect(
+-            ObjectIdentifier(Conversion.Error.self)
+-                != ObjectIdentifier(Ratio<Destination, Source>.Error.self)
+-        )
++        }
++
++        @Test
++        func `conversion errors cross tasks without requiring sendable domain tags`() async {
++            typealias Conversion = Ratio<Source, Destination>
++            let error = await Task.detached { () -> Conversion.Error? in
++                do throws(Conversion.Error) {
++                    _ = try Conversion(Int(2)).applying(
++                        to: Tagged<Source, Cardinal>(_unchecked: .max)
++                    )
++                    return nil
++                } catch {
++                    return error
++                }
++            }.value
++            #expect(error == .overflow)
++            #expect(Set<Conversion.Error>([.overflow, .inexact, .overflow]).count == 2)
++            #expect(
++                ObjectIdentifier(Conversion.Error.self)
++                    != ObjectIdentifier(Ratio<Destination, Source>.Error.self)
++            )
++        }
+     }
+ }
+-- 
+2.43.0
+

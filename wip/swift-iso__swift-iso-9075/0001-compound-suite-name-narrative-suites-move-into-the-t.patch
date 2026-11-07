@@ -1,0 +1,446 @@
+From 6d5b32c41f4f566ec479bb0ba664a391ea2ee6d8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:19 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../ISO 9075 Call-Level Interface Tests.swift |  96 +++----
+ .../ISO 9075 Foundation Tests.swift           | 248 ++++++++++--------
+ 2 files changed, 185 insertions(+), 159 deletions(-)
+
+diff --git a/Tests/ISO 9075 Call-Level Interface Tests/ISO 9075 Call-Level Interface Tests.swift b/Tests/ISO 9075 Call-Level Interface Tests/ISO 9075 Call-Level Interface Tests.swift
+index 06b0c7a..b9d363c 100644
+--- a/Tests/ISO 9075 Call-Level Interface Tests/ISO 9075 Call-Level Interface Tests.swift	
++++ b/Tests/ISO 9075 Call-Level Interface Tests/ISO 9075 Call-Level Interface Tests.swift	
+@@ -34,25 +34,29 @@ struct Recording: ISO_9075.Connection {
+     }
+ }
+ 
+-@Suite struct `A connection executes rendered fragments` {
+-    let connection = Recording(rows: [
+-        Row(columns: ["title"], values: [.text("Groceries")]),
+-        Row(columns: ["title"], values: [.text("Call mom")]),
+-    ])
+-    let fragment: ISO_9075.Fragment = #"SELECT "title" FROM "reminders" WHERE "isCompleted" = \#(.bool(true))"#
+-
+-    @Test func `rows are fetched through the connection's dialect`() throws {
+-        let titles = try connection.fetchAll(fragment) { row throws(ISO_9075.Error) in try row.value(named: "title") }
+-        #expect(titles == [.text("Groceries"), .text("Call mom")])
+-    }
++enum `ISO 9075 Call-Level Interface Tests` {}
++
++extension `ISO 9075 Call-Level Interface Tests` {
++    @Suite struct `A connection executes rendered fragments` {
++        let connection = Recording(rows: [
++            Row(columns: ["title"], values: [.text("Groceries")]),
++            Row(columns: ["title"], values: [.text("Call mom")]),
++        ])
++        let fragment: ISO_9075.Fragment = #"SELECT "title" FROM "reminders" WHERE "isCompleted" = \#(.bool(true))"#
++
++        @Test func `rows are fetched through the connection's dialect`() throws {
++            let titles = try connection.fetchAll(fragment) { row throws(ISO_9075.Error) in try row.value(named: "title") }
++            #expect(titles == [.text("Groceries"), .text("Call mom")])
++        }
+ 
+-    @Test func `fetching one returns the first row`() throws {
+-        #expect(try connection.fetchOne(fragment) { row throws(ISO_9075.Error) in try row.value(at: 0) } == .text("Groceries"))
+-    }
++        @Test func `fetching one returns the first row`() throws {
++            #expect(try connection.fetchOne(fragment) { row throws(ISO_9075.Error) in try row.value(at: 0) } == .text("Groceries"))
++        }
+ 
+-    @Test func `a missing column is a decoding error`() throws {
+-        #expect(throws: ISO_9075.Error.decoding("no column named body")) {
+-            try connection.fetchAll(fragment) { row throws(ISO_9075.Error) in try row.value(named: "body") }
++        @Test func `a missing column is a decoding error`() throws {
++            #expect(throws: ISO_9075.Error.decoding("no column named body")) {
++                try connection.fetchAll(fragment) { row throws(ISO_9075.Error) in try row.value(named: "body") }
++            }
+         }
+     }
+ }
+@@ -101,40 +105,42 @@ actor Journal: ISO_9075.Database {
+     }
+ }
+ 
+-@Suite struct `A database scopes synchronous connection work` {
+-    @Test func `a write scope commits every statement it ran`() async throws {
+-        let journal = Journal()
+-        try await journal.write { connection throws(ISO_9075.Error) in
+-            _ = try connection.execute("INSERT INTO \"a\" VALUES (\(.int(1)))")
+-            _ = try connection.execute("INSERT INTO \"b\" VALUES (\(.int(2)))")
++extension `ISO 9075 Call-Level Interface Tests` {
++    @Suite struct `A database scopes synchronous connection work` {
++        @Test func `a write scope commits every statement it ran`() async throws {
++            let journal = Journal()
++            try await journal.write { connection throws(ISO_9075.Error) in
++                _ = try connection.execute("INSERT INTO \"a\" VALUES (\(.int(1)))")
++                _ = try connection.execute("INSERT INTO \"b\" VALUES (\(.int(2)))")
++            }
++            #expect(await journal.committed == [#"INSERT INTO "a" VALUES ($1)"#, #"INSERT INTO "b" VALUES ($1)"#])
+         }
+-        #expect(await journal.committed == [#"INSERT INTO "a" VALUES ($1)"#, #"INSERT INTO "b" VALUES ($1)"#])
+-    }
+ 
+-    @Test func `a failing write scope commits nothing`() async throws {
+-        let journal = Journal()
+-        await #expect(throws: ISO_9075.Error.execution("stop")) {
+-            try await journal.write { connection throws(ISO_9075.Error) in
+-                _ = try connection.execute("DELETE FROM \"a\"")
+-                throw .execution("stop")
++        @Test func `a failing write scope commits nothing`() async throws {
++            let journal = Journal()
++            await #expect(throws: ISO_9075.Error.execution("stop")) {
++                try await journal.write { connection throws(ISO_9075.Error) in
++                    _ = try connection.execute("DELETE FROM \"a\"")
++                    throw .execution("stop")
++                }
+             }
++            #expect(await journal.committed.isEmpty)
+         }
+-        #expect(await journal.committed.isEmpty)
+-    }
+ 
+-    @Test func `a rollback scope leaves the database untouched`() async throws {
+-        let journal = Journal()
+-        let count = try await journal.withRollback { connection throws(ISO_9075.Error) in try connection.execute("DELETE FROM \"a\"") }
+-        #expect(count == 1)
+-        #expect(await journal.committed.isEmpty)
+-    }
++        @Test func `a rollback scope leaves the database untouched`() async throws {
++            let journal = Journal()
++            let count = try await journal.withRollback { connection throws(ISO_9075.Error) in try connection.execute("DELETE FROM \"a\"") }
++            #expect(count == 1)
++            #expect(await journal.committed.isEmpty)
++        }
+ 
+-    @Test func `a read scope sees committed statements`() async throws {
+-        let journal = Journal()
+-        _ = try await journal.execute("DELETE FROM \"a\"")
+-        let seen = try await journal.read { connection throws(ISO_9075.Error) in
+-            try connection.fetchAll("SELECT 1") { row throws(ISO_9075.Error) in try row.value(named: "sql") }
++        @Test func `a read scope sees committed statements`() async throws {
++            let journal = Journal()
++            _ = try await journal.execute("DELETE FROM \"a\"")
++            let seen = try await journal.read { connection throws(ISO_9075.Error) in
++                try connection.fetchAll("SELECT 1") { row throws(ISO_9075.Error) in try row.value(named: "sql") }
++            }
++            #expect(seen == [.text(#"DELETE FROM "a""#)])
+         }
+-        #expect(seen == [.text(#"DELETE FROM "a""#)])
+     }
+ }
+diff --git a/Tests/ISO 9075 Foundation Tests/ISO 9075 Foundation Tests.swift b/Tests/ISO 9075 Foundation Tests/ISO 9075 Foundation Tests.swift
+index bdd0d58..c4c1148 100644
+--- a/Tests/ISO 9075 Foundation Tests/ISO 9075 Foundation Tests.swift	
++++ b/Tests/ISO 9075 Foundation Tests/ISO 9075 Foundation Tests.swift	
+@@ -11,105 +11,115 @@ struct Numbered: ISO_9075.Dialect {
+     func placeholder(_ offset: Int) -> String { "$\(offset)" }
+ }
+ 
+-@Suite struct `Rendering a fragment` {
+-    let fragment: ISO_9075.Fragment = "SELECT \(quote: "title") FROM \(ISO_9075.Identifier("reminders")) WHERE \(quote: "isCompleted") = \(.bool(true)) AND \(quote: "title") <> \(.text("Taxes"))"
+-
+-    @Test func `values become placeholders in order, per the dialect`() {
+-        #expect(
+-            Positional().render(fragment)
+-                == ISO_9075.Rendering(
+-                    sql: #"SELECT "title" FROM "reminders" WHERE "isCompleted" = ? AND "title" <> ?"#,
+-                    values: [.bool(true), .text("Taxes")]
+-                )
+-        )
+-        #expect(Numbered().render(fragment).sql == #"SELECT "title" FROM "reminders" WHERE "isCompleted" = $1 AND "title" <> $2"#)
+-    }
++enum `ISO 9075 Foundation Tests` {}
++
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Rendering a fragment` {
++        let fragment: ISO_9075.Fragment = "SELECT \(quote: "title") FROM \(ISO_9075.Identifier("reminders")) WHERE \(quote: "isCompleted") = \(.bool(true)) AND \(quote: "title") <> \(.text("Taxes"))"
++
++        @Test func `values become placeholders in order, per the dialect`() {
++            #expect(
++                Positional().render(fragment)
++                    == ISO_9075.Rendering(
++                        sql: #"SELECT "title" FROM "reminders" WHERE "isCompleted" = ? AND "title" <> ?"#,
++                        values: [.bool(true), .text("Taxes")]
++                    )
++            )
++            #expect(Numbered().render(fragment).sql == #"SELECT "title" FROM "reminders" WHERE "isCompleted" = $1 AND "title" <> $2"#)
++        }
+ 
+-    @Test func `inlining writes each value as a standard literal`() throws {
+-        #expect(try Positional().inline(fragment) == #"SELECT "title" FROM "reminders" WHERE "isCompleted" = TRUE AND "title" <> 'Taxes'"#)
+-    }
++        @Test func `inlining writes each value as a standard literal`() throws {
++            #expect(try Positional().inline(fragment) == #"SELECT "title" FROM "reminders" WHERE "isCompleted" = TRUE AND "title" <> 'Taxes'"#)
++        }
+ 
+-    @Test func `an invalid value cannot be inlined`() {
+-        #expect(throws: ISO_9075.Value.Failure("unencodable")) {
+-            try Positional().inline("SELECT \(.invalid(ISO_9075.Value.Failure("unencodable")))")
++        @Test func `an invalid value cannot be inlined`() {
++            #expect(throws: ISO_9075.Value.Failure("unencodable")) {
++                try Positional().inline("SELECT \(.invalid(ISO_9075.Value.Failure("unencodable")))")
++            }
+         }
+-    }
+ 
+-    @Test func `the dialect defaults are the standard's`() {
+-        #expect(Numbered().defaultPrimaryKey == "DEFAULT")
++        @Test func `the dialect defaults are the standard's`() {
++            #expect(Numbered().defaultPrimaryKey == "DEFAULT")
++        }
+     }
+ }
+ 
+-@Suite struct `Delimited identifiers and literals` {
+-    @Test func `a delimiter inside an identifier is doubled`() {
+-        #expect(ISO_9075.Identifier(#"the "best" table"#).delimited == #""the ""best"" table""#)
+-    }
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Delimited identifiers and literals` {
++        @Test func `a delimiter inside an identifier is doubled`() {
++            #expect(ISO_9075.Identifier(#"the "best" table"#).delimited == #""the ""best"" table""#)
++        }
+ 
+-    @Test func `a quote inside a character literal is doubled`() {
+-        #expect(ISO_9075.Literal.character("it's") == "'it''s'")
+-    }
++        @Test func `a quote inside a character literal is doubled`() {
++            #expect(ISO_9075.Literal.character("it's") == "'it''s'")
++        }
+ 
+-    @Test func `a binary literal is hexadecimal`() {
+-        #expect(ISO_9075.Literal.binary([Byte(0x00), Byte(0xAB), Byte(0x0F)]) == "X'00AB0F'")
+-    }
++        @Test func `a binary literal is hexadecimal`() {
++            #expect(ISO_9075.Literal.binary([Byte(0x00), Byte(0xAB), Byte(0x0F)]) == "X'00AB0F'")
++        }
+ 
+-    @Test func `fragments join with a separator`() {
+-        let joined = [ISO_9075.Fragment("a"), "b", "c"].joined(separator: ", ")
+-        #expect(Positional().render(joined).sql == "a, b, c")
++        @Test func `fragments join with a separator`() {
++            let joined = [ISO_9075.Fragment("a"), "b", "c"].joined(separator: ", ")
++            #expect(Positional().render(joined).sql == "a, b, c")
++        }
+     }
+ }
+ 
+-@Suite struct `Timestamp literals` {
+-    @Test func `the epoch is midnight, the first of January 1970`() throws {
+-        #expect(try ISO_9075.Literal.timestamp(Time.Instant(secondsSinceUnixEpoch: 0)) == "1970-01-01 00:00:00.000")
+-    }
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Timestamp literals` {
++        @Test func `the epoch is midnight, the first of January 1970`() throws {
++            #expect(try ISO_9075.Literal.timestamp(Time.Instant(secondsSinceUnixEpoch: 0)) == "1970-01-01 00:00:00.000")
++        }
+ 
+-    @Test func `a leap day keeps its milliseconds`() throws {
+-        #expect(try ISO_9075.Literal.timestamp(Time.Instant(secondsSinceUnixEpoch: 951_827_696, nanosecondFraction: 123_456_789)) == "2000-02-29 12:34:56.123")
+-    }
++        @Test func `a leap day keeps its milliseconds`() throws {
++            #expect(try ISO_9075.Literal.timestamp(Time.Instant(secondsSinceUnixEpoch: 951_827_696, nanosecondFraction: 123_456_789)) == "2000-02-29 12:34:56.123")
++        }
+ 
+-    @Test func `a timestamp literal reads back as its instant`() throws {
+-        let instant = try Time.Instant(secondsSinceUnixEpoch: 951_827_696, nanosecondFraction: 123_000_000)
+-        #expect(try ISO_9075.Literal.instant("2000-02-29 12:34:56.123") == instant)
+-        #expect(try ISO_9075.Literal.instant("2000-02-29T12:34:56.123") == instant)
+-        #expect(try ISO_9075.Literal.instant("1970-01-01 00:00:00") == Time.Instant(secondsSinceUnixEpoch: 0))
+-    }
++        @Test func `a timestamp literal reads back as its instant`() throws {
++            let instant = try Time.Instant(secondsSinceUnixEpoch: 951_827_696, nanosecondFraction: 123_000_000)
++            #expect(try ISO_9075.Literal.instant("2000-02-29 12:34:56.123") == instant)
++            #expect(try ISO_9075.Literal.instant("2000-02-29T12:34:56.123") == instant)
++            #expect(try ISO_9075.Literal.instant("1970-01-01 00:00:00") == Time.Instant(secondsSinceUnixEpoch: 0))
++        }
+ 
+-    @Test func `text that is not a timestamp is refused`() {
+-        #expect(throws: ISO_9075.Value.Failure.self) { try ISO_9075.Literal.instant("yesterday") }
+-    }
++        @Test func `text that is not a timestamp is refused`() {
++            #expect(throws: ISO_9075.Value.Failure.self) { try ISO_9075.Literal.instant("yesterday") }
++        }
+ 
+-    @Test(arguments: [
+-        "2000-02-29 24:00:00",
+-        "2000-02-29 23:60:00",
+-        "2000-02-29 23:59:60",
+-        "2000-02-29 -1:00:00",
+-        "+2000-02-29 12:34:56",
+-        "2000-02-29 +1:00:00",
+-        "2000-02-29 12:34:56.123 7",
+-        "2000-02-29 12:34",
+-        "2000-02-29 1\u{0662}:34:56",
+-        "2000-02-29 12:34:56.12x",
+-        "2000-02-29 99999999999999999:00:00",
+-        "99999999999999-01-01 00:00:00",
+-    ])
+-    func `a timestamp with an out-of-range, signed, non-digit or extra field is refused`(_ text: String) {
+-        #expect(throws: ISO_9075.Value.Failure.self) { try ISO_9075.Literal.instant(text) }
+-    }
++        @Test(arguments: [
++            "2000-02-29 24:00:00",
++            "2000-02-29 23:60:00",
++            "2000-02-29 23:59:60",
++            "2000-02-29 -1:00:00",
++            "+2000-02-29 12:34:56",
++            "2000-02-29 +1:00:00",
++            "2000-02-29 12:34:56.123 7",
++            "2000-02-29 12:34",
++            "2000-02-29 1\u{0662}:34:56",
++            "2000-02-29 12:34:56.12x",
++            "2000-02-29 99999999999999999:00:00",
++            "99999999999999-01-01 00:00:00",
++        ])
++        func `a timestamp with an out-of-range, signed, non-digit or extra field is refused`(_ text: String) {
++            #expect(throws: ISO_9075.Value.Failure.self) { try ISO_9075.Literal.instant(text) }
++        }
+ 
+-    @Test func `the last second of a day and a nine-digit fraction read back`() throws {
+-        #expect(try ISO_9075.Literal.instant("1970-01-01 23:59:59.999999999") == Time.Instant(secondsSinceUnixEpoch: 86_399, nanosecondFraction: 999_999_999))
+-    }
++        @Test func `the last second of a day and a nine-digit fraction read back`() throws {
++            #expect(try ISO_9075.Literal.instant("1970-01-01 23:59:59.999999999") == Time.Instant(secondsSinceUnixEpoch: 86_399, nanosecondFraction: 999_999_999))
++        }
+ 
+-    @Test func `an instant before the epoch counts back`() throws {
+-        #expect(try ISO_9075.Literal.timestamp(Time.Instant(secondsSinceUnixEpoch: -1)) == "1969-12-31 23:59:59.000")
++        @Test func `an instant before the epoch counts back`() throws {
++            #expect(try ISO_9075.Literal.timestamp(Time.Instant(secondsSinceUnixEpoch: -1)) == "1969-12-31 23:59:59.000")
++        }
+     }
+ }
+ 
+-@Suite struct `Debug descriptions` {
+-    @Test func `a fragment describes itself with its values inlined`() {
+-        let fragment: ISO_9075.Fragment = "SELECT \(ISO_9075.Identifier("title")) WHERE \(quote: "id") = \(.int(1)) AND \(quote: "tags") = \(.array([.text("a"), .null], of: .text))"
+-        #expect(fragment.debugDescription == #"SELECT "title" WHERE "id" = 1 AND "tags" = ARRAY['a', NULL]"#)
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Debug descriptions` {
++        @Test func `a fragment describes itself with its values inlined`() {
++            let fragment: ISO_9075.Fragment = "SELECT \(ISO_9075.Identifier("title")) WHERE \(quote: "id") = \(.int(1)) AND \(quote: "tags") = \(.array([.text("a"), .null], of: .text))"
++            #expect(fragment.debugDescription == #"SELECT "title" WHERE "id" = 1 AND "tags" = ARRAY['a', NULL]"#)
++        }
+     }
+ }
+ 
+@@ -127,63 +137,73 @@ struct Engine: ISO_9075.Dialect {
+     var roundPrecisionClose: String { " AS INTEGER)" }
+ }
+ 
+-@Suite struct `Keywords` {
+-    let fragment: ISO_9075.Fragment = "VALUES (\(ISO_9075.Keyword.defaultPrimaryKey), \(.text("Taxes")))"
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Keywords` {
++        let fragment: ISO_9075.Fragment = "VALUES (\(ISO_9075.Keyword.defaultPrimaryKey), \(.text("Taxes")))"
+ 
+-    @Test func `a dialect spells each keyword when it renders`() {
+-        #expect(Engine().render(fragment).sql == "VALUES (NULL, ?)")
+-    }
++        @Test func `a dialect spells each keyword when it renders`() {
++            #expect(Engine().render(fragment).sql == "VALUES (NULL, ?)")
++        }
+ 
+-    @Test func `the standard spelling is the default`() throws {
+-        #expect(try Positional().inline(fragment) == "VALUES (DEFAULT, 'Taxes')")
+-        #expect(fragment.debugDescription == "VALUES (DEFAULT, 'Taxes')")
++        @Test func `the standard spelling is the default`() throws {
++            #expect(try Positional().inline(fragment) == "VALUES (DEFAULT, 'Taxes')")
++            #expect(fragment.debugDescription == "VALUES (DEFAULT, 'Taxes')")
++        }
+     }
+ }
+ 
+-@Suite struct `JSON booleans` {
+-    let fragment: ISO_9075.Fragment = "\(ISO_9075.Keyword.jsonBooleanOpen)\(quote: "isDone")\(ISO_9075.Keyword.jsonBooleanClose)"
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `JSON booleans` {
++        let fragment: ISO_9075.Fragment = "\(ISO_9075.Keyword.jsonBooleanOpen)\(quote: "isDone")\(ISO_9075.Keyword.jsonBooleanClose)"
+ 
+-    @Test func `the standard passes a boolean through`() {
+-        #expect(fragment.debugDescription == #""isDone""#)
+-    }
++        @Test func `the standard passes a boolean through`() {
++            #expect(fragment.debugDescription == #""isDone""#)
++        }
+ 
+-    @Test func `a dialect without booleans converts one`() {
+-        #expect(Engine().render(fragment).sql == #"json(CASE "isDone" WHEN 0 THEN 'false' WHEN 1 THEN 'true' END)"#)
++        @Test func `a dialect without booleans converts one`() {
++            #expect(Engine().render(fragment).sql == #"json(CASE "isDone" WHEN 0 THEN 'false' WHEN 1 THEN 'true' END)"#)
++        }
+     }
+ }
+ 
+-@Suite struct `Unbounded limits` {
+-    let fragment: ISO_9075.Fragment = "LIMIT \(ISO_9075.Keyword.unboundedLimit) OFFSET \(.int(10))"
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Unbounded limits` {
++        let fragment: ISO_9075.Fragment = "LIMIT \(ISO_9075.Keyword.unboundedLimit) OFFSET \(.int(10))"
+ 
+-    @Test func `the standard spells an unbounded limit ALL`() {
+-        #expect(Positional().render(fragment).sql == "LIMIT ALL OFFSET ?")
+-        #expect(fragment.debugDescription == "LIMIT ALL OFFSET 10")
+-    }
++        @Test func `the standard spells an unbounded limit ALL`() {
++            #expect(Positional().render(fragment).sql == "LIMIT ALL OFFSET ?")
++            #expect(fragment.debugDescription == "LIMIT ALL OFFSET 10")
++        }
+ 
+-    @Test func `a dialect spells its own unbounded limit`() {
+-        #expect(Engine().render(fragment).sql == "LIMIT -1 OFFSET ?")
++        @Test func `a dialect spells its own unbounded limit`() {
++            #expect(Engine().render(fragment).sql == "LIMIT -1 OFFSET ?")
++        }
+     }
+ }
+ 
+-@Suite struct `Rounding` {
+-    let fragment: ISO_9075.Fragment =
+-        "\(ISO_9075.Keyword.roundOpen)round(\(ISO_9075.Keyword.roundOperandOpen)\(quote: "value")\(ISO_9075.Keyword.roundOperandClose), \(ISO_9075.Keyword.roundPrecisionOpen)\(.int(2))\(ISO_9075.Keyword.roundPrecisionClose))\(ISO_9075.Keyword.roundClose)"
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Rounding` {
++        let fragment: ISO_9075.Fragment =
++            "\(ISO_9075.Keyword.roundOpen)round(\(ISO_9075.Keyword.roundOperandOpen)\(quote: "value")\(ISO_9075.Keyword.roundOperandClose), \(ISO_9075.Keyword.roundPrecisionOpen)\(.int(2))\(ISO_9075.Keyword.roundPrecisionClose))\(ISO_9075.Keyword.roundClose)"
+ 
+-    @Test func `the standard rounds the operand as it is`() {
+-        #expect(Positional().render(fragment).sql == #"round("value", ?)"#)
+-    }
++        @Test func `the standard rounds the operand as it is`() {
++            #expect(Positional().render(fragment).sql == #"round("value", ?)"#)
++        }
+ 
+-    @Test func `a dialect converts the operand, the precision and the result`() {
+-        #expect(Engine().render(fragment).sql == #"CAST(round(CAST("value" AS NUMERIC), CAST(? AS INTEGER)) AS DOUBLE PRECISION)"#)
++        @Test func `a dialect converts the operand, the precision and the result`() {
++            #expect(Engine().render(fragment).sql == #"CAST(round(CAST("value" AS NUMERIC), CAST(? AS INTEGER)) AS DOUBLE PRECISION)"#)
++        }
+     }
+ }
+ 
+-@Suite struct `Arrays` {
+-    @Test func `an array carries its element kind`() {
+-        #expect(ISO_9075.Value.array([], of: .int) != ISO_9075.Value.array([], of: .text))
+-    }
++extension `ISO 9075 Foundation Tests` {
++    @Suite struct `Arrays` {
++        @Test func `an array carries its element kind`() {
++            #expect(ISO_9075.Value.array([], of: .int) != ISO_9075.Value.array([], of: .text))
++        }
+ 
+-    @Test func `an empty array is an empty standard literal`() throws {
+-        #expect(try ISO_9075.Value.array([], of: .int).literal == "ARRAY[]")
++        @Test func `an empty array is an empty standard literal`() throws {
++            #expect(try ISO_9075.Value.array([], of: .int).literal == "ARRAY[]")
++        }
+     }
+ }
+-- 
+2.43.0
+

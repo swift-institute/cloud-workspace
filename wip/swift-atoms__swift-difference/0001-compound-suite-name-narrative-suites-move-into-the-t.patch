@@ -1,0 +1,577 @@
+From 8ce74f564b42b25a621b9d6fa00d481637d6f427 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:33:59 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Carrier Hash Tests.swift                  |  20 +-
+ Tests/Difference Tests/Compiler Tests.swift   |  78 +++---
+ ...e Standard Library Integration Tests.swift | 148 +++++------
+ Tests/Difference Tests/Difference Tests.swift | 240 +++++++++---------
+ 4 files changed, 251 insertions(+), 235 deletions(-)
+
+diff --git a/Tests/Difference Hash Migration Tests/Carrier Hash Tests.swift b/Tests/Difference Hash Migration Tests/Carrier Hash Tests.swift
+index 58ea16a..5fa445a 100644
+--- a/Tests/Difference Hash Migration Tests/Carrier Hash Tests.swift	
++++ b/Tests/Difference Hash Migration Tests/Carrier Hash Tests.swift	
+@@ -1,17 +1,21 @@
+ import Difference
+ import Testing
+ 
+-@Suite
+-struct `Affine Hash Tests` {
++enum `Carrier Hash Tests` {}
+ 
+-    @Test
+-    func `Difference supplies Hash's domain-typed value`() {
+-        let first: Int = hash(Difference(3))
+-        let second: Int = hash(Difference(3))
++extension `Carrier Hash Tests` {
++    @Suite
++    struct `Affine Hash Tests` {
+ 
+-        #expect(first == second)
+-    }
++        @Test
++        func `Difference supplies Hash's domain-typed value`() {
++            let first: Int = hash(Difference(3))
++            let second: Int = hash(Difference(3))
++
++            #expect(first == second)
++        }
+ 
++    }
+ }
+ 
+ private func hash<T: Swift::Hashable>(_ value: borrowing T) -> Int {
+diff --git a/Tests/Difference Tests/Compiler Tests.swift b/Tests/Difference Tests/Compiler Tests.swift
+index 1f61d52..fdb296f 100644
+--- a/Tests/Difference Tests/Compiler Tests.swift	
++++ b/Tests/Difference Tests/Compiler Tests.swift	
+@@ -2,43 +2,47 @@
+     import Foundation
+     import Testing
+ 
+-    @Suite struct `Count conversion requires the same domain` {
+-        @Test(arguments: [false, true])
+-        func `the compiler enforces the count domain`(mismatched: Bool) throws {
+-            var products = Bundle.module.bundleURL
+-            while !FileManager.default.fileExists(
+-                atPath: products.appendingPathComponent("Difference.swiftmodule").path
+-            ) {
+-                let parent = products.deletingLastPathComponent()
+-                products = try #require(parent != products ? parent : nil)
+-            }
+-            let source = try #require(Bundle.module.resourceURL)
+-                .appendingPathComponent("Fixtures/Count domain.swift")
+-            let process = Process()
+-            let errors = Pipe()
+-            process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+-            process.arguments =
+-                [
+-                    "swiftc", "-typecheck", "-swift-version", "6",
+-                    "-enable-experimental-feature", "Lifetimes",
+-                    "-module-name", "Client", "-I", products.path, source.path,
+-                ] + (mismatched ? ["-D", "MISMATCH_DOMAIN"] : [])
+-            process.standardError = errors
+-            try process.run()
+-            let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+-            DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: watchdog)
+-            defer { watchdog.cancel() }
+-            let diagnostic = String(
+-                decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+-                as: UTF8.self
+-            )
+-            process.waitUntilExit()
+-            #expect(process.terminationReason == .exit, "\(diagnostic)")
+-            #expect((process.terminationStatus != 0) == mismatched, "\(diagnostic)")
+-            if mismatched {
+-                #expect(diagnostic.contains("First") && diagnostic.contains("Second"))
++enum `Compiler Tests` {}
++
++extension `Compiler Tests` {
++        @Suite struct `Count conversion requires the same domain` {
++            @Test(arguments: [false, true])
++            func `the compiler enforces the count domain`(mismatched: Bool) throws {
++                var products = Bundle.module.bundleURL
++                while !FileManager.default.fileExists(
++                    atPath: products.appendingPathComponent("Difference.swiftmodule").path
++                ) {
++                    let parent = products.deletingLastPathComponent()
++                    products = try #require(parent != products ? parent : nil)
++                }
++                let source = try #require(Bundle.module.resourceURL)
++                    .appendingPathComponent("Fixtures/Count domain.swift")
++                let process = Process()
++                let errors = Pipe()
++                process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
++                process.arguments =
++                    [
++                        "swiftc", "-typecheck", "-swift-version", "6",
++                        "-enable-experimental-feature", "Lifetimes",
++                        "-module-name", "Client", "-I", products.path, source.path,
++                    ] + (mismatched ? ["-D", "MISMATCH_DOMAIN"] : [])
++                process.standardError = errors
++                try process.run()
++                let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
++                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: watchdog)
++                defer { watchdog.cancel() }
++                let diagnostic = String(
++                    decoding: errors.fileHandleForReading.readDataToEndOfFile(),
++                    as: UTF8.self
++                )
++                process.waitUntilExit()
++                #expect(process.terminationReason == .exit, "\(diagnostic)")
++                #expect((process.terminationStatus != 0) == mismatched, "\(diagnostic)")
++                if mismatched {
++                    #expect(diagnostic.contains("First") && diagnostic.contains("Second"))
++                }
++                #expect(!diagnostic.contains("no such module"))
+             }
+-            #expect(!diagnostic.contains("no such module"))
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Difference Tests/Difference Standard Library Integration Tests.swift b/Tests/Difference Tests/Difference Standard Library Integration Tests.swift
+index ba69a9a..e1cd014 100644
+--- a/Tests/Difference Tests/Difference Standard Library Integration Tests.swift	
++++ b/Tests/Difference Tests/Difference Standard Library Integration Tests.swift	
+@@ -8,84 +8,88 @@ private struct Offset: Carrier.`Protocol` {
+     init(_ underlying: Difference) { self.underlying = underlying }
+ }
+ 
+-@Suite
+-struct `Difference adapters preserve signed offsets and exact representation` {
++enum `Difference Standard Library Integration Tests` {}
+ 
+-    @Test
+-    func `exact Int conversion covers both boundaries`() throws {
+-        #expect(Int(exactly: Difference(Int.min)) == Int.min)
+-        #expect(Int(exactly: Difference(Int.max)) == Int.max)
+-        #expect(Int(exactly: Difference.zero) == 0)
+-        #expect(Int(exactly: .positive(Difference.Magnitude(Cardinal(UInt(Int.max) + 1)))) == nil)
+-        #expect(Int(exactly: .negative(Difference.Magnitude(Cardinal(UInt(Int.max) + 2)))) == nil)
+-        #expect(try Difference(Int.min).intValue() == Int.min)
+-        #expect(try Difference(Int.max).intValue() == Int.max)
+-    }
++extension `Difference Standard Library Integration Tests` {
++    @Suite
++    struct `Difference adapters preserve signed offsets and exact representation` {
+ 
+-    @Test
+-    func `collection offsets preserve their sign`() {
+-        let values = Array(0..<10)
+-        let forward = values.index(values.startIndex, offsetBy: Offset(Difference(6)))
+-        let backward = values.index(forward, offsetBy: Offset(Difference(-4)))
+-        #expect(values[forward] == 6)
+-        #expect(values[backward] == 2)
++        @Test
++        func `exact Int conversion covers both boundaries`() throws {
++            #expect(Int(exactly: Difference(Int.min)) == Int.min)
++            #expect(Int(exactly: Difference(Int.max)) == Int.max)
++            #expect(Int(exactly: Difference.zero) == 0)
++            #expect(Int(exactly: .positive(Difference.Magnitude(Cardinal(UInt(Int.max) + 1)))) == nil)
++            #expect(Int(exactly: .negative(Difference.Magnitude(Cardinal(UInt(Int.max) + 2)))) == nil)
++            #expect(try Difference(Int.min).intValue() == Int.min)
++            #expect(try Difference(Int.max).intValue() == Int.max)
++        }
+ 
+-        var index = forward
+-        values.formIndex(&index, offsetBy: Offset(Difference(-2)))
+-        #expect(values[index] == 4)
+-        #expect(
+-            values.index(forward, offsetBy: Offset(Difference(8)), limitedBy: values.endIndex)
+-                == nil
+-        )
+-    }
++        @Test
++        func `collection offsets preserve their sign`() {
++            let values = Array(0..<10)
++            let forward = values.index(values.startIndex, offsetBy: Offset(Difference(6)))
++            let backward = values.index(forward, offsetBy: Offset(Difference(-4)))
++            #expect(values[forward] == 6)
++            #expect(values[backward] == 2)
+ 
+-    @Test
+-    func `raw pointer adapters use exact byte offsets`() {
+-        let pointer = UnsafeMutableRawPointer.allocate(byteCount: 8, alignment: 4)
+-        defer { unsafe pointer.deallocate() }
++            var index = forward
++            values.formIndex(&index, offsetBy: Offset(Difference(-2)))
++            #expect(values[index] == 4)
++            #expect(
++                values.index(forward, offsetBy: Offset(Difference(8)), limitedBy: values.endIndex)
++                    == nil
++            )
++        }
+ 
+-        unsafe pointer.storeBytes(
+-            of: UInt32(0xAABB_CCDD),
+-            toByteOffset: Offset(Difference(4)),
+-            as: UInt32.self
+-        )
+-        let mutableValue = unsafe pointer.load(
+-            fromByteOffset: Offset(Difference(4)),
+-            as: UInt32.self
+-        )
+-        let immutable = UnsafeRawPointer(pointer)
+-        let immutableValue = unsafe immutable.load(
+-            fromByteOffset: Offset(Difference(4)),
+-            as: UInt32.self
+-        )
+-        let mutableAdvancedMatches =
+-            unsafe pointer.advanced(
+-                by: Offset(Difference(4))
+-            ) == pointer + 4
+-        let immutableAdvancedMatches =
+-            unsafe immutable.advanced(
+-                by: Offset(Difference(4))
+-            ) == immutable + 4
++        @Test
++        func `raw pointer adapters use exact byte offsets`() {
++            let pointer = UnsafeMutableRawPointer.allocate(byteCount: 8, alignment: 4)
++            defer { unsafe pointer.deallocate() }
+ 
+-        #expect(mutableValue == 0xAABB_CCDD)
+-        #expect(immutableValue == 0xAABB_CCDD)
+-        #expect(mutableAdvancedMatches)
+-        #expect(immutableAdvancedMatches)
+-    }
++            unsafe pointer.storeBytes(
++                of: UInt32(0xAABB_CCDD),
++                toByteOffset: Offset(Difference(4)),
++                as: UInt32.self
++            )
++            let mutableValue = unsafe pointer.load(
++                fromByteOffset: Offset(Difference(4)),
++                as: UInt32.self
++            )
++            let immutable = UnsafeRawPointer(pointer)
++            let immutableValue = unsafe immutable.load(
++                fromByteOffset: Offset(Difference(4)),
++                as: UInt32.self
++            )
++            let mutableAdvancedMatches =
++                unsafe pointer.advanced(
++                    by: Offset(Difference(4))
++                ) == pointer + 4
++            let immutableAdvancedMatches =
++                unsafe immutable.advanced(
++                    by: Offset(Difference(4))
++                ) == immutable + 4
+ 
+-    #if SYNCHRONIZATION_AVAILABLE
+-        @Test(arguments: [
+-            Difference.zero,
+-            .one,
+-            Difference(-1),
+-            Difference(Int.min),
+-            Difference(Int.max),
+-            .positive(Difference.Magnitude(Cardinal(UInt.max))),
+-            .negative(Difference.Magnitude(Cardinal(UInt.max))),
+-        ])
+-        func `atomic representation round trips the complete range`(_ value: Difference) {
+-            let representation = Difference.encodeAtomicRepresentation(value)
+-            #expect(Difference.decodeAtomicRepresentation(representation) == value)
++            #expect(mutableValue == 0xAABB_CCDD)
++            #expect(immutableValue == 0xAABB_CCDD)
++            #expect(mutableAdvancedMatches)
++            #expect(immutableAdvancedMatches)
+         }
+-    #endif
++
++        #if SYNCHRONIZATION_AVAILABLE
++            @Test(arguments: [
++                Difference.zero,
++                .one,
++                Difference(-1),
++                Difference(Int.min),
++                Difference(Int.max),
++                .positive(Difference.Magnitude(Cardinal(UInt.max))),
++                .negative(Difference.Magnitude(Cardinal(UInt.max))),
++            ])
++            func `atomic representation round trips the complete range`(_ value: Difference) {
++                let representation = Difference.encodeAtomicRepresentation(value)
++                #expect(Difference.decodeAtomicRepresentation(representation) == value)
++            }
++        #endif
++    }
+ }
+diff --git a/Tests/Difference Tests/Difference Tests.swift b/Tests/Difference Tests/Difference Tests.swift
+index 09555ba..eb6092d 100644
+--- a/Tests/Difference Tests/Difference Tests.swift	
++++ b/Tests/Difference Tests/Difference Tests.swift	
+@@ -10,136 +10,140 @@ import Subtraction
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Differences preserve signed magnitude domains and exact arithmetic` {
++enum `Difference Tests` {}
+ 
+-    @Test
+-    func `binary constructors are total and normalize both signs of zero`() {
+-        let positiveZero = Difference(
+-            polarity: .positive,
+-            magnitude: Difference.Magnitude(Cardinal(0 as UInt))
+-        )
+-        let negativeZero = Difference(
+-            polarity: .negative,
+-            magnitude: Difference.Magnitude(Cardinal(0 as UInt))
+-        )
+-
+-        #expect(positiveZero == .zero)
+-        #expect(negativeZero == .zero)
+-        #expect(positiveZero.polarity == nil)
+-        #expect(negativeZero.polarity == nil)
+-        #expect(positiveZero.magnitude == Difference.Magnitude(Cardinal(0 as UInt)))
+-    }
++extension `Difference Tests` {
++    @Suite
++    struct `Differences preserve signed magnitude domains and exact arithmetic` {
+ 
+-    @Test
+-    func `signed magnitude covers the complete UInt range`() {
+-        let maximum = Difference.Magnitude(Cardinal(UInt.max))
+-        let positive = Difference.positive(maximum)
+-        let negative = Difference.negative(maximum)
+-
+-        #expect(positive.polarity == .positive)
+-        #expect(negative.polarity == .negative)
+-        #expect(positive.magnitude == maximum)
+-        #expect(negative.magnitude == maximum)
+-        #expect(-positive == negative)
+-        #expect(-negative == positive)
+-        #expect(-Difference.zero == .zero)
+-    }
++        @Test
++        func `binary constructors are total and normalize both signs of zero`() {
++            let positiveZero = Difference(
++                polarity: .positive,
++                magnitude: Difference.Magnitude(Cardinal(0 as UInt))
++            )
++            let negativeZero = Difference(
++                polarity: .negative,
++                magnitude: Difference.Magnitude(Cardinal(0 as UInt))
++            )
+ 
+-    @Test
+-    func `literal comparison and Codable preserve semantic values`() throws {
+-        let literal: Difference = -42
+-        #expect(literal < .zero)
+-        #expect(literal.description == "-42")
+-
+-        let values: [Difference] = [
+-            .zero,
+-            .one,
+-            Difference(-1),
+-            .positive(Difference.Magnitude(Cardinal(UInt.max))),
+-            .negative(Difference.Magnitude(Cardinal(UInt.max))),
+-        ]
+-        for value in values {
+-            let encoded = try JSONEncoder().encode(value)
+-            #expect(try JSONDecoder().decode(Difference.self, from: encoded) == value)
++            #expect(positiveZero == .zero)
++            #expect(negativeZero == .zero)
++            #expect(positiveZero.polarity == nil)
++            #expect(negativeZero.polarity == nil)
++            #expect(positiveZero.magnitude == Difference.Magnitude(Cardinal(0 as UInt)))
+         }
+-    }
+ 
+-    @Test
+-    func `Codable rejects sign and zero mismatches`() throws {
+-        let signedZero = EncodedDifference(polarity: .negative, magnitude: 0)
+-        let unsignedNonzero = EncodedDifference(polarity: nil, magnitude: 1)
+-
+-        #expect(throws: (any Swift::Error).self) {
+-            try JSONDecoder().decode(
+-                Difference.self,
+-                from: JSONEncoder().encode(signedZero)
+-            )
+-        }
+-        #expect(throws: (any Swift::Error).self) {
+-            try JSONDecoder().decode(
+-                Difference.self,
+-                from: JSONEncoder().encode(unsignedNonzero)
+-            )
++        @Test
++        func `signed magnitude covers the complete UInt range`() {
++            let maximum = Difference.Magnitude(Cardinal(UInt.max))
++            let positive = Difference.positive(maximum)
++            let negative = Difference.negative(maximum)
++
++            #expect(positive.polarity == .positive)
++            #expect(negative.polarity == .negative)
++            #expect(positive.magnitude == maximum)
++            #expect(negative.magnitude == maximum)
++            #expect(-positive == negative)
++            #expect(-negative == positive)
++            #expect(-Difference.zero == .zero)
+         }
+-    }
+ 
+-    @Test
+-    func `Int conversion is exact at both boundaries`() throws {
+-        #expect(try Difference(Int.max).intValue() == Int.max)
+-        #expect(try Difference(Int.min).intValue() == Int.min)
+-        #expect(throws: Difference.Error.unrepresentable) {
+-            try Difference.positive(Difference.Magnitude(Cardinal(UInt(Int.max) + 1))).intValue()
++        @Test
++        func `literal comparison and Codable preserve semantic values`() throws {
++            let literal: Difference = -42
++            #expect(literal < .zero)
++            #expect(literal.description == "-42")
++
++            let values: [Difference] = [
++                .zero,
++                .one,
++                Difference(-1),
++                .positive(Difference.Magnitude(Cardinal(UInt.max))),
++                .negative(Difference.Magnitude(Cardinal(UInt.max))),
++            ]
++            for value in values {
++                let encoded = try JSONEncoder().encode(value)
++                #expect(try JSONDecoder().decode(Difference.self, from: encoded) == value)
++            }
+         }
+-        #expect(throws: Difference.Error.unrepresentable) {
+-            try Difference.negative(Difference.Magnitude(Cardinal(UInt(Int.max) + 2))).intValue()
++
++        @Test
++        func `Codable rejects sign and zero mismatches`() throws {
++            let signedZero = EncodedDifference(polarity: .negative, magnitude: 0)
++            let unsignedNonzero = EncodedDifference(polarity: nil, magnitude: 1)
++
++            #expect(throws: (any Swift::Error).self) {
++                try JSONDecoder().decode(
++                    Difference.self,
++                    from: JSONEncoder().encode(signedZero)
++                )
++            }
++            #expect(throws: (any Swift::Error).self) {
++                try JSONDecoder().decode(
++                    Difference.self,
++                    from: JSONEncoder().encode(unsignedNonzero)
++                )
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `exact and saturating arithmetic preserve full-width semantics`() throws {
+-        let maximum = Difference.Magnitude(Cardinal(UInt.max))
+-        #expect(try Difference(7).add.exact(Difference(-2)) == Difference(5))
+-        #expect(try Difference(-7).subtract.exact(Difference(-2)) == Difference(-5))
+-        #expect(try Difference.positive(maximum).add.exact(.negative(maximum)) == .zero)
+-        #expect(throws: Difference.Error.overflow) {
+-            try Difference.positive(maximum).add.exact(.one)
++        @Test
++        func `Int conversion is exact at both boundaries`() throws {
++            #expect(try Difference(Int.max).intValue() == Int.max)
++            #expect(try Difference(Int.min).intValue() == Int.min)
++            #expect(throws: Difference.Error.unrepresentable) {
++                try Difference.positive(Difference.Magnitude(Cardinal(UInt(Int.max) + 1))).intValue()
++            }
++            #expect(throws: Difference.Error.unrepresentable) {
++                try Difference.negative(Difference.Magnitude(Cardinal(UInt(Int.max) + 2))).intValue()
++            }
+         }
+-        #expect(throws: Difference.Error.overflow) {
+-            try Difference.negative(maximum).subtract.exact(.one)
++
++        @Test
++        func `exact and saturating arithmetic preserve full-width semantics`() throws {
++            let maximum = Difference.Magnitude(Cardinal(UInt.max))
++            #expect(try Difference(7).add.exact(Difference(-2)) == Difference(5))
++            #expect(try Difference(-7).subtract.exact(Difference(-2)) == Difference(-5))
++            #expect(try Difference.positive(maximum).add.exact(.negative(maximum)) == .zero)
++            #expect(throws: Difference.Error.overflow) {
++                try Difference.positive(maximum).add.exact(.one)
++            }
++            #expect(throws: Difference.Error.overflow) {
++                try Difference.negative(maximum).subtract.exact(.one)
++            }
++            #expect(Difference.positive(maximum).add.saturating(.one) == .positive(maximum))
++            #expect(Difference.negative(maximum).subtract.saturating(.one) == .negative(maximum))
+         }
+-        #expect(Difference.positive(maximum).add.saturating(.one) == .positive(maximum))
+-        #expect(Difference.negative(maximum).subtract.saturating(.one) == .negative(maximum))
+-    }
+ 
+-    @Test
+-    func `exact arithmetic agrees with an Int128 boundary oracle`() {
+-        let maximum = Difference.Magnitude(Cardinal(UInt.max))
+-        let values: [Difference] = [
+-            .negative(maximum),
+-            Difference(Int.min),
+-            Difference(-1),
+-            .zero,
+-            .one,
+-            Difference(Int.max),
+-            .positive(maximum),
+-        ]
+-        let maximumMagnitude = Int128(UInt.max)
+-
+-        for lhs in values {
+-            for rhs in values {
+-                checkExact(
+-                    lhs.add.exact,
+-                    rhs,
+-                    expected: int128(lhs) + int128(rhs),
+-                    maximumMagnitude
+-                )
+-                checkExact(
+-                    lhs.subtract.exact,
+-                    rhs,
+-                    expected: int128(lhs) - int128(rhs),
+-                    maximumMagnitude
+-                )
++        @Test
++        func `exact arithmetic agrees with an Int128 boundary oracle`() {
++            let maximum = Difference.Magnitude(Cardinal(UInt.max))
++            let values: [Difference] = [
++                .negative(maximum),
++                Difference(Int.min),
++                Difference(-1),
++                .zero,
++                .one,
++                Difference(Int.max),
++                .positive(maximum),
++            ]
++            let maximumMagnitude = Int128(UInt.max)
++
++            for lhs in values {
++                for rhs in values {
++                    checkExact(
++                        lhs.add.exact,
++                        rhs,
++                        expected: int128(lhs) + int128(rhs),
++                        maximumMagnitude
++                    )
++                    checkExact(
++                        lhs.subtract.exact,
++                        rhs,
++                        expected: int128(lhs) - int128(rhs),
++                        maximumMagnitude
++                    )
++                }
+             }
+         }
+     }
+@@ -185,7 +189,7 @@ extension Wrapped {
+     typealias Domain = Tag
+ }
+ 
+-extension `Differences preserve signed magnitude domains and exact arithmetic` {
++extension `Difference Tests`.`Differences preserve signed magnitude domains and exact arithmetic` {
+ 
+     @Test(arguments: [UInt.zero, 1, UInt(Int.max), UInt(Int.max) + 1, UInt.max])
+     func `count conversion retains its complete magnitude and domain`(value: UInt) {
+-- 
+2.43.0
+

@@ -1,0 +1,3369 @@
+From 7a8ef54defc38b3328dad4265503814f271ae1ed Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:23 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Context Resolution Tests.swift            | 204 ++--
+ .../Dependency.Values Clock Tests.swift       |  18 +-
+ .../Key Path Access Tests.swift               | 138 +--
+ .../Task Propagation Tests.swift              | 286 +++---
+ .../Foundation Dependencies Tests.swift       |  58 +-
+ ... Tests (Foundation Extensions) Tests.swift | 756 +++++++--------
+ .../Readme Verification Tests.swift           | 876 +++++++++---------
+ .../Wrapper Parity Tests.swift                |  30 +-
+ .../Dependency.Key Tests.swift                |   3 +
+ .../Dependency.Key.Strict Tests.swift         |   3 +
+ .../Dependency.PropertyWrapper Tests.swift    |   3 +
+ .../Dependency.Test.Trait Tests.swift         | 214 +++--
+ .../Dependencies Tests/Edge Cases Tests.swift |  17 +-
+ .../Dependencies Tests/Isolation Tests.swift  |  17 +-
+ .../Dependencies Tests/Resolution Tests.swift |  17 +-
+ .../prepareDependencies Tests.swift           |  15 +-
+ .../withDependencies Tests.swift              |  15 +-
+ 17 files changed, 1373 insertions(+), 1297 deletions(-)
+
+diff --git a/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift b/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift
+index 8a3c050..a8da440 100644
+--- a/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Context Resolution Tests.swift	
+@@ -2,129 +2,131 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-@Suite
+-struct `Context Resolution Tests` {
++extension `Context Resolution Tests`.`Context Resolution Tests` {
++    @Suite
++    struct `Context Resolution Tests` {
+ 
+-    @Test(arguments: [
+-        (Dependency<Never>.Context.Mode.live, "live greeting"),
+-        (Dependency<Never>.Context.Mode.test, "test greeting"),
+-        (Dependency<Never>.Context.Mode.preview, "preview greeting"),
+-    ])
+-    func `A fully specified key resolves the value of the context`(
+-        mode: Dependency<Never>.Context.Mode,
+-        expected: String
+-    ) {
+-        withDependencies(
+-            mode: mode,
+-            operation: {
+-                @Dependency(\.greeting) var greeting
+-                #expect(greeting == expected)
+-            }
+-        )
+-    }
+-
+-    @Test
+-    func `A live only key serves its live value in every context`() {
+-        for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
++        @Test(arguments: [
++            (Dependency<Never>.Context.Mode.live, "live greeting"),
++            (Dependency<Never>.Context.Mode.test, "test greeting"),
++            (Dependency<Never>.Context.Mode.preview, "preview greeting"),
++        ])
++        func `A fully specified key resolves the value of the context`(
++            mode: Dependency<Never>.Context.Mode,
++            expected: String
++        ) {
+             withDependencies(
+                 mode: mode,
+                 operation: {
+-                    @Dependency(\.liveOnly) var liveOnly
+-                    #expect(liveOnly == "only live")
++                    @Dependency(\.greeting) var greeting
++                    #expect(greeting == expected)
+                 }
+             )
+         }
+-    }
+ 
+-    @Test
+-    func `A test value defaults to the preview value`() {
+-        withDependencies(
+-            mode: .test,
+-            operation: {
+-                @Dependency(\.liveAndPreview) var value
+-                #expect(value == "preview half")
+-            }
+-        )
+-        withDependencies(
+-            mode: .live,
+-            operation: {
+-                @Dependency(\.liveAndPreview) var value
+-                #expect(value == "live half")
++        @Test
++        func `A live only key serves its live value in every context`() {
++            for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
++                withDependencies(
++                    mode: mode,
++                    operation: {
++                        @Dependency(\.liveOnly) var liveOnly
++                        #expect(liveOnly == "only live")
++                    }
++                )
+             }
+-        )
+-    }
++        }
+ 
+-    @Test
+-    func `A test only key serves its test value in previews`() {
+-        withDependencies(
+-            mode: .preview,
+-            operation: {
+-                @Dependency(\.testOnly) var testOnly
+-                #expect(testOnly == "only test")
+-            }
+-        )
+-    }
++        @Test
++        func `A test value defaults to the preview value`() {
++            withDependencies(
++                mode: .test,
++                operation: {
++                    @Dependency(\.liveAndPreview) var value
++                    #expect(value == "preview half")
++                }
++            )
++            withDependencies(
++                mode: .live,
++                operation: {
++                    @Dependency(\.liveAndPreview) var value
++                    #expect(value == "live half")
++                }
++            )
++        }
+ 
+-    @Test(arguments: [Dependency<Never>.Context.Mode.live, .test, .preview])
+-    func `The context is readable as a dependency value`(mode: Dependency<Never>.Context.Mode) {
+-        withDependencies(
+-            mode: mode,
+-            operation: {
+-                @Dependency(\.context) var context
+-                #expect(context == mode)
+-            }
+-        )
+-    }
++        @Test
++        func `A test only key serves its test value in previews`() {
++            withDependencies(
++                mode: .preview,
++                operation: {
++                    @Dependency(\.testOnly) var testOnly
++                    #expect(testOnly == "only test")
++                }
++            )
++        }
+ 
+-    @Test
+-    func `Setting the context in the update closure selects that context`() {
+-        withDependencies {
+-            $0.context = .preview
+-        } operation: {
+-            @Dependency(\.context) var context
+-            @Dependency(\.greeting) var greeting
+-            #expect(context == .preview)
+-            #expect(greeting == "preview greeting")
++        @Test(arguments: [Dependency<Never>.Context.Mode.live, .test, .preview])
++        func `The context is readable as a dependency value`(mode: Dependency<Never>.Context.Mode) {
++            withDependencies(
++                mode: mode,
++                operation: {
++                    @Dependency(\.context) var context
++                    #expect(context == mode)
++                }
++            )
+         }
+-    }
+ 
+-    @Test
+-    func `Reads in the update closure follow a context set earlier in it`() {
+-        withDependencies {
+-            $0.context = .test
+-            $0.greeting += "!"
+-        } operation: {
+-            @Dependency(\.greeting) var greeting
+-            #expect(greeting == "test greeting!")
++        @Test
++        func `Setting the context in the update closure selects that context`() {
++            withDependencies {
++                $0.context = .preview
++            } operation: {
++                @Dependency(\.context) var context
++                @Dependency(\.greeting) var greeting
++                #expect(context == .preview)
++                #expect(greeting == "preview greeting")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `An explicit value wins over every context`() {
+-        for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
++        @Test
++        func `Reads in the update closure follow a context set earlier in it`() {
+             withDependencies {
+-                $0.context = mode
+-                $0.greeting = "explicit"
++                $0.context = .test
++                $0.greeting += "!"
+             } operation: {
+                 @Dependency(\.greeting) var greeting
+-                #expect(greeting == "explicit")
++                #expect(greeting == "test greeting!")
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `Without a scope the context is live`() async {
+-        let context = await Task.detached {
+-            Dependency<Never>.Context.current.context
+-        }.value
+-        #expect(context == .live)
+-    }
++        @Test
++        func `An explicit value wins over every context`() {
++            for mode in [Dependency<Never>.Context.Mode.live, .test, .preview] {
++                withDependencies {
++                    $0.context = mode
++                    $0.greeting = "explicit"
++                } operation: {
++                    @Dependency(\.greeting) var greeting
++                    #expect(greeting == "explicit")
++                }
++            }
++        }
++
++        @Test
++        func `Without a scope the context is live`() async {
++            let context = await Task.detached {
++                Dependency<Never>.Context.current.context
++            }.value
++            #expect(context == .live)
++        }
+ 
+-    @Test(.dependencies)
+-    func `The dependencies trait enters the test context`() {
+-        @Dependency(\.context) var context
+-        @Dependency(\.greeting) var greeting
+-        #expect(context == .test)
+-        #expect(greeting == "test greeting")
++        @Test(.dependencies)
++        func `The dependencies trait enters the test context`() {
++            @Dependency(\.context) var context
++            @Dependency(\.greeting) var greeting
++            #expect(context == .test)
++            #expect(greeting == "test greeting")
++        }
+     }
+ }
+diff --git a/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift b/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift
+index cd94888..83dab15 100644
+--- a/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Dependency.Values Clock Tests.swift	
+@@ -3,14 +3,16 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-@Suite
+-struct `Dependency.Values Clock Tests` {
+-    @Suite struct Unit {}
+-    @Suite struct `Edge Case` {}
+-    @Suite struct Integration {}
++extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests` {
++    @Suite
++    struct `Dependency.Values Clock Tests` {
++        @Suite struct Unit {}
++        @Suite struct `Edge Case` {}
++        @Suite struct Integration {}
++    }
+ }
+ 
+-extension `Dependency.Values Clock Tests`.Unit {
++extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.Unit {
+     @Test
+     func `test mode resolves the clock to an immediate clock`() async throws {
+ 
+@@ -44,7 +46,7 @@ extension `Dependency.Values Clock Tests`.Unit {
+     }
+ }
+ 
+-extension `Dependency.Values Clock Tests`.`Edge Case` {
++extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.`Edge Case` {
+     @Test
+     func `sleeping for a zero duration returns immediately`() async throws {
+         @Dependency(\.clock) var clock
+@@ -57,7 +59,7 @@ extension `Dependency.Values Clock Tests`.`Edge Case` {
+     }
+ }
+ 
+-extension `Dependency.Values Clock Tests`.Integration {
++extension `Dependency.Values Clock Tests`.`Dependency.Values Clock Tests`.Integration {
+     @Test(.dependency(\.clock, Clock.`Any`(Clock.Immediate())))
+     func `the dependency trait overrides the clock for a test`() async throws {
+         @Dependency(\.clock) var clock
+diff --git a/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift b/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift
+index d0deb57..5d913e4 100644
+--- a/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Key Path Access Tests.swift	
+@@ -2,93 +2,95 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-@Suite(.dependencies)
+-struct `Key Path Access Tests` {
++extension `Key Path Access Tests`.`Key Path Access Tests` {
++    @Suite(.dependencies)
++    struct `Key Path Access Tests` {
+ 
+-    @Test
+-    func `A key path property wrapper reads the key's value`() {
+-        @Dependency(\.greeting) var greeting
+-        #expect(greeting == "test greeting")
+-    }
+-
+-    @Test
+-    func `A write through a key path is visible inside the operation`() {
+-        withDependencies {
+-            $0.greeting = "written"
+-        } operation: {
++        @Test
++        func `A key path property wrapper reads the key's value`() {
+             @Dependency(\.greeting) var greeting
+-            #expect(greeting == "written")
++            #expect(greeting == "test greeting")
+         }
+-    }
+ 
+-    @Test
+-    func `The update closure reads back its own writes`() {
+-        withDependencies {
+-            $0.number = 20
+-            $0.number += 1
+-            $0.number *= 2
+-        } operation: {
+-            @Dependency(\.number) var number
+-            #expect(number == 42)
++        @Test
++        func `A write through a key path is visible inside the operation`() {
++            withDependencies {
++                $0.greeting = "written"
++            } operation: {
++                @Dependency(\.greeting) var greeting
++                #expect(greeting == "written")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `The update closure starts from the enclosing values`() {
+-        withDependencies {
+-            $0.greeting = "enclosing"
+-        } operation: {
++        @Test
++        func `The update closure reads back its own writes`() {
+             withDependencies {
+-                $0.greeting += " and nested"
++                $0.number = 20
++                $0.number += 1
++                $0.number *= 2
+             } operation: {
+-                @Dependency(\.greeting) var greeting
+-                #expect(greeting == "enclosing and nested")
++                @Dependency(\.number) var number
++                #expect(number == 42)
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `Type form and key path form resolve the same value`() {
+-        withDependencies {
+-            $0.greeting = "shared"
+-        } operation: {
+-            @Dependency(GreetingKey.self) var byType
+-            @Dependency(\.greeting) var byKeyPath
+-            #expect(byType == byKeyPath)
+-            #expect(byType == "shared")
++        @Test
++        func `The update closure starts from the enclosing values`() {
++            withDependencies {
++                $0.greeting = "enclosing"
++            } operation: {
++                withDependencies {
++                    $0.greeting += " and nested"
++                } operation: {
++                    @Dependency(\.greeting) var greeting
++                    #expect(greeting == "enclosing and nested")
++                }
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `A chained key path reads a member of the value`() {
+-        withDependencies {
+-            $0.greeting = "12345"
+-        } operation: {
+-            @Dependency(\.greeting.count) var length
+-            #expect(length == 5)
++        @Test
++        func `Type form and key path form resolve the same value`() {
++            withDependencies {
++                $0.greeting = "shared"
++            } operation: {
++                @Dependency(GreetingKey.self) var byType
++                @Dependency(\.greeting) var byKeyPath
++                #expect(byType == byKeyPath)
++                #expect(byType == "shared")
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `The subscript and the key path address the same storage`() {
+-        withDependencies {
+-            $0[GreetingKey.self] = "via subscript"
+-        } operation: {
+-            #expect(Dependency<Never>.Context.current.greeting == "via subscript")
++        @Test
++        func `A chained key path reads a member of the value`() {
++            withDependencies {
++                $0.greeting = "12345"
++            } operation: {
++                @Dependency(\.greeting.count) var length
++                #expect(length == 5)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `A throwing update closure propagates its error and runs no operation`() {
+-        let ran = Recorder<Bool>()
+-        #expect(throws: Failure.expected) {
+-            try withDependencies {
+-                $0.greeting = "never used"
+-                throw Failure.expected
++        @Test
++        func `The subscript and the key path address the same storage`() {
++            withDependencies {
++                $0[GreetingKey.self] = "via subscript"
+             } operation: {
+-                ran.append(true)
++                #expect(Dependency<Never>.Context.current.greeting == "via subscript")
++            }
++        }
++
++        @Test
++        func `A throwing update closure propagates its error and runs no operation`() {
++            let ran = Recorder<Bool>()
++            #expect(throws: Failure.expected) {
++                try withDependencies {
++                    $0.greeting = "never used"
++                    throw Failure.expected
++                } operation: {
++                    ran.append(true)
++                }
+             }
++            #expect(ran.elements.isEmpty)
+         }
+-        #expect(ran.elements.isEmpty)
+     }
+ }
+diff --git a/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift b/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift
+index c062df4..74135ca 100644
+--- a/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift	
++++ b/Tests/Dependencies Conformance Tests/Task Propagation Tests.swift	
+@@ -2,182 +2,184 @@ import Dependencies
+ import Dependencies_Test_Support
+ import Testing
+ 
+-@Suite(.dependencies)
+-struct `Task Propagation Tests` {
++extension `Task Propagation Tests`.`Task Propagation Tests` {
++    @Suite(.dependencies)
++    struct `Task Propagation Tests` {
+ 
+-    @Test
+-    func `An unstructured task inherits the scope it was created in`() async {
+-        let value = await withDependencies {
+-            $0.greeting = "scoped"
+-        } operation: {
+-            await Task {
+-                Dependency<Never>.Context.current.greeting
+-            }.value
++        @Test
++        func `An unstructured task inherits the scope it was created in`() async {
++            let value = await withDependencies {
++                $0.greeting = "scoped"
++            } operation: {
++                await Task {
++                    Dependency<Never>.Context.current.greeting
++                }.value
++            }
++            #expect(value == "scoped")
+         }
+-        #expect(value == "scoped")
+-    }
+ 
+-    @Test
+-    func `An unstructured task keeps its scope after the scope has ended`() async {
+-        let task = withDependencies {
+-            $0.greeting = "captured at creation"
+-        } operation: {
+-            Task {
+-                await Task.yield()
+-                return Dependency<Never>.Context.current.greeting
++        @Test
++        func `An unstructured task keeps its scope after the scope has ended`() async {
++            let task = withDependencies {
++                $0.greeting = "captured at creation"
++            } operation: {
++                Task {
++                    await Task.yield()
++                    return Dependency<Never>.Context.current.greeting
++                }
++            }
++            let value = await withDependencies {
++                $0.greeting = "awaited elsewhere"
++            } operation: {
++                await task.value
+             }
++            #expect(value == "captured at creation")
+         }
+-        let value = await withDependencies {
+-            $0.greeting = "awaited elsewhere"
+-        } operation: {
+-            await task.value
++
++        @Test
++        func `An unstructured task inherits the context`() async {
++            let context = await withDependencies(
++                mode: .preview,
++                operation: {
++                    await Task {
++                        Dependency<Never>.Context.current.context
++                    }.value
++                }
++            )
++            #expect(context == .preview)
+         }
+-        #expect(value == "captured at creation")
+-    }
+ 
+-    @Test
+-    func `An unstructured task inherits the context`() async {
+-        let context = await withDependencies(
+-            mode: .preview,
+-            operation: {
+-                await Task {
+-                    Dependency<Never>.Context.current.context
++        @Test
++        func `A detached task does not inherit the scope`() async {
++            let observed = await withDependencies {
++                $0.greeting = "scoped"
++            } operation: {
++                await Task.detached {
++                    (
++                        Dependency<Never>.Context.current.greeting,
++                        Dependency<Never>.Context.current.context
++                    )
+                 }.value
+             }
+-        )
+-        #expect(context == .preview)
+-    }
++            #expect(observed.0 == "live greeting")
++            #expect(observed.1 == .live)
++        }
+ 
+-    @Test
+-    func `A detached task does not inherit the scope`() async {
+-        let observed = await withDependencies {
+-            $0.greeting = "scoped"
+-        } operation: {
+-            await Task.detached {
+-                (
+-                    Dependency<Never>.Context.current.greeting,
+-                    Dependency<Never>.Context.current.context
+-                )
+-            }.value
++        @Test
++        func `A detached task can adopt a scope through an escaped continuation`() async {
++            let value = await withDependencies {
++                $0.greeting = "escaped"
++            } operation: {
++                await withEscapedDependencies { continuation in
++                    await Task.detached {
++                        continuation.yield {
++                            Dependency<Never>.Context.current.greeting
++                        }
++                    }.value
++                }
++            }
++            #expect(value == "escaped")
+         }
+-        #expect(observed.0 == "live greeting")
+-        #expect(observed.1 == .live)
+-    }
+ 
+-    @Test
+-    func `A detached task can adopt a scope through an escaped continuation`() async {
+-        let value = await withDependencies {
+-            $0.greeting = "escaped"
+-        } operation: {
+-            await withEscapedDependencies { continuation in
+-                await Task.detached {
+-                    continuation.yield {
+-                        Dependency<Never>.Context.current.greeting
++        @Test
++        func `Task group children inherit the scope`() async {
++            let values = await withDependencies {
++                $0.greeting = "grouped"
++            } operation: {
++                await withTaskGroup(of: String.self) { group in
++                    for _ in 0..<8 {
++                        group.addTask {
++                            Dependency<Never>.Context.current.greeting
++                        }
+                     }
+-                }.value
++                    var values: [String] = []
++                    for await value in group {
++                        values.append(value)
++                    }
++                    return values
++                }
+             }
++            #expect(values == Array(repeating: "grouped", count: 8))
+         }
+-        #expect(value == "escaped")
+-    }
+ 
+-    @Test
+-    func `Task group children inherit the scope`() async {
+-        let values = await withDependencies {
+-            $0.greeting = "grouped"
+-        } operation: {
+-            await withTaskGroup(of: String.self) { group in
+-                for _ in 0..<8 {
++        @Test
++        func `Task group children override independently`() async {
++            let values = await withTaskGroup(of: Int.self) { group in
++                for index in 0..<8 {
+                     group.addTask {
+-                        Dependency<Never>.Context.current.greeting
++                        await withDependencies {
++                            $0.number = index
++                        } operation: {
++                            await Task.yield()
++                            return Dependency<Never>.Context.current.number
++                        }
+                     }
+                 }
+-                var values: [String] = []
++                var values: [Int] = []
+                 for await value in group {
+                     values.append(value)
+                 }
+-                return values
++                return values.sorted()
+             }
++            #expect(values == Array(0..<8))
+         }
+-        #expect(values == Array(repeating: "grouped", count: 8))
+-    }
+ 
+-    @Test
+-    func `Task group children override independently`() async {
+-        let values = await withTaskGroup(of: Int.self) { group in
+-            for index in 0..<8 {
+-                group.addTask {
+-                    await withDependencies {
+-                        $0.number = index
+-                    } operation: {
+-                        await Task.yield()
+-                        return Dependency<Never>.Context.current.number
+-                    }
+-                }
+-            }
+-            var values: [Int] = []
+-            for await value in group {
+-                values.append(value)
++        @Test
++        func `Async let children inherit the scope`() async {
++            let (first, second) = await withDependencies {
++                $0.greeting = "bound"
++                $0.number = 3
++            } operation: {
++                async let first = Dependency<Never>.Context.current.greeting
++                async let second = Dependency<Never>.Context.current.number
++                return await (first, second)
+             }
+-            return values.sorted()
+-        }
+-        #expect(values == Array(0..<8))
+-    }
+-
+-    @Test
+-    func `Async let children inherit the scope`() async {
+-        let (first, second) = await withDependencies {
+-            $0.greeting = "bound"
+-            $0.number = 3
+-        } operation: {
+-            async let first = Dependency<Never>.Context.current.greeting
+-            async let second = Dependency<Never>.Context.current.number
+-            return await (first, second)
++            #expect(first == "bound")
++            #expect(second == 3)
+         }
+-        #expect(first == "bound")
+-        #expect(second == 3)
+-    }
+ 
+-    @Test
+-    func `Async let children see a scope entered inside them`() async {
+-        await withDependencies {
+-            $0.number = 1
+-        } operation: {
+-            async let inner: Int = withDependencies {
+-                $0.number += 1
++        @Test
++        func `Async let children see a scope entered inside them`() async {
++            await withDependencies {
++                $0.number = 1
+             } operation: {
+-                Dependency<Never>.Context.current.number
++                async let inner: Int = withDependencies {
++                    $0.number += 1
++                } operation: {
++                    Dependency<Never>.Context.current.number
++                }
++                async let outer = Dependency<Never>.Context.current.number
++                let values = await (inner, outer)
++                #expect(values.0 == 2)
++                #expect(values.1 == 1)
+             }
+-            async let outer = Dependency<Never>.Context.current.number
+-            let values = await (inner, outer)
+-            #expect(values.0 == 2)
+-            #expect(values.1 == 1)
+         }
+-    }
+ 
+-    @Test
+-    func `A stream element is produced in the consumer's scope unless escaped`() async {
+-        let (plain, escaped) = withDependencies {
+-            $0.greeting = "producer"
+-        } operation: {
+-            let plain = AsyncStream<String>(unfolding: {
+-                Dependency<Never>.Context.current.greeting
+-            })
+-            let escaped = withEscapedDependencies { continuation in
+-                AsyncStream<String>(unfolding: {
+-                    continuation.yield {
+-                        Dependency<Never>.Context.current.greeting
+-                    }
++        @Test
++        func `A stream element is produced in the consumer's scope unless escaped`() async {
++            let (plain, escaped) = withDependencies {
++                $0.greeting = "producer"
++            } operation: {
++                let plain = AsyncStream<String>(unfolding: {
++                    Dependency<Never>.Context.current.greeting
+                 })
++                let escaped = withEscapedDependencies { continuation in
++                    AsyncStream<String>(unfolding: {
++                        continuation.yield {
++                            Dependency<Never>.Context.current.greeting
++                        }
++                    })
++                }
++                return (plain, escaped)
++            }
++            await withDependencies {
++                $0.greeting = "consumer"
++            } operation: {
++                var plainIterator = plain.makeAsyncIterator()
++                var escapedIterator = escaped.makeAsyncIterator()
++                #expect(await plainIterator.next() == "consumer")
++                #expect(await escapedIterator.next() == "producer")
+             }
+-            return (plain, escaped)
+-        }
+-        await withDependencies {
+-            $0.greeting = "consumer"
+-        } operation: {
+-            var plainIterator = plain.makeAsyncIterator()
+-            var escapedIterator = escaped.makeAsyncIterator()
+-            #expect(await plainIterator.next() == "consumer")
+-            #expect(await escapedIterator.next() == "producer")
+         }
+     }
+ }
+diff --git a/Tests/Dependencies Foundation Integration Tests/Foundation Dependencies Tests.swift b/Tests/Dependencies Foundation Integration Tests/Foundation Dependencies Tests.swift
+index 7ddb9d0..1cd6e8e 100644
+--- a/Tests/Dependencies Foundation Integration Tests/Foundation Dependencies Tests.swift	
++++ b/Tests/Dependencies Foundation Integration Tests/Foundation Dependencies Tests.swift	
+@@ -10,6 +10,36 @@ import Testing
+ )
+ struct Test {
+ 
++    @Suite
++    struct `Performance` {
++
++        @Test
++        func `Date component access is efficient`() async throws {
++            let testDate = Date()
++
++            for _ in 0..<1000 {
++                let _ = testDate.year
++                let _ = testDate.month
++                let _ = testDate.day
++            }
++
++            #expect(true)
++        }
++
++        @Test
++        func `Date arithmetic is efficient`() async throws {
++            let baseDate = Date()
++
++            for i in 0..<100 {
++                let _ = baseDate + i.days
++            }
++
++            #expect(true)
++        }
++    }
++}
++
++extension Test {
+     @Suite
+     struct `Date Initialization` {
+ 
+@@ -683,34 +713,6 @@ struct Test {
+         }
+     }
+ 
+-    @Suite
+-    struct `Performance` {
+-
+-        @Test
+-        func `Date component access is efficient`() async throws {
+-            let testDate = Date()
+-
+-            for _ in 0..<1000 {
+-                let _ = testDate.year
+-                let _ = testDate.month
+-                let _ = testDate.day
+-            }
+-
+-            #expect(true)
+-        }
+-
+-        @Test
+-        func `Date arithmetic is efficient`() async throws {
+-            let baseDate = Date()
+-
+-            for i in 0..<100 {
+-                let _ = baseDate + i.days
+-            }
+-
+-            #expect(true)
+-        }
+-    }
+-
+     @Suite
+     struct `Component Properties` {
+ 
+diff --git a/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests (Foundation Extensions) Tests.swift b/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests (Foundation Extensions) Tests.swift
+index ff57a46..f099738 100644
+--- a/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests (Foundation Extensions) Tests.swift	
++++ b/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests (Foundation Extensions) Tests.swift	
+@@ -5,517 +5,521 @@ import Foundation
+ import Standard_Library_Extensions
+ import Testing
+ 
+-@Suite(.dependency(\.calendar, Calendar.current))
+-struct `Readme Verification (Foundation Extensions)` {
++enum `Readme Verification Tests (Foundation Extensions) Tests` {}
+ 
+-    @Test
+-    func `Quick Start: Date creation`() async throws {
++extension `Readme Verification Tests (Foundation Extensions) Tests` {
++    @Suite(.dependency(\.calendar, Calendar.current))
++    struct `Readme Verification (Foundation Extensions)` {
+ 
+-        let date = Date(year: 2025, month: 7, day: 26)!
+-        let invalidDate = Date(year: 2025, month: 2, day: 30)
++        @Test
++        func `Quick Start: Date creation`() async throws {
+ 
+-        #expect(date.year == 2025)
+-        #expect(date.month == 7)
+-        #expect(date.day == 26)
+-        #expect(invalidDate == nil)
+-    }
++            let date = Date(year: 2025, month: 7, day: 26)!
++            let invalidDate = Date(year: 2025, month: 2, day: 30)
+ 
+-    @Test
+-    func `Quick Start: Date arithmetic`() async throws {
++            #expect(date.year == 2025)
++            #expect(date.month == 7)
++            #expect(date.day == 26)
++            #expect(invalidDate == nil)
++        }
+ 
+-        let tomorrow = Date() + 1.day
+-        let nextWeek = Date() + 1.weekOfYear
+-        let complex = Date() + 1.year + 6.months + 2.days
++        @Test
++        func `Quick Start: Date arithmetic`() async throws {
+ 
+-        #expect(tomorrow > Date())
+-        #expect(nextWeek > Date())
+-        #expect(complex > Date())
+-    }
++            let tomorrow = Date() + 1.day
++            let nextWeek = Date() + 1.weekOfYear
++            let complex = Date() + 1.year + 6.months + 2.days
+ 
+-    @Test
+-    func `Quick Start: Date boundaries`() async throws {
++            #expect(tomorrow > Date())
++            #expect(nextWeek > Date())
++            #expect(complex > Date())
++        }
+ 
+-        let startOfDay = Date().startOfDay
+-        let endOfMonth = try #require(Date().endOfMonth)
+-        let startOfYear = try #require(Date().startOfYear)
+-        #expect(startOfDay.hour == 0)
+-        #expect(startOfDay.minute == 0)
+-        #expect(endOfMonth > Date())
+-        #expect(startOfYear <= Date())
+-    }
++        @Test
++        func `Quick Start: Date boundaries`() async throws {
+ 
+-    @Test
+-    func `Quick Start: State checks`() async throws {
++            let startOfDay = Date().startOfDay
++            let endOfMonth = try #require(Date().endOfMonth)
++            let startOfYear = try #require(Date().startOfYear)
++            #expect(startOfDay.hour == 0)
++            #expect(startOfDay.minute == 0)
++            #expect(endOfMonth > Date())
++            #expect(startOfYear <= Date())
++        }
+ 
+-        if Date().isToday {
++        @Test
++        func `Quick Start: State checks`() async throws {
+ 
++            if Date().isToday {
++
++            }
++            #expect(Date().isToday == true)
+         }
+-        #expect(Date().isToday == true)
+-    }
+ 
+-    @Test
+-    func `Quick Start: Relative formatting`() async throws {
++        @Test
++        func `Quick Start: Relative formatting`() async throws {
+ 
+-        let now = Date()
+-        let pastDate = now - 2.hours
+-        let pastFormatted = pastDate.relativeFormatted
++            let now = Date()
++            let pastDate = now - 2.hours
++            let pastFormatted = pastDate.relativeFormatted
+ 
+-        let futureDate = Date() + 3.days
+-        let futureFormatted = futureDate.relativeFormatted
++            let futureDate = Date() + 3.days
++            let futureFormatted = futureDate.relativeFormatted
+ 
+-        @Dependency(\.calendar) var calendar
+-        let todayNoon = now.startOfDay + 12.hours
+-        let todayTen = now.startOfDay + 10.hours
+-        #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
+-        let previousDayNoon = todayNoon - 1.day
+-        #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
+-        #expect(pastFormatted == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
+-        #expect(futureFormatted.contains("day") || futureFormatted.contains("in"))
+-    }
++            @Dependency(\.calendar) var calendar
++            let todayNoon = now.startOfDay + 12.hours
++            let todayTen = now.startOfDay + 10.hours
++            #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
++            let previousDayNoon = todayNoon - 1.day
++            #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
++            #expect(pastFormatted == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
++            #expect(futureFormatted.contains("day") || futureFormatted.contains("in"))
++        }
+ 
+-    @Test
+-    func `Quick Start: element access from Standard Library Extensions`() async throws {
++        @Test
++        func `Quick Start: element access from Standard Library Extensions`() async throws {
+ 
+-        let array = [1, 2, 3]
+-        let value = array.element(at: 5)
+-        let validValue = array.element(at: 1)
++            let array = [1, 2, 3]
++            let value = array.element(at: 5)
++            let validValue = array.element(at: 1)
+ 
+-        #expect(value == nil)
+-        #expect(validValue == 2)
+-    }
++            #expect(value == nil)
++            #expect(validValue == 2)
++        }
+ 
+-    @Test
+-    func `Usage: Date creation basic`() async throws {
++        @Test
++        func `Usage: Date creation basic`() async throws {
+ 
+-        let date1 = Date(year: 2025, month: 7, day: 26)
+-        let date2 = Date(year: 2025, month: 12, day: 25, hour: 15, minute: 30, second: 45)
++            let date1 = Date(year: 2025, month: 7, day: 26)
++            let date2 = Date(year: 2025, month: 12, day: 25, hour: 15, minute: 30, second: 45)
+ 
+-        #expect(date1 != nil)
+-        #expect(date2 != nil)
+-        #expect(date2?.hour == 15)
+-        #expect(date2?.minute == 30)
+-        #expect(date2?.second == 45)
+-    }
++            #expect(date1 != nil)
++            #expect(date2 != nil)
++            #expect(date2?.hour == 15)
++            #expect(date2?.minute == 30)
++            #expect(date2?.second == 45)
++        }
+ 
+-    @Test
+-    func `Usage: Date validation`() async throws {
++        @Test
++        func `Usage: Date validation`() async throws {
+ 
+-        let invalid1 = Date(year: 2025, month: 13, day: 1)
+-        let invalid2 = Date(year: 2025, month: 2, day: 30)
+-        let invalid3 = Date(year: 2025, month: 1, day: 1, hour: 25)
++            let invalid1 = Date(year: 2025, month: 13, day: 1)
++            let invalid2 = Date(year: 2025, month: 2, day: 30)
++            let invalid3 = Date(year: 2025, month: 1, day: 1, hour: 25)
+ 
+-        #expect(invalid1 == nil)
+-        #expect(invalid2 == nil)
+-        #expect(invalid3 == nil)
+-    }
++            #expect(invalid1 == nil)
++            #expect(invalid2 == nil)
++            #expect(invalid3 == nil)
++        }
+ 
+-    @Test
+-    func `Usage: Basic date arithmetic`() async throws {
++        @Test
++        func `Usage: Basic date arithmetic`() async throws {
+ 
+-        let date = Date()
+-        let tomorrow = date + 1.day
+-        let lastWeek = date - 1.weekOfYear
+-        let nextMonth = date + 1.month
++            let date = Date()
++            let tomorrow = date + 1.day
++            let lastWeek = date - 1.weekOfYear
++            let nextMonth = date + 1.month
+ 
+-        #expect(tomorrow > date)
+-        #expect(lastWeek < date)
+-        #expect(nextMonth > date)
+-    }
++            #expect(tomorrow > date)
++            #expect(lastWeek < date)
++            #expect(nextMonth > date)
++        }
+ 
+-    @Test
+-    func `Usage: Safe date arithmetic`() async throws {
++        @Test
++        func `Usage: Safe date arithmetic`() async throws {
+ 
+-        let date = Date()
+-        let safeResult = date.adding(1.day)
+-        let safeSubtract = date.subtracting(1.weekOfYear)
++            let date = Date()
++            let safeResult = date.adding(1.day)
++            let safeSubtract = date.subtracting(1.weekOfYear)
+ 
+-        #expect(safeResult != nil)
+-        #expect(safeSubtract != nil)
+-    }
++            #expect(safeResult != nil)
++            #expect(safeSubtract != nil)
++        }
+ 
+-    @Test
+-    func `Usage: Complex date calculations`() async throws {
++        @Test
++        func `Usage: Complex date calculations`() async throws {
+ 
+-        let date = Date()
+-        let complex = date + 1.year + 6.months + 2.days + 3.hours + 30.minutes
++            let date = Date()
++            let complex = date + 1.year + 6.months + 2.days + 3.hours + 30.minutes
+ 
+-        #expect(complex > date)
+-    }
++            #expect(complex > date)
++        }
+ 
+-    @Test
+-    func `Usage: Time components`() async throws {
+-
+-        let _ = 1.second
+-        let _ = 30.seconds
+-        let _ = 1.minute
+-        let _ = 45.minutes
+-        let _ = 1.hour
+-        let _ = 12.hours
+-        let _ = 1.day
+-        let _ = 7.days
+-        let _ = 1.month
+-        let _ = 6.months
+-        let _ = 1.year
+-        let _ = 5.years
+-    }
++        @Test
++        func `Usage: Time components`() async throws {
++
++            let _ = 1.second
++            let _ = 30.seconds
++            let _ = 1.minute
++            let _ = 45.minutes
++            let _ = 1.hour
++            let _ = 12.hours
++            let _ = 1.day
++            let _ = 7.days
++            let _ = 1.month
++            let _ = 6.months
++            let _ = 1.year
++            let _ = 5.years
++        }
+ 
+-    @Test
+-    func `Usage: Calendar components`() async throws {
++        @Test
++        func `Usage: Calendar components`() async throws {
+ 
+-        let _ = 1.weekday
+-        let _ = 1.quarter
+-        let _ = 1.weekOfMonth
+-        let _ = 1.weekOfYear
+-        let _ = 1.weeksOfYear
+-    }
++            let _ = 1.weekday
++            let _ = 1.quarter
++            let _ = 1.weekOfMonth
++            let _ = 1.weekOfYear
++            let _ = 1.weeksOfYear
++        }
+ 
+-    @Test
+-    func `Usage: Day boundaries`() async throws {
++        @Test
++        func `Usage: Day boundaries`() async throws {
+ 
+-        let date = Date()
++            let date = Date()
+ 
+-        let startOfDay = date.startOfDay
+-        let endOfDay = try #require(date.endOfDay)
+-        #expect(startOfDay.hour == 0)
+-        #expect(startOfDay.minute == 0)
+-        #expect(endOfDay > startOfDay)
+-    }
++            let startOfDay = date.startOfDay
++            let endOfDay = try #require(date.endOfDay)
++            #expect(startOfDay.hour == 0)
++            #expect(startOfDay.minute == 0)
++            #expect(endOfDay > startOfDay)
++        }
+ 
+-    @Test
+-    func `Usage: Week boundaries`() async throws {
++        @Test
++        func `Usage: Week boundaries`() async throws {
+ 
+-        let date = Date()
+-        let startOfWeek = try #require(date.startOfWeek)
+-        let endOfWeek = try #require(date.endOfWeek)
+-        #expect(startOfWeek <= date)
+-        #expect(endOfWeek >= date)
+-    }
++            let date = Date()
++            let startOfWeek = try #require(date.startOfWeek)
++            let endOfWeek = try #require(date.endOfWeek)
++            #expect(startOfWeek <= date)
++            #expect(endOfWeek >= date)
++        }
+ 
+-    @Test
+-    func `Usage: Month boundaries`() async throws {
++        @Test
++        func `Usage: Month boundaries`() async throws {
+ 
+-        let date = Date()
+-        let startOfMonth = try #require(date.startOfMonth)
+-        let endOfMonth = try #require(date.endOfMonth)
+-        let firstDay = try #require(date.firstDayOfMonth)
+-        let lastDay = try #require(date.lastDayOfMonth)
++            let date = Date()
++            let startOfMonth = try #require(date.startOfMonth)
++            let endOfMonth = try #require(date.endOfMonth)
++            let firstDay = try #require(date.firstDayOfMonth)
++            let lastDay = try #require(date.lastDayOfMonth)
+ 
+-        #expect(startOfMonth <= date)
+-        #expect(endOfMonth >= date)
+-        #expect(firstDay.day == 1)
+-        #expect(lastDay.day > 0)
+-    }
++            #expect(startOfMonth <= date)
++            #expect(endOfMonth >= date)
++            #expect(firstDay.day == 1)
++            #expect(lastDay.day > 0)
++        }
+ 
+-    @Test
+-    func `Usage: Year boundaries`() async throws {
++        @Test
++        func `Usage: Year boundaries`() async throws {
+ 
+-        let date = Date()
+-        let startOfYear = try #require(date.startOfYear)
+-        let endOfYear = try #require(date.endOfYear)
+-        #expect(startOfYear <= date)
+-        #expect(endOfYear >= date)
+-        #expect(startOfYear.month == 1)
+-        #expect(startOfYear.day == 1)
+-    }
++            let date = Date()
++            let startOfYear = try #require(date.startOfYear)
++            let endOfYear = try #require(date.endOfYear)
++            #expect(startOfYear <= date)
++            #expect(endOfYear >= date)
++            #expect(startOfYear.month == 1)
++            #expect(startOfYear.day == 1)
++        }
+ 
+-    @Test
+-    func `Usage: Date state relative to today`() async throws {
++        @Test
++        func `Usage: Date state relative to today`() async throws {
+ 
+-        let date = Date()
++            let date = Date()
+ 
+-        _ = date.isToday
+-        _ = date.isTomorrow
+-        _ = date.isYesterday
++            _ = date.isToday
++            _ = date.isTomorrow
++            _ = date.isYesterday
+ 
+-        #expect(date.isToday == true)
+-    }
++            #expect(date.isToday == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date state relative to current periods`() async throws {
++        @Test
++        func `Usage: Date state relative to current periods`() async throws {
+ 
+-        let date = Date()
+-        _ = date.isThisWeek
+-        _ = date.isThisMonth
+-        _ = date.isThisYear
++            let date = Date()
++            _ = date.isThisWeek
++            _ = date.isThisMonth
++            _ = date.isThisYear
+ 
+-        _ = date.isWeekend
++            _ = date.isWeekend
+ 
+-        #expect(date.isThisYear == true)
+-    }
++            #expect(date.isThisYear == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date comparisons`() async throws {
++        @Test
++        func `Usage: Date comparisons`() async throws {
+ 
+-        let date1 = Date()
+-        let date2 = Date() + 1.day
++            let date1 = Date()
++            let date2 = Date() + 1.day
+ 
+-        #expect(date2.isAfter(date1) == true)
+-        #expect(date1.isBefore(date2) == true)
+-        #expect(date1.isSameDay(as: date1) == true)
+-    }
++            #expect(date2.isAfter(date1) == true)
++            #expect(date1.isBefore(date2) == true)
++            #expect(date1.isSameDay(as: date1) == true)
++        }
+ 
+-    @Test
+-    func `Usage: Weekend checks`() async throws {
++        @Test
++        func `Usage: Weekend checks`() async throws {
+ 
+-        let date = Date()
++            let date = Date()
+ 
+-        if date.isWeekend {
+-            let nextWorkday = try #require(date.ifWeekendThenNextWorkday())
+-            let prevWorkday = try #require(date.ifWeekendThenPreviousWorkday())
++            if date.isWeekend {
++                let nextWorkday = try #require(date.ifWeekendThenNextWorkday())
++                let prevWorkday = try #require(date.ifWeekendThenPreviousWorkday())
+ 
+-            #expect(!nextWorkday.isWeekend)
+-            #expect(!prevWorkday.isWeekend)
+-        }
++                #expect(!nextWorkday.isWeekend)
++                #expect(!prevWorkday.isWeekend)
++            }
+ 
+-        let nextWeekday = try #require(date.nextWeekday)
+-        #expect(!nextWeekday.isWeekend)
+-    }
++            let nextWeekday = try #require(date.nextWeekday)
++            #expect(!nextWeekday.isWeekend)
++        }
+ 
+-    @Test
+-    func `Usage: Business day calculations`() async throws {
++        @Test
++        func `Usage: Business day calculations`() async throws {
+ 
+-        let date = Date()
+-        let fiveBusinessDaysLater = try #require(date.addingBusinessDays(5))
+-        let fiveBusinessDaysEarlier = try #require(date.addingBusinessDays(-5))
++            let date = Date()
++            let fiveBusinessDaysLater = try #require(date.addingBusinessDays(5))
++            let fiveBusinessDaysEarlier = try #require(date.addingBusinessDays(-5))
+ 
+-        #expect(fiveBusinessDaysLater > date)
+-        #expect(fiveBusinessDaysEarlier < date)
+-    }
++            #expect(fiveBusinessDaysLater > date)
++            #expect(fiveBusinessDaysEarlier < date)
++        }
+ 
+-    @Test
+-    func `Usage: Weekday navigation`() async throws {
++        @Test
++        func `Usage: Weekday navigation`() async throws {
+ 
+-        let date = Date()
++            let date = Date()
+ 
+-        let nextMonday = try #require(date.next(2))
+-        let previousFriday = try #require(date.previous(6))
++            let nextMonday = try #require(date.next(2))
++            let previousFriday = try #require(date.previous(6))
+ 
+-        #expect(nextMonday.weekday == 2)
+-        #expect(previousFriday.weekday == 6)
+-    }
++            #expect(nextMonday.weekday == 2)
++            #expect(previousFriday.weekday == 6)
++        }
+ 
+-    @Test
+-    func `Usage: Time calculations`() async throws {
++        @Test
++        func `Usage: Time calculations`() async throws {
+ 
+-        let startDate = Date()
+-        let endDate = Date() + 10.days
++            let startDate = Date()
++            let endDate = Date() + 10.days
+ 
+-        let daysBetween = try #require(startDate.daysBetween(endDate))
++            let daysBetween = try #require(startDate.daysBetween(endDate))
+ 
+-        #expect(daysBetween == 10)
+-    }
++            #expect(daysBetween == 10)
++        }
+ 
+-    @Test
+-    func `Usage: Age calculations`() async throws {
++        @Test
++        func `Usage: Age calculations`() async throws {
+ 
+-        let birthDate = Date(year: 2000, month: 1, day: 1)!
+-        let age = try #require(birthDate.age())
+-        let ageAt = try #require(birthDate.age(at: Date(year: 2025, month: 1, day: 1)!))
++            let birthDate = Date(year: 2000, month: 1, day: 1)!
++            let age = try #require(birthDate.age())
++            let ageAt = try #require(birthDate.age(at: Date(year: 2025, month: 1, day: 1)!))
+ 
+-        #expect(age > 20)
+-        #expect(ageAt == 25)
+-    }
++            #expect(age > 20)
++            #expect(ageAt == 25)
++        }
+ 
+-    @Test
+-    func `Usage: Time Interval constants`() async throws {
++        @Test
++        func `Usage: Time Interval constants`() async throws {
+ 
+-        #expect(TimeInterval.minute == 60)
+-        #expect(TimeInterval.hour == 3600)
+-        #expect(TimeInterval.day == 86400)
+-        #expect(TimeInterval.week == 604800)
+-    }
++            #expect(TimeInterval.minute == 60)
++            #expect(TimeInterval.hour == 3600)
++            #expect(TimeInterval.day == 86400)
++            #expect(TimeInterval.week == 604800)
++        }
+ 
+-    @Test
+-    func `Usage: Time Interval conversions`() async throws {
++        @Test
++        func `Usage: Time Interval conversions`() async throws {
+ 
+-        let twoHours: TimeInterval = 2.hours
+-        let thirtyMinutes: TimeInterval = 30.minutes
++            let twoHours: TimeInterval = 2.hours
++            let thirtyMinutes: TimeInterval = 30.minutes
+ 
+-        #expect(twoHours == 7200)
+-        #expect(thirtyMinutes == 1800)
+-    }
++            #expect(twoHours == 7200)
++            #expect(thirtyMinutes == 1800)
++        }
+ 
+-    @Test
+-    func `Usage: Time Interval as conversions`() async throws {
++        @Test
++        func `Usage: Time Interval as conversions`() async throws {
+ 
+-        let interval: TimeInterval = 7200
+-        #expect(interval.asHours == 2.0)
+-        #expect(interval.asMinutes == 120.0)
+-        #expect(interval.asDays < 1.0)
+-    }
++            let interval: TimeInterval = 7200
++            #expect(interval.asHours == 2.0)
++            #expect(interval.asMinutes == 120.0)
++            #expect(interval.asDays < 1.0)
++        }
+ 
+-    @Test
+-    func `Usage: Formatted duration`() async throws {
++        @Test
++        func `Usage: Formatted duration`() async throws {
+ 
+-        #expect((30.0).formattedDuration == "30s")
+-        #expect((90.0).formattedDuration == "2m")
+-        #expect((3660.0).formattedDuration == "1.0h")
+-        #expect((86500.0).formattedDuration == "1.0d")
+-    }
++            #expect((30.0).formattedDuration == "30s")
++            #expect((90.0).formattedDuration == "2m")
++            #expect((3660.0).formattedDuration == "1.0h")
++            #expect((86500.0).formattedDuration == "1.0d")
++        }
+ 
+-    @Test
+-    func `Usage: Relative date formatting past`() async throws {
++        @Test
++        func `Usage: Relative date formatting past`() async throws {
+ 
+-        let now = Date()
++            let now = Date()
+ 
+-        let pastDate = now - 2.hours
+-        let timeAgo = pastDate.timeAgoSince(now)
+-        let relativeFormatted = pastDate.relativeFormatted
++            let pastDate = now - 2.hours
++            let timeAgo = pastDate.timeAgoSince(now)
++            let relativeFormatted = pastDate.relativeFormatted
+ 
+-        #expect(timeAgo.contains("hour"))
+-        @Dependency(\.calendar) var calendar
+-        let todayNoon = now.startOfDay + 12.hours
+-        let todayTen = now.startOfDay + 10.hours
+-        #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
+-        let previousDayNoon = todayNoon - 1.day
+-        #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
+-        #expect(relativeFormatted == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
+-    }
++            #expect(timeAgo.contains("hour"))
++            @Dependency(\.calendar) var calendar
++            let todayNoon = now.startOfDay + 12.hours
++            let todayTen = now.startOfDay + 10.hours
++            #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
++            let previousDayNoon = todayNoon - 1.day
++            #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
++            #expect(relativeFormatted == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
++        }
+ 
+-    @Test
+-    func `Usage: Relative date formatting future`() async throws {
++        @Test
++        func `Usage: Relative date formatting future`() async throws {
+ 
+-        let now = Date()
+-        let futureDate = now + 3.days
+-        let timeUntil = futureDate.timeUntil(now)
+-        let relativeFormatted = futureDate.relativeFormatted
++            let now = Date()
++            let futureDate = now + 3.days
++            let timeUntil = futureDate.timeUntil(now)
++            let relativeFormatted = futureDate.relativeFormatted
+ 
+-        #expect(timeUntil.contains("in"))
+-        #expect(relativeFormatted.contains("day") || relativeFormatted.contains("in"))
+-    }
++            #expect(timeUntil.contains("in"))
++            #expect(relativeFormatted.contains("day") || relativeFormatted.contains("in"))
++        }
+ 
+-    @Test
+-    func `Usage: Relative date formatting special cases`() async throws {
++        @Test
++        func `Usage: Relative date formatting special cases`() async throws {
+ 
+-        let now = Date()
++            let now = Date()
+ 
+-        let yesterday = now - 1.day
+-        let yesterdayFormatted = yesterday.relativeFormatted
++            let yesterday = now - 1.day
++            let yesterdayFormatted = yesterday.relativeFormatted
+ 
+-        let tomorrow = now + 1.day
+-        let tomorrowFormatted = tomorrow.relativeFormatted
++            let tomorrow = now + 1.day
++            let tomorrowFormatted = tomorrow.relativeFormatted
+ 
+-        let recent = now - 5.seconds
+-        let recentFormatted = recent.relativeFormatted
++            let recent = now - 5.seconds
++            let recentFormatted = recent.relativeFormatted
+ 
+-        #expect(!yesterdayFormatted.isEmpty)
+-        #expect(!tomorrowFormatted.isEmpty)
+-        #expect(!recentFormatted.isEmpty)
+-    }
++            #expect(!yesterdayFormatted.isEmpty)
++            #expect(!tomorrowFormatted.isEmpty)
++            #expect(!recentFormatted.isEmpty)
++        }
+ 
+-    @Test
+-    func `Usage: Basic date components`() async throws {
++        @Test
++        func `Usage: Basic date components`() async throws {
+ 
+-        let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
++            let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
+ 
+-        #expect(date.year == 2025)
+-        #expect(date.month == 7)
+-        #expect(date.day == 26)
+-        #expect(date.hour == 15)
+-        #expect(date.minute == 30)
+-        #expect(date.second == 0)
+-    }
++            #expect(date.year == 2025)
++            #expect(date.month == 7)
++            #expect(date.day == 26)
++            #expect(date.hour == 15)
++            #expect(date.minute == 30)
++            #expect(date.second == 0)
++        }
+ 
+-    @Test
+-    func `Usage: Advanced date components`() async throws {
++        @Test
++        func `Usage: Advanced date components`() async throws {
+ 
+-        let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
++            let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
+ 
+-        _ = date.weekday
+-        _ = date.weekOfYear
+-        _ = date.weekOfMonth
+-        _ = date.quarter
+-        _ = date.era
++            _ = date.weekday
++            _ = date.weekOfYear
++            _ = date.weekOfMonth
++            _ = date.quarter
++            _ = date.era
+ 
+-        #expect(date.weekday >= 1 && date.weekday <= 7)
+-        #expect(date.quarter >= 1 && date.quarter <= 4)
+-    }
++            #expect(date.weekday >= 1 && date.weekday <= 7)
++            #expect(date.quarter >= 1 && date.quarter <= 4)
++        }
+ 
+-    @Test
+-    func `Usage: Calendar and timezone info`() async throws {
++        @Test
++        func `Usage: Calendar and timezone info`() async throws {
+ 
+-        let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
++            let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
+ 
+-        _ = date.calendarIdentifier
+-        _ = date.timeZone
++            _ = date.calendarIdentifier
++            _ = date.timeZone
+ 
+-        #expect(date.calendarIdentifier == Calendar.current.identifier)
+-    }
++            #expect(date.calendarIdentifier == Calendar.current.identifier)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components combining`() async throws {
++        @Test
++        func `Usage: Date Components combining`() async throws {
+ 
+-        let components = 1.day + 2.hours + 30.minutes
+-        let result = Date() + components
++            let components = 1.day + 2.hours + 30.minutes
++            let result = Date() + components
+ 
+-        #expect(result > Date())
+-    }
++            #expect(result > Date())
++        }
+ 
+-    @Test
+-    func `Usage: Date Components multiplication`() async throws {
++        @Test
++        func `Usage: Date Components multiplication`() async throws {
+ 
+-        let threeDays = 1.day * 3
+-        let sixMonths = 1.month * 6
++            let threeDays = 1.day * 3
++            let sixMonths = 1.month * 6
+ 
+-        let date = Date()
+-        let result1 = date + threeDays
+-        let result2 = date + sixMonths
++            let date = Date()
++            let result1 = date + threeDays
++            let result2 = date + sixMonths
+ 
+-        #expect(result1 > date)
+-        #expect(result2 > date)
+-    }
++            #expect(result1 > date)
++            #expect(result2 > date)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components subtraction`() async throws {
++        @Test
++        func `Usage: Date Components subtraction`() async throws {
+ 
+-        let difference = 2.weeksOfYear - 3.days
++            let difference = 2.weeksOfYear - 3.days
+ 
+-        let date = Date()
+-        let result = date + difference
++            let date = Date()
++            let result = date + difference
+ 
+-        #expect(result != date)
+-    }
++            #expect(result != date)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components basic validation`() async throws {
++        @Test
++        func `Usage: Date Components basic validation`() async throws {
+ 
+-        let components = DateComponents(year: 2025, month: 7, day: 26)
++            let components = DateComponents(year: 2025, month: 7, day: 26)
+ 
+-        #expect(components.isValid == true)
+-    }
++            #expect(components.isValid == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components calendar validation`() async throws {
++        @Test
++        func `Usage: Date Components calendar validation`() async throws {
+ 
+-        let components = DateComponents(year: 2025, month: 7, day: 26)
+-        let calendar = Calendar.current
++            let components = DateComponents(year: 2025, month: 7, day: 26)
++            let calendar = Calendar.current
+ 
+-        #expect(components.isValid(for: calendar) == true)
+-    }
++            #expect(components.isValid(for: calendar) == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components invalid examples`() async throws {
++        @Test
++        func `Usage: Date Components invalid examples`() async throws {
+ 
+-        let invalid = DateComponents(month: 13, day: 1)
++            let invalid = DateComponents(month: 13, day: 1)
+ 
+-        #expect(invalid.isValid == false)
+-    }
++            #expect(invalid.isValid == false)
++        }
+ 
+-    @Test
+-    func `Usage: date format style`() async throws {
++        @Test
++        func `Usage: date format style`() async throws {
+ 
+-        let dateString = Date().formatted(.dateFormat("yyyy-MM-dd"))
++            let dateString = Date().formatted(.dateFormat("yyyy-MM-dd"))
+ 
+-        #expect(dateString.count == 10)
+-        #expect(dateString.contains("-"))
+-    }
++            #expect(dateString.count == 10)
++            #expect(dateString.contains("-"))
++        }
+ 
+-    @Test
+-    func `Usage: Format Style extensions`() async throws {
++        @Test
++        func `Usage: Format Style extensions`() async throws {
+ 
+-        let formatted = Date().formatted(.dateFormat("MMM d, yyyy"))
++            let formatted = Date().formatted(.dateFormat("MMM d, yyyy"))
+ 
+-        #expect(!formatted.isEmpty)
+-        #expect(formatted.contains(","))
++            #expect(!formatted.isEmpty)
++            #expect(formatted.contains(","))
++        }
+     }
+ }
+diff --git a/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests.swift b/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests.swift
+index 6f69dc5..f42dc20 100644
+--- a/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests.swift	
++++ b/Tests/Dependencies Foundation Integration Tests/Readme Verification Tests.swift	
+@@ -5,557 +5,561 @@ import Foundation
+ import Standard_Library_Extensions
+ import Testing
+ 
+-@Suite(
+-    .dependency(\.calendar, Calendar.current)
+-)
+-struct `Readme Verification` {
++enum `Readme Verification Tests` {}
+ 
+-    @Test
+-    func `Quick Start: Date creation`() async throws {
++extension `Readme Verification Tests` {
++    @Suite(
++        .dependency(\.calendar, Calendar.current)
++    )
++    struct `Readme Verification` {
+ 
+-        let date = Date(year: 2025, month: 7, day: 26)!
+-        let invalidDate = Date(year: 2025, month: 2, day: 30)
++        @Test
++        func `Quick Start: Date creation`() async throws {
+ 
+-        #expect(date.year == 2025)
+-        #expect(date.month == 7)
+-        #expect(date.day == 26)
+-        #expect(invalidDate == nil)
+-    }
++            let date = Date(year: 2025, month: 7, day: 26)!
++            let invalidDate = Date(year: 2025, month: 2, day: 30)
+ 
+-    @Test
+-    func `Quick Start: Date arithmetic`() async throws {
+-        let baseDate = Date(year: 2025, month: 1, day: 1)!
++            #expect(date.year == 2025)
++            #expect(date.month == 7)
++            #expect(date.day == 26)
++            #expect(invalidDate == nil)
++        }
+ 
+-        let tomorrow = baseDate + 1.day
+-        let nextWeek = baseDate + 1.weekOfYear
+-        let complex = baseDate + 1.year + 6.months + 2.days
++        @Test
++        func `Quick Start: Date arithmetic`() async throws {
++            let baseDate = Date(year: 2025, month: 1, day: 1)!
+ 
+-        #expect(tomorrow.day == 2)
+-        #expect(nextWeek.day == 8)
+-        #expect(complex.year == 2026)
+-        #expect(complex.month == 7)
+-    }
++            let tomorrow = baseDate + 1.day
++            let nextWeek = baseDate + 1.weekOfYear
++            let complex = baseDate + 1.year + 6.months + 2.days
+ 
+-    @Test
+-    func `Quick Start: Date boundaries`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26, hour: 12)!
+-
+-        let startOfDay = date.startOfDay
+-        let endOfMonth = try #require(date.endOfMonth)
+-        let startOfYear = try #require(date.startOfYear)
+-        #expect(startOfDay.hour == 0)
+-        #expect(startOfDay.minute == 0)
+-        #expect(endOfMonth.month == 8)
+-        #expect(endOfMonth.day == 1)
+-        #expect(date < endOfMonth)
+-        #expect(startOfYear.month == 1)
+-    }
++            #expect(tomorrow.day == 2)
++            #expect(nextWeek.day == 8)
++            #expect(complex.year == 2026)
++            #expect(complex.month == 7)
++        }
+ 
+-    @Test
+-    func `Quick Start: State checks`() async throws {
+-        let today = Date()
++        @Test
++        func `Quick Start: Date boundaries`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26, hour: 12)!
++
++            let startOfDay = date.startOfDay
++            let endOfMonth = try #require(date.endOfMonth)
++            let startOfYear = try #require(date.startOfYear)
++            #expect(startOfDay.hour == 0)
++            #expect(startOfDay.minute == 0)
++            #expect(endOfMonth.month == 8)
++            #expect(endOfMonth.day == 1)
++            #expect(date < endOfMonth)
++            #expect(startOfYear.month == 1)
++        }
+ 
+-        #expect(today.isToday == true)
+-    }
++        @Test
++        func `Quick Start: State checks`() async throws {
++            let today = Date()
+ 
+-    @Test
+-    func `Quick Start: Relative formatting`() async throws {
+-        let now = Date()
+-
+-        let pastDate = now - 2.hours
+-        let relativeString = pastDate.relativeFormatted
+-        @Dependency(\.calendar) var calendar
+-        let todayNoon = now.startOfDay + 12.hours
+-        let todayTen = now.startOfDay + 10.hours
+-        #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
+-        let previousDayNoon = todayNoon - 1.day
+-        #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
+-        #expect(relativeString == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
+-
+-        let futureDate = now + 3.days
+-        let futureString = futureDate.relativeFormatted
+-        #expect(futureString.contains("day"))
+-    }
++            #expect(today.isToday == true)
++        }
+ 
+-    @Test
+-    func `Quick Start: element access from Standard Library Extensions`() async throws {
+-        let array = [1, 2, 3]
+-        let value = array.element(at: 5)
+-        let validValue = array.element(at: 1)
++        @Test
++        func `Quick Start: Relative formatting`() async throws {
++            let now = Date()
++
++            let pastDate = now - 2.hours
++            let relativeString = pastDate.relativeFormatted
++            @Dependency(\.calendar) var calendar
++            let todayNoon = now.startOfDay + 12.hours
++            let todayTen = now.startOfDay + 10.hours
++            #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
++            let previousDayNoon = todayNoon - 1.day
++            #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
++            #expect(relativeString == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
++
++            let futureDate = now + 3.days
++            let futureString = futureDate.relativeFormatted
++            #expect(futureString.contains("day"))
++        }
+ 
+-        #expect(value == nil)
+-        #expect(validValue == 2)
+-    }
++        @Test
++        func `Quick Start: element access from Standard Library Extensions`() async throws {
++            let array = [1, 2, 3]
++            let value = array.element(at: 5)
++            let validValue = array.element(at: 1)
+ 
+-    @Test
+-    func `Usage: Date creation basic`() async throws {
++            #expect(value == nil)
++            #expect(validValue == 2)
++        }
+ 
+-        let date1 = Date(year: 2025, month: 7, day: 26)
+-        let date2 = Date(year: 2025, month: 12, day: 25, hour: 15, minute: 30, second: 45)
++        @Test
++        func `Usage: Date creation basic`() async throws {
+ 
+-        #expect(date1 != nil)
+-        #expect(date2 != nil)
+-        #expect(date2?.hour == 15)
+-        #expect(date2?.minute == 30)
+-        #expect(date2?.second == 45)
+-    }
++            let date1 = Date(year: 2025, month: 7, day: 26)
++            let date2 = Date(year: 2025, month: 12, day: 25, hour: 15, minute: 30, second: 45)
+ 
+-    @Test
+-    func `Usage: Date validation`() async throws {
++            #expect(date1 != nil)
++            #expect(date2 != nil)
++            #expect(date2?.hour == 15)
++            #expect(date2?.minute == 30)
++            #expect(date2?.second == 45)
++        }
+ 
+-        let invalid1 = Date(year: 2025, month: 13, day: 1)
+-        let invalid2 = Date(year: 2025, month: 2, day: 30)
+-        let invalid3 = Date(year: 2025, month: 1, day: 1, hour: 25)
++        @Test
++        func `Usage: Date validation`() async throws {
+ 
+-        #expect(invalid1 == nil)
+-        #expect(invalid2 == nil)
+-        #expect(invalid3 == nil)
+-    }
++            let invalid1 = Date(year: 2025, month: 13, day: 1)
++            let invalid2 = Date(year: 2025, month: 2, day: 30)
++            let invalid3 = Date(year: 2025, month: 1, day: 1, hour: 25)
+ 
+-    @Test
+-    func `Usage: Basic date arithmetic`() async throws {
+-        let date = Date(year: 2025, month: 2, day: 15)!
++            #expect(invalid1 == nil)
++            #expect(invalid2 == nil)
++            #expect(invalid3 == nil)
++        }
+ 
+-        let tomorrow = date + 1.day
+-        let lastWeek = date - 1.weekOfYear
+-        let nextMonth = date + 1.month
++        @Test
++        func `Usage: Basic date arithmetic`() async throws {
++            let date = Date(year: 2025, month: 2, day: 15)!
+ 
+-        #expect(tomorrow.day == 16)
+-        #expect(lastWeek.day == 8)
+-        #expect(nextMonth.month == 3)
+-    }
++            let tomorrow = date + 1.day
++            let lastWeek = date - 1.weekOfYear
++            let nextMonth = date + 1.month
+ 
+-    @Test
+-    func `Usage: Safe date arithmetic`() async throws {
+-        let date = Date(year: 2025, month: 1, day: 15)!
++            #expect(tomorrow.day == 16)
++            #expect(lastWeek.day == 8)
++            #expect(nextMonth.month == 3)
++        }
+ 
+-        let safeResult = date.adding(1.day)
+-        let safeSubtract = date.subtracting(1.weekOfYear)
++        @Test
++        func `Usage: Safe date arithmetic`() async throws {
++            let date = Date(year: 2025, month: 1, day: 15)!
+ 
+-        #expect(safeResult != nil)
+-        #expect(safeSubtract != nil)
+-    }
++            let safeResult = date.adding(1.day)
++            let safeSubtract = date.subtracting(1.weekOfYear)
+ 
+-    @Test
+-    func `Usage: Complex date calculations`() async throws {
+-        let date = Date(year: 2025, month: 1, day: 1, hour: 0)!
++            #expect(safeResult != nil)
++            #expect(safeSubtract != nil)
++        }
+ 
+-        let complex = date + 1.year + 6.months + 2.days + 3.hours + 30.minutes
++        @Test
++        func `Usage: Complex date calculations`() async throws {
++            let date = Date(year: 2025, month: 1, day: 1, hour: 0)!
+ 
+-        #expect(complex.year == 2026)
+-        #expect(complex.month == 7)
+-        #expect(complex.day == 3)
+-        #expect(complex.hour == 3)
+-        #expect(complex.minute == 30)
+-    }
++            let complex = date + 1.year + 6.months + 2.days + 3.hours + 30.minutes
+ 
+-    @Test
+-    func `Usage: Time components`() async throws {
+-
+-        let _: DateComponents = 1.second
+-        let _: DateComponents = 30.seconds
+-        let _: DateComponents = 1.minute
+-        let _: DateComponents = 45.minutes
+-        let _: DateComponents = 1.hour
+-        let _: DateComponents = 12.hours
+-        let _: DateComponents = 1.day
+-        let _: DateComponents = 7.days
+-        let _: DateComponents = 1.month
+-        let _: DateComponents = 6.months
+-        let _: DateComponents = 1.year
+-        let _: DateComponents = 5.years
+-
+-        #expect(1.day.day == 1)
+-        #expect(7.days.day == 7)
+-    }
++            #expect(complex.year == 2026)
++            #expect(complex.month == 7)
++            #expect(complex.day == 3)
++            #expect(complex.hour == 3)
++            #expect(complex.minute == 30)
++        }
+ 
+-    @Test
+-    func `Usage: Calendar components`() async throws {
++        @Test
++        func `Usage: Time components`() async throws {
++
++            let _: DateComponents = 1.second
++            let _: DateComponents = 30.seconds
++            let _: DateComponents = 1.minute
++            let _: DateComponents = 45.minutes
++            let _: DateComponents = 1.hour
++            let _: DateComponents = 12.hours
++            let _: DateComponents = 1.day
++            let _: DateComponents = 7.days
++            let _: DateComponents = 1.month
++            let _: DateComponents = 6.months
++            let _: DateComponents = 1.year
++            let _: DateComponents = 5.years
++
++            #expect(1.day.day == 1)
++            #expect(7.days.day == 7)
++        }
+ 
+-        let _: DateComponents = 1.weekday
+-        let _: DateComponents = 1.quarter
+-        let _: DateComponents = 1.weekOfMonth
+-        let _: DateComponents = 1.weekOfYear
+-        let _: DateComponents = 1.weeksOfYear
++        @Test
++        func `Usage: Calendar components`() async throws {
+ 
+-        #expect(1.weekday.weekday == 1)
+-        #expect(1.quarter.quarter == 1)
+-    }
++            let _: DateComponents = 1.weekday
++            let _: DateComponents = 1.quarter
++            let _: DateComponents = 1.weekOfMonth
++            let _: DateComponents = 1.weekOfYear
++            let _: DateComponents = 1.weeksOfYear
+ 
+-    @Test
+-    func `Usage: Day boundaries`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
+-
+-        let startOfDay = date.startOfDay
+-        let endOfDay = try #require(date.endOfDay)
+-        #expect(startOfDay.hour == 0)
+-        #expect(startOfDay.minute == 0)
+-        #expect(startOfDay.second == 0)
+-        #expect(endOfDay.day == 27)
+-        #expect(endOfDay.hour == 0)
+-        #expect(endOfDay.minute == 0)
+-        #expect(startOfDay <= date)
+-        #expect(date < endOfDay)
+-        #expect(!endOfDay.isSameDay(as: date))
+-    }
++            #expect(1.weekday.weekday == 1)
++            #expect(1.quarter.quarter == 1)
++        }
+ 
+-    @Test
+-    func `Usage: Week boundaries`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26)!
++        @Test
++        func `Usage: Day boundaries`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
++
++            let startOfDay = date.startOfDay
++            let endOfDay = try #require(date.endOfDay)
++            #expect(startOfDay.hour == 0)
++            #expect(startOfDay.minute == 0)
++            #expect(startOfDay.second == 0)
++            #expect(endOfDay.day == 27)
++            #expect(endOfDay.hour == 0)
++            #expect(endOfDay.minute == 0)
++            #expect(startOfDay <= date)
++            #expect(date < endOfDay)
++            #expect(!endOfDay.isSameDay(as: date))
++        }
+ 
+-        let startOfWeek = try #require(date.startOfWeek)
+-        let endOfWeek = try #require(date.endOfWeek)
+-        #expect(startOfWeek <= date)
+-        #expect(endOfWeek >= date)
+-    }
++        @Test
++        func `Usage: Week boundaries`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26)!
+ 
+-    @Test
+-    func `Usage: Month boundaries`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26)!
+-
+-        let startOfMonth = try #require(date.startOfMonth)
+-        let endOfMonth = try #require(date.endOfMonth)
+-        let firstDay = try #require(date.firstDayOfMonth)
+-        let lastDay = try #require(date.lastDayOfMonth)
+-
+-        #expect(startOfMonth.day == 1)
+-        #expect(endOfMonth.month == 8)
+-        #expect(endOfMonth.day == 1)
+-        #expect(startOfMonth <= date)
+-        #expect(date < endOfMonth)
+-        #expect(firstDay.day == 1)
+-        #expect(lastDay.day == 31)
+-    }
++            let startOfWeek = try #require(date.startOfWeek)
++            let endOfWeek = try #require(date.endOfWeek)
++            #expect(startOfWeek <= date)
++            #expect(endOfWeek >= date)
++        }
+ 
+-    @Test
+-    func `Usage: Year boundaries`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26)!
+-
+-        let startOfYear = try #require(date.startOfYear)
+-        let endOfYear = try #require(date.endOfYear)
+-        #expect(startOfYear.month == 1)
+-        #expect(startOfYear.day == 1)
+-        #expect(endOfYear.year == 2026)
+-        #expect(endOfYear.month == 1)
+-        #expect(endOfYear.day == 1)
+-        #expect(startOfYear <= date)
+-        #expect(date < endOfYear)
+-    }
++        @Test
++        func `Usage: Month boundaries`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26)!
++
++            let startOfMonth = try #require(date.startOfMonth)
++            let endOfMonth = try #require(date.endOfMonth)
++            let firstDay = try #require(date.firstDayOfMonth)
++            let lastDay = try #require(date.lastDayOfMonth)
++
++            #expect(startOfMonth.day == 1)
++            #expect(endOfMonth.month == 8)
++            #expect(endOfMonth.day == 1)
++            #expect(startOfMonth <= date)
++            #expect(date < endOfMonth)
++            #expect(firstDay.day == 1)
++            #expect(lastDay.day == 31)
++        }
++
++        @Test
++        func `Usage: Year boundaries`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26)!
++
++            let startOfYear = try #require(date.startOfYear)
++            let endOfYear = try #require(date.endOfYear)
++            #expect(startOfYear.month == 1)
++            #expect(startOfYear.day == 1)
++            #expect(endOfYear.year == 2026)
++            #expect(endOfYear.month == 1)
++            #expect(endOfYear.day == 1)
++            #expect(startOfYear <= date)
++            #expect(date < endOfYear)
++        }
+ 
+-    @Test
+-    func `Usage: Date state relative to today`() async throws {
+-        let date = Date()
++        @Test
++        func `Usage: Date state relative to today`() async throws {
++            let date = Date()
+ 
+-        let isToday = date.isToday
+-        let isTomorrow = (date + 1.day).isTomorrow
+-        let isYesterday = (date - 1.day).isYesterday
++            let isToday = date.isToday
++            let isTomorrow = (date + 1.day).isTomorrow
++            let isYesterday = (date - 1.day).isYesterday
+ 
+-        #expect(isToday == true)
+-        #expect(isTomorrow == true)
+-        #expect(isYesterday == true)
+-    }
++            #expect(isToday == true)
++            #expect(isTomorrow == true)
++            #expect(isYesterday == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date state relative to current periods`() async throws {
+-        let date = Date()
++        @Test
++        func `Usage: Date state relative to current periods`() async throws {
++            let date = Date()
+ 
+-        let isThisWeek = date.isThisWeek
+-        let isThisMonth = date.isThisMonth
+-        let isThisYear = date.isThisYear
++            let isThisWeek = date.isThisWeek
++            let isThisMonth = date.isThisMonth
++            let isThisYear = date.isThisYear
+ 
+-        #expect(isThisWeek == true)
+-        #expect(isThisMonth == true)
+-        #expect(isThisYear == true)
+-    }
++            #expect(isThisWeek == true)
++            #expect(isThisMonth == true)
++            #expect(isThisYear == true)
++        }
+ 
+-    @Test
+-    func `Usage: Weekend checks`() async throws {
+-        let saturday = Date(year: 2025, month: 8, day: 2)!
++        @Test
++        func `Usage: Weekend checks`() async throws {
++            let saturday = Date(year: 2025, month: 8, day: 2)!
+ 
+-        let isWeekend = saturday.isWeekend
++            let isWeekend = saturday.isWeekend
+ 
+-        #expect(isWeekend == true)
+-    }
++            #expect(isWeekend == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date comparisons`() async throws {
+-        let date1 = Date(year: 2025, month: 1, day: 1)!
+-        let date2 = date1 + 1.day
++        @Test
++        func `Usage: Date comparisons`() async throws {
++            let date1 = Date(year: 2025, month: 1, day: 1)!
++            let date2 = date1 + 1.day
+ 
+-        let isAfter = date2.isAfter(date1)
+-        let isBefore = date1.isBefore(date2)
+-        let isSameDay = date1.isSameDay(as: date1)
++            let isAfter = date2.isAfter(date1)
++            let isBefore = date1.isBefore(date2)
++            let isSameDay = date1.isSameDay(as: date1)
+ 
+-        #expect(isAfter == true)
+-        #expect(isBefore == true)
+-        #expect(isSameDay == true)
+-    }
++            #expect(isAfter == true)
++            #expect(isBefore == true)
++            #expect(isSameDay == true)
++        }
+ 
+-    @Test
+-    func `Usage: Weekend handling`() async throws {
+-        let saturday = Date(year: 2025, month: 8, day: 2)!
++        @Test
++        func `Usage: Weekend handling`() async throws {
++            let saturday = Date(year: 2025, month: 8, day: 2)!
+ 
+-        if saturday.isWeekend {
+-            let nextWorkday = try #require(saturday.ifWeekendThenNextWorkday())
+-            let prevWorkday = try #require(saturday.ifWeekendThenPreviousWorkday())
++            if saturday.isWeekend {
++                let nextWorkday = try #require(saturday.ifWeekendThenNextWorkday())
++                let prevWorkday = try #require(saturday.ifWeekendThenPreviousWorkday())
+ 
+-            #expect(nextWorkday > saturday)
+-            #expect(prevWorkday < saturday)
++                #expect(nextWorkday > saturday)
++                #expect(prevWorkday < saturday)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Usage: Business day calculations`() async throws {
+-        let monday = Date(year: 2025, month: 7, day: 28)!
++        @Test
++        func `Usage: Business day calculations`() async throws {
++            let monday = Date(year: 2025, month: 7, day: 28)!
+ 
+-        let fiveBusinessDaysLater = try #require(monday.addingBusinessDays(5))
+-        let fiveBusinessDaysEarlier = try #require(monday.addingBusinessDays(-5))
++            let fiveBusinessDaysLater = try #require(monday.addingBusinessDays(5))
++            let fiveBusinessDaysEarlier = try #require(monday.addingBusinessDays(-5))
+ 
+-        #expect(fiveBusinessDaysLater > monday)
+-        #expect(fiveBusinessDaysEarlier < monday)
+-    }
++            #expect(fiveBusinessDaysLater > monday)
++            #expect(fiveBusinessDaysEarlier < monday)
++        }
+ 
+-    @Test
+-    func `Usage: Weekday navigation`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26)!
++        @Test
++        func `Usage: Weekday navigation`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26)!
+ 
+-        let nextMonday = try #require(date.next(2))
+-        let previousFriday = try #require(date.previous(6))
++            let nextMonday = try #require(date.next(2))
++            let previousFriday = try #require(date.previous(6))
+ 
+-        #expect(nextMonday > date)
+-        #expect(previousFriday < date)
+-    }
++            #expect(nextMonday > date)
++            #expect(previousFriday < date)
++        }
+ 
+-    @Test
+-    func `Usage: Time calculations`() async throws {
+-        let startDate = Date(year: 2025, month: 1, day: 1)!
+-        let endDate = startDate + 10.days
++        @Test
++        func `Usage: Time calculations`() async throws {
++            let startDate = Date(year: 2025, month: 1, day: 1)!
++            let endDate = startDate + 10.days
+ 
+-        let daysBetween = try #require(startDate.daysBetween(endDate))
++            let daysBetween = try #require(startDate.daysBetween(endDate))
+ 
+-        #expect(daysBetween == 10)
+-    }
++            #expect(daysBetween == 10)
++        }
+ 
+-    @Test
+-    func `Usage: Age calculations`() async throws {
+-        let birthDate = Date(year: 2000, month: 1, day: 1)!
+-        let someDate = Date(year: 2025, month: 1, day: 1)!
++        @Test
++        func `Usage: Age calculations`() async throws {
++            let birthDate = Date(year: 2000, month: 1, day: 1)!
++            let someDate = Date(year: 2025, month: 1, day: 1)!
+ 
+-        let ageAt = try #require(birthDate.age(at: someDate))
++            let ageAt = try #require(birthDate.age(at: someDate))
+ 
+-        #expect(ageAt == 25)
+-    }
++            #expect(ageAt == 25)
++        }
+ 
+-    @Test
+-    func `Usage: Time Interval constants`() async throws {
++        @Test
++        func `Usage: Time Interval constants`() async throws {
+ 
+-        #expect(TimeInterval.minute == 60)
+-        #expect(TimeInterval.hour == 3600)
+-        #expect(TimeInterval.day == 86400)
+-        #expect(TimeInterval.week == 604800)
+-    }
++            #expect(TimeInterval.minute == 60)
++            #expect(TimeInterval.hour == 3600)
++            #expect(TimeInterval.day == 86400)
++            #expect(TimeInterval.week == 604800)
++        }
+ 
+-    @Test
+-    func `Usage: Time Interval conversions`() async throws {
++        @Test
++        func `Usage: Time Interval conversions`() async throws {
+ 
+-        let twoHours: TimeInterval = 2.hours
+-        let thirtyMinutes: TimeInterval = 30.minutes
++            let twoHours: TimeInterval = 2.hours
++            let thirtyMinutes: TimeInterval = 30.minutes
+ 
+-        #expect(twoHours == 7200)
+-        #expect(thirtyMinutes == 1800)
+-    }
++            #expect(twoHours == 7200)
++            #expect(thirtyMinutes == 1800)
++        }
+ 
+-    @Test
+-    func `Usage: Time Interval as conversions`() async throws {
++        @Test
++        func `Usage: Time Interval as conversions`() async throws {
+ 
+-        let interval: TimeInterval = 7200
+-        let hours = interval.asHours
+-        let minutes = interval.asMinutes
++            let interval: TimeInterval = 7200
++            let hours = interval.asHours
++            let minutes = interval.asMinutes
+ 
+-        #expect(hours == 2.0)
+-        #expect(minutes == 120.0)
+-    }
++            #expect(hours == 2.0)
++            #expect(minutes == 120.0)
++        }
+ 
+-    @Test
+-    func `Usage: Formatted duration`() async throws {
++        @Test
++        func `Usage: Formatted duration`() async throws {
+ 
+-        let duration1 = (30.0).formattedDuration
+-        let duration2 = (90.0).formattedDuration
+-        let duration3 = (3660.0).formattedDuration
+-        let duration4 = (86500.0).formattedDuration
++            let duration1 = (30.0).formattedDuration
++            let duration2 = (90.0).formattedDuration
++            let duration3 = (3660.0).formattedDuration
++            let duration4 = (86500.0).formattedDuration
+ 
+-        #expect(duration1.contains("s"))
+-        #expect(duration2.contains("m"))
+-        #expect(duration3.contains("h"))
+-        #expect(duration4.contains("d"))
+-    }
++            #expect(duration1.contains("s"))
++            #expect(duration2.contains("m"))
++            #expect(duration3.contains("h"))
++            #expect(duration4.contains("d"))
++        }
+ 
+-    @Test
+-    func `Usage: Relative date formatting past`() async throws {
+-        let now = Date()
+-
+-        let pastDate = now - 2.hours
+-        let timeAgo = pastDate.timeAgoSince(now)
+-        let relativeFormatted = pastDate.relativeFormatted
+-
+-        #expect(timeAgo.contains("hour"))
+-        @Dependency(\.calendar) var calendar
+-        let todayNoon = now.startOfDay + 12.hours
+-        let todayTen = now.startOfDay + 10.hours
+-        #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
+-        let previousDayNoon = todayNoon - 1.day
+-        #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
+-        #expect(relativeFormatted == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
+-    }
++        @Test
++        func `Usage: Relative date formatting past`() async throws {
++            let now = Date()
++
++            let pastDate = now - 2.hours
++            let timeAgo = pastDate.timeAgoSince(now)
++            let relativeFormatted = pastDate.relativeFormatted
++
++            #expect(timeAgo.contains("hour"))
++            @Dependency(\.calendar) var calendar
++            let todayNoon = now.startOfDay + 12.hours
++            let todayTen = now.startOfDay + 10.hours
++            #expect(todayTen.relativeFormatted(in: calendar, now: todayNoon) == "2 hours ago")
++            let previousDayNoon = todayNoon - 1.day
++            #expect(previousDayNoon.relativeFormatted(in: calendar, now: todayNoon) == "yesterday")
++            #expect(relativeFormatted == (calendar.isDateInYesterday(pastDate) ? "yesterday" : pastDate.timeAgoSince(now, in: calendar)))
++        }
+ 
+-    @Test
+-    func `Usage: Relative date formatting future`() async throws {
+-        let now = Date()
++        @Test
++        func `Usage: Relative date formatting future`() async throws {
++            let now = Date()
+ 
+-        let futureDate = now + 3.days
+-        let timeUntil = futureDate.timeUntil(now)
+-        let relativeFormatted = futureDate.relativeFormatted
++            let futureDate = now + 3.days
++            let timeUntil = futureDate.timeUntil(now)
++            let relativeFormatted = futureDate.relativeFormatted
+ 
+-        #expect(timeUntil.contains("day"))
+-        #expect(relativeFormatted.contains("day"))
+-    }
++            #expect(timeUntil.contains("day"))
++            #expect(relativeFormatted.contains("day"))
++        }
+ 
+-    @Test
+-    func `Usage: Relative date formatting special cases`() async throws {
+-        let now = Date()
++        @Test
++        func `Usage: Relative date formatting special cases`() async throws {
++            let now = Date()
+ 
+-        let yesterday = now - 1.day
+-        let yesterdayFormatted = yesterday.relativeFormatted
++            let yesterday = now - 1.day
++            let yesterdayFormatted = yesterday.relativeFormatted
+ 
+-        let tomorrow = now + 1.day
+-        let tomorrowFormatted = tomorrow.relativeFormatted
++            let tomorrow = now + 1.day
++            let tomorrowFormatted = tomorrow.relativeFormatted
+ 
+-        #expect(yesterdayFormatted == "yesterday" || yesterdayFormatted.contains("hour"))
+-        #expect(tomorrowFormatted == "tomorrow" || tomorrowFormatted.contains("hour"))
+-    }
++            #expect(yesterdayFormatted == "yesterday" || yesterdayFormatted.contains("hour"))
++            #expect(tomorrowFormatted == "tomorrow" || tomorrowFormatted.contains("hour"))
++        }
+ 
+-    @Test
+-    func `Usage: Basic date components`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
++        @Test
++        func `Usage: Basic date components`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26, hour: 15, minute: 30)!
+ 
+-        #expect(date.year == 2025)
+-        #expect(date.month == 7)
+-        #expect(date.day == 26)
+-        #expect(date.hour == 15)
+-        #expect(date.minute == 30)
+-        #expect(date.second == 0)
+-    }
++            #expect(date.year == 2025)
++            #expect(date.month == 7)
++            #expect(date.day == 26)
++            #expect(date.hour == 15)
++            #expect(date.minute == 30)
++            #expect(date.second == 0)
++        }
+ 
+-    @Test
+-    func `Usage: Advanced date components`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26)!
+-
+-        let weekday = date.weekday
+-        let weekOfYear = date.weekOfYear
+-        let weekOfMonth = date.weekOfMonth
+-        let quarter = date.quarter
+-        let era = date.era
+-
+-        #expect(weekday >= 1 && weekday <= 7)
+-        #expect(weekOfYear > 0)
+-        #expect(weekOfMonth > 0)
+-        #expect(quarter >= 1 && quarter <= 4)
+-        #expect(era >= 0)
+-    }
++        @Test
++        func `Usage: Advanced date components`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26)!
++
++            let weekday = date.weekday
++            let weekOfYear = date.weekOfYear
++            let weekOfMonth = date.weekOfMonth
++            let quarter = date.quarter
++            let era = date.era
++
++            #expect(weekday >= 1 && weekday <= 7)
++            #expect(weekOfYear > 0)
++            #expect(weekOfMonth > 0)
++            #expect(quarter >= 1 && quarter <= 4)
++            #expect(era >= 0)
++        }
+ 
+-    @Test
+-    func `Usage: Calendar and timezone info`() async throws {
+-        let date = Date(year: 2025, month: 7, day: 26)!
++        @Test
++        func `Usage: Calendar and timezone info`() async throws {
++            let date = Date(year: 2025, month: 7, day: 26)!
+ 
+-        let calendarIdentifier = date.calendarIdentifier
+-        let timeZone = date.timeZone
++            let calendarIdentifier = date.calendarIdentifier
++            let timeZone = date.timeZone
+ 
+-        #expect(calendarIdentifier == Calendar.current.identifier)
+-        #expect(timeZone == Calendar.current.timeZone)
+-    }
++            #expect(calendarIdentifier == Calendar.current.identifier)
++            #expect(timeZone == Calendar.current.timeZone)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components combining`() async throws {
++        @Test
++        func `Usage: Date Components combining`() async throws {
+ 
+-        let components = 1.day + 2.hours + 30.minutes
+-        let result = Date(year: 2025, month: 1, day: 1)! + components
++            let components = 1.day + 2.hours + 30.minutes
++            let result = Date(year: 2025, month: 1, day: 1)! + components
+ 
+-        #expect(result.day == 2)
+-        #expect(result.hour == 2)
+-        #expect(result.minute == 30)
+-    }
++            #expect(result.day == 2)
++            #expect(result.hour == 2)
++            #expect(result.minute == 30)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components multiplication`() async throws {
++        @Test
++        func `Usage: Date Components multiplication`() async throws {
+ 
+-        let threeDays = 1.day * 3
+-        let sixMonths = 1.month * 6
++            let threeDays = 1.day * 3
++            let sixMonths = 1.month * 6
+ 
+-        #expect(threeDays.day == 3)
+-        #expect(sixMonths.month == 6)
+-    }
++            #expect(threeDays.day == 3)
++            #expect(sixMonths.month == 6)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components subtraction`() async throws {
++        @Test
++        func `Usage: Date Components subtraction`() async throws {
+ 
+-        let difference = 2.weeksOfYear - 3.days
++            let difference = 2.weeksOfYear - 3.days
+ 
+-        #expect(difference.weekOfYear == 1)
+-        #expect(difference.day == 4)
+-    }
++            #expect(difference.weekOfYear == 1)
++            #expect(difference.day == 4)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components negation`() async throws {
+-        let components = 1.day + 2.hours
++        @Test
++        func `Usage: Date Components negation`() async throws {
++            let components = 1.day + 2.hours
+ 
+-        let negated = components.negated()
++            let negated = components.negated()
+ 
+-        #expect(negated.day == -1)
+-        #expect(negated.hour == -2)
+-    }
++            #expect(negated.day == -1)
++            #expect(negated.hour == -2)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components basic validation`() async throws {
+-        let components = DateComponents(year: 2025, month: 7, day: 26)
++        @Test
++        func `Usage: Date Components basic validation`() async throws {
++            let components = DateComponents(year: 2025, month: 7, day: 26)
+ 
+-        let isValid = components.isValid
++            let isValid = components.isValid
+ 
+-        #expect(isValid == true)
+-    }
++            #expect(isValid == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components calendar validation`() async throws {
+-        let components = DateComponents(year: 2025, month: 7, day: 26)
++        @Test
++        func `Usage: Date Components calendar validation`() async throws {
++            let components = DateComponents(year: 2025, month: 7, day: 26)
+ 
+-        let calendar = Calendar.current
+-        let isValid = components.isValid(for: calendar)
++            let calendar = Calendar.current
++            let isValid = components.isValid(for: calendar)
+ 
+-        #expect(isValid == true)
+-    }
++            #expect(isValid == true)
++        }
+ 
+-    @Test
+-    func `Usage: Date Components invalid examples`() async throws {
++        @Test
++        func `Usage: Date Components invalid examples`() async throws {
+ 
+-        let invalid = DateComponents(month: 13, day: 1)
+-        let isValid = invalid.isValid
++            let invalid = DateComponents(month: 13, day: 1)
++            let isValid = invalid.isValid
+ 
+-        #expect(isValid == false)
+-    }
++            #expect(isValid == false)
++        }
+ 
+-    @Test
+-    func `Usage: date format style`() async throws {
++        @Test
++        func `Usage: date format style`() async throws {
+ 
+-        let dateString = Date(year: 2025, month: 7, day: 26)!.formatted(.dateFormat("yyyy-MM-dd"))
++            let dateString = Date(year: 2025, month: 7, day: 26)!.formatted(.dateFormat("yyyy-MM-dd"))
+ 
+-        #expect(dateString == "2025-07-26")
+-    }
++            #expect(dateString == "2025-07-26")
++        }
+ 
+-    @Test
+-    func `Usage: Format Style extensions`() async throws {
++        @Test
++        func `Usage: Format Style extensions`() async throws {
+ 
+-        let date = Date(year: 2025, month: 7, day: 26)!
+-        let formatted = date.formatted(.dateFormat("MMM d, yyyy"))
++            let date = Date(year: 2025, month: 7, day: 26)!
++            let formatted = date.formatted(.dateFormat("MMM d, yyyy"))
+ 
+-        #expect(formatted.contains("2025"))
++            #expect(formatted.contains("2025"))
++        }
+     }
+ }
+diff --git a/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift b/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift
+index 00ac3f5..6cd112a 100644
+--- a/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift	
++++ b/Tests/Dependencies Foundation Integration Tests/Wrapper Parity Tests.swift	
+@@ -4,20 +4,22 @@ import Dependencies_Test_Support
+ import Foundation
+ import Testing
+ 
+-@Suite(.dependency(\.calendar, Calendar(identifier: .gregorian)))
+-struct `Wrapper Parity Tests` {
+-    @Test func `the eight optional wrappers forward the explicit-calendar helper results`() throws {
+-        @Dependency(\.calendar) var calendar
+-        let saturday = try #require(Date(year: 2024, month: 1, day: 6))
+-        let birth = try #require(Date(year: 1990, month: 5, day: 15))
++extension `Wrapper Parity Tests`.`Wrapper Parity Tests` {
++    @Suite(.dependency(\.calendar, Calendar(identifier: .gregorian)))
++    struct `Wrapper Parity Tests` {
++        @Test func `the eight optional wrappers forward the explicit-calendar helper results`() throws {
++            @Dependency(\.calendar) var calendar
++            let saturday = try #require(Date(year: 2024, month: 1, day: 6))
++            let birth = try #require(Date(year: 1990, month: 5, day: 15))
+ 
+-        #expect(saturday.nextWeekday == saturday.nextWeekday(in: calendar))
+-        #expect(saturday.ifWeekendThenNextWorkday() == saturday.ifWeekendThenNextWorkday(in: calendar))
+-        #expect(saturday.ifWeekendThenPreviousWorkday() == saturday.ifWeekendThenPreviousWorkday(in: calendar))
+-        #expect(saturday.daysBetween(birth) == saturday.daysBetween(birth, in: calendar))
+-        #expect(saturday.addingBusinessDays(3) == saturday.addingBusinessDays(3, in: calendar))
+-        #expect(saturday.firstDayOfMonth == saturday.firstDayOfMonth(in: calendar))
+-        #expect(saturday.lastDayOfMonth == saturday.lastDayOfMonth(in: calendar))
+-        #expect(birth.age(at: saturday) == birth.age(at: saturday, in: calendar))
++            #expect(saturday.nextWeekday == saturday.nextWeekday(in: calendar))
++            #expect(saturday.ifWeekendThenNextWorkday() == saturday.ifWeekendThenNextWorkday(in: calendar))
++            #expect(saturday.ifWeekendThenPreviousWorkday() == saturday.ifWeekendThenPreviousWorkday(in: calendar))
++            #expect(saturday.daysBetween(birth) == saturday.daysBetween(birth, in: calendar))
++            #expect(saturday.addingBusinessDays(3) == saturday.addingBusinessDays(3, in: calendar))
++            #expect(saturday.firstDayOfMonth == saturday.firstDayOfMonth(in: calendar))
++            #expect(saturday.lastDayOfMonth == saturday.lastDayOfMonth(in: calendar))
++            #expect(birth.age(at: saturday) == birth.age(at: saturday, in: calendar))
++        }
+     }
+ }
+diff --git a/Tests/Dependencies Tests/Dependency.Key Tests.swift b/Tests/Dependencies Tests/Dependency.Key Tests.swift
+index fb71c01..48501ce 100644
+--- a/Tests/Dependencies Tests/Dependency.Key Tests.swift	
++++ b/Tests/Dependencies Tests/Dependency.Key Tests.swift	
+@@ -4,6 +4,9 @@ import Testing
+ 
+ @Suite
+ struct `Dependency.Key Tests` {
++}
++
++extension `Dependency.Key Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+diff --git a/Tests/Dependencies Tests/Dependency.Key.Strict Tests.swift b/Tests/Dependencies Tests/Dependency.Key.Strict Tests.swift
+index 2d70681..581e3e0 100644
+--- a/Tests/Dependencies Tests/Dependency.Key.Strict Tests.swift	
++++ b/Tests/Dependencies Tests/Dependency.Key.Strict Tests.swift	
+@@ -4,6 +4,9 @@ import Testing
+ 
+ @Suite
+ struct `Dependency.Key.Strict Tests` {
++}
++
++extension `Dependency.Key.Strict Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+diff --git a/Tests/Dependencies Tests/Dependency.PropertyWrapper Tests.swift b/Tests/Dependencies Tests/Dependency.PropertyWrapper Tests.swift
+index 8d65df8..7f1c8ab 100644
+--- a/Tests/Dependencies Tests/Dependency.PropertyWrapper Tests.swift	
++++ b/Tests/Dependencies Tests/Dependency.PropertyWrapper Tests.swift	
+@@ -4,6 +4,9 @@ import Testing
+ 
+ @Suite
+ struct `Dependency Tests` {
++}
++
++extension `Dependency Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+diff --git a/Tests/Dependencies Tests/Dependency.Test.Trait Tests.swift b/Tests/Dependencies Tests/Dependency.Test.Trait Tests.swift
+index 57c05e4..df42d8e 100644
+--- a/Tests/Dependencies Tests/Dependency.Test.Trait Tests.swift	
++++ b/Tests/Dependencies Tests/Dependency.Test.Trait Tests.swift	
+@@ -3,91 +3,103 @@
+     import Dependencies
+     import Dependencies_Test_Support
+ 
+-    @Suite(.dependencies)
+-    struct `Dependency Test Traits` {
++enum `Dependency.Test.Trait Tests` {}
+ 
+-        @Test
+-        func `dependencies trait sets test mode`() {
+-            Dependency<Never>.Test.assertMode(.test)
+-        }
++extension `Dependency.Test.Trait Tests` {
++        @Suite(.dependencies)
++        struct `Dependency Test Traits` {
+ 
+-        @Test
+-        func `dependencies trait provides isolation`() {
+-            @Dependency(\.counting) var counting
+-            let client = counting
+-            #expect(client.increment() == 1)
+-            #expect(client.increment() == 2)
++            @Test
++            func `dependencies trait sets test mode`() {
++                Dependency<Never>.Test.assertMode(.test)
++            }
++
++            @Test
++            func `dependencies trait provides isolation`() {
++                @Dependency(\.counting) var counting
++                let client = counting
++                #expect(client.increment() == 1)
++                #expect(client.increment() == 2)
++            }
+         }
+-    }
++}
+ 
+-    @Suite(.dependencies)
+-    struct `Single Dependency Override` {
++extension `Dependency.Test.Trait Tests` {
++        @Suite(.dependencies)
++        struct `Single Dependency Override` {
+ 
+-        @Test("dependency trait overrides via KeyPath", .dependency(\.simple, "trait-override"))
+-        func `keyPathOverride`() {
+-            @Dependency(\.simple) var simple
+-            #expect(simple == "trait-override")
+-        }
++            @Test("dependency trait overrides via KeyPath", .dependency(\.simple, "trait-override"))
++            func `keyPathOverride`() {
++                @Dependency(\.simple) var simple
++                #expect(simple == "trait-override")
++            }
+ 
+-        @Test("dependency trait overrides int value", .dependency(\.intValue, 999))
+-        func `intOverride`() {
+-            @Dependency(\.intValue) var intValue
+-            #expect(intValue == 999)
+-        }
++            @Test("dependency trait overrides int value", .dependency(\.intValue, 999))
++            func `intOverride`() {
++                @Dependency(\.intValue) var intValue
++                #expect(intValue == 999)
++            }
+ 
+-        @Test("dependency trait with nil optional", .dependency(\.optionalValue, nil))
+-        func `nilOptionalOverride`() {
+-            @Dependency(\.optionalValue) var optionalValue
+-            #expect(optionalValue == nil)
+-        }
++            @Test("dependency trait with nil optional", .dependency(\.optionalValue, nil))
++            func `nilOptionalOverride`() {
++                @Dependency(\.optionalValue) var optionalValue
++                #expect(optionalValue == nil)
++            }
+ 
+-        @Test("dependency trait with some optional", .dependency(\.optionalValue, "some-value"))
+-        func `someOptionalOverride`() {
+-            @Dependency(\.optionalValue) var optionalValue
+-            #expect(optionalValue == "some-value")
++            @Test("dependency trait with some optional", .dependency(\.optionalValue, "some-value"))
++            func `someOptionalOverride`() {
++                @Dependency(\.optionalValue) var optionalValue
++                #expect(optionalValue == "some-value")
++            }
+         }
+-    }
++}
+ 
+-    @Suite(.dependencies)
+-    struct `Multiple Dependencies Override` {
+-
+-        @Test(
+-            "dependencies closure overrides multiple values",
+-            .dependencies {
+-                $0.simple = "multi-1"
+-                $0.intValue = 42
+-                $0.stringValue = "multi-2"
+-            }
+-        )
+-        func `multipleOverrides`() {
+-            @Dependency(\.simple) var simple
+-            @Dependency(\.intValue) var intValue
+-            @Dependency(\.stringValue) var stringValue
+-
+-            #expect(simple == "multi-1")
+-            #expect(intValue == 42)
+-            #expect(stringValue == "multi-2")
+-        }
++extension `Dependency.Test.Trait Tests` {
++        @Suite(.dependencies)
++        struct `Multiple Dependencies Override` {
+ 
+-        @Test(
+-            "dependencies closure can override witness types",
+-            .dependencies {
+-                $0.testAPI = TestAPI(
+-                    fetch: { _ in "custom-fetch" },
+-                    update: { _, _ in }
+-                )
+-            }
+-        )
+-        func `witnessOverride`() async throws {
+-            @Dependency(\.testAPI) var api
+-            let result = try await api.fetch(id: 1)
+-            #expect(result == "custom-fetch")
++            @Test(
++                "dependencies closure overrides multiple values",
++                .dependencies {
++                    $0.simple = "multi-1"
++                    $0.intValue = 42
++                    $0.stringValue = "multi-2"
++                }
++            )
++            func `multipleOverrides`() {
++                @Dependency(\.simple) var simple
++                @Dependency(\.intValue) var intValue
++                @Dependency(\.stringValue) var stringValue
++
++                #expect(simple == "multi-1")
++                #expect(intValue == 42)
++                #expect(stringValue == "multi-2")
++            }
++
++            @Test(
++                "dependencies closure can override witness types",
++                .dependencies {
++                    $0.testAPI = TestAPI(
++                        fetch: { _ in "custom-fetch" },
++                        update: { _, _ in }
++                    )
++                }
++            )
++            func `witnessOverride`() async throws {
++                @Dependency(\.testAPI) var api
++                let result = try await api.fetch(id: 1)
++                #expect(result == "custom-fetch")
++            }
+         }
+-    }
++}
+ 
+-    @Suite(.dependencies)
+-    struct `Nested Suite Traits` {
++extension `Dependency.Test.Trait Tests` {
++        @Suite(.dependencies)
++        struct `Nested Suite Traits` {
++        }
++}
+ 
++    extension `Dependency.Test.Trait Tests`.`Nested Suite Traits` {
+         @Suite(.dependency(\.simple, "outer"))
+         struct `Inner Suite with Override` {
+ 
+@@ -113,41 +125,45 @@
+         }
+     }
+ 
+-    @Suite(.dependencies)
+-    struct `Trait Isolation` {
++extension `Dependency.Test.Trait Tests` {
++        @Suite(.dependencies)
++        struct `Trait Isolation` {
+ 
+-        @Test
+-        func `test 1 - counting starts fresh`() {
+-            @Dependency(\.counting) var counting
+-            let client = counting
+-            #expect(client.increment() == 1)
+-            #expect(client.increment() == 2)
+-        }
++            @Test
++            func `test 1 - counting starts fresh`() {
++                @Dependency(\.counting) var counting
++                let client = counting
++                #expect(client.increment() == 1)
++                #expect(client.increment() == 2)
++            }
+ 
+-        @Test
+-        func `test 2 - counting also starts fresh (isolated from test 1)`() {
+-            @Dependency(\.counting) var counting
+-            let client = counting
+-            #expect(client.increment() == 1)
+-            #expect(client.increment() == 2)
++            @Test
++            func `test 2 - counting also starts fresh (isolated from test 1)`() {
++                @Dependency(\.counting) var counting
++                let client = counting
++                #expect(client.increment() == 1)
++                #expect(client.increment() == 2)
++            }
+         }
+-    }
++}
+ 
+-    @Suite(.dependencies)
+-    struct `Mode Resolution with Traits` {
++extension `Dependency.Test.Trait Tests` {
++        @Suite(.dependencies)
++        struct `Mode Resolution with Traits` {
+ 
+-        @Test
+-        func `uses testValue by default in trait scope`() {
+-            @Dependency(\.modeAware) var modeAware
+-            #expect(modeAware == "test-default")
+-        }
++            @Test
++            func `uses testValue by default in trait scope`() {
++                @Dependency(\.modeAware) var modeAware
++                #expect(modeAware == "test-default")
++            }
+ 
+-        @Test("override takes precedence over testValue", .dependency(\.modeAware, "overridden"))
+-        func `overrideTakesPrecedence`() {
+-            @Dependency(\.modeAware) var modeAware
+-            #expect(modeAware == "overridden")
++            @Test("override takes precedence over testValue", .dependency(\.modeAware, "overridden"))
++            func `overrideTakesPrecedence`() {
++                @Dependency(\.modeAware) var modeAware
++                #expect(modeAware == "overridden")
++            }
+         }
+-    }
++}
+ 
+     extension __DependencyTestTrait {
+         @Suite struct `L1 Scope` {
+diff --git a/Tests/Dependencies Tests/Edge Cases Tests.swift b/Tests/Dependencies Tests/Edge Cases Tests.swift
+index bfc8e40..de0423a 100644
+--- a/Tests/Dependencies Tests/Edge Cases Tests.swift	
++++ b/Tests/Dependencies Tests/Edge Cases Tests.swift	
+@@ -2,8 +2,15 @@ import Testing
+ 
+ @testable import Dependencies
+ 
+-@Suite
+-struct `Edge Cases` {
++enum `Edge Cases Tests` {}
++
++extension `Edge Cases Tests` {
++    @Suite
++    struct `Edge Cases` {
++    }
++}
++
++extension `Edge Cases Tests`.`Edge Cases` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -11,7 +18,7 @@ struct `Edge Cases` {
+     }
+ }
+ 
+-extension `Edge Cases`.Test.Unit {
++extension `Edge Cases Tests`.`Edge Cases`.Test.Unit {
+     @Test
+     func `Dependency with type-based subscript access`() {
+         struct MyDependency: Dependency.Key {
+@@ -66,7 +73,7 @@ extension `Edge Cases`.Test.Unit {
+     }
+ }
+ 
+-extension `Edge Cases`.Test.`Edge Case` {
++extension `Edge Cases Tests`.`Edge Cases`.Test.`Edge Case` {
+     @Test
+     func `Deeply nested model hierarchy`() {
+         class NestedModel: @unchecked Sendable {
+@@ -167,7 +174,7 @@ extension `Edge Cases`.Test.`Edge Case` {
+     }
+ }
+ 
+-extension `Edge Cases`.Test.Integration {
++extension `Edge Cases Tests`.`Edge Cases`.Test.Integration {
+     @Test
+     func `Actor with dependencies`() async {
+         actor DependentActor {
+diff --git a/Tests/Dependencies Tests/Isolation Tests.swift b/Tests/Dependencies Tests/Isolation Tests.swift
+index 5b0f5c9..f50aee9 100644
+--- a/Tests/Dependencies Tests/Isolation Tests.swift	
++++ b/Tests/Dependencies Tests/Isolation Tests.swift	
+@@ -2,8 +2,15 @@ import Testing
+ 
+ @testable import Dependencies
+ 
+-@Suite("Isolation")
+-struct `Isolation` {
++enum `Isolation Tests` {}
++
++extension `Isolation Tests` {
++    @Suite("Isolation")
++    struct `Isolation` {
++    }
++}
++
++extension `Isolation Tests`.`Isolation` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -11,7 +18,7 @@ struct `Isolation` {
+     }
+ }
+ 
+-extension `Isolation`.Test.Unit {
++extension `Isolation Tests`.`Isolation`.Test.Unit {
+     @Test
+     func `Each test starts with clean context`() {
+         @Dependency(\.counting) var counting
+@@ -45,7 +52,7 @@ extension `Isolation`.Test.Unit {
+     }
+ }
+ 
+-extension `Isolation`.Test.`Edge Case` {
++extension `Isolation Tests`.`Isolation`.Test.`Edge Case` {
+     @Test
+     func `Concurrent scopes are isolated`() async {
+         let iterations = 10
+@@ -148,7 +155,7 @@ extension `Isolation`.Test.`Edge Case` {
+     }
+ }
+ 
+-extension `Isolation`.Test.Integration {
++extension `Isolation Tests`.`Isolation`.Test.Integration {
+     @Test
+     func `Task isolation with TaskGroup`() async {
+         await withDependencies {
+diff --git a/Tests/Dependencies Tests/Resolution Tests.swift b/Tests/Dependencies Tests/Resolution Tests.swift
+index 2582091..fe8cf26 100644
+--- a/Tests/Dependencies Tests/Resolution Tests.swift	
++++ b/Tests/Dependencies Tests/Resolution Tests.swift	
+@@ -2,8 +2,15 @@ import Testing
+ 
+ @testable import Dependencies
+ 
+-@Suite("Resolution")
+-struct `Resolution` {
++enum `Resolution Tests` {}
++
++extension `Resolution Tests` {
++    @Suite("Resolution")
++    struct `Resolution` {
++    }
++}
++
++extension `Resolution Tests`.`Resolution` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -11,7 +18,7 @@ struct `Resolution` {
+     }
+ }
+ 
+-extension `Resolution`.Test.Unit {
++extension `Resolution Tests`.`Resolution`.Test.Unit {
+     @Test
+     func `Eager dependency resolution`() {
+         @Dependency(\.eagerChild) var eagerChild: Int
+@@ -34,7 +41,7 @@ extension `Resolution`.Test.Unit {
+     }
+ }
+ 
+-extension `Resolution`.Test.`Edge Case` {
++extension `Resolution Tests`.`Resolution`.Test.`Edge Case` {
+     @Test
+     func `Eager dependency with override`() {
+         @Dependency(\.eagerChild) var eagerChild: Int
+@@ -92,7 +99,7 @@ extension `Resolution`.Test.`Edge Case` {
+     }
+ }
+ 
+-extension `Resolution`.Test.Integration {
++extension `Resolution Tests`.`Resolution`.Test.Integration {
+     @Test
+     func `Multiple dependencies resolved together`() {
+         withDependencies {
+diff --git a/Tests/Dependencies Tests/prepareDependencies Tests.swift b/Tests/Dependencies Tests/prepareDependencies Tests.swift
+index a1bbda9..2c18917 100644
+--- a/Tests/Dependencies Tests/prepareDependencies Tests.swift	
++++ b/Tests/Dependencies Tests/prepareDependencies Tests.swift	
+@@ -3,8 +3,13 @@ import Witnesses
+ 
+ @testable import Dependencies
+ 
+-@Suite
+-struct `prepareDependencies Tests` {
++extension `prepareDependencies Tests`.`prepareDependencies Tests` {
++    @Suite
++    struct `prepareDependencies Tests` {
++    }
++}
++
++extension `prepareDependencies Tests`.`prepareDependencies Tests`.`prepareDependencies Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -12,7 +17,7 @@ struct `prepareDependencies Tests` {
+     }
+ }
+ 
+-extension `prepareDependencies Tests`.Test.Unit {
++extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.Unit {
+     @Test
+     func `Sync preparation runs without error`() {
+         let result = prepareDependencies { store in
+@@ -65,7 +70,7 @@ extension `prepareDependencies Tests`.Test.Unit {
+     }
+ }
+ 
+-extension `prepareDependencies Tests`.Test.`Edge Case` {
++extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.`Edge Case` {
+     @Test
+     func `Empty preparation works`() {
+         let result = prepareDependencies { _ in
+@@ -93,7 +98,7 @@ extension `prepareDependencies Tests`.Test.`Edge Case` {
+     }
+ }
+ 
+-extension `prepareDependencies Tests`.Test.Integration {
++extension `prepareDependencies Tests`.`prepareDependencies Tests`.Test.Integration {
+     @Test
+     func `withDependencies works inside prepareDependencies`() {
+         prepareDependencies { _ in
+diff --git a/Tests/Dependencies Tests/withDependencies Tests.swift b/Tests/Dependencies Tests/withDependencies Tests.swift
+index 0461483..0903900 100644
+--- a/Tests/Dependencies Tests/withDependencies Tests.swift	
++++ b/Tests/Dependencies Tests/withDependencies Tests.swift	
+@@ -2,8 +2,13 @@ import Testing
+ 
+ @testable import Dependencies
+ 
+-@Suite
+-struct `withDependencies Tests` {
++extension `withDependencies Tests`.`withDependencies Tests` {
++    @Suite
++    struct `withDependencies Tests` {
++    }
++}
++
++extension `withDependencies Tests`.`withDependencies Tests`.`withDependencies Tests` {
+     @Suite struct Test {
+         @Suite struct Unit {}
+         @Suite struct `Edge Case` {}
+@@ -11,7 +16,7 @@ struct `withDependencies Tests` {
+     }
+ }
+ 
+-extension `withDependencies Tests`.Test.Unit {
++extension `withDependencies Tests`.`withDependencies Tests`.Test.Unit {
+     @Test
+     func `Basic override works`() throws {
+         let result = withDependencies {
+@@ -52,7 +57,7 @@ extension `withDependencies Tests`.Test.Unit {
+     }
+ }
+ 
+-extension `withDependencies Tests`.Test.`Edge Case` {
++extension `withDependencies Tests`.`withDependencies Tests`.Test.`Edge Case` {
+     @Test
+     func `Nested scopes work correctly`() throws {
+         try withDependencies {
+@@ -95,7 +100,7 @@ extension `withDependencies Tests`.Test.`Edge Case` {
+     }
+ }
+ 
+-extension `withDependencies Tests`.Test.Integration {
++extension `withDependencies Tests`.`withDependencies Tests`.Test.Integration {
+     @Test
+     func `Async variant works`() async throws {
+         let result = await withDependencies {
+-- 
+2.43.0
+

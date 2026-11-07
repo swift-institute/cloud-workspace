@@ -1,0 +1,580 @@
+From 8bb5258d8b73231d786c251b7fe49c4c5edcc240 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:23 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../IO.Blocking.Run Tests.swift               | 212 +++++++++---------
+ .../IO.Completion.Actor Tests.swift           | 156 ++++++-------
+ .../IO.Event.Primitives Tests.swift           | 114 +++++-----
+ 3 files changed, 247 insertions(+), 235 deletions(-)
+
+diff --git a/Tests/IO Kernel Blocking Tests/IO.Blocking.Run Tests.swift b/Tests/IO Kernel Blocking Tests/IO.Blocking.Run Tests.swift
+index 2087a88..c04f44a 100644
+--- a/Tests/IO Kernel Blocking Tests/IO.Blocking.Run Tests.swift	
++++ b/Tests/IO Kernel Blocking Tests/IO.Blocking.Run Tests.swift	
+@@ -3,125 +3,129 @@ import Memory
+ import Span
+ import Testing
+ 
+-@Suite(.timeLimit(.minutes(1)))
+-struct `IO blocking run tests` {
+-    @Test
+-    func `read/write through pipe`() async throws {
+-        let io = IO.blocking()
+-        let pipe = try Kernel.Pipe.pipe()
+-
+-        let message: [UInt8] = [72, 101, 108, 108, 111]
+-        let writePtr = UnsafeMutableRawBufferPointer.allocate(
+-            byteCount: message.count,
+-            alignment: 1
+-        )
+-        defer { unsafe writePtr.deallocate() }
+-        unsafe writePtr.copyBytes(from: message)
+-        let writeBuffer: Span.Raw = unsafe .init(UnsafeRawBufferPointer(writePtr))
+-
+-        let readPtr = UnsafeMutableRawBufferPointer.allocate(byteCount: 16, alignment: 1)
+-        defer { unsafe readPtr.deallocate() }
+-        let readBuffer: Span.Raw.Mutable = unsafe .init(readPtr)
+-
+-        let written = unsafe try await io.write(to: pipe.write, from: writeBuffer)
+-        #expect(written == 5)
+-
+-        let bytesRead = unsafe try await io.read(from: pipe.read, into: readBuffer)
+-        #expect(bytesRead == 5)
+-
+-        let result = unsafe Array(UnsafeRawBufferPointer(readPtr).prefix(5))
+-        #expect(result == message)
+-    }
++enum `IO.Blocking.Run Tests` {}
++
++extension `IO.Blocking.Run Tests` {
++    @Suite(.timeLimit(.minutes(1)))
++    struct `IO blocking run tests` {
++        @Test
++        func `read/write through pipe`() async throws {
++            let io = IO.blocking()
++            let pipe = try Kernel.Pipe.pipe()
++
++            let message: [UInt8] = [72, 101, 108, 108, 111]
++            let writePtr = UnsafeMutableRawBufferPointer.allocate(
++                byteCount: message.count,
++                alignment: 1
++            )
++            defer { unsafe writePtr.deallocate() }
++            unsafe writePtr.copyBytes(from: message)
++            let writeBuffer: Span.Raw = unsafe .init(UnsafeRawBufferPointer(writePtr))
++
++            let readPtr = UnsafeMutableRawBufferPointer.allocate(byteCount: 16, alignment: 1)
++            defer { unsafe readPtr.deallocate() }
++            let readBuffer: Span.Raw.Mutable = unsafe .init(readPtr)
++
++            let written = unsafe try await io.write(to: pipe.write, from: writeBuffer)
++            #expect(written == 5)
++
++            let bytesRead = unsafe try await io.read(from: pipe.read, into: readBuffer)
++            #expect(bytesRead == 5)
++
++            let result = unsafe Array(UnsafeRawBufferPointer(readPtr).prefix(5))
++            #expect(result == message)
++        }
+ 
+-    @Test
+-    func `concurrent blocking calls complete — proves dedicated threads`() async throws {
+-        let count = 16
+-        try await withThrowingTaskGroup(of: Void.self) { group in
+-            for _ in 0..<count {
+-                group.addTask {
+-                    let io = IO.blocking()
+-                    let pipe = try Kernel.Pipe.pipe()
+-
+-                    let ptr = UnsafeMutableRawBufferPointer.allocate(
+-                        byteCount: 1,
+-                        alignment: 1
+-                    )
+-                    defer { unsafe ptr.deallocate() }
+-                    unsafe ptr[0] = 42
+-                    let writeBuf: Span.Raw = unsafe .init(UnsafeRawBufferPointer(ptr))
+-                    let readBuf: Span.Raw.Mutable = unsafe .init(ptr)
+-
+-                    _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
+-                    _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++        @Test
++        func `concurrent blocking calls complete — proves dedicated threads`() async throws {
++            let count = 16
++            try await withThrowingTaskGroup(of: Void.self) { group in
++                for _ in 0..<count {
++                    group.addTask {
++                        let io = IO.blocking()
++                        let pipe = try Kernel.Pipe.pipe()
++
++                        let ptr = UnsafeMutableRawBufferPointer.allocate(
++                            byteCount: 1,
++                            alignment: 1
++                        )
++                        defer { unsafe ptr.deallocate() }
++                        unsafe ptr[0] = 42
++                        let writeBuf: Span.Raw = unsafe .init(UnsafeRawBufferPointer(ptr))
++                        let readBuf: Span.Raw.Mutable = unsafe .init(ptr)
++
++                        _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
++                        _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++                    }
+                 }
++                try await group.waitForAll()
+             }
+-            try await group.waitForAll()
+         }
+-    }
+ 
+-    @Test
+-    func `await between I/O calls — actor isolation keeps ops on executor`() async throws {
+-
+-        let count = 16
+-        try await withThrowingTaskGroup(of: Void.self) { group in
+-            for _ in 0..<count {
+-                group.addTask {
+-                    let io = IO.blocking()
+-                    let pipe = try Kernel.Pipe.pipe()
+-
+-                    let ptr = UnsafeMutableRawBufferPointer.allocate(
+-                        byteCount: 1,
+-                        alignment: 1
+-                    )
+-                    defer { unsafe ptr.deallocate() }
+-                    unsafe ptr[0] = 1
+-                    let writeBuf: Span.Raw = unsafe .init(UnsafeRawBufferPointer(ptr))
+-                    let readBuf: Span.Raw.Mutable = unsafe .init(ptr)
+-
+-                    _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
+-                    _ = unsafe try await io.read(from: pipe.read, into: readBuf)
+-
+-                    await Task.yield()
+-
+-                    unsafe ptr[0] = 2
+-                    _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
+-                    _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++        @Test
++        func `await between I/O calls — actor isolation keeps ops on executor`() async throws {
++
++            let count = 16
++            try await withThrowingTaskGroup(of: Void.self) { group in
++                for _ in 0..<count {
++                    group.addTask {
++                        let io = IO.blocking()
++                        let pipe = try Kernel.Pipe.pipe()
++
++                        let ptr = UnsafeMutableRawBufferPointer.allocate(
++                            byteCount: 1,
++                            alignment: 1
++                        )
++                        defer { unsafe ptr.deallocate() }
++                        unsafe ptr[0] = 1
++                        let writeBuf: Span.Raw = unsafe .init(UnsafeRawBufferPointer(ptr))
++                        let readBuf: Span.Raw.Mutable = unsafe .init(ptr)
++
++                        _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
++                        _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++
++                        await Task.yield()
++
++                        unsafe ptr[0] = 2
++                        _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
++                        _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++                    }
+                 }
++                try await group.waitForAll()
+             }
+-            try await group.waitForAll()
+         }
+-    }
+ 
+-    @Test
+-    func `errors propagate from closure through witness to caller`() async throws {
+-        let io = IO.blocking()
+-        let readPtr = UnsafeMutableRawBufferPointer.allocate(byteCount: 16, alignment: 1)
+-        defer { unsafe readPtr.deallocate() }
+-        let readBuf: Span.Raw.Mutable = unsafe .init(readPtr)
++        @Test
++        func `errors propagate from closure through witness to caller`() async throws {
++            let io = IO.blocking()
++            let readPtr = UnsafeMutableRawBufferPointer.allocate(byteCount: 16, alignment: 1)
++            defer { unsafe readPtr.deallocate() }
++            let readBuf: Span.Raw.Mutable = unsafe .init(readPtr)
+ 
+-        let invalid = Kernel.Descriptor.invalid
++            let invalid = Kernel.Descriptor.invalid
+ 
+-        await #expect(throws: Basic.Error.self) {
+-            _ = try await io.read(from: invalid, into: readBuf)
++            await #expect(throws: Basic.Error.self) {
++                _ = try await io.read(from: invalid, into: readBuf)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `IO instance is reusable across multiple calls`() async throws {
+-        let io = IO.blocking()
++        @Test
++        func `IO instance is reusable across multiple calls`() async throws {
++            let io = IO.blocking()
+ 
+-        let pipe = try Kernel.Pipe.pipe()
+-        let ptr = UnsafeMutableRawBufferPointer.allocate(byteCount: 1, alignment: 1)
+-        defer { unsafe ptr.deallocate() }
+-        let writeBuf: Span.Raw = unsafe .init(UnsafeRawBufferPointer(ptr))
+-        let readBuf: Span.Raw.Mutable = unsafe .init(ptr)
++            let pipe = try Kernel.Pipe.pipe()
++            let ptr = UnsafeMutableRawBufferPointer.allocate(byteCount: 1, alignment: 1)
++            defer { unsafe ptr.deallocate() }
++            let writeBuf: Span.Raw = unsafe .init(UnsafeRawBufferPointer(ptr))
++            let readBuf: Span.Raw.Mutable = unsafe .init(ptr)
+ 
+-        unsafe ptr[0] = 1
+-        _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
+-        _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++            unsafe ptr[0] = 1
++            _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
++            _ = unsafe try await io.read(from: pipe.read, into: readBuf)
+ 
+-        unsafe ptr[0] = 2
+-        _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
+-        _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++            unsafe ptr[0] = 2
++            _ = unsafe try await io.write(to: pipe.write, from: writeBuf)
++            _ = unsafe try await io.read(from: pipe.read, into: readBuf)
++        }
+     }
+ }
+diff --git a/Tests/IO Kernel Completions Tests/IO.Completion.Actor Tests.swift b/Tests/IO Kernel Completions Tests/IO.Completion.Actor Tests.swift
+index dbbfd15..a899421 100644
+--- a/Tests/IO Kernel Completions Tests/IO.Completion.Actor Tests.swift	
++++ b/Tests/IO Kernel Completions Tests/IO.Completion.Actor Tests.swift	
+@@ -7,103 +7,107 @@
+     import Memory
+     import Span
+ 
+-    @Suite struct `Proactor tests` {
+-        @Suite(
+-            .disabled(
+-                if: Toolchain.hasTaggedMetadataSIGSEGV,
++enum `IO.Completion.Actor Tests` {}
+ 
+-            )
+-        )
+-        struct ActorTests {
++extension `IO.Completion.Actor Tests` {
++        @Suite struct `Proactor tests` {
++            @Suite(
++                .disabled(
++                    if: Toolchain.hasTaggedMetadataSIGSEGV,
+ 
+-            @Suite struct `Unit` {
++                )
++            )
++            struct ActorTests {
+ 
+-                @Test func `init with fake kernel boots executor`() async {
+-                    let (actor, backend) = Completion.Actor.fake()
+-                    #expect(!backend.isClosed)
+-                    _ = actor
+-                }
++                @Suite struct `Unit` {
+ 
+-                @Test func `deinit shuts down backend`() async {
+-                    let backend: Kernel.Completion.Fake
+-                    do {
+-                        let (actor, b) = Completion.Actor.fake()
+-                        backend = b
++                    @Test func `init with fake kernel boots executor`() async {
++                        let (actor, backend) = Completion.Actor.fake()
+                         #expect(!backend.isClosed)
+                         _ = actor
+                     }
+-                    #expect(backend.waitUntilClosed(timeout: .seconds(2)))
+-                }
+ 
+-                @Test func `submit records in backend`() async throws {
+-                    let (actor, backend) = Completion.Actor.fake()
+-                    backend.onSubmit = { submission in
+-                        Kernel.Completion.Event(
+-                            token: submission.token,
+-                            result: .init(rawValue: 0)
+-                        )
++                    @Test func `deinit shuts down backend`() async {
++                        let backend: Kernel.Completion.Fake
++                        do {
++                            let (actor, b) = Completion.Actor.fake()
++                            backend = b
++                            #expect(!backend.isClosed)
++                            _ = actor
++                        }
++                        #expect(backend.waitUntilClosed(timeout: .seconds(2)))
+                     }
+-                    let pipe = try Kernel.Pipe.pipe()
+-                    _ = try await actor.ready(from: pipe.read, interest: .read)
+-                    #expect(backend.submissions.count >= 1)
+-                }
+ 
+-                @Test func `flush is called after submit`() async throws {
+-                    let (actor, backend) = Completion.Actor.fake()
+-                    backend.onSubmit = { submission in
+-                        Kernel.Completion.Event(
+-                            token: submission.token,
+-                            result: .init(rawValue: 0)
+-                        )
++                    @Test func `submit records in backend`() async throws {
++                        let (actor, backend) = Completion.Actor.fake()
++                        backend.onSubmit = { submission in
++                            Kernel.Completion.Event(
++                                token: submission.token,
++                                result: .init(rawValue: 0)
++                            )
++                        }
++                        let pipe = try Kernel.Pipe.pipe()
++                        _ = try await actor.ready(from: pipe.read, interest: .read)
++                        #expect(backend.submissions.count >= 1)
+                     }
+-                    let pipe = try Kernel.Pipe.pipe()
+-                    _ = try await actor.ready(from: pipe.read, interest: .read)
+-                    #expect(backend.flushCount >= 1)
+-                }
+ 
+-                @Test func `ID generation is monotonic`() async throws {
+-                    let (actor, backend) = Completion.Actor.fake()
+-                    backend.onSubmit = { submission in
+-                        Kernel.Completion.Event(
+-                            token: submission.token,
+-                            result: .init(rawValue: 0)
+-                        )
++                    @Test func `flush is called after submit`() async throws {
++                        let (actor, backend) = Completion.Actor.fake()
++                        backend.onSubmit = { submission in
++                            Kernel.Completion.Event(
++                                token: submission.token,
++                                result: .init(rawValue: 0)
++                            )
++                        }
++                        let pipe = try Kernel.Pipe.pipe()
++                        _ = try await actor.ready(from: pipe.read, interest: .read)
++                        #expect(backend.flushCount >= 1)
++                    }
++
++                    @Test func `ID generation is monotonic`() async throws {
++                        let (actor, backend) = Completion.Actor.fake()
++                        backend.onSubmit = { submission in
++                            Kernel.Completion.Event(
++                                token: submission.token,
++                                result: .init(rawValue: 0)
++                            )
++                        }
++                        let pipe = try Kernel.Pipe.pipe()
++                        _ = try await actor.ready(from: pipe.read, interest: .read)
++                        _ = try await actor.ready(from: pipe.read, interest: .read)
++                        let subs = backend.submissions
++                        #expect(subs.count >= 2)
++                        #expect(subs[0].token != subs[1].token)
+                     }
+-                    let pipe = try Kernel.Pipe.pipe()
+-                    _ = try await actor.ready(from: pipe.read, interest: .read)
+-                    _ = try await actor.ready(from: pipe.read, interest: .read)
+-                    let subs = backend.submissions
+-                    #expect(subs.count >= 2)
+-                    #expect(subs[0].token != subs[1].token)
+                 }
+-            }
+ 
+-            @Suite struct `Edge Case` {
++                @Suite struct `Edge Case` {
+ 
+-                @Test func `error CQE maps to Basic.Error`() async throws {
+-                    let (actor, backend) = Completion.Actor.fake()
+-                    backend.onSubmit = { submission in
+-                        Kernel.Completion.Event(
+-                            token: submission.token,
+-                            result: .init(rawValue: -9)
++                    @Test func `error CQE maps to Basic.Error`() async throws {
++                        let (actor, backend) = Completion.Actor.fake()
++                        backend.onSubmit = { submission in
++                            Kernel.Completion.Event(
++                                token: submission.token,
++                                result: .init(rawValue: -9)
++                            )
++                        }
++                        let pipe = try Kernel.Pipe.pipe()
++                        let readBuf = UnsafeMutableRawBufferPointer.allocate(
++                            byteCount: 64,
++                            alignment: 1
+                         )
+-                    }
+-                    let pipe = try Kernel.Pipe.pipe()
+-                    let readBuf = UnsafeMutableRawBufferPointer.allocate(
+-                        byteCount: 64,
+-                        alignment: 1
+-                    )
+-                    defer { unsafe readBuf.deallocate() }
+-                    let buffer: Span.Raw.Mutable = unsafe .init(readBuf)
+-                    do {
+-                        _ = unsafe try await actor.read(from: pipe.read, into: buffer)
+-                        Issue.record("expected Basic.Error")
+-                    } catch {
++                        defer { unsafe readBuf.deallocate() }
++                        let buffer: Span.Raw.Mutable = unsafe .init(readBuf)
++                        do {
++                            _ = unsafe try await actor.read(from: pipe.read, into: buffer)
++                            Issue.record("expected Basic.Error")
++                        } catch {
+ 
++                        }
+                     }
+                 }
+             }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/IO Kernel Events Tests/IO.Event.Primitives Tests.swift b/Tests/IO Kernel Events Tests/IO.Event.Primitives Tests.swift
+index 2c5c044..90d2690 100644
+--- a/Tests/IO Kernel Events Tests/IO.Event.Primitives Tests.swift	
++++ b/Tests/IO Kernel Events Tests/IO.Event.Primitives Tests.swift	
+@@ -4,73 +4,77 @@
+     import Kernel
+     import Testing
+ 
+-    @Suite(.timeLimit(.minutes(1)))
+-    struct `Event Primitives` {
++enum `IO.Event.Primitives Tests` {}
+ 
+-        @Test
+-        func `Interest OptionSet operations`() {
+-            let read: Event.Interest = .read
+-            let write: Event.Interest = .write
+-            let both: Event.Interest = [.read, .write]
++extension `IO.Event.Primitives Tests` {
++        @Suite(.timeLimit(.minutes(1)))
++        struct `Event Primitives` {
+ 
+-            #expect(both.contains(.read))
+-            #expect(both.contains(.write))
+-            #expect(!read.contains(.write))
+-            #expect(read.union(write) == both)
+-        }
++            @Test
++            func `Interest OptionSet operations`() {
++                let read: Event.Interest = .read
++                let write: Event.Interest = .write
++                let both: Event.Interest = [.read, .write]
+ 
+-        @Test
+-        func `Event creation and properties`() {
+-            let id = Event.ID(42)
+-            let event = Kernel.Event(
+-                id: id,
+-                interest: [.read, .write],
+-                flags: [.hangup]
+-            )
++                #expect(both.contains(.read))
++                #expect(both.contains(.write))
++                #expect(!read.contains(.write))
++                #expect(read.union(write) == both)
++            }
+ 
+-            #expect(event.id == id)
+-            #expect(event.interest.contains(.read))
+-            #expect(event.interest.contains(.write))
+-            #expect(event.flags.contains(.hangup))
+-            #expect(!event.flags.contains(.error))
+-        }
++            @Test
++            func `Event creation and properties`() {
++                let id = Event.ID(42)
++                let event = Kernel.Event(
++                    id: id,
++                    interest: [.read, .write],
++                    flags: [.hangup]
++                )
+ 
+-        @Test
+-        func `Event.Options combinations`() {
+-            let flags: Event.Options = [.error, .hangup]
++                #expect(event.id == id)
++                #expect(event.interest.contains(.read))
++                #expect(event.interest.contains(.write))
++                #expect(event.flags.contains(.hangup))
++                #expect(!event.flags.contains(.error))
++            }
+ 
+-            #expect(flags.contains(.error))
+-            #expect(flags.contains(.hangup))
+-            #expect(!flags.contains(.readHangup))
+-        }
++            @Test
++            func `Event.Options combinations`() {
++                let flags: Event.Options = [.error, .hangup]
+ 
+-        @Test
+-        func `ID equality and hashing`() {
+-            let id1 = Event.ID(100)
+-            let id2 = Event.ID(100)
+-            let id3 = Event.ID(200)
++                #expect(flags.contains(.error))
++                #expect(flags.contains(.hangup))
++                #expect(!flags.contains(.readHangup))
++            }
+ 
+-            #expect(id1 == id2)
+-            #expect(id1 != id3)
+-            #expect(id1.hashValue == id2.hashValue)
+-        }
++            @Test
++            func `ID equality and hashing`() {
++                let id1 = Event.ID(100)
++                let id2 = Event.ID(100)
++                let id3 = Event.ID(200)
+ 
+-        @Test
+-        func `Token creation and ID access`() {
+-            let _ = Event.ID(42)
++                #expect(id1 == id2)
++                #expect(id1 != id3)
++                #expect(id1.hashValue == id2.hashValue)
++            }
+ 
+-        }
++            @Test
++            func `Token creation and ID access`() {
++                let _ = Event.ID(42)
++
++            }
+ 
+-        @Test
+-        func `Error descriptions`() {
+-            let platformError = Event.Error.platform(.posix(22))
+-            let invalidDesc = Event.Error.invalidDescriptor
+-            let writeClosed = Event.Error.writeClosed
++            @Test
++            func `Error descriptions`() {
++                let platformError = Event.Error.platform(.posix(22))
++                let invalidDesc = Event.Error.invalidDescriptor
++                let writeClosed = Event.Error.writeClosed
+ 
+-            #expect(platformError.description.contains("Platform"))
+-            #expect(invalidDesc.description.contains("Invalid"))
+-            #expect(writeClosed.description.contains("closed"))
++                #expect(platformError.description.contains("Platform"))
++                #expect(invalidDesc.description.contains("Invalid"))
++                #expect(writeClosed.description.contains("closed"))
++            }
+         }
+-    }
++}
+ 
+ #endif
+-- 
+2.43.0
+

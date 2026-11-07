@@ -1,0 +1,1703 @@
+From 2374b4b9175a9e7165302b3fcfd2d59a3a923529 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:07 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Sample Comparison Tests.swift             |   6 +-
+ .../Sample Order Tests.swift                  |  30 +-
+ ...n preserves component rounding Tests.swift |  96 ++---
+ .../Sample.Accumulator Tests.swift            | 230 ++++++------
+ .../Sample Tests/Sample.Averaging Tests.swift | 126 +++----
+ Tests/Sample Tests/Sample.Batch Tests.swift   | 342 +++++++++---------
+ ...e.Batch+CoefficientOfVariation Tests.swift | 110 +++---
+ ....Batch+MedianAbsoluteDeviation Tests.swift | 168 ++++-----
+ .../Sample.Comparison Tests.swift             | 198 +++++-----
+ .../Sample.Regression Tests.swift             |  15 +-
+ .../Sample.Trend+MannKendall Tests.swift      |  19 +-
+ .../Sample Algebra Tests.swift                |  28 +-
+ .../swift-sample-time/Sample Time Tests.swift |  70 ++--
+ 13 files changed, 746 insertions(+), 692 deletions(-)
+
+diff --git a/Tests/Consolidated swift-sample-comparison/Sample Comparison Tests/Sample Comparison Tests.swift b/Tests/Consolidated swift-sample-comparison/Sample Comparison Tests/Sample Comparison Tests.swift
+index 9e8a6ed..b66164d 100644
+--- a/Tests/Consolidated swift-sample-comparison/Sample Comparison Tests/Sample Comparison Tests.swift	
++++ b/Tests/Consolidated swift-sample-comparison/Sample Comparison Tests/Sample Comparison Tests.swift	
+@@ -1,4 +1,6 @@
+ import Testing
+ 
+-@Suite
+-struct `Sample Comparison Tests` {}
++extension `Sample Comparison Tests`.`Sample Comparison Tests` {
++    @Suite
++    struct `Sample Comparison Tests` {}
++}
+diff --git a/Tests/Consolidated swift-sample-order/Sample Order Tests/Sample Order Tests.swift b/Tests/Consolidated swift-sample-order/Sample Order Tests/Sample Order Tests.swift
+index 3b7f1da..ae4a8de 100644
+--- a/Tests/Consolidated swift-sample-order/Sample Order Tests/Sample Order Tests.swift	
++++ b/Tests/Consolidated swift-sample-order/Sample Order Tests/Sample Order Tests.swift	
+@@ -2,21 +2,23 @@ import Order
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample Order Tests` {
++extension `Sample Order Tests`.`Sample Order Tests` {
++    @Suite
++    struct `Sample Order Tests` {
+ 
+-    @Test
+-    func `order comparator constructs a sorted sample batch`() {
+-        let values = [4, 1, 3, 2]
+-        let comparator: Order.Comparator<Int> = .ascending
+-        let batch = Sample.Batch(
+-            count: values.count,
+-            sortedBy: comparator,
+-            initializingWith: { values[$0] }
+-        )
++        @Test
++        func `order comparator constructs a sorted sample batch`() {
++            let values = [4, 1, 3, 2]
++            let comparator: Order.Comparator<Int> = .ascending
++            let batch = Sample.Batch(
++                count: values.count,
++                sortedBy: comparator,
++                initializingWith: { values[$0] }
++            )
+ 
+-        #expect(batch.withMin { $0 } == 1)
+-        #expect(batch.withMedian { $0 } == 3)
+-        #expect(batch.withMax { $0 } == 4)
++            #expect(batch.withMin { $0 } == 1)
++            #expect(batch.withMedian { $0 } == 3)
++            #expect(batch.withMax { $0 } == 4)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Duration projection preserves component rounding Tests.swift b/Tests/Sample Tests/Duration projection preserves component rounding Tests.swift
+index 924a1b8..982f9aa 100644
+--- a/Tests/Sample Tests/Duration projection preserves component rounding Tests.swift	
++++ b/Tests/Sample Tests/Duration projection preserves component rounding Tests.swift	
+@@ -1,59 +1,63 @@
+ import Sample
+ import Testing
+ 
+-@Suite struct `Duration projection preserves component rounding` {
+-    @Test func `projection matches native components throughout their representable domain`() {
+-        let averaging = Sample.Averaging<Duration>.duration
++enum `Duration projection preserves component rounding Tests` {}
+ 
+-        func verify(seconds: Int64, attoseconds: Int64) {
+-            let duration = Duration(secondsComponent: seconds, attosecondsComponent: attoseconds)
+-            let components = duration.components
+-            let expected = Double(components.seconds) + Double(components.attoseconds) / 1e18
+-            #expect(averaging.project(duration).bitPattern == expected.bitPattern)
+-        }
++extension `Duration projection preserves component rounding Tests` {
++    @Suite struct `Duration projection preserves component rounding` {
++        @Test func `projection matches native components throughout their representable domain`() {
++            let averaging = Sample.Averaging<Duration>.duration
++
++            func verify(seconds: Int64, attoseconds: Int64) {
++                let duration = Duration(secondsComponent: seconds, attosecondsComponent: attoseconds)
++                let components = duration.components
++                let expected = Double(components.seconds) + Double(components.attoseconds) / 1e18
++                #expect(averaging.project(duration).bitPattern == expected.bitPattern)
++            }
++
++            let seconds: [Int64] = [
++                .min, .min + 1, -(1 << 53), -1000, -2, -1, 0, 1, 2, 1000,
++                1 << 53, .max - 1, .max,
++            ]
++            let fractions: [Int64] = [
++                -999_999_999_999_999_999, -500_000_000_000_000_000,
++                -250_000_000_000_000_000, -1_000_000_000, -1, 0, 1, 1_000_000_000,
++                250_000_000_000_000_000, 500_000_000_000_000_000, 999_999_999_999_999_999,
++            ]
++            for second in seconds {
++                for fraction in fractions {
++                    verify(seconds: second, attoseconds: fraction)
++                }
++            }
+ 
+-        let seconds: [Int64] = [
+-            .min, .min + 1, -(1 << 53), -1000, -2, -1, 0, 1, 2, 1000,
+-            1 << 53, .max - 1, .max,
+-        ]
+-        let fractions: [Int64] = [
+-            -999_999_999_999_999_999, -500_000_000_000_000_000,
+-            -250_000_000_000_000_000, -1_000_000_000, -1, 0, 1, 1_000_000_000,
+-            250_000_000_000_000_000, 500_000_000_000_000_000, 999_999_999_999_999_999,
+-        ]
+-        for second in seconds {
+-            for fraction in fractions {
++            var state: UInt64 = 0x91a3_7bc8_456d_20ef
++            (0..<8192).forEach { index in
++                state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
++                let second =
++                    index.isMultiple(of: 2)
++                    ? Int64(bitPattern: state)
++                    : Int64(state % 2_000_001) - 1_000_000
++                state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
++                let fraction = Int64(state % 2_000_000_000_000_000_000) - 1_000_000_000_000_000_000
+                 verify(seconds: second, attoseconds: fraction)
+             }
+         }
+ 
+-        var state: UInt64 = 0x91a3_7bc8_456d_20ef
+-        (0..<8192).forEach { index in
+-            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+-            let second =
+-                index.isMultiple(of: 2)
+-                ? Int64(bitPattern: state)
+-                : Int64(state % 2_000_001) - 1_000_000
+-            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+-            let fraction = Int64(state % 2_000_000_000_000_000_000) - 1_000_000_000_000_000_000
+-            verify(seconds: second, attoseconds: fraction)
++        @Test(arguments: [Int128.min, .min + 1, .max - 1, .max])
++        func `projection accepts durations beyond the native component extent`(attoseconds: Int128) {
++            let projected = Sample.Averaging<Duration>.duration.project(.init(attoseconds: attoseconds))
++            let expected: UInt64 = attoseconds < 0 ? 0xc422_725d_d1d2_43ac : 0x4422_725d_d1d2_43ac
++            #expect(projected.bitPattern == expected)
++            #expect(projected.isFinite)
+         }
+-    }
+-
+-    @Test(arguments: [Int128.min, .min + 1, .max - 1, .max])
+-    func `projection accepts durations beyond the native component extent`(attoseconds: Int128) {
+-        let projected = Sample.Averaging<Duration>.duration.project(.init(attoseconds: attoseconds))
+-        let expected: UInt64 = attoseconds < 0 ? 0xc422_725d_d1d2_43ac : 0x4422_725d_d1d2_43ac
+-        #expect(projected.bitPattern == expected)
+-        #expect(projected.isFinite)
+-    }
+ 
+-    @Test func `sampling and scalar conversions retain their distinct fractional rounding`() {
+-        let duration = Duration(
+-            secondsComponent: 1000,
+-            attosecondsComponent: 250_000_000_000_000_000
+-        )
+-        #expect(Sample.Averaging<Duration>.duration.project(duration) == 1000.25)
+-        #expect(duration.inSeconds.bitPattern == 4_652_009_507_864_444_927)
++        @Test func `sampling and scalar conversions retain their distinct fractional rounding`() {
++            let duration = Duration(
++                secondsComponent: 1000,
++                attosecondsComponent: 250_000_000_000_000_000
++            )
++            #expect(Sample.Averaging<Duration>.duration.project(duration) == 1000.25)
++            #expect(duration.inSeconds.bitPattern == 4_652_009_507_864_444_927)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Sample.Accumulator Tests.swift b/Tests/Sample Tests/Sample.Accumulator Tests.swift
+index 34da013..7c73190 100644
+--- a/Tests/Sample Tests/Sample.Accumulator Tests.swift	
++++ b/Tests/Sample Tests/Sample.Accumulator Tests.swift	
+@@ -1,118 +1,122 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample accumulators combine observations under monoid laws` {
+-
+-    @Test
+-    func `Empty sample accumulators have zero count and sum with no mean`() {
+-        let acc = Sample.Accumulator.empty
+-        #expect(acc.count == 0)
+-        #expect(acc.sum == 0)
+-        #expect(acc.minimum == .max)
+-        #expect(acc.maximum == 0)
+-        #expect(acc.mean == nil)
+-    }
+-
+-    @Test
+-    func `Recording samples updates the count sum extrema and mean`() {
+-        var acc = Sample.Accumulator.empty
+-        acc.record(10)
+-        acc.record(20)
+-        acc.record(30)
+-        #expect(acc.count == 3)
+-        #expect(acc.sum == 60)
+-        #expect(acc.minimum == 10)
+-        #expect(acc.maximum == 30)
+-        #expect(acc.mean == 20)
+-    }
+-
+-    @Test
+-    func `A single recorded sample defines all accumulator statistics`() {
+-        var acc = Sample.Accumulator.empty
+-        acc.record(42)
+-        #expect(acc.count == 1)
+-        #expect(acc.sum == 42)
+-        #expect(acc.minimum == 42)
+-        #expect(acc.maximum == 42)
+-        #expect(acc.mean == 42)
+-    }
+-
+-    @Test
+-    func `An empty left accumulator preserves the merged statistics`() {
+-        var acc = Sample.Accumulator.empty
+-        acc.record(10)
+-        acc.record(20)
+-        let result = Sample.Accumulator.empty.merged(with: acc)
+-        #expect(result.count == acc.count)
+-        #expect(result.sum == acc.sum)
+-        #expect(result.minimum == acc.minimum)
+-        #expect(result.maximum == acc.maximum)
+-    }
+-
+-    @Test
+-    func `An empty right accumulator preserves the merged statistics`() {
+-        var acc = Sample.Accumulator.empty
+-        acc.record(10)
+-        acc.record(20)
+-        let result = acc.merged(with: .empty)
+-        #expect(result.count == acc.count)
+-        #expect(result.sum == acc.sum)
+-        #expect(result.minimum == acc.minimum)
+-        #expect(result.maximum == acc.maximum)
+-    }
+-
+-    @Test
+-    func `Sample accumulator merging is associative`() {
+-        var a = Sample.Accumulator.empty
+-        a.record(1)
+-        a.record(2)
+-
+-        var b = Sample.Accumulator.empty
+-        b.record(3)
+-        b.record(4)
+-
+-        var c = Sample.Accumulator.empty
+-        c.record(5)
+-        c.record(6)
+-
+-        let left = a.merged(with: b).merged(with: c)
+-        let right = a.merged(with: b.merged(with: c))
+-
+-        #expect(left.count == right.count)
+-        #expect(left.sum == right.sum)
+-        #expect(left.minimum == right.minimum)
+-        #expect(left.maximum == right.maximum)
+-    }
+-
+-    @Test
+-    func `Sample accumulator merging is commutative`() {
+-        var a = Sample.Accumulator.empty
+-        a.record(10)
+-        a.record(50)
+-
+-        var b = Sample.Accumulator.empty
+-        b.record(20)
+-        b.record(30)
+-
+-        let ab = a.merged(with: b)
+-        let ba = b.merged(with: a)
+-
+-        #expect(ab.count == ba.count)
+-        #expect(ab.sum == ba.sum)
+-        #expect(ab.minimum == ba.minimum)
+-        #expect(ab.maximum == ba.maximum)
+-    }
+-
+-    @Test
+-    func `The accumulator monoid witness preserves its identity law`() {
+-        let monoid = Sample.Accumulator.monoid
+-
+-        var a = Sample.Accumulator.empty
+-        a.record(5)
+-
+-        let combined = monoid(a, monoid.identity)
+-        #expect(combined.count == a.count)
+-        #expect(combined.sum == a.sum)
++enum `Sample.Accumulator Tests` {}
++
++extension `Sample.Accumulator Tests` {
++    @Suite
++    struct `Sample accumulators combine observations under monoid laws` {
++
++        @Test
++        func `Empty sample accumulators have zero count and sum with no mean`() {
++            let acc = Sample.Accumulator.empty
++            #expect(acc.count == 0)
++            #expect(acc.sum == 0)
++            #expect(acc.minimum == .max)
++            #expect(acc.maximum == 0)
++            #expect(acc.mean == nil)
++        }
++
++        @Test
++        func `Recording samples updates the count sum extrema and mean`() {
++            var acc = Sample.Accumulator.empty
++            acc.record(10)
++            acc.record(20)
++            acc.record(30)
++            #expect(acc.count == 3)
++            #expect(acc.sum == 60)
++            #expect(acc.minimum == 10)
++            #expect(acc.maximum == 30)
++            #expect(acc.mean == 20)
++        }
++
++        @Test
++        func `A single recorded sample defines all accumulator statistics`() {
++            var acc = Sample.Accumulator.empty
++            acc.record(42)
++            #expect(acc.count == 1)
++            #expect(acc.sum == 42)
++            #expect(acc.minimum == 42)
++            #expect(acc.maximum == 42)
++            #expect(acc.mean == 42)
++        }
++
++        @Test
++        func `An empty left accumulator preserves the merged statistics`() {
++            var acc = Sample.Accumulator.empty
++            acc.record(10)
++            acc.record(20)
++            let result = Sample.Accumulator.empty.merged(with: acc)
++            #expect(result.count == acc.count)
++            #expect(result.sum == acc.sum)
++            #expect(result.minimum == acc.minimum)
++            #expect(result.maximum == acc.maximum)
++        }
++
++        @Test
++        func `An empty right accumulator preserves the merged statistics`() {
++            var acc = Sample.Accumulator.empty
++            acc.record(10)
++            acc.record(20)
++            let result = acc.merged(with: .empty)
++            #expect(result.count == acc.count)
++            #expect(result.sum == acc.sum)
++            #expect(result.minimum == acc.minimum)
++            #expect(result.maximum == acc.maximum)
++        }
++
++        @Test
++        func `Sample accumulator merging is associative`() {
++            var a = Sample.Accumulator.empty
++            a.record(1)
++            a.record(2)
++
++            var b = Sample.Accumulator.empty
++            b.record(3)
++            b.record(4)
++
++            var c = Sample.Accumulator.empty
++            c.record(5)
++            c.record(6)
++
++            let left = a.merged(with: b).merged(with: c)
++            let right = a.merged(with: b.merged(with: c))
++
++            #expect(left.count == right.count)
++            #expect(left.sum == right.sum)
++            #expect(left.minimum == right.minimum)
++            #expect(left.maximum == right.maximum)
++        }
++
++        @Test
++        func `Sample accumulator merging is commutative`() {
++            var a = Sample.Accumulator.empty
++            a.record(10)
++            a.record(50)
++
++            var b = Sample.Accumulator.empty
++            b.record(20)
++            b.record(30)
++
++            let ab = a.merged(with: b)
++            let ba = b.merged(with: a)
++
++            #expect(ab.count == ba.count)
++            #expect(ab.sum == ba.sum)
++            #expect(ab.minimum == ba.minimum)
++            #expect(ab.maximum == ba.maximum)
++        }
++
++        @Test
++        func `The accumulator monoid witness preserves its identity law`() {
++            let monoid = Sample.Accumulator.monoid
++
++            var a = Sample.Accumulator.empty
++            a.record(5)
++
++            let combined = monoid(a, monoid.identity)
++            #expect(combined.count == a.count)
++            #expect(combined.sum == a.sum)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Sample.Averaging Tests.swift b/Tests/Sample Tests/Sample.Averaging Tests.swift
+index 2061acf..423862f 100644
+--- a/Tests/Sample Tests/Sample.Averaging Tests.swift	
++++ b/Tests/Sample Tests/Sample.Averaging Tests.swift	
+@@ -1,81 +1,85 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample averaging projects values into sums means and deviations` {
++enum `Sample.Averaging Tests` {}
+ 
+-    @Test
+-    func `Floating point sample means average every observation`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
+-        #expect(batch.mean == 3.0)
+-    }
++extension `Sample.Averaging Tests` {
++    @Suite
++    struct `Sample averaging projects values into sums means and deviations` {
+ 
+-    @Test
+-    func `Integer sample means average every observation`() {
+-        let batch = Sample.Batch([10, 20, 30])
+-        #expect(batch.mean == 20)
+-    }
++        @Test
++        func `Floating point sample means average every observation`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
++            #expect(batch.mean == 3.0)
++        }
+ 
+-    @Test
+-    func `Empty sample batches have no mean`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.mean == nil)
+-    }
++        @Test
++        func `Integer sample means average every observation`() {
++            let batch = Sample.Batch([10, 20, 30])
++            #expect(batch.mean == 20)
++        }
+ 
+-    @Test
+-    func `Floating point sample sums include every observation`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0])
+-        #expect(batch.sum == 6.0)
+-    }
++        @Test
++        func `Empty sample batches have no mean`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.mean == nil)
++        }
+ 
+-    @Test
+-    func `Explicit averaging witnesses determine the sample mean`() {
+-        let batch = Sample.Batch([10.0, 20.0, 30.0])
+-        let result = batch.mean(using: .real)
+-        #expect(result == 20.0)
+-    }
++        @Test
++        func `Floating point sample sums include every observation`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0])
++            #expect(batch.sum == 6.0)
++        }
+ 
+-    @Test
+-    func `Sample standard deviation uses the sample variance denominator`() {
+-        let batch = Sample.Batch([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])
+-        let stddev = batch.standardDeviation
+-        #expect(stddev != nil)
++        @Test
++        func `Explicit averaging witnesses determine the sample mean`() {
++            let batch = Sample.Batch([10.0, 20.0, 30.0])
++            let result = batch.mean(using: .real)
++            #expect(result == 20.0)
++        }
+ 
+-        let expected = (32.0 / 7.0).squareRoot()
+-        #expect(abs(stddev! - expected) < 0.001)
+-    }
++        @Test
++        func `Sample standard deviation uses the sample variance denominator`() {
++            let batch = Sample.Batch([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])
++            let stddev = batch.standardDeviation
++            #expect(stddev != nil)
+ 
+-    @Test
+-    func `A single sample has no sample standard deviation`() {
+-        let batch = Sample.Batch([42.0])
+-        #expect(batch.standardDeviation == nil)
+-    }
++            let expected = (32.0 / 7.0).squareRoot()
++            #expect(abs(stddev! - expected) < 0.001)
++        }
+ 
+-    @Test
+-    func `Empty sample batches have no standard deviation`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.standardDeviation == nil)
+-    }
++        @Test
++        func `A single sample has no sample standard deviation`() {
++            let batch = Sample.Batch([42.0])
++            #expect(batch.standardDeviation == nil)
++        }
+ 
+-    @Test
+-    func `Real averaging witnesses provide addition division and zero`() {
+-        let averaging = Sample.Averaging<Double>.real
+-        let sum = averaging.adding(3.0, 4.0)
+-        #expect(sum == 7.0)
+-        let divided = averaging.dividing(10.0, 2)
+-        #expect(divided == 5.0)
+-        #expect(averaging.zero == 0.0)
+-    }
++        @Test
++        func `Empty sample batches have no standard deviation`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.standardDeviation == nil)
++        }
++
++        @Test
++        func `Real averaging witnesses provide addition division and zero`() {
++            let averaging = Sample.Averaging<Double>.real
++            let sum = averaging.adding(3.0, 4.0)
++            #expect(sum == 7.0)
++            let divided = averaging.dividing(10.0, 2)
++            #expect(divided == 5.0)
++            #expect(averaging.zero == 0.0)
++        }
+ 
+-    @Test
+-    func `Natural averaging witnesses compute means of UInt64 samples`() {
+-        let batch = Sample.Batch<UInt64>([10, 20, 30], sortedBy: .ascending)
+-        let result = batch.mean(using: .natural)
+-        #expect(result == 20)
++        @Test
++        func `Natural averaging witnesses compute means of UInt64 samples`() {
++            let batch = Sample.Batch<UInt64>([10, 20, 30], sortedBy: .ascending)
++            let result = batch.mean(using: .natural)
++            #expect(result == 20)
++        }
+     }
+ }
+ 
+-extension `Sample averaging projects values into sums means and deviations` {
++extension `Sample.Averaging Tests`.`Sample averaging projects values into sums means and deviations` {
+     @Test(arguments: [-1.25, -0.25, 0.0, 0.25, 1.25])
+     func `duration projection preserves fractional seconds`(_ seconds: Double) {
+         let averaging = Sample.Averaging<Duration>.duration
+diff --git a/Tests/Sample Tests/Sample.Batch Tests.swift b/Tests/Sample Tests/Sample.Batch Tests.swift
+index 66cc4d5..1569f12 100644
+--- a/Tests/Sample Tests/Sample.Batch Tests.swift	
++++ b/Tests/Sample Tests/Sample.Batch Tests.swift	
+@@ -1,201 +1,205 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample batches expose ordered statistics and borrowed observations` {
+-
+-    @Test
+-    func `Empty sample batches have no ordered statistics`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.count == 0)
+-        #expect(batch.isEmpty)
+-        #expect(batch.min == nil)
+-        #expect(batch.max == nil)
+-        #expect(batch.median == nil)
+-        #expect(batch.p99 == nil)
+-    }
+-
+-    @Test
+-    func `A single sample defines the minimum maximum and median`() {
+-        let batch = Sample.Batch([42.0])
+-        #expect(batch.count == 1)
+-        #expect(!batch.isEmpty)
+-        #expect(batch.min == 42.0)
+-        #expect(batch.max == 42.0)
+-        #expect(batch.median == 42.0)
+-    }
++enum `Sample.Batch Tests` {}
++
++extension `Sample.Batch Tests` {
++    @Suite
++    struct `Sample batches expose ordered statistics and borrowed observations` {
++
++        @Test
++        func `Empty sample batches have no ordered statistics`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.count == 0)
++            #expect(batch.isEmpty)
++            #expect(batch.min == nil)
++            #expect(batch.max == nil)
++            #expect(batch.median == nil)
++            #expect(batch.p99 == nil)
++        }
+ 
+-    @Test
+-    func `Sample batches expose extrema in sorted order`() {
+-        let batch = Sample.Batch([5, 3, 1, 4, 2])
+-        #expect(batch.min == 1)
+-        #expect(batch.max == 5)
+-    }
++        @Test
++        func `A single sample defines the minimum maximum and median`() {
++            let batch = Sample.Batch([42.0])
++            #expect(batch.count == 1)
++            #expect(!batch.isEmpty)
++            #expect(batch.min == 42.0)
++            #expect(batch.max == 42.0)
++            #expect(batch.median == 42.0)
++        }
+ 
+-    @Test
+-    func `Named sample percentiles select the expected ordered observations`() {
+-        let batch = Sample.Batch([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0])
+-        #expect(batch.p50 == 60.0)
+-        #expect(batch.p90 == 100.0)
+-        #expect(batch.p99 == 100.0)
+-        #expect(batch.min == 10.0)
+-        #expect(batch.max == 100.0)
+-    }
++        @Test
++        func `Sample batches expose extrema in sorted order`() {
++            let batch = Sample.Batch([5, 3, 1, 4, 2])
++            #expect(batch.min == 1)
++            #expect(batch.max == 5)
++        }
+ 
+-    @Test
+-    func `Sample percentile lookup clamps endpoints and selects indexed observations`() {
++        @Test
++        func `Named sample percentiles select the expected ordered observations`() {
++            let batch = Sample.Batch([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0])
++            #expect(batch.p50 == 60.0)
++            #expect(batch.p90 == 100.0)
++            #expect(batch.p99 == 100.0)
++            #expect(batch.min == 10.0)
++            #expect(batch.max == 100.0)
++        }
+ 
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
++        @Test
++        func `Sample percentile lookup clamps endpoints and selects indexed observations`() {
+ 
+-        #expect(batch.percentile(0.5) == 3.0)
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
+ 
+-        #expect(batch.percentile(0.25) == 2.0)
++            #expect(batch.percentile(0.5) == 3.0)
+ 
+-        #expect(batch.percentile(0.0) == 1.0)
++            #expect(batch.percentile(0.25) == 2.0)
+ 
+-        #expect(batch.percentile(1.0) == 4.0)
+-    }
++            #expect(batch.percentile(0.0) == 1.0)
+ 
+-    @Test
+-    func `Borrowed sample accessors expose the minimum maximum and median`() {
+-        let batch = Sample.Batch(count: 3, sortedBy: .ascending) { i in
+-            [30, 10, 20][i]
++            #expect(batch.percentile(1.0) == 4.0)
+         }
+-        let minVal = batch.withMin { $0 }
+-        #expect(minVal == 10)
+ 
+-        let maxVal = batch.withMax { $0 }
+-        #expect(maxVal == 30)
++        @Test
++        func `Borrowed sample accessors expose the minimum maximum and median`() {
++            let batch = Sample.Batch(count: 3, sortedBy: .ascending) { i in
++                [30, 10, 20][i]
++            }
++            let minVal = batch.withMin { $0 }
++            #expect(minVal == 10)
+ 
+-        let medVal = batch.withMedian { $0 }
+-        #expect(medVal == 20)
+-    }
++            let maxVal = batch.withMax { $0 }
++            #expect(maxVal == 30)
+ 
+-    @Test
+-    func `Sample batch statistics follow the supplied comparator`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0], sortedBy: .descending)
++            let medVal = batch.withMedian { $0 }
++            #expect(medVal == 20)
++        }
+ 
+-        #expect(batch.min == 5.0)
+-        #expect(batch.max == 1.0)
+-        #expect(batch.percentile(0.0) == 5.0)
+-        #expect(batch.percentile(1.0) == 1.0)
+-    }
++        @Test
++        func `Sample batch statistics follow the supplied comparator`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0], sortedBy: .descending)
+ 
+-    @Test
+-    func `Percentiles below zero have no observation`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
+-        #expect(batch.percentile(-1.0) == nil)
+-        #expect(batch.percentile(-0.5) == nil)
+-        #expect(batch.percentile(-Double.ulpOfOne) == nil)
+-        #expect(batch.percentile(-Double.leastNonzeroMagnitude) == nil)
+-        #expect(batch.percentile(-Double.greatestFiniteMagnitude) == nil)
+-    }
++            #expect(batch.min == 5.0)
++            #expect(batch.max == 1.0)
++            #expect(batch.percentile(0.0) == 5.0)
++            #expect(batch.percentile(1.0) == 1.0)
++        }
+ 
+-    @Test
+-    func `Percentiles above one have no observation`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
+-        #expect(batch.percentile(1.0.nextUp) == nil)
+-        #expect(batch.percentile(1.5) == nil)
+-        #expect(batch.percentile(2.0) == nil)
+-        #expect(batch.percentile(Double.greatestFiniteMagnitude) == nil)
+-    }
++        @Test
++        func `Percentiles below zero have no observation`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
++            #expect(batch.percentile(-1.0) == nil)
++            #expect(batch.percentile(-0.5) == nil)
++            #expect(batch.percentile(-Double.ulpOfOne) == nil)
++            #expect(batch.percentile(-Double.leastNonzeroMagnitude) == nil)
++            #expect(batch.percentile(-Double.greatestFiniteMagnitude) == nil)
++        }
+ 
+-    @Test
+-    func `Non-finite percentiles have no observation`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
+-        #expect(batch.percentile(.nan) == nil)
+-        #expect(batch.percentile(.signalingNaN) == nil)
+-        #expect(batch.percentile(.infinity) == nil)
+-        #expect(batch.percentile(-.infinity) == nil)
+-    }
++        @Test
++        func `Percentiles above one have no observation`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
++            #expect(batch.percentile(1.0.nextUp) == nil)
++            #expect(batch.percentile(1.5) == nil)
++            #expect(batch.percentile(2.0) == nil)
++            #expect(batch.percentile(Double.greatestFiniteMagnitude) == nil)
++        }
+ 
+-    @Test
+-    func `Borrowed percentiles just outside zero to one have no observation`() {
+-        let batch = Sample.Batch(count: 4, sortedBy: .ascending) { i in [1.0, 2.0, 3.0, 4.0][i] }
+-        #expect(batch.withPercentile(-0.1) { $0 } == nil)
+-        #expect(batch.withPercentile(-Double.leastNonzeroMagnitude) { $0 } == nil)
+-        #expect(batch.withPercentile(1.0.nextUp) { $0 } == nil)
+-        #expect(batch.withPercentile(1.5) { $0 } == nil)
+-        #expect(batch.withPercentile(0.0) { $0 } == 1.0)
+-        #expect(batch.withPercentile(1.0) { $0 } == 4.0)
+-    }
++        @Test
++        func `Non-finite percentiles have no observation`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
++            #expect(batch.percentile(.nan) == nil)
++            #expect(batch.percentile(.signalingNaN) == nil)
++            #expect(batch.percentile(.infinity) == nil)
++            #expect(batch.percentile(-.infinity) == nil)
++        }
+ 
+-    @Test
+-    func `Borrowed non-finite and far negative percentiles have no observation`() {
+-        let batch = Sample.Batch(count: 4, sortedBy: .ascending) { i in [1.0, 2.0, 3.0, 4.0][i] }
+-        #expect(batch.withPercentile(-1.0) { $0 } == nil)
+-        #expect(batch.withPercentile(.nan) { $0 } == nil)
+-        #expect(batch.withPercentile(.infinity) { $0 } == nil)
+-        #expect(batch.withPercentile(-.infinity) { $0 } == nil)
+-    }
++        @Test
++        func `Borrowed percentiles just outside zero to one have no observation`() {
++            let batch = Sample.Batch(count: 4, sortedBy: .ascending) { i in [1.0, 2.0, 3.0, 4.0][i] }
++            #expect(batch.withPercentile(-0.1) { $0 } == nil)
++            #expect(batch.withPercentile(-Double.leastNonzeroMagnitude) { $0 } == nil)
++            #expect(batch.withPercentile(1.0.nextUp) { $0 } == nil)
++            #expect(batch.withPercentile(1.5) { $0 } == nil)
++            #expect(batch.withPercentile(0.0) { $0 } == 1.0)
++            #expect(batch.withPercentile(1.0) { $0 } == 4.0)
++        }
+ 
+-    @Test
+-    func `Empty batches have no percentile for any input`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.percentile(0.0) == nil)
+-        #expect(batch.percentile(0.5) == nil)
+-        #expect(batch.percentile(1.0) == nil)
+-        #expect(batch.percentile(-1.0) == nil)
+-        #expect(batch.percentile(.nan) == nil)
+-        #expect(batch.percentile(.infinity) == nil)
+-    }
++        @Test
++        func `Borrowed non-finite and far negative percentiles have no observation`() {
++            let batch = Sample.Batch(count: 4, sortedBy: .ascending) { i in [1.0, 2.0, 3.0, 4.0][i] }
++            #expect(batch.withPercentile(-1.0) { $0 } == nil)
++            #expect(batch.withPercentile(.nan) { $0 } == nil)
++            #expect(batch.withPercentile(.infinity) { $0 } == nil)
++            #expect(batch.withPercentile(-.infinity) { $0 } == nil)
++        }
+ 
+-    @Test
+-    func `Percentile endpoints select the minimum and the maximum`() {
+-        let single = Sample.Batch([42.0])
+-        #expect(single.percentile(0.0) == 42.0)
+-        #expect(single.percentile(-0.0) == 42.0)
+-        #expect(single.percentile(1.0) == 42.0)
+-
+-        let batch = Sample.Batch([5.0, 3.0, 1.0, 4.0, 2.0])
+-        #expect(batch.percentile(0.0) == batch.min)
+-        #expect(batch.percentile(-0.0) == batch.min)
+-        #expect(batch.percentile(1.0) == batch.max)
+-
+-        let descending = Sample.Batch([1.0, 2.0, 3.0], sortedBy: .descending)
+-        #expect(descending.percentile(0.0) == 3.0)
+-        #expect(descending.percentile(1.0) == 1.0)
+-    }
++        @Test
++        func `Empty batches have no percentile for any input`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.percentile(0.0) == nil)
++            #expect(batch.percentile(0.5) == nil)
++            #expect(batch.percentile(1.0) == nil)
++            #expect(batch.percentile(-1.0) == nil)
++            #expect(batch.percentile(.nan) == nil)
++            #expect(batch.percentile(.infinity) == nil)
++        }
+ 
+-    @Test
+-    func `Interior percentiles keep their truncating selection`() {
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
+-        #expect(batch.percentile(Double.leastNonzeroMagnitude) == 1.0)
+-        #expect(batch.percentile(0.25) == 2.0)
+-        #expect(batch.percentile(0.49) == 2.0)
+-        #expect(batch.percentile(0.5) == 3.0)
+-        #expect(batch.percentile(0.74) == 3.0)
+-        #expect(batch.percentile(0.75) == 4.0)
+-        #expect(batch.percentile(1.0.nextDown) == 4.0)
+-    }
++        @Test
++        func `Percentile endpoints select the minimum and the maximum`() {
++            let single = Sample.Batch([42.0])
++            #expect(single.percentile(0.0) == 42.0)
++            #expect(single.percentile(-0.0) == 42.0)
++            #expect(single.percentile(1.0) == 42.0)
++
++            let batch = Sample.Batch([5.0, 3.0, 1.0, 4.0, 2.0])
++            #expect(batch.percentile(0.0) == batch.min)
++            #expect(batch.percentile(-0.0) == batch.min)
++            #expect(batch.percentile(1.0) == batch.max)
++
++            let descending = Sample.Batch([1.0, 2.0, 3.0], sortedBy: .descending)
++            #expect(descending.percentile(0.0) == 3.0)
++            #expect(descending.percentile(1.0) == 1.0)
++        }
+ 
+-    @Test
+-    func `Percentiles just below one select the maximum of a large batch`() {
+-        let batch = Sample.Batch(count: 1000, sortedBy: .ascending) { i in Double(i) }
+-        #expect(batch.percentile(0.999) == 999.0)
+-        #expect(batch.percentile(1.0.nextDown) == 999.0)
+-        #expect(batch.percentile(1.0) == 999.0)
+-        #expect(batch.percentile(0.5) == 500.0)
+-    }
++        @Test
++        func `Interior percentiles keep their truncating selection`() {
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0])
++            #expect(batch.percentile(Double.leastNonzeroMagnitude) == 1.0)
++            #expect(batch.percentile(0.25) == 2.0)
++            #expect(batch.percentile(0.49) == 2.0)
++            #expect(batch.percentile(0.5) == 3.0)
++            #expect(batch.percentile(0.74) == 3.0)
++            #expect(batch.percentile(0.75) == 4.0)
++            #expect(batch.percentile(1.0.nextDown) == 4.0)
++        }
+ 
+-    @Test
+-    func `Every valid percentile selects the truncated index of a small batch`() {
+-        (1...9).forEach { count in
+-            let batch = Sample.Batch(count: count, sortedBy: .ascending) { i in i }
+-            let percentiles = (0...64).map { Double($0) / 64 } + [Double.leastNonzeroMagnitude, 1.0.nextDown]
+-            for p in percentiles {
+-                let expected = Swift::min(Int(Double(count) * p), count - 1)
+-                #expect(batch.percentile(p) == expected)
++        @Test
++        func `Percentiles just below one select the maximum of a large batch`() {
++            let batch = Sample.Batch(count: 1000, sortedBy: .ascending) { i in Double(i) }
++            #expect(batch.percentile(0.999) == 999.0)
++            #expect(batch.percentile(1.0.nextDown) == 999.0)
++            #expect(batch.percentile(1.0) == 999.0)
++            #expect(batch.percentile(0.5) == 500.0)
++        }
++
++        @Test
++        func `Every valid percentile selects the truncated index of a small batch`() {
++            (1...9).forEach { count in
++                let batch = Sample.Batch(count: count, sortedBy: .ascending) { i in i }
++                let percentiles = (0...64).map { Double($0) / 64 } + [Double.leastNonzeroMagnitude, 1.0.nextDown]
++                for p in percentiles {
++                    let expected = Swift::min(Int(Double(count) * p), count - 1)
++                    #expect(batch.percentile(p) == expected)
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `Copied sample batches preserve their count and extrema`() {
+-        let batch1 = Sample.Batch([1.0, 2.0, 3.0])
+-        let batch2 = batch1
+-        #expect(batch1.count == batch2.count)
+-        #expect(batch1.min == batch2.min)
+-        #expect(batch1.max == batch2.max)
++        @Test
++        func `Copied sample batches preserve their count and extrema`() {
++            let batch1 = Sample.Batch([1.0, 2.0, 3.0])
++            let batch2 = batch1
++            #expect(batch1.count == batch2.count)
++            #expect(batch1.min == batch2.min)
++            #expect(batch1.max == batch2.max)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Sample.Batch+CoefficientOfVariation Tests.swift b/Tests/Sample Tests/Sample.Batch+CoefficientOfVariation Tests.swift
+index b68e1a1..d49b973 100644
+--- a/Tests/Sample Tests/Sample.Batch+CoefficientOfVariation Tests.swift	
++++ b/Tests/Sample Tests/Sample.Batch+CoefficientOfVariation Tests.swift	
+@@ -1,69 +1,73 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample variation coefficients express relative dispersion` {
++enum `Sample.Batch+CoefficientOfVariation Tests` {}
+ 
+-    @Test
+-    func `Empty sample batches have no coefficient of variation`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.coefficientOfVariation == nil)
+-    }
++extension `Sample.Batch+CoefficientOfVariation Tests` {
++    @Suite
++    struct `Sample variation coefficients express relative dispersion` {
+ 
+-    @Test
+-    func `A single sample has no coefficient of variation`() {
+-        let batch = Sample.Batch([42.0])
+-        #expect(batch.coefficientOfVariation == nil)
+-    }
++        @Test
++        func `Empty sample batches have no coefficient of variation`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.coefficientOfVariation == nil)
++        }
+ 
+-    @Test
+-    func `Uniform samples have zero coefficient of variation`() {
+-        let batch = Sample.Batch([5.0, 5.0, 5.0, 5.0, 5.0])
+-        #expect(batch.coefficientOfVariation == 0.0)
+-    }
++        @Test
++        func `A single sample has no coefficient of variation`() {
++            let batch = Sample.Batch([42.0])
++            #expect(batch.coefficientOfVariation == nil)
++        }
+ 
+-    @Test
+-    func `Sample variation coefficients match the expected relative dispersion`() {
++        @Test
++        func `Uniform samples have zero coefficient of variation`() {
++            let batch = Sample.Batch([5.0, 5.0, 5.0, 5.0, 5.0])
++            #expect(batch.coefficientOfVariation == 0.0)
++        }
+ 
+-        let batch = Sample.Batch([10.0, 20.0, 30.0, 40.0, 50.0])
+-        let cv = batch.coefficientOfVariation!
+-        #expect(abs(cv - 52.705) < 0.01)
+-    }
++        @Test
++        func `Sample variation coefficients match the expected relative dispersion`() {
+ 
+-    @Test
+-    func `Closely grouped samples have a small coefficient of variation`() {
++            let batch = Sample.Batch([10.0, 20.0, 30.0, 40.0, 50.0])
++            let cv = batch.coefficientOfVariation!
++            #expect(abs(cv - 52.705) < 0.01)
++        }
+ 
+-        let batch = Sample.Batch([100.0, 101.0, 99.0, 100.5, 99.5])
+-        let cv = batch.coefficientOfVariation!
+-        #expect(cv < 5.0)
+-    }
++        @Test
++        func `Closely grouped samples have a small coefficient of variation`() {
+ 
+-    @Test
+-    func `Equal duration samples have zero coefficient of variation`() {
+-        let batch = Sample.Batch<Duration>([.seconds(1), .seconds(1), .seconds(1)])
+-        #expect(batch.coefficientOfVariation == 0.0)
+-    }
++            let batch = Sample.Batch([100.0, 101.0, 99.0, 100.5, 99.5])
++            let cv = batch.coefficientOfVariation!
++            #expect(cv < 5.0)
++        }
+ 
+-    @Test
+-    func `Varying duration samples have a positive coefficient of variation`() {
+-        let batch = Sample.Batch<Duration>([
+-            .seconds(10), .seconds(20), .seconds(30), .seconds(40), .seconds(50),
+-        ])
+-        let cv = batch.coefficientOfVariation!
+-        #expect(cv > 20.0)
+-    }
++        @Test
++        func `Equal duration samples have zero coefficient of variation`() {
++            let batch = Sample.Batch<Duration>([.seconds(1), .seconds(1), .seconds(1)])
++            #expect(batch.coefficientOfVariation == 0.0)
++        }
+ 
+-    @Test
+-    func `Samples with a zero mean have no coefficient of variation`() {
+-        let batch = Sample.Batch([-1.0, 0.0, 1.0])
+-        #expect(batch.coefficientOfVariation == nil)
+-    }
++        @Test
++        func `Varying duration samples have a positive coefficient of variation`() {
++            let batch = Sample.Batch<Duration>([
++                .seconds(10), .seconds(20), .seconds(30), .seconds(40), .seconds(50),
++            ])
++            let cv = batch.coefficientOfVariation!
++            #expect(cv > 20.0)
++        }
++
++        @Test
++        func `Samples with a zero mean have no coefficient of variation`() {
++            let batch = Sample.Batch([-1.0, 0.0, 1.0])
++            #expect(batch.coefficientOfVariation == nil)
++        }
+ 
+-    @Test
+-    func `Integer averaging witnesses support coefficients of variation`() {
+-        let batch = Sample.Batch([100, 200, 300, 400, 500])
+-        let cv = batch.coefficientOfVariation(using: .integer)
+-        #expect(cv != nil)
+-        #expect(cv! > 0)
++        @Test
++        func `Integer averaging witnesses support coefficients of variation`() {
++            let batch = Sample.Batch([100, 200, 300, 400, 500])
++            let cv = batch.coefficientOfVariation(using: .integer)
++            #expect(cv != nil)
++            #expect(cv! > 0)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Sample.Batch+MedianAbsoluteDeviation Tests.swift b/Tests/Sample Tests/Sample.Batch+MedianAbsoluteDeviation Tests.swift
+index 816ab08..560bf08 100644
+--- a/Tests/Sample Tests/Sample.Batch+MedianAbsoluteDeviation Tests.swift	
++++ b/Tests/Sample Tests/Sample.Batch+MedianAbsoluteDeviation Tests.swift	
+@@ -1,87 +1,91 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample median deviations measure robust dispersion and outliers` {
+-
+-    @Test
+-    func `Empty sample batches have no median absolute deviation`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.medianAbsoluteDeviation == nil)
+-    }
+-
+-    @Test
+-    func `A single sample has zero median absolute deviation`() {
+-        let batch = Sample.Batch([42.0])
+-        #expect(batch.medianAbsoluteDeviation == 0.0)
+-    }
+-
+-    @Test
+-    func `Uniform samples have zero median absolute deviation`() {
+-        let batch = Sample.Batch([7.0, 7.0, 7.0, 7.0, 7.0])
+-        #expect(batch.medianAbsoluteDeviation == 0.0)
+-    }
+-
+-    @Test
+-    func `Sample median absolute deviation matches the expected dispersion`() {
+-
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
+-        #expect(batch.medianAbsoluteDeviation == 1.0)
+-    }
+-
+-    @Test
+-    func `Median absolute deviation resists a distant outlier`() {
+-
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 100.0])
+-        #expect(batch.medianAbsoluteDeviation == 1.0)
+-    }
+-
+-    @Test
+-    func `Duration samples preserve the duration unit of median absolute deviation`() {
+-        let batch = Sample.Batch<Duration>([
+-            .seconds(1), .seconds(2), .seconds(3), .seconds(4), .seconds(5),
+-        ])
+-        #expect(batch.medianAbsoluteDeviation == .seconds(1))
+-    }
+-
+-    @Test
+-    func `Empty sample batches have no outlier count`() {
+-        let batch = Sample.Batch<Double>([], sortedBy: .ascending)
+-        #expect(batch.outlierCount() == nil)
+-    }
+-
+-    @Test
+-    func `Uniform sample batches contain no outliers`() {
+-        let batch = Sample.Batch([5.0, 5.0, 5.0, 5.0, 5.0])
+-        #expect(batch.outlierCount() == 0)
+-    }
+-
+-    @Test
+-    func `Evenly spaced samples remain within the default outlier threshold`() {
+-
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
+-        #expect(batch.outlierCount() == 0)
+-    }
+-
+-    @Test
+-    func `Sample outlier counting identifies a distant observation`() {
+-
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 100.0])
+-        #expect(batch.outlierCount() == 1)
+-    }
+-
+-    @Test
+-    func `Sample outlier counting applies the requested threshold`() {
+-
+-        let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
+-        #expect(batch.outlierCount(threshold: 1.5) == 2)
+-    }
+-
+-    @Test
+-    func `Duration sample outlier counting identifies a distant duration`() {
+-        let batch = Sample.Batch<Duration>([
+-            .seconds(1), .seconds(2), .seconds(3), .seconds(4), .seconds(100),
+-        ])
+-        #expect(batch.outlierCount() == 1)
++enum `Sample.Batch+MedianAbsoluteDeviation Tests` {}
++
++extension `Sample.Batch+MedianAbsoluteDeviation Tests` {
++    @Suite
++    struct `Sample median deviations measure robust dispersion and outliers` {
++
++        @Test
++        func `Empty sample batches have no median absolute deviation`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.medianAbsoluteDeviation == nil)
++        }
++
++        @Test
++        func `A single sample has zero median absolute deviation`() {
++            let batch = Sample.Batch([42.0])
++            #expect(batch.medianAbsoluteDeviation == 0.0)
++        }
++
++        @Test
++        func `Uniform samples have zero median absolute deviation`() {
++            let batch = Sample.Batch([7.0, 7.0, 7.0, 7.0, 7.0])
++            #expect(batch.medianAbsoluteDeviation == 0.0)
++        }
++
++        @Test
++        func `Sample median absolute deviation matches the expected dispersion`() {
++
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
++            #expect(batch.medianAbsoluteDeviation == 1.0)
++        }
++
++        @Test
++        func `Median absolute deviation resists a distant outlier`() {
++
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 100.0])
++            #expect(batch.medianAbsoluteDeviation == 1.0)
++        }
++
++        @Test
++        func `Duration samples preserve the duration unit of median absolute deviation`() {
++            let batch = Sample.Batch<Duration>([
++                .seconds(1), .seconds(2), .seconds(3), .seconds(4), .seconds(5),
++            ])
++            #expect(batch.medianAbsoluteDeviation == .seconds(1))
++        }
++
++        @Test
++        func `Empty sample batches have no outlier count`() {
++            let batch = Sample.Batch<Double>([], sortedBy: .ascending)
++            #expect(batch.outlierCount() == nil)
++        }
++
++        @Test
++        func `Uniform sample batches contain no outliers`() {
++            let batch = Sample.Batch([5.0, 5.0, 5.0, 5.0, 5.0])
++            #expect(batch.outlierCount() == 0)
++        }
++
++        @Test
++        func `Evenly spaced samples remain within the default outlier threshold`() {
++
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
++            #expect(batch.outlierCount() == 0)
++        }
++
++        @Test
++        func `Sample outlier counting identifies a distant observation`() {
++
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 100.0])
++            #expect(batch.outlierCount() == 1)
++        }
++
++        @Test
++        func `Sample outlier counting applies the requested threshold`() {
++
++            let batch = Sample.Batch([1.0, 2.0, 3.0, 4.0, 5.0])
++            #expect(batch.outlierCount(threshold: 1.5) == 2)
++        }
++
++        @Test
++        func `Duration sample outlier counting identifies a distant duration`() {
++            let batch = Sample.Batch<Duration>([
++                .seconds(1), .seconds(2), .seconds(3), .seconds(4), .seconds(100),
++            ])
++            #expect(batch.outlierCount() == 1)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Sample.Comparison Tests.swift b/Tests/Sample Tests/Sample.Comparison Tests.swift
+index 64c710b..537155b 100644
+--- a/Tests/Sample Tests/Sample.Comparison Tests.swift	
++++ b/Tests/Sample Tests/Sample.Comparison Tests.swift	
+@@ -1,110 +1,114 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample comparisons classify metric changes using the requested polarity` {
++enum `Sample.Comparison Tests` {}
+ 
+-    @Test
+-    func `Increasing sample means indicate regression when lower values are preferred`() {
+-        let baseline = Sample.Batch([10.0, 20.0, 30.0])
+-        let current = Sample.Batch([15.0, 25.0, 35.0])
+-        let comparison = Sample.Comparison(
+-            baseline: baseline,
+-            current: current,
+-            metric: .mean,
+-            polarity: .lowerIsBetter
+-        )
+-        #expect(comparison.isRegression)
+-        #expect(!comparison.isImprovement)
+-    }
++extension `Sample.Comparison Tests` {
++    @Suite
++    struct `Sample comparisons classify metric changes using the requested polarity` {
+ 
+-    @Test
+-    func `Decreasing sample means indicate improvement when lower values are preferred`() {
+-        let baseline = Sample.Batch([10.0, 20.0, 30.0])
+-        let current = Sample.Batch([5.0, 15.0, 25.0])
+-        let comparison = Sample.Comparison(
+-            baseline: baseline,
+-            current: current,
+-            metric: .mean,
+-            polarity: .lowerIsBetter
+-        )
+-        #expect(!comparison.isRegression)
+-        #expect(comparison.isImprovement)
+-    }
++        @Test
++        func `Increasing sample means indicate regression when lower values are preferred`() {
++            let baseline = Sample.Batch([10.0, 20.0, 30.0])
++            let current = Sample.Batch([15.0, 25.0, 35.0])
++            let comparison = Sample.Comparison(
++                baseline: baseline,
++                current: current,
++                metric: .mean,
++                polarity: .lowerIsBetter
++            )
++            #expect(comparison.isRegression)
++            #expect(!comparison.isImprovement)
++        }
+ 
+-    @Test
+-    func `Decreasing sample means indicate regression when higher values are preferred`() {
+-        let baseline = Sample.Batch([100.0, 200.0, 300.0])
+-        let current = Sample.Batch([50.0, 150.0, 250.0])
+-        let comparison = Sample.Comparison(
+-            baseline: baseline,
+-            current: current,
+-            metric: .mean,
+-            polarity: .higherIsBetter
+-        )
+-        #expect(comparison.isRegression)
+-        #expect(!comparison.isImprovement)
+-    }
++        @Test
++        func `Decreasing sample means indicate improvement when lower values are preferred`() {
++            let baseline = Sample.Batch([10.0, 20.0, 30.0])
++            let current = Sample.Batch([5.0, 15.0, 25.0])
++            let comparison = Sample.Comparison(
++                baseline: baseline,
++                current: current,
++                metric: .mean,
++                polarity: .lowerIsBetter
++            )
++            #expect(!comparison.isRegression)
++            #expect(comparison.isImprovement)
++        }
+ 
+-    @Test
+-    func `Sample comparisons report relative metric change`() {
+-        let baseline = Sample.Batch([100.0])
+-        let current = Sample.Batch([110.0])
+-        let comparison = Sample.Comparison(
+-            baseline: baseline,
+-            current: current,
+-            metric: .mean,
+-            polarity: .lowerIsBetter
+-        )
+-        let change = comparison.change
+-        #expect(change != nil)
+-        #expect(abs(change! - 0.1) < 0.001)
+-    }
++        @Test
++        func `Decreasing sample means indicate regression when higher values are preferred`() {
++            let baseline = Sample.Batch([100.0, 200.0, 300.0])
++            let current = Sample.Batch([50.0, 150.0, 250.0])
++            let comparison = Sample.Comparison(
++                baseline: baseline,
++                current: current,
++                metric: .mean,
++                polarity: .higherIsBetter
++            )
++            #expect(comparison.isRegression)
++            #expect(!comparison.isImprovement)
++        }
+ 
+-    @Test
+-    func `Sample comparisons test relative change against the requested tolerance`() {
+-        let baseline = Sample.Batch([100.0])
+-        let current = Sample.Batch([115.0])
+-        let comparison = Sample.Comparison(
+-            baseline: baseline,
+-            current: current,
+-            metric: .mean,
+-            polarity: .lowerIsBetter
+-        )
+-        #expect(comparison.exceedsTolerance(0.10))
+-        #expect(!comparison.exceedsTolerance(0.20))
+-    }
++        @Test
++        func `Sample comparisons report relative metric change`() {
++            let baseline = Sample.Batch([100.0])
++            let current = Sample.Batch([110.0])
++            let comparison = Sample.Comparison(
++                baseline: baseline,
++                current: current,
++                metric: .mean,
++                polarity: .lowerIsBetter
++            )
++            let change = comparison.change
++            #expect(change != nil)
++            #expect(abs(change! - 0.1) < 0.001)
++        }
+ 
+-    @Test
+-    func `Empty sample comparisons report neither change nor improvement or regression`() {
+-        let baseline = Sample.Batch<Double>([], sortedBy: .ascending)
+-        let current = Sample.Batch<Double>([], sortedBy: .ascending)
+-        let comparison = Sample.Comparison(
+-            baseline: baseline,
+-            current: current,
+-            metric: .mean,
+-            polarity: .lowerIsBetter
+-        )
+-        #expect(comparison.change == nil)
+-        #expect(!comparison.isRegression)
+-        #expect(!comparison.isImprovement)
+-    }
++        @Test
++        func `Sample comparisons test relative change against the requested tolerance`() {
++            let baseline = Sample.Batch([100.0])
++            let current = Sample.Batch([115.0])
++            let comparison = Sample.Comparison(
++                baseline: baseline,
++                current: current,
++                metric: .mean,
++                polarity: .lowerIsBetter
++            )
++            #expect(comparison.exceedsTolerance(0.10))
++            #expect(!comparison.exceedsTolerance(0.20))
++        }
+ 
+-    @Test
+-    func `Sample metric extraction returns the requested minimum maximum or mean`() {
+-        let batch = Sample.Batch([10.0, 20.0, 30.0, 40.0, 50.0])
+-        let minVal = Sample.Metric.min.extract(from: batch, using: .real)
+-        #expect(minVal == 10.0)
+-        let maxVal = Sample.Metric.max.extract(from: batch, using: .real)
+-        #expect(maxVal == 50.0)
+-        let meanVal = Sample.Metric.mean.extract(from: batch, using: .real)
+-        #expect(meanVal == 30.0)
+-    }
++        @Test
++        func `Empty sample comparisons report neither change nor improvement or regression`() {
++            let baseline = Sample.Batch<Double>([], sortedBy: .ascending)
++            let current = Sample.Batch<Double>([], sortedBy: .ascending)
++            let comparison = Sample.Comparison(
++                baseline: baseline,
++                current: current,
++                metric: .mean,
++                polarity: .lowerIsBetter
++            )
++            #expect(comparison.change == nil)
++            #expect(!comparison.isRegression)
++            #expect(!comparison.isImprovement)
++        }
++
++        @Test
++        func `Sample metric extraction returns the requested minimum maximum or mean`() {
++            let batch = Sample.Batch([10.0, 20.0, 30.0, 40.0, 50.0])
++            let minVal = Sample.Metric.min.extract(from: batch, using: .real)
++            #expect(minVal == 10.0)
++            let maxVal = Sample.Metric.max.extract(from: batch, using: .real)
++            #expect(maxVal == 50.0)
++            let meanVal = Sample.Metric.mean.extract(from: batch, using: .real)
++            #expect(meanVal == 30.0)
++        }
+ 
+-    @Test
+-    func `Sample polarity distinguishes preferences for lower and higher values`() {
+-        let lower: Sample.Polarity = .lowerIsBetter
+-        let higher: Sample.Polarity = .higherIsBetter
+-        #expect(lower != higher)
++        @Test
++        func `Sample polarity distinguishes preferences for lower and higher values`() {
++            let lower: Sample.Polarity = .lowerIsBetter
++            let higher: Sample.Polarity = .higherIsBetter
++            #expect(lower != higher)
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/Sample.Regression Tests.swift b/Tests/Sample Tests/Sample.Regression Tests.swift
+index 476bff0..36de5d8 100644
+--- a/Tests/Sample Tests/Sample.Regression Tests.swift	
++++ b/Tests/Sample Tests/Sample.Regression Tests.swift	
+@@ -1,14 +1,21 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample regression fits linear relationships and reports degeneracy` {
++enum `Sample.Regression Tests` {}
+ 
++extension `Sample.Regression Tests` {
++    @Suite
++    struct `Sample regression fits linear relationships and reports degeneracy` {
++    }
++}
++
++extension `Sample.Regression Tests`.`Sample regression fits linear relationships and reports degeneracy` {
+     @Suite struct `Linear regression recovers slopes intercepts and fit quality` {}
++
+     @Suite struct `Linear regression handles sparse degenerate and large observations` {}
+ }
+ 
+-extension `Sample regression fits linear relationships and reports degeneracy`.`Linear regression recovers slopes intercepts and fit quality` {
++extension `Sample.Regression Tests`.`Sample regression fits linear relationships and reports degeneracy`.`Linear regression recovers slopes intercepts and fit quality` {
+ 
+     @Test
+     func `Linear regression recovers an exact slope intercept and perfect fit`() {
+@@ -69,7 +76,7 @@ extension `Sample regression fits linear relationships and reports degeneracy`.`
+     }
+ }
+ 
+-extension `Sample regression fits linear relationships and reports degeneracy`.`Linear regression handles sparse degenerate and large observations` {
++extension `Sample.Regression Tests`.`Sample regression fits linear relationships and reports degeneracy`.`Linear regression handles sparse degenerate and large observations` {
+ 
+     @Test
+     func `Two distinct points determine an exact linear fit`() {
+diff --git a/Tests/Sample Tests/Sample.Trend+MannKendall Tests.swift b/Tests/Sample Tests/Sample.Trend+MannKendall Tests.swift
+index 0f8826d..dee7702 100644
+--- a/Tests/Sample Tests/Sample.Trend+MannKendall Tests.swift	
++++ b/Tests/Sample Tests/Sample.Trend+MannKendall Tests.swift	
+@@ -1,14 +1,23 @@
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Mann Kendall trends quantify ordered evidence with tie correction` {
++enum `Sample.Trend+MannKendall Tests` {}
++
++extension `Sample.Trend+MannKendall Tests` {
++    @Suite
++    struct `Mann Kendall trends quantify ordered evidence with tie correction` {
++    }
++}
++
++extension `Sample.Trend+MannKendall Tests`.`Mann Kendall trends quantify ordered evidence with tie correction` {
+     @Suite struct `Mann Kendall evidence distinguishes increasing decreasing and flat observations` {}
++
+     @Suite struct `Mann Kendall evidence handles nonfinite and short observation sequences` {}
++
+     @Suite struct `Mann Kendall projections support generic ordered samples` {}
+ }
+ 
+-extension `Mann Kendall trends quantify ordered evidence with tie correction`.`Mann Kendall evidence distinguishes increasing decreasing and flat observations` {
++extension `Sample.Trend+MannKendall Tests`.`Mann Kendall trends quantify ordered evidence with tie correction`.`Mann Kendall evidence distinguishes increasing decreasing and flat observations` {
+     @Test
+     func `Increasing observations produce positive Mann Kendall evidence`() {
+         let trend = Sample.Trend.mannKendall([1.0, 2.0, 3.0, 4.0, 5.0], value: { $0 })
+@@ -50,7 +59,7 @@ extension `Mann Kendall trends quantify ordered evidence with tie correction`.`M
+     }
+ }
+ 
+-extension `Mann Kendall trends quantify ordered evidence with tie correction`.`Mann Kendall evidence handles nonfinite and short observation sequences` {
++extension `Sample.Trend+MannKendall Tests`.`Mann Kendall trends quantify ordered evidence with tie correction`.`Mann Kendall evidence handles nonfinite and short observation sequences` {
+     @Test
+     func `non-finite observations are explicitly excluded`() {
+         let trend = Sample.Trend.mannKendall(
+@@ -75,7 +84,7 @@ extension `Mann Kendall trends quantify ordered evidence with tie correction`.`M
+     }
+ }
+ 
+-extension `Mann Kendall trends quantify ordered evidence with tie correction`.`Mann Kendall projections support generic ordered samples` {
++extension `Sample.Trend+MannKendall Tests`.`Mann Kendall trends quantify ordered evidence with tie correction`.`Mann Kendall projections support generic ordered samples` {
+     @Test
+     func `projection supports generic ordered samples`() {
+         struct Observation {
+diff --git a/Tests/Sample Tests/swift-sample-algebra/Sample Algebra Tests.swift b/Tests/Sample Tests/swift-sample-algebra/Sample Algebra Tests.swift
+index 5e95c12..49576ad 100644
+--- a/Tests/Sample Tests/swift-sample-algebra/Sample Algebra Tests.swift	
++++ b/Tests/Sample Tests/swift-sample-algebra/Sample Algebra Tests.swift	
+@@ -2,22 +2,24 @@ import Algebra
+ import Sample
+ import Testing
+ 
+-@Suite
+-struct `Sample Algebra Tests` {
++extension `Sample Algebra Tests`.`Sample Algebra Tests` {
++    @Suite
++    struct `Sample Algebra Tests` {
+ 
+-    @Test
+-    func `commutative monoid delegates to the sample accumulator`() {
+-        var lhs = Sample.Accumulator.empty
+-        lhs.record(10)
+-        lhs.record(30)
++        @Test
++        func `commutative monoid delegates to the sample accumulator`() {
++            var lhs = Sample.Accumulator.empty
++            lhs.record(10)
++            lhs.record(30)
+ 
+-        var rhs = Sample.Accumulator.empty
+-        rhs.record(20)
++            var rhs = Sample.Accumulator.empty
++            rhs.record(20)
+ 
+-        let monoid = Sample.Accumulator.commutativeMonoid
++            let monoid = Sample.Accumulator.commutativeMonoid
+ 
+-        #expect(monoid.identity == .empty)
+-        #expect(monoid(lhs, rhs) == lhs.merged(with: rhs))
+-        #expect(monoid(lhs, rhs) == monoid(rhs, lhs))
++            #expect(monoid.identity == .empty)
++            #expect(monoid(lhs, rhs) == lhs.merged(with: rhs))
++            #expect(monoid(lhs, rhs) == monoid(rhs, lhs))
++        }
+     }
+ }
+diff --git a/Tests/Sample Tests/swift-sample-time/Sample Time Tests.swift b/Tests/Sample Tests/swift-sample-time/Sample Time Tests.swift
+index 917647b..13b97aa 100644
+--- a/Tests/Sample Tests/swift-sample-time/Sample Time Tests.swift	
++++ b/Tests/Sample Tests/swift-sample-time/Sample Time Tests.swift	
+@@ -2,41 +2,45 @@ import Sample
+ import Testing
+ import Time
+ 
+-@Suite
+-struct `Duration sampling retains temporal units` {
+-    @Test func `duration averaging projects and embeds signed fractional seconds`() {
+-        let averaging = Sample.Averaging<Duration>.duration
+-        #expect(averaging.zero == .zero)
+-        #expect(averaging.project(.milliseconds(1250)) == 1.25)
+-        #expect(averaging.project(.milliseconds(-1250)) == -1.25)
+-        #expect(averaging.embed(1.25) == .milliseconds(1250))
+-        #expect(averaging.embed(-1.25) == .milliseconds(-1250))
+-        #expect(averaging.project(.init(attoseconds: 1)) == 1e-18)
+-    }
++enum `Sample Time Tests` {}
+ 
+-    @Test func `duration samples retain their sum mean and dispersion`() {
+-        let averaging = Sample.Averaging<Duration>.duration
+-        let batch = Sample.Batch([
+-            Duration.milliseconds(-500), .milliseconds(500), .milliseconds(1500),
+-        ])
+-        #expect(batch.sum(using: averaging) == .milliseconds(1500))
+-        #expect(batch.mean(using: averaging) == .milliseconds(500))
+-        #expect(batch.standardDeviation(using: averaging) == .seconds(1))
+-    }
++extension `Sample Time Tests` {
++    @Suite
++    struct `Duration sampling retains temporal units` {
++        @Test func `duration averaging projects and embeds signed fractional seconds`() {
++            let averaging = Sample.Averaging<Duration>.duration
++            #expect(averaging.zero == .zero)
++            #expect(averaging.project(.milliseconds(1250)) == 1.25)
++            #expect(averaging.project(.milliseconds(-1250)) == -1.25)
++            #expect(averaging.embed(1.25) == .milliseconds(1250))
++            #expect(averaging.embed(-1.25) == .milliseconds(-1250))
++            #expect(averaging.project(.init(attoseconds: 1)) == 1e-18)
++        }
+ 
+-    @Test func `duration sampling adopts the lower projection and preserves the scalar conversion`() {
+-        let averaging = Sample.Averaging<Duration>.duration
+-        let duration = Duration(
+-            secondsComponent: 1000,
+-            attosecondsComponent: 250_000_000_000_000_000
+-        )
+-        #expect(averaging.project(duration) == 1000.25)
+-        #expect(duration.inSeconds.bitPattern == 4_652_009_507_864_444_927)
+-    }
++        @Test func `duration samples retain their sum mean and dispersion`() {
++            let averaging = Sample.Averaging<Duration>.duration
++            let batch = Sample.Batch([
++                Duration.milliseconds(-500), .milliseconds(500), .milliseconds(1500),
++            ])
++            #expect(batch.sum(using: averaging) == .milliseconds(1500))
++            #expect(batch.mean(using: averaging) == .milliseconds(500))
++            #expect(batch.standardDeviation(using: averaging) == .seconds(1))
++        }
++
++        @Test func `duration sampling adopts the lower projection and preserves the scalar conversion`() {
++            let averaging = Sample.Averaging<Duration>.duration
++            let duration = Duration(
++                secondsComponent: 1000,
++                attosecondsComponent: 250_000_000_000_000_000
++            )
++            #expect(averaging.project(duration) == 1000.25)
++            #expect(duration.inSeconds.bitPattern == 4_652_009_507_864_444_927)
++        }
+ 
+-    @Test func `duration projection accepts the full native storage range`() {
+-        let averaging = Sample.Averaging<Duration>.duration
+-        #expect(averaging.project(.init(attoseconds: .max)).bitPattern == 0x4422_725d_d1d2_43ac)
+-        #expect(averaging.project(.init(attoseconds: .min)).bitPattern == 0xc422_725d_d1d2_43ac)
++        @Test func `duration projection accepts the full native storage range`() {
++            let averaging = Sample.Averaging<Duration>.duration
++            #expect(averaging.project(.init(attoseconds: .max)).bitPattern == 0x4422_725d_d1d2_43ac)
++            #expect(averaging.project(.init(attoseconds: .min)).bitPattern == 0xc422_725d_d1d2_43ac)
++        }
+     }
+ }
+-- 
+2.43.0
+

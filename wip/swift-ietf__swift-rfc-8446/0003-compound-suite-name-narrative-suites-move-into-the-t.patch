@@ -1,0 +1,1341 @@
+From 4e8b9d23e22925e41db3c4035a5ca76b8eaf8c5a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:18 +0000
+Subject: [PATCH 3/3] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../RFC_8446_Record_UInt8 Tests.swift         |  40 +-
+ .../RFC_8446 ClientHello Bounds Tests.swift   |  64 ++--
+ ...RFC_8446 Extension Wire Bounds Tests.swift |  72 ++--
+ .../RFC_8446 Message Wire Bounds Tests.swift  |  70 ++--
+ Tests/RFC 8446 Tests/RFC_8446 Tests.swift     |   2 +
+ .../RFC_8446_ExtensionRoundTrip Tests.swift   | 346 +++++++++---------
+ .../RFC_8446_HandshakeRoundTrip Tests.swift   | 238 ++++++------
+ .../RFC_8446_KeySchedule Tests.swift          |  12 +-
+ .../RFC_8446_RFC8448_Message Tests.swift      | 328 +++++++++--------
+ 9 files changed, 604 insertions(+), 568 deletions(-)
+
+diff --git a/Tests/RFC 8446 Standard Library Integration Tests/RFC_8446_Record_UInt8 Tests.swift b/Tests/RFC 8446 Standard Library Integration Tests/RFC_8446_Record_UInt8 Tests.swift
+index f12b4a0..5eaf194 100644
+--- a/Tests/RFC 8446 Standard Library Integration Tests/RFC_8446_Record_UInt8 Tests.swift	
++++ b/Tests/RFC 8446 Standard Library Integration Tests/RFC_8446_Record_UInt8 Tests.swift	
+@@ -2,28 +2,32 @@ import RFC_8446
+ import RFC_8446_Standard_Library_Integration
+ import Testing
+ 
+-@Suite
+-struct `RFC 8446 Record UInt8 forwarder` {
+-    @Test
+-    func `forwarder agrees with primary byte-domain construction`() throws {
+-        let uint8Fragment: [UInt8] = [1, 2, 3, 4]
+-        let record = try RFC_8446.Record(contentType: .handshake, fragment: uint8Fragment)
++enum `RFC_8446_Record_UInt8 Tests` {}
+ 
+-        #expect(record.contentType == .handshake)
+-        #expect(record.legacyVersion == .legacy)
+-        #expect(record.fragment.count == 4)
++extension `RFC_8446_Record_UInt8 Tests` {
++    @Suite
++    struct `RFC 8446 Record UInt8 forwarder` {
++        @Test
++        func `forwarder agrees with primary byte-domain construction`() throws {
++            let uint8Fragment: [UInt8] = [1, 2, 3, 4]
++            let record = try RFC_8446.Record(contentType: .handshake, fragment: uint8Fragment)
+ 
+-        let byteFragment: [Byte] = uint8Fragment.map(Byte.init(bitPattern:))
+-        let primaryRecord = try RFC_8446.Record(contentType: .handshake, fragment: byteFragment)
+-        #expect(record == primaryRecord)
+-    }
++            #expect(record.contentType == .handshake)
++            #expect(record.legacyVersion == .legacy)
++            #expect(record.fragment.count == 4)
++
++            let byteFragment: [Byte] = uint8Fragment.map(Byte.init(bitPattern:))
++            let primaryRecord = try RFC_8446.Record(contentType: .handshake, fragment: byteFragment)
++            #expect(record == primaryRecord)
++        }
+ 
+-    @Test
+-    func `forwarder rejects oversized fragment`() {
+-        let largeFragment = Array(repeating: UInt8(0), count: 16385)
++        @Test
++        func `forwarder rejects oversized fragment`() {
++            let largeFragment = Array(repeating: UInt8(0), count: 16385)
+ 
+-        #expect(throws: RFC_8446.Record.Error.self) {
+-            try RFC_8446.Record(contentType: .applicationData, fragment: largeFragment)
++            #expect(throws: RFC_8446.Record.Error.self) {
++                try RFC_8446.Record(contentType: .applicationData, fragment: largeFragment)
++            }
+         }
+     }
+ }
+diff --git a/Tests/RFC 8446 Tests/RFC_8446 ClientHello Bounds Tests.swift b/Tests/RFC 8446 Tests/RFC_8446 ClientHello Bounds Tests.swift
+index 3bf9dd2..3e859c4 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446 ClientHello Bounds Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446 ClientHello Bounds Tests.swift	
+@@ -2,42 +2,46 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `ClientHello wire bounds` {
+-    private static func hello(sessionID: Int, suites: Int, compression: Int) -> [Byte] {
+-        var bytes: [UInt8] = [0x03, 0x03] + [UInt8](repeating: 0, count: 32)
+-        bytes += [UInt8(sessionID)] + [UInt8](repeating: 0xAA, count: sessionID)
+-        bytes += [UInt8((suites * 2) >> 8), UInt8((suites * 2) & 0xFF)]
+-        for _ in 0..<suites { bytes += [0x13, 0x01] }
+-        bytes += [UInt8(compression)] + [UInt8](repeating: 0, count: compression)
+-        bytes += [0x00, 0x00]
+-        return bytes.map { Byte($0) }
+-    }
++enum `RFC_8446 ClientHello Bounds Tests` {}
+ 
+-    @Test
+-    func `a well-formed hello parses`() throws {
+-        let hello = try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 32, suites: 1, compression: 1))
+-        #expect(hello.legacySessionID.count == 32)
+-    }
++extension `RFC_8446 ClientHello Bounds Tests` {
++    @Suite
++    struct `ClientHello wire bounds` {
++        private static func hello(sessionID: Int, suites: Int, compression: Int) -> [Byte] {
++            var bytes: [UInt8] = [0x03, 0x03] + [UInt8](repeating: 0, count: 32)
++            bytes += [UInt8(sessionID)] + [UInt8](repeating: 0xAA, count: sessionID)
++            bytes += [UInt8((suites * 2) >> 8), UInt8((suites * 2) & 0xFF)]
++            for _ in 0..<suites { bytes += [0x13, 0x01] }
++            bytes += [UInt8(compression)] + [UInt8](repeating: 0, count: compression)
++            bytes += [0x00, 0x00]
++            return bytes.map { Byte($0) }
++        }
+ 
+-    @Test
+-    func `a session id longer than 32 bytes is refused`() {
+-        #expect(throws: RFC_8446.Handshake.ClientHello.Error.invalidSessionIDLength(33)) {
+-            try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 33, suites: 1, compression: 1))
++        @Test
++        func `a well-formed hello parses`() throws {
++            let hello = try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 32, suites: 1, compression: 1))
++            #expect(hello.legacySessionID.count == 32)
+         }
+-    }
+ 
+-    @Test
+-    func `an empty cipher suite list is refused`() {
+-        #expect(throws: RFC_8446.Handshake.ClientHello.Error.invalidCipherSuiteCount(0)) {
+-            try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 0, suites: 0, compression: 1))
++        @Test
++        func `a session id longer than 32 bytes is refused`() {
++            #expect(throws: RFC_8446.Handshake.ClientHello.Error.invalidSessionIDLength(33)) {
++                try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 33, suites: 1, compression: 1))
++            }
++        }
++
++        @Test
++        func `an empty cipher suite list is refused`() {
++            #expect(throws: RFC_8446.Handshake.ClientHello.Error.invalidCipherSuiteCount(0)) {
++                try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 0, suites: 0, compression: 1))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `an empty compression method list is refused`() {
+-        #expect(throws: RFC_8446.Handshake.ClientHello.Error.invalidCompressionMethodsLength(0)) {
+-            try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 0, suites: 1, compression: 0))
++        @Test
++        func `an empty compression method list is refused`() {
++            #expect(throws: RFC_8446.Handshake.ClientHello.Error.invalidCompressionMethodsLength(0)) {
++                try RFC_8446.Handshake.ClientHello(binary: Self.hello(sessionID: 0, suites: 1, compression: 0))
++            }
+         }
+     }
+ }
+diff --git a/Tests/RFC 8446 Tests/RFC_8446 Extension Wire Bounds Tests.swift b/Tests/RFC 8446 Tests/RFC_8446 Extension Wire Bounds Tests.swift
+index 2cf47ff..66c1f87 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446 Extension Wire Bounds Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446 Extension Wire Bounds Tests.swift	
+@@ -2,49 +2,53 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `Extension wire bounds` {
+-    private static let emptyVector16: [Byte] = [Byte(0), Byte(0)]
+-
+-    @Test
+-    func `an empty supported groups list is refused`() {
+-        #expect(throws: RFC_8446.Extension.SupportedGroups.Error.self) {
+-            try RFC_8446.Extension.SupportedGroups(binary: Self.emptyVector16)
++enum `RFC_8446 Extension Wire Bounds Tests` {}
++
++extension `RFC_8446 Extension Wire Bounds Tests` {
++    @Suite
++    struct `Extension wire bounds` {
++        private static let emptyVector16: [Byte] = [Byte(0), Byte(0)]
++
++        @Test
++        func `an empty supported groups list is refused`() {
++            #expect(throws: RFC_8446.Extension.SupportedGroups.Error.self) {
++                try RFC_8446.Extension.SupportedGroups(binary: Self.emptyVector16)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `an empty signature algorithms list is refused`() {
+-        #expect(throws: RFC_8446.Extension.SignatureAlgorithms.Error.self) {
+-            try RFC_8446.Extension.SignatureAlgorithms(binary: Self.emptyVector16)
++        @Test
++        func `an empty signature algorithms list is refused`() {
++            #expect(throws: RFC_8446.Extension.SignatureAlgorithms.Error.self) {
++                try RFC_8446.Extension.SignatureAlgorithms(binary: Self.emptyVector16)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `an empty certificate signature algorithms list is refused`() {
+-        #expect(throws: RFC_8446.Extension.SignatureAlgorithmsCert.Error.self) {
+-            try RFC_8446.Extension.SignatureAlgorithmsCert(binary: Self.emptyVector16)
++        @Test
++        func `an empty certificate signature algorithms list is refused`() {
++            #expect(throws: RFC_8446.Extension.SignatureAlgorithmsCert.Error.self) {
++                try RFC_8446.Extension.SignatureAlgorithmsCert(binary: Self.emptyVector16)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `an empty PSK key exchange mode list is refused`() {
+-        #expect(throws: RFC_8446.Extension.PskKeyExchangeModes.Error.self) {
+-            try RFC_8446.Extension.PskKeyExchangeModes(binary: [Byte(0)])
++        @Test
++        func `an empty PSK key exchange mode list is refused`() {
++            #expect(throws: RFC_8446.Extension.PskKeyExchangeModes.Error.self) {
++                try RFC_8446.Extension.PskKeyExchangeModes(binary: [Byte(0)])
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `an empty cookie is refused`() {
+-        #expect(throws: RFC_8446.Extension.Cookie.Error.self) {
+-            try RFC_8446.Extension.Cookie(binary: Self.emptyVector16)
++        @Test
++        func `an empty cookie is refused`() {
++            #expect(throws: RFC_8446.Extension.Cookie.Error.self) {
++                try RFC_8446.Extension.Cookie(binary: Self.emptyVector16)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `non-empty lists still parse`() throws {
+-        _ = try RFC_8446.Extension.SupportedGroups(binary: [0, 2, 0, 0x1D].map { Byte($0) })
+-        _ = try RFC_8446.Extension.PskKeyExchangeModes(binary: [1, 1].map { Byte($0) })
+-        _ = try RFC_8446.Extension.Cookie(binary: [0, 1, 0xAB].map { Byte($0) })
++        @Test
++        func `non-empty lists still parse`() throws {
++            _ = try RFC_8446.Extension.SupportedGroups(binary: [0, 2, 0, 0x1D].map { Byte($0) })
++            _ = try RFC_8446.Extension.PskKeyExchangeModes(binary: [1, 1].map { Byte($0) })
++            _ = try RFC_8446.Extension.Cookie(binary: [0, 1, 0xAB].map { Byte($0) })
++        }
+     }
+ }
+diff --git a/Tests/RFC 8446 Tests/RFC_8446 Message Wire Bounds Tests.swift b/Tests/RFC 8446 Tests/RFC_8446 Message Wire Bounds Tests.swift
+index 1acdabc..28d0e2b 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446 Message Wire Bounds Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446 Message Wire Bounds Tests.swift	
+@@ -2,46 +2,50 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `Message wire bounds` {
+-    private static func bytes(_ values: [UInt8]) -> [Byte] { values.map { Byte($0) } }
++enum `RFC_8446 Message Wire Bounds Tests` {}
+ 
+-    @Test
+-    func `an empty certificate authority name is refused`() {
+-        #expect(throws: RFC_8446.Extension.CertificateAuthorities.Error.self) {
+-            try RFC_8446.Extension.CertificateAuthorities(binary: Self.bytes([0, 2, 0, 0]))
++extension `RFC_8446 Message Wire Bounds Tests` {
++    @Suite
++    struct `Message wire bounds` {
++        private static func bytes(_ values: [UInt8]) -> [Byte] { values.map { Byte($0) } }
++
++        @Test
++        func `an empty certificate authority name is refused`() {
++            #expect(throws: RFC_8446.Extension.CertificateAuthorities.Error.self) {
++                try RFC_8446.Extension.CertificateAuthorities(binary: Self.bytes([0, 2, 0, 0]))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `an empty session ticket is refused`() {
+-        let wire: [UInt8] = [0, 0, 0, 1] + [0, 0, 0, 2] + [0] + [0, 0] + [0, 0]
+-        #expect(throws: RFC_8446.Handshake.NewSessionTicket.Error.self) {
+-            try RFC_8446.Handshake.NewSessionTicket(binary: Self.bytes(wire))
++        @Test
++        func `an empty session ticket is refused`() {
++            let wire: [UInt8] = [0, 0, 0, 1] + [0, 0, 0, 2] + [0] + [0, 0] + [0, 0]
++            #expect(throws: RFC_8446.Handshake.NewSessionTicket.Error.self) {
++                try RFC_8446.Handshake.NewSessionTicket(binary: Self.bytes(wire))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `a server session id echo longer than 32 bytes is refused`() {
+-        let wire: [UInt8] =
+-            [3, 3] + [UInt8](repeating: 0, count: 32) + [33] + [UInt8](repeating: 1, count: 33)
+-            + [0x13, 0x01] + [0] + [0, 0]
+-        #expect(throws: RFC_8446.Handshake.ServerHello.Error.self) {
+-            try RFC_8446.Handshake.ServerHello(binary: Self.bytes(wire))
++        @Test
++        func `a server session id echo longer than 32 bytes is refused`() {
++            let wire: [UInt8] =
++                [3, 3] + [UInt8](repeating: 0, count: 32) + [33] + [UInt8](repeating: 1, count: 33)
++                + [0x13, 0x01] + [0] + [0, 0]
++            #expect(throws: RFC_8446.Handshake.ServerHello.Error.self) {
++                try RFC_8446.Handshake.ServerHello(binary: Self.bytes(wire))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `well-formed messages still parse`() throws {
+-        _ = try RFC_8446.Extension.CertificateAuthorities(binary: Self.bytes([0, 3, 0, 1, 0x30]))
+-        _ = try RFC_8446.Handshake.NewSessionTicket(
+-            binary: Self.bytes([0, 0, 0, 1] + [0, 0, 0, 2] + [0] + [0, 1, 0xAB] + [0, 0])
+-        )
+-        _ = try RFC_8446.Handshake.ServerHello(
+-            binary: Self.bytes(
+-                [3, 3] + [UInt8](repeating: 0, count: 32) + [32] + [UInt8](repeating: 1, count: 32)
+-                    + [0x13, 0x01] + [0] + [0, 0]
++        @Test
++        func `well-formed messages still parse`() throws {
++            _ = try RFC_8446.Extension.CertificateAuthorities(binary: Self.bytes([0, 3, 0, 1, 0x30]))
++            _ = try RFC_8446.Handshake.NewSessionTicket(
++                binary: Self.bytes([0, 0, 0, 1] + [0, 0, 0, 2] + [0] + [0, 1, 0xAB] + [0, 0])
++            )
++            _ = try RFC_8446.Handshake.ServerHello(
++                binary: Self.bytes(
++                    [3, 3] + [UInt8](repeating: 0, count: 32) + [32] + [UInt8](repeating: 1, count: 32)
++                        + [0x13, 0x01] + [0] + [0, 0]
++                )
+             )
+-        )
++        }
+     }
+ }
+diff --git a/Tests/RFC 8446 Tests/RFC_8446 Tests.swift b/Tests/RFC 8446 Tests/RFC_8446 Tests.swift
+index 2185cd9..1e2fb0a 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446 Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446 Tests.swift	
+@@ -4,7 +4,9 @@ import Testing
+ 
+ @Suite("RFC 8446 TLS 1.3 Tests")
+ struct RFC8446Tests {
++}
+ 
++extension RFC8446Tests {
+     @Suite
+     struct `Protocol Version Tests` {
+         @Test
+diff --git a/Tests/RFC 8446 Tests/RFC_8446_ExtensionRoundTrip Tests.swift b/Tests/RFC 8446 Tests/RFC_8446_ExtensionRoundTrip Tests.swift
+index 022a0e0..b97ddfc 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446_ExtensionRoundTrip Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446_ExtensionRoundTrip Tests.swift	
+@@ -3,180 +3,184 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `RFC 8446 extension payload round-trips` {
+-
+-    @Test
+-    func `Extension.Data envelope round-trips`() throws {
+-        let ext = try RFC_8446.Extension.Data(type: .cookie, data: [Byte(1), Byte(2), Byte(3)])
+-        #expect(try RFC_8446.Extension.Data(binary: ext.bytes) == ext)
+-    }
+-
+-    @Test
+-    func `SupportedGroups round-trips`() throws {
+-        let value = try RFC_8446.Extension.SupportedGroups(namedGroupList: [
+-            .x25519, .secp256r1, .x448,
+-        ])
+-        #expect(try RFC_8446.Extension.SupportedGroups(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .supportedGroups)
+-    }
+-
+-    @Test
+-    func `SignatureAlgorithms round-trips`() throws {
+-        let value = try RFC_8446.Extension.SignatureAlgorithms(
+-            supportedSignatureAlgorithms: [.ecdsaSecp256r1Sha256, .rsaPssRsaeSha256, .ed25519]
+-        )
+-        #expect(try RFC_8446.Extension.SignatureAlgorithms(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .signatureAlgorithms)
+-    }
+-
+-    @Test
+-    func `SignatureAlgorithmsCert round-trips`() throws {
+-        let value = try RFC_8446.Extension.SignatureAlgorithmsCert(
+-            supportedSignatureAlgorithms: [.rsaPkcs1Sha256, .ed448]
+-        )
+-        #expect(try RFC_8446.Extension.SignatureAlgorithmsCert(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .signatureAlgorithmsCert)
+-    }
+-
+-    @Test
+-    func `Cookie round-trips`() throws {
+-        let value = try RFC_8446.Extension.Cookie(cookie: [Byte(0xC0), Byte(0x0C), Byte(0x1E)])
+-        #expect(try RFC_8446.Extension.Cookie(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .cookie)
+-    }
+-
+-    @Test
+-    func `Padding round-trips`() throws {
+-        let value = try RFC_8446.Extension.Padding(length: 8)
+-        #expect(try RFC_8446.Extension.Padding(binary: value.bytes) == value)
+-        #expect(value.padding == Array(repeating: Byte(0), count: 8))
+-        #expect(value.extensionData.type == .padding)
+-    }
+-
+-    @Test
+-    func `PskKeyExchangeModes round-trips`() throws {
+-        let value = try RFC_8446.Extension.PskKeyExchangeModes(keModes: [.pskDheKe, .pskKe])
+-        #expect(try RFC_8446.Extension.PskKeyExchangeModes(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .pskKeyExchangeModes)
+-    }
+-
+-    @Test
+-    func `KeyShare ClientHello round-trips`() throws {
+-        let value = try RFC_8446.Extension.KeyShare.ClientHello(clientShares: [
+-            try RFC_8446.Extension.KeyShare.Entry(
+-                group: .x25519,
+-                keyExchange: Array(repeating: Byte(0xAB), count: 32)
+-            ),
+-            try RFC_8446.Extension.KeyShare.Entry(
+-                group: .secp256r1,
+-                keyExchange: Array(repeating: Byte(0xCD), count: 65)
+-            ),
+-        ])
+-        #expect(try RFC_8446.Extension.KeyShare.ClientHello(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .keyShare)
+-    }
+-
+-    @Test
+-    func `KeyShare ServerHello round-trips`() throws {
+-        let value = RFC_8446.Extension.KeyShare.ServerHello(
+-            serverShare: try RFC_8446.Extension.KeyShare.Entry(
+-                group: .x25519,
+-                keyExchange: Array(repeating: Byte(0x11), count: 32)
++enum `RFC_8446_ExtensionRoundTrip Tests` {}
++
++extension `RFC_8446_ExtensionRoundTrip Tests` {
++    @Suite
++    struct `RFC 8446 extension payload round-trips` {
++
++        @Test
++        func `Extension.Data envelope round-trips`() throws {
++            let ext = try RFC_8446.Extension.Data(type: .cookie, data: [Byte(1), Byte(2), Byte(3)])
++            #expect(try RFC_8446.Extension.Data(binary: ext.bytes) == ext)
++        }
++
++        @Test
++        func `SupportedGroups round-trips`() throws {
++            let value = try RFC_8446.Extension.SupportedGroups(namedGroupList: [
++                .x25519, .secp256r1, .x448,
++            ])
++            #expect(try RFC_8446.Extension.SupportedGroups(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .supportedGroups)
++        }
++
++        @Test
++        func `SignatureAlgorithms round-trips`() throws {
++            let value = try RFC_8446.Extension.SignatureAlgorithms(
++                supportedSignatureAlgorithms: [.ecdsaSecp256r1Sha256, .rsaPssRsaeSha256, .ed25519]
+             )
+-        )
+-        #expect(try RFC_8446.Extension.KeyShare.ServerHello(binary: value.bytes) == value)
+-    }
+-
+-    @Test
+-    func `KeyShare HelloRetryRequest round-trips`() throws {
+-        let value = RFC_8446.Extension.KeyShare.HelloRetryRequest(selectedGroup: .secp384r1)
+-        #expect(try RFC_8446.Extension.KeyShare.HelloRetryRequest(binary: value.bytes) == value)
+-    }
+-
+-    @Test
+-    func `SupportedVersions ClientHello round-trips`() throws {
+-        let value = try RFC_8446.Extension.SupportedVersions.ClientHello(versions: [
+-            .tls1_3, .tls1_2,
+-        ])
+-        #expect(try RFC_8446.Extension.SupportedVersions.ClientHello(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .supportedVersions)
+-    }
+-
+-    @Test
+-    func `SupportedVersions ServerHello round-trips`() throws {
+-        let value = RFC_8446.Extension.SupportedVersions.ServerHello(selectedVersion: .tls1_3)
+-        #expect(try RFC_8446.Extension.SupportedVersions.ServerHello(binary: value.bytes) == value)
+-    }
+-
+-    @Test
+-    func `PreSharedKey OfferedPsks round-trips`() throws {
+-        let value = try RFC_8446.Extension.PreSharedKey.OfferedPsks(
+-            identities: [
+-                try RFC_8446.Extension.PreSharedKey.Identity(
+-                    identity: [Byte(0x01), Byte(0x02)],
+-                    obfuscatedTicketAge: 12345
++            #expect(try RFC_8446.Extension.SignatureAlgorithms(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .signatureAlgorithms)
++        }
++
++        @Test
++        func `SignatureAlgorithmsCert round-trips`() throws {
++            let value = try RFC_8446.Extension.SignatureAlgorithmsCert(
++                supportedSignatureAlgorithms: [.rsaPkcs1Sha256, .ed448]
++            )
++            #expect(try RFC_8446.Extension.SignatureAlgorithmsCert(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .signatureAlgorithmsCert)
++        }
++
++        @Test
++        func `Cookie round-trips`() throws {
++            let value = try RFC_8446.Extension.Cookie(cookie: [Byte(0xC0), Byte(0x0C), Byte(0x1E)])
++            #expect(try RFC_8446.Extension.Cookie(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .cookie)
++        }
++
++        @Test
++        func `Padding round-trips`() throws {
++            let value = try RFC_8446.Extension.Padding(length: 8)
++            #expect(try RFC_8446.Extension.Padding(binary: value.bytes) == value)
++            #expect(value.padding == Array(repeating: Byte(0), count: 8))
++            #expect(value.extensionData.type == .padding)
++        }
++
++        @Test
++        func `PskKeyExchangeModes round-trips`() throws {
++            let value = try RFC_8446.Extension.PskKeyExchangeModes(keModes: [.pskDheKe, .pskKe])
++            #expect(try RFC_8446.Extension.PskKeyExchangeModes(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .pskKeyExchangeModes)
++        }
++
++        @Test
++        func `KeyShare ClientHello round-trips`() throws {
++            let value = try RFC_8446.Extension.KeyShare.ClientHello(clientShares: [
++                try RFC_8446.Extension.KeyShare.Entry(
++                    group: .x25519,
++                    keyExchange: Array(repeating: Byte(0xAB), count: 32)
+                 ),
+-                try RFC_8446.Extension.PreSharedKey.Identity(
+-                    identity: [Byte(0x03)],
+-                    obfuscatedTicketAge: 0
++                try RFC_8446.Extension.KeyShare.Entry(
++                    group: .secp256r1,
++                    keyExchange: Array(repeating: Byte(0xCD), count: 65)
+                 ),
+-            ],
+-            binders: [
+-                Array(repeating: Byte(0xAA), count: 32),
+-                Array(repeating: Byte(0xBB), count: 48),
+-            ]
+-        )
+-        #expect(try RFC_8446.Extension.PreSharedKey.OfferedPsks(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .preSharedKey)
+-    }
+-
+-    @Test
+-    func `PreSharedKey ServerHello round-trips`() throws {
+-        let value = RFC_8446.Extension.PreSharedKey.ServerHello(selectedIdentity: 0)
+-        #expect(try RFC_8446.Extension.PreSharedKey.ServerHello(binary: value.bytes) == value)
+-    }
+-
+-    @Test
+-    func `EarlyData Indication round-trips`() throws {
+-        let value = RFC_8446.Extension.EarlyData.Indication()
+-        #expect(try RFC_8446.Extension.EarlyData.Indication(binary: value.bytes) == value)
+-        #expect(value.bytes == [])
+-    }
+-
+-    @Test
+-    func `EarlyData Ticket round-trips`() throws {
+-        let value = RFC_8446.Extension.EarlyData.Ticket(maxEarlyDataSize: 1024)
+-        #expect(try RFC_8446.Extension.EarlyData.Ticket(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .earlyData)
+-    }
+-
+-    @Test
+-    func `CertificateAuthorities round-trips`() throws {
+-        let value = try RFC_8446.Extension.CertificateAuthorities(authorities: [
+-            [Byte(0x30), Byte(0x0E)],
+-            [Byte(0x30), Byte(0x10), Byte(0x20)],
+-        ])
+-        #expect(try RFC_8446.Extension.CertificateAuthorities(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .certificateAuthorities)
+-    }
+-
+-    @Test
+-    func `OidFilters round-trips`() throws {
+-        let value = try RFC_8446.Extension.OidFilters(filters: [
+-            try RFC_8446.Extension.OidFilters.Filter(
+-                certificateExtensionOID: [Byte(0x55), Byte(0x1D), Byte(0x0F)],
+-                certificateExtensionValues: [Byte(0x03), Byte(0x02), Byte(0x05), Byte(0xA0)]
++            ])
++            #expect(try RFC_8446.Extension.KeyShare.ClientHello(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .keyShare)
++        }
++
++        @Test
++        func `KeyShare ServerHello round-trips`() throws {
++            let value = RFC_8446.Extension.KeyShare.ServerHello(
++                serverShare: try RFC_8446.Extension.KeyShare.Entry(
++                    group: .x25519,
++                    keyExchange: Array(repeating: Byte(0x11), count: 32)
++                )
+             )
+-        ])
+-        #expect(try RFC_8446.Extension.OidFilters(binary: value.bytes) == value)
+-        #expect(value.extensionData.type == .oidFilters)
+-    }
+-
+-    @Test
+-    func `PostHandshakeAuth round-trips`() throws {
+-        let value = RFC_8446.Extension.PostHandshakeAuth()
+-        #expect(try RFC_8446.Extension.PostHandshakeAuth(binary: value.bytes) == value)
+-        #expect(value.bytes == [])
++            #expect(try RFC_8446.Extension.KeyShare.ServerHello(binary: value.bytes) == value)
++        }
++
++        @Test
++        func `KeyShare HelloRetryRequest round-trips`() throws {
++            let value = RFC_8446.Extension.KeyShare.HelloRetryRequest(selectedGroup: .secp384r1)
++            #expect(try RFC_8446.Extension.KeyShare.HelloRetryRequest(binary: value.bytes) == value)
++        }
++
++        @Test
++        func `SupportedVersions ClientHello round-trips`() throws {
++            let value = try RFC_8446.Extension.SupportedVersions.ClientHello(versions: [
++                .tls1_3, .tls1_2,
++            ])
++            #expect(try RFC_8446.Extension.SupportedVersions.ClientHello(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .supportedVersions)
++        }
++
++        @Test
++        func `SupportedVersions ServerHello round-trips`() throws {
++            let value = RFC_8446.Extension.SupportedVersions.ServerHello(selectedVersion: .tls1_3)
++            #expect(try RFC_8446.Extension.SupportedVersions.ServerHello(binary: value.bytes) == value)
++        }
++
++        @Test
++        func `PreSharedKey OfferedPsks round-trips`() throws {
++            let value = try RFC_8446.Extension.PreSharedKey.OfferedPsks(
++                identities: [
++                    try RFC_8446.Extension.PreSharedKey.Identity(
++                        identity: [Byte(0x01), Byte(0x02)],
++                        obfuscatedTicketAge: 12345
++                    ),
++                    try RFC_8446.Extension.PreSharedKey.Identity(
++                        identity: [Byte(0x03)],
++                        obfuscatedTicketAge: 0
++                    ),
++                ],
++                binders: [
++                    Array(repeating: Byte(0xAA), count: 32),
++                    Array(repeating: Byte(0xBB), count: 48),
++                ]
++            )
++            #expect(try RFC_8446.Extension.PreSharedKey.OfferedPsks(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .preSharedKey)
++        }
++
++        @Test
++        func `PreSharedKey ServerHello round-trips`() throws {
++            let value = RFC_8446.Extension.PreSharedKey.ServerHello(selectedIdentity: 0)
++            #expect(try RFC_8446.Extension.PreSharedKey.ServerHello(binary: value.bytes) == value)
++        }
++
++        @Test
++        func `EarlyData Indication round-trips`() throws {
++            let value = RFC_8446.Extension.EarlyData.Indication()
++            #expect(try RFC_8446.Extension.EarlyData.Indication(binary: value.bytes) == value)
++            #expect(value.bytes == [])
++        }
++
++        @Test
++        func `EarlyData Ticket round-trips`() throws {
++            let value = RFC_8446.Extension.EarlyData.Ticket(maxEarlyDataSize: 1024)
++            #expect(try RFC_8446.Extension.EarlyData.Ticket(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .earlyData)
++        }
++
++        @Test
++        func `CertificateAuthorities round-trips`() throws {
++            let value = try RFC_8446.Extension.CertificateAuthorities(authorities: [
++                [Byte(0x30), Byte(0x0E)],
++                [Byte(0x30), Byte(0x10), Byte(0x20)],
++            ])
++            #expect(try RFC_8446.Extension.CertificateAuthorities(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .certificateAuthorities)
++        }
++
++        @Test
++        func `OidFilters round-trips`() throws {
++            let value = try RFC_8446.Extension.OidFilters(filters: [
++                try RFC_8446.Extension.OidFilters.Filter(
++                    certificateExtensionOID: [Byte(0x55), Byte(0x1D), Byte(0x0F)],
++                    certificateExtensionValues: [Byte(0x03), Byte(0x02), Byte(0x05), Byte(0xA0)]
++                )
++            ])
++            #expect(try RFC_8446.Extension.OidFilters(binary: value.bytes) == value)
++            #expect(value.extensionData.type == .oidFilters)
++        }
++
++        @Test
++        func `PostHandshakeAuth round-trips`() throws {
++            let value = RFC_8446.Extension.PostHandshakeAuth()
++            #expect(try RFC_8446.Extension.PostHandshakeAuth(binary: value.bytes) == value)
++            #expect(value.bytes == [])
++        }
+     }
+ }
+diff --git a/Tests/RFC 8446 Tests/RFC_8446_HandshakeRoundTrip Tests.swift b/Tests/RFC 8446 Tests/RFC_8446_HandshakeRoundTrip Tests.swift
+index ba1e454..56c10f7 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446_HandshakeRoundTrip Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446_HandshakeRoundTrip Tests.swift	
+@@ -3,139 +3,143 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `RFC 8446 handshake payload round-trips` {
++enum `RFC_8446_HandshakeRoundTrip Tests` {}
+ 
+-    static let sampleRandom: [Byte] = (0..<32).map { Byte(UInt8($0)) }
++extension `RFC_8446_HandshakeRoundTrip Tests` {
++    @Suite
++    struct `RFC 8446 handshake payload round-trips` {
+ 
+-    static let sampleExtensions: [RFC_8446.Extension.Data] = [
++        static let sampleRandom: [Byte] = (0..<32).map { Byte(UInt8($0)) }
+ 
+-        try! RFC_8446.Extension.Data(type: .supportedVersions, data: [Byte(0x03), Byte(0x04)]),
++        static let sampleExtensions: [RFC_8446.Extension.Data] = [
+ 
+-        try! RFC_8446.Extension.Data(type: .cookie, data: [Byte(0xAA), Byte(0xBB), Byte(0xCC)]),
+-    ]
++            try! RFC_8446.Extension.Data(type: .supportedVersions, data: [Byte(0x03), Byte(0x04)]),
+ 
+-    @Test
+-    func `Message envelope round-trips`() throws {
+-        let message = try RFC_8446.Handshake.Message(
+-            type: .clientHello,
+-            body: [Byte(1), Byte(2), Byte(3)]
+-        )
+-        let parsed = try RFC_8446.Handshake.Message(binary: message.bytes)
+-        #expect(parsed == message)
+-    }
++            try! RFC_8446.Extension.Data(type: .cookie, data: [Byte(0xAA), Byte(0xBB), Byte(0xCC)]),
++        ]
+ 
+-    @Test
+-    func `ClientHello round-trips`() throws {
+-        let hello = try RFC_8446.Handshake.ClientHello(
+-            random: Self.sampleRandom,
+-            legacySessionID: [Byte(0xDE), Byte(0xAD)],
+-            cipherSuites: [.aes128GcmSha256, .aes256GcmSha384],
+-            extensions: Self.sampleExtensions
+-        )
+-        #expect(try RFC_8446.Handshake.ClientHello(binary: hello.bytes) == hello)
+-    }
++        @Test
++        func `Message envelope round-trips`() throws {
++            let message = try RFC_8446.Handshake.Message(
++                type: .clientHello,
++                body: [Byte(1), Byte(2), Byte(3)]
++            )
++            let parsed = try RFC_8446.Handshake.Message(binary: message.bytes)
++            #expect(parsed == message)
++        }
+ 
+-    @Test
+-    func `ServerHello round-trips`() throws {
+-        let hello = try RFC_8446.Handshake.ServerHello(
+-            random: Self.sampleRandom,
+-            legacySessionIDEcho: [Byte(0xDE), Byte(0xAD)],
+-            cipherSuite: .aes128GcmSha256,
+-            extensions: Self.sampleExtensions
+-        )
+-        #expect(try RFC_8446.Handshake.ServerHello(binary: hello.bytes) == hello)
+-        #expect(hello.isHelloRetryRequest == false)
+-    }
++        @Test
++        func `ClientHello round-trips`() throws {
++            let hello = try RFC_8446.Handshake.ClientHello(
++                random: Self.sampleRandom,
++                legacySessionID: [Byte(0xDE), Byte(0xAD)],
++                cipherSuites: [.aes128GcmSha256, .aes256GcmSha384],
++                extensions: Self.sampleExtensions
++            )
++            #expect(try RFC_8446.Handshake.ClientHello(binary: hello.bytes) == hello)
++        }
+ 
+-    @Test
+-    func `ServerHello with HelloRetryRequest random discriminates`() throws {
+-        let hrr = try RFC_8446.Handshake.ServerHello(
+-            random: RFC_8446.Handshake.ServerHello.helloRetryRequestRandom,
+-            cipherSuite: .aes128GcmSha256,
+-            extensions: [
+-                try RFC_8446.Extension.Data(
+-                    type: .supportedVersions,
+-                    data: [Byte(0x03), Byte(0x04)]
+-                )
+-            ]
+-        )
+-        #expect(hrr.isHelloRetryRequest == true)
+-        let parsed = try RFC_8446.Handshake.ServerHello(binary: hrr.bytes)
+-        #expect(parsed.isHelloRetryRequest == true)
+-        #expect(parsed == hrr)
+-    }
++        @Test
++        func `ServerHello round-trips`() throws {
++            let hello = try RFC_8446.Handshake.ServerHello(
++                random: Self.sampleRandom,
++                legacySessionIDEcho: [Byte(0xDE), Byte(0xAD)],
++                cipherSuite: .aes128GcmSha256,
++                extensions: Self.sampleExtensions
++            )
++            #expect(try RFC_8446.Handshake.ServerHello(binary: hello.bytes) == hello)
++            #expect(hello.isHelloRetryRequest == false)
++        }
+ 
+-    @Test
+-    func `EncryptedExtensions round-trips`() throws {
+-        let ee = try RFC_8446.Handshake.EncryptedExtensions(extensions: Self.sampleExtensions)
+-        #expect(try RFC_8446.Handshake.EncryptedExtensions(binary: ee.bytes) == ee)
+-    }
++        @Test
++        func `ServerHello with HelloRetryRequest random discriminates`() throws {
++            let hrr = try RFC_8446.Handshake.ServerHello(
++                random: RFC_8446.Handshake.ServerHello.helloRetryRequestRandom,
++                cipherSuite: .aes128GcmSha256,
++                extensions: [
++                    try RFC_8446.Extension.Data(
++                        type: .supportedVersions,
++                        data: [Byte(0x03), Byte(0x04)]
++                    )
++                ]
++            )
++            #expect(hrr.isHelloRetryRequest == true)
++            let parsed = try RFC_8446.Handshake.ServerHello(binary: hrr.bytes)
++            #expect(parsed.isHelloRetryRequest == true)
++            #expect(parsed == hrr)
++        }
+ 
+-    @Test
+-    func `Certificate round-trips`() throws {
+-        let certificate = try RFC_8446.Handshake.Certificate(
+-            certificateRequestContext: [Byte(0x01)],
+-            certificateList: [
+-                try RFC_8446.Handshake.Certificate.Entry(
+-                    certificateData: [Byte(0xCA), Byte(0xFE)],
+-                    extensions: [try RFC_8446.Extension.Data(type: .statusRequest, data: [])]
+-                ),
+-                try RFC_8446.Handshake.Certificate.Entry(certificateData: [Byte(0xBE), Byte(0xEF)]
+-                ),
+-            ]
+-        )
+-        #expect(try RFC_8446.Handshake.Certificate(binary: certificate.bytes) == certificate)
+-    }
++        @Test
++        func `EncryptedExtensions round-trips`() throws {
++            let ee = try RFC_8446.Handshake.EncryptedExtensions(extensions: Self.sampleExtensions)
++            #expect(try RFC_8446.Handshake.EncryptedExtensions(binary: ee.bytes) == ee)
++        }
+ 
+-    @Test
+-    func `CertificateRequest round-trips`() throws {
+-        let request = try RFC_8446.Handshake.CertificateRequest(
+-            certificateRequestContext: [Byte(0x2A)],
+-            extensions: Self.sampleExtensions
+-        )
+-        #expect(try RFC_8446.Handshake.CertificateRequest(binary: request.bytes) == request)
+-    }
++        @Test
++        func `Certificate round-trips`() throws {
++            let certificate = try RFC_8446.Handshake.Certificate(
++                certificateRequestContext: [Byte(0x01)],
++                certificateList: [
++                    try RFC_8446.Handshake.Certificate.Entry(
++                        certificateData: [Byte(0xCA), Byte(0xFE)],
++                        extensions: [try RFC_8446.Extension.Data(type: .statusRequest, data: [])]
++                    ),
++                    try RFC_8446.Handshake.Certificate.Entry(certificateData: [Byte(0xBE), Byte(0xEF)]
++                    ),
++                ]
++            )
++            #expect(try RFC_8446.Handshake.Certificate(binary: certificate.bytes) == certificate)
++        }
+ 
+-    @Test
+-    func `CertificateVerify round-trips`() throws {
+-        let verify = try RFC_8446.Handshake.CertificateVerify(
+-            algorithm: .ed25519,
+-            signature: [Byte(0x01), Byte(0x02), Byte(0x03), Byte(0x04)]
+-        )
+-        #expect(try RFC_8446.Handshake.CertificateVerify(binary: verify.bytes) == verify)
+-    }
++        @Test
++        func `CertificateRequest round-trips`() throws {
++            let request = try RFC_8446.Handshake.CertificateRequest(
++                certificateRequestContext: [Byte(0x2A)],
++                extensions: Self.sampleExtensions
++            )
++            #expect(try RFC_8446.Handshake.CertificateRequest(binary: request.bytes) == request)
++        }
+ 
+-    @Test
+-    func `Finished round-trips`() throws {
+-        let finished = try RFC_8446.Handshake.Finished(verifyData: Self.sampleRandom)
+-        #expect(try RFC_8446.Handshake.Finished(binary: finished.bytes) == finished)
+-    }
++        @Test
++        func `CertificateVerify round-trips`() throws {
++            let verify = try RFC_8446.Handshake.CertificateVerify(
++                algorithm: .ed25519,
++                signature: [Byte(0x01), Byte(0x02), Byte(0x03), Byte(0x04)]
++            )
++            #expect(try RFC_8446.Handshake.CertificateVerify(binary: verify.bytes) == verify)
++        }
+ 
+-    @Test
+-    func `NewSessionTicket round-trips`() throws {
+-        let ticket = try RFC_8446.Handshake.NewSessionTicket(
+-            ticketLifetime: 7200,
+-            ticketAgeAdd: 0xDEAD_BEEF,
+-            ticketNonce: [Byte(0x00), Byte(0x01)],
+-            ticket: [Byte(0xAB), Byte(0xCD), Byte(0xEF)],
+-            extensions: [RFC_8446.Extension.EarlyData.Ticket(maxEarlyDataSize: 16384).extensionData]
+-        )
+-        #expect(try RFC_8446.Handshake.NewSessionTicket(binary: ticket.bytes) == ticket)
+-    }
++        @Test
++        func `Finished round-trips`() throws {
++            let finished = try RFC_8446.Handshake.Finished(verifyData: Self.sampleRandom)
++            #expect(try RFC_8446.Handshake.Finished(binary: finished.bytes) == finished)
++        }
+ 
+-    @Test
+-    func `KeyUpdate round-trips both request values`() throws {
+-        for request in [RFC_8446.Handshake.KeyUpdate.Request.updateNotRequested, .updateRequested] {
+-            let update = RFC_8446.Handshake.KeyUpdate(requestUpdate: request)
+-            #expect(try RFC_8446.Handshake.KeyUpdate(binary: update.bytes) == update)
++        @Test
++        func `NewSessionTicket round-trips`() throws {
++            let ticket = try RFC_8446.Handshake.NewSessionTicket(
++                ticketLifetime: 7200,
++                ticketAgeAdd: 0xDEAD_BEEF,
++                ticketNonce: [Byte(0x00), Byte(0x01)],
++                ticket: [Byte(0xAB), Byte(0xCD), Byte(0xEF)],
++                extensions: [RFC_8446.Extension.EarlyData.Ticket(maxEarlyDataSize: 16384).extensionData]
++            )
++            #expect(try RFC_8446.Handshake.NewSessionTicket(binary: ticket.bytes) == ticket)
+         }
+-    }
+ 
+-    @Test
+-    func `EndOfEarlyData round-trips`() throws {
+-        let eoed = RFC_8446.Handshake.EndOfEarlyData()
+-        #expect(try RFC_8446.Handshake.EndOfEarlyData(binary: eoed.bytes) == eoed)
+-        #expect(eoed.bytes == [])
++        @Test
++        func `KeyUpdate round-trips both request values`() throws {
++            for request in [RFC_8446.Handshake.KeyUpdate.Request.updateNotRequested, .updateRequested] {
++                let update = RFC_8446.Handshake.KeyUpdate(requestUpdate: request)
++                #expect(try RFC_8446.Handshake.KeyUpdate(binary: update.bytes) == update)
++            }
++        }
++
++        @Test
++        func `EndOfEarlyData round-trips`() throws {
++            let eoed = RFC_8446.Handshake.EndOfEarlyData()
++            #expect(try RFC_8446.Handshake.EndOfEarlyData(binary: eoed.bytes) == eoed)
++            #expect(eoed.bytes == [])
++        }
+     }
+ }
+diff --git a/Tests/RFC 8446 Tests/RFC_8446_KeySchedule Tests.swift b/Tests/RFC 8446 Tests/RFC_8446_KeySchedule Tests.swift
+index a5367e5..2cea197 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446_KeySchedule Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446_KeySchedule Tests.swift	
+@@ -3,11 +3,17 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `RFC 8446 Key Schedule` {
++enum `RFC_8446_KeySchedule Tests` {}
+ 
+-    typealias KS = RFC_8446.KeySchedule
++extension `RFC_8446_KeySchedule Tests` {
++    @Suite
++    struct `RFC 8446 Key Schedule` {
++
++        typealias KS = RFC_8446.KeySchedule
++    }
++}
+ 
++extension `RFC_8446_KeySchedule Tests`.`RFC 8446 Key Schedule` {
+     @Suite
+     struct `HkdfLabel byte-exact shapes` {
+         @Test
+diff --git a/Tests/RFC 8446 Tests/RFC_8446_RFC8448_Message Tests.swift b/Tests/RFC 8446 Tests/RFC_8446_RFC8448_Message Tests.swift
+index eac4c7c..86aa845 100644
+--- a/Tests/RFC 8446 Tests/RFC_8446_RFC8448_Message Tests.swift	
++++ b/Tests/RFC 8446 Tests/RFC_8446_RFC8448_Message Tests.swift	
+@@ -3,167 +3,171 @@ import Testing
+ 
+ @testable import RFC_8446
+ 
+-@Suite
+-struct `RFC 8448 Section 3 byte-exact message parsing` {
+-
+-    @Test
+-    func `ClientHello parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.clientHello)
+-        #expect(message.type == .clientHello)
+-
+-        let hello = try RFC_8446.Handshake.ClientHello(binary: message.body)
+-
+-        #expect(hello.legacyVersion == .tls1_2)
+-        #expect(
+-            hello.random
+-                == hex(
+-                    """
+-                    cb 34 ec b1 e7 81 63 ba 1c 38 c6 da cb 19 6a 6d ff a2 1a 8d 99 12
+-                    ec 18 a2 ef 62 83 02 4d ec e7
+-                    """
+-                )
+-        )
+-        #expect(hello.legacySessionID == [])
+-        #expect(
+-            hello.cipherSuites == [.aes128GcmSha256, .chacha20Poly1305Sha256, .aes256GcmSha384]
+-        )
+-        #expect(hello.legacyCompressionMethods == [Byte(0)])
+-
+-        #expect(hello.bytes == message.body)
+-        #expect(hello.message.bytes == RFC8448.clientHello)
+-    }
+-
+-    @Test
+-    func `ClientHello key_share extension parses into typed KeyShare`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.clientHello)
+-        let hello = try RFC_8446.Handshake.ClientHello(binary: message.body)
+-
+-        let keyShareExt = try #require(hello.extensions.first { $0.type == .keyShare })
+-        let keyShare = try RFC_8446.Extension.KeyShare.ClientHello(binary: keyShareExt.data)
+-
+-        #expect(keyShare.clientShares.count == 1)
+-        #expect(keyShare.clientShares[0].group == .x25519)
+-        #expect(
+-            keyShare.clientShares[0].keyExchange
+-                == hex(
+-                    """
+-                    99 38 1d e5 60 e4 bd 43 d2 3d 8e 43 5a 7d ba fe b3 c0 6e 51 c1 3c
+-                    ae 4d 54 13 69 1e 52 9a af 2c
+-                    """
+-                )
+-        )
+-        #expect(keyShare.bytes == keyShareExt.data)
+-    }
+-
+-    @Test
+-    func `ClientHello supported_versions offers TLS 1.3`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.clientHello)
+-        let hello = try RFC_8446.Handshake.ClientHello(binary: message.body)
+-
+-        let ext = try #require(hello.extensions.first { $0.type == .supportedVersions })
+-        let versions = try RFC_8446.Extension.SupportedVersions.ClientHello(binary: ext.data)
+-        #expect(versions.versions == [.tls1_3])
+-        #expect(versions.bytes == ext.data)
+-    }
+-
+-    @Test
+-    func `ServerHello parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.serverHello)
+-        #expect(message.type == .serverHello)
+-
+-        let hello = try RFC_8446.Handshake.ServerHello(binary: message.body)
+-        #expect(hello.legacyVersion == .tls1_2)
+-        #expect(hello.cipherSuite == .aes128GcmSha256)
+-        #expect(hello.legacyCompressionMethod == 0)
+-        #expect(hello.isHelloRetryRequest == false)
+-
+-        #expect(hello.bytes == message.body)
+-        #expect(hello.message.bytes == RFC8448.serverHello)
+-    }
+-
+-    @Test
+-    func `ServerHello key_share and supported_versions parse`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.serverHello)
+-        let hello = try RFC_8446.Handshake.ServerHello(binary: message.body)
+-
+-        let keyShareExt = try #require(hello.extensions.first { $0.type == .keyShare })
+-        let keyShare = try RFC_8446.Extension.KeyShare.ServerHello(binary: keyShareExt.data)
+-        #expect(keyShare.serverShare.group == .x25519)
+-        #expect(keyShare.bytes == keyShareExt.data)
+-
+-        let versionExt = try #require(hello.extensions.first { $0.type == .supportedVersions })
+-        let version = try RFC_8446.Extension.SupportedVersions.ServerHello(binary: versionExt.data)
+-        #expect(version.selectedVersion == .tls1_3)
+-        #expect(version.bytes == versionExt.data)
+-    }
+-
+-    @Test
+-    func `EncryptedExtensions parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.encryptedExtensions)
+-        #expect(message.type == .encryptedExtensions)
+-
+-        let ee = try RFC_8446.Handshake.EncryptedExtensions(binary: message.body)
+-        #expect(ee.extensions.contains { $0.type == .supportedGroups })
+-        #expect(ee.extensions.contains { $0.type == .serverName })
+-
+-        #expect(ee.bytes == message.body)
+-        #expect(ee.message.bytes == RFC8448.encryptedExtensions)
+-    }
+-
+-    @Test
+-    func `Certificate parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.certificate)
+-        #expect(message.type == .certificate)
+-
+-        let certificate = try RFC_8446.Handshake.Certificate(binary: message.body)
+-        #expect(certificate.certificateRequestContext == [])
+-        #expect(certificate.certificateList.count == 1)
+-        #expect(certificate.certificateList[0].certificateData.count == 432)
+-        #expect(certificate.certificateList[0].extensions == [])
+-
+-        #expect(certificate.bytes == message.body)
+-        #expect(certificate.message.bytes == RFC8448.certificate)
+-    }
+-
+-    @Test
+-    func `CertificateVerify parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.certificateVerify)
+-        #expect(message.type == .certificateVerify)
+-
+-        let verify = try RFC_8446.Handshake.CertificateVerify(binary: message.body)
+-        #expect(verify.algorithm == .rsaPssRsaeSha256)
+-        #expect(verify.signature.count == 128)
+-
+-        #expect(verify.bytes == message.body)
+-        #expect(verify.message.bytes == RFC8448.certificateVerify)
+-    }
+-
+-    @Test
+-    func `Server Finished parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.serverFinished)
+-        #expect(message.type == .finished)
+-
+-        let finished = try RFC_8446.Handshake.Finished(binary: message.body)
+-        #expect(finished.verifyData == RFC8448.serverFinishedVerifyData)
+-
+-        #expect(finished.bytes == message.body)
+-        #expect(finished.message.bytes == RFC8448.serverFinished)
+-    }
+-
+-    @Test
+-    func `NewSessionTicket parses byte-exactly and re-serializes`() throws {
+-        let message = try RFC_8446.Handshake.Message(binary: RFC8448.newSessionTicket)
+-        #expect(message.type == .newSessionTicket)
+-
+-        let ticket = try RFC_8446.Handshake.NewSessionTicket(binary: message.body)
+-        #expect(ticket.ticketLifetime == 30)
+-        #expect(ticket.ticketNonce == [Byte(0), Byte(0)])
+-
+-        let earlyExt = try #require(ticket.extensions.first { $0.type == .earlyData })
+-        let early = try RFC_8446.Extension.EarlyData.Ticket(binary: earlyExt.data)
+-        #expect(early.maxEarlyDataSize == 1024)
+-
+-        #expect(ticket.bytes == message.body)
+-        #expect(ticket.message.bytes == RFC8448.newSessionTicket)
++enum `RFC_8446_RFC8448_Message Tests` {}
++
++extension `RFC_8446_RFC8448_Message Tests` {
++    @Suite
++    struct `RFC 8448 Section 3 byte-exact message parsing` {
++
++        @Test
++        func `ClientHello parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.clientHello)
++            #expect(message.type == .clientHello)
++
++            let hello = try RFC_8446.Handshake.ClientHello(binary: message.body)
++
++            #expect(hello.legacyVersion == .tls1_2)
++            #expect(
++                hello.random
++                    == hex(
++                        """
++                        cb 34 ec b1 e7 81 63 ba 1c 38 c6 da cb 19 6a 6d ff a2 1a 8d 99 12
++                        ec 18 a2 ef 62 83 02 4d ec e7
++                        """
++                    )
++            )
++            #expect(hello.legacySessionID == [])
++            #expect(
++                hello.cipherSuites == [.aes128GcmSha256, .chacha20Poly1305Sha256, .aes256GcmSha384]
++            )
++            #expect(hello.legacyCompressionMethods == [Byte(0)])
++
++            #expect(hello.bytes == message.body)
++            #expect(hello.message.bytes == RFC8448.clientHello)
++        }
++
++        @Test
++        func `ClientHello key_share extension parses into typed KeyShare`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.clientHello)
++            let hello = try RFC_8446.Handshake.ClientHello(binary: message.body)
++
++            let keyShareExt = try #require(hello.extensions.first { $0.type == .keyShare })
++            let keyShare = try RFC_8446.Extension.KeyShare.ClientHello(binary: keyShareExt.data)
++
++            #expect(keyShare.clientShares.count == 1)
++            #expect(keyShare.clientShares[0].group == .x25519)
++            #expect(
++                keyShare.clientShares[0].keyExchange
++                    == hex(
++                        """
++                        99 38 1d e5 60 e4 bd 43 d2 3d 8e 43 5a 7d ba fe b3 c0 6e 51 c1 3c
++                        ae 4d 54 13 69 1e 52 9a af 2c
++                        """
++                    )
++            )
++            #expect(keyShare.bytes == keyShareExt.data)
++        }
++
++        @Test
++        func `ClientHello supported_versions offers TLS 1.3`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.clientHello)
++            let hello = try RFC_8446.Handshake.ClientHello(binary: message.body)
++
++            let ext = try #require(hello.extensions.first { $0.type == .supportedVersions })
++            let versions = try RFC_8446.Extension.SupportedVersions.ClientHello(binary: ext.data)
++            #expect(versions.versions == [.tls1_3])
++            #expect(versions.bytes == ext.data)
++        }
++
++        @Test
++        func `ServerHello parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.serverHello)
++            #expect(message.type == .serverHello)
++
++            let hello = try RFC_8446.Handshake.ServerHello(binary: message.body)
++            #expect(hello.legacyVersion == .tls1_2)
++            #expect(hello.cipherSuite == .aes128GcmSha256)
++            #expect(hello.legacyCompressionMethod == 0)
++            #expect(hello.isHelloRetryRequest == false)
++
++            #expect(hello.bytes == message.body)
++            #expect(hello.message.bytes == RFC8448.serverHello)
++        }
++
++        @Test
++        func `ServerHello key_share and supported_versions parse`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.serverHello)
++            let hello = try RFC_8446.Handshake.ServerHello(binary: message.body)
++
++            let keyShareExt = try #require(hello.extensions.first { $0.type == .keyShare })
++            let keyShare = try RFC_8446.Extension.KeyShare.ServerHello(binary: keyShareExt.data)
++            #expect(keyShare.serverShare.group == .x25519)
++            #expect(keyShare.bytes == keyShareExt.data)
++
++            let versionExt = try #require(hello.extensions.first { $0.type == .supportedVersions })
++            let version = try RFC_8446.Extension.SupportedVersions.ServerHello(binary: versionExt.data)
++            #expect(version.selectedVersion == .tls1_3)
++            #expect(version.bytes == versionExt.data)
++        }
++
++        @Test
++        func `EncryptedExtensions parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.encryptedExtensions)
++            #expect(message.type == .encryptedExtensions)
++
++            let ee = try RFC_8446.Handshake.EncryptedExtensions(binary: message.body)
++            #expect(ee.extensions.contains { $0.type == .supportedGroups })
++            #expect(ee.extensions.contains { $0.type == .serverName })
++
++            #expect(ee.bytes == message.body)
++            #expect(ee.message.bytes == RFC8448.encryptedExtensions)
++        }
++
++        @Test
++        func `Certificate parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.certificate)
++            #expect(message.type == .certificate)
++
++            let certificate = try RFC_8446.Handshake.Certificate(binary: message.body)
++            #expect(certificate.certificateRequestContext == [])
++            #expect(certificate.certificateList.count == 1)
++            #expect(certificate.certificateList[0].certificateData.count == 432)
++            #expect(certificate.certificateList[0].extensions == [])
++
++            #expect(certificate.bytes == message.body)
++            #expect(certificate.message.bytes == RFC8448.certificate)
++        }
++
++        @Test
++        func `CertificateVerify parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.certificateVerify)
++            #expect(message.type == .certificateVerify)
++
++            let verify = try RFC_8446.Handshake.CertificateVerify(binary: message.body)
++            #expect(verify.algorithm == .rsaPssRsaeSha256)
++            #expect(verify.signature.count == 128)
++
++            #expect(verify.bytes == message.body)
++            #expect(verify.message.bytes == RFC8448.certificateVerify)
++        }
++
++        @Test
++        func `Server Finished parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.serverFinished)
++            #expect(message.type == .finished)
++
++            let finished = try RFC_8446.Handshake.Finished(binary: message.body)
++            #expect(finished.verifyData == RFC8448.serverFinishedVerifyData)
++
++            #expect(finished.bytes == message.body)
++            #expect(finished.message.bytes == RFC8448.serverFinished)
++        }
++
++        @Test
++        func `NewSessionTicket parses byte-exactly and re-serializes`() throws {
++            let message = try RFC_8446.Handshake.Message(binary: RFC8448.newSessionTicket)
++            #expect(message.type == .newSessionTicket)
++
++            let ticket = try RFC_8446.Handshake.NewSessionTicket(binary: message.body)
++            #expect(ticket.ticketLifetime == 30)
++            #expect(ticket.ticketNonce == [Byte(0), Byte(0)])
++
++            let earlyExt = try #require(ticket.extensions.first { $0.type == .earlyData })
++            let early = try RFC_8446.Extension.EarlyData.Ticket(binary: earlyExt.data)
++            #expect(early.maxEarlyDataSize == 1024)
++
++            #expect(ticket.bytes == message.body)
++            #expect(ticket.message.bytes == RFC8448.newSessionTicket)
++        }
+     }
+ }
+-- 
+2.43.0
+

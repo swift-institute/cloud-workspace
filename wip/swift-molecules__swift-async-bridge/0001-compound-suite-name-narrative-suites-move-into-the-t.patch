@@ -1,0 +1,209 @@
+From fc8ccb6e4ace367b155c2f458e654b1385a7d602 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:10 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Async.Bridge Ordering Tests.swift         | 98 ++++++++++---------
+ .../Async.Bridge Tests.swift                  | 52 +++++-----
+ 2 files changed, 79 insertions(+), 71 deletions(-)
+
+diff --git a/Tests/Async Bridge Tests/Async.Bridge Ordering Tests.swift b/Tests/Async Bridge Tests/Async.Bridge Ordering Tests.swift
+index cbd7c19..c414487 100644
+--- a/Tests/Async Bridge Tests/Async.Bridge Ordering Tests.swift	
++++ b/Tests/Async Bridge Tests/Async.Bridge Ordering Tests.swift	
+@@ -2,61 +2,65 @@ import Async
+ import Async_Bridge
+ import Testing
+ 
+-@Suite
+-struct `Async bridge ordering` {
+-    @Test
+-    func `buffered elements are delivered first in, first out`() async {
+-        let bridge = Async.Bridge<Int>()
+-        bridge.push(1)
+-        bridge.push([2, 3])
+-        bridge.push(contentsOf: 4...5)
+-
+-        var received: [Int] = []
+-        for _ in 0..<5 {
+-            if let value = await bridge.next() { received.append(value) }
++enum `Async.Bridge Ordering Tests` {}
++
++extension `Async.Bridge Ordering Tests` {
++    @Suite
++    struct `Async bridge ordering` {
++        @Test
++        func `buffered elements are delivered first in, first out`() async {
++            let bridge = Async.Bridge<Int>()
++            bridge.push(1)
++            bridge.push([2, 3])
++            bridge.push(contentsOf: 4...5)
++
++            var received: [Int] = []
++            for _ in 0..<5 {
++                if let value = await bridge.next() { received.append(value) }
++            }
++            #expect(received == [1, 2, 3, 4, 5])
+         }
+-        #expect(received == [1, 2, 3, 4, 5])
+-    }
+ 
+-    @Test
+-    func `finish drains the buffer before reporting the end`() async {
+-        let bridge = Async.Bridge<Int>()
+-        bridge.push(7)
+-        bridge.finish()
++        @Test
++        func `finish drains the buffer before reporting the end`() async {
++            let bridge = Async.Bridge<Int>()
++            bridge.push(7)
++            bridge.finish()
+ 
+-        #expect(bridge.isFinished)
+-        #expect(await bridge.next() == 7)
+-        #expect(await bridge.next() == nil)
+-    }
++            #expect(bridge.isFinished)
++            #expect(await bridge.next() == 7)
++            #expect(await bridge.next() == nil)
++        }
+ 
+-    @Test
+-    func `elements pushed after finish are dropped`() async {
+-        let bridge = Async.Bridge<Int>()
+-        bridge.finish()
+-        bridge.push(1)
+-        bridge.push([2, 3])
++        @Test
++        func `elements pushed after finish are dropped`() async {
++            let bridge = Async.Bridge<Int>()
++            bridge.finish()
++            bridge.push(1)
++            bridge.push([2, 3])
+ 
+-        #expect(await bridge.next() == nil)
+-    }
++            #expect(await bridge.next() == nil)
++        }
+ 
+-    @Test
+-    func `draining push takes elements until the source returns nil`() async {
+-        let bridge = Async.Bridge<Int>()
+-        var source = [10, 20, 30].makeIterator()
+-        bridge.push(draining: { source.next() })
+-        bridge.finish()
++        @Test
++        func `draining push takes elements until the source returns nil`() async {
++            let bridge = Async.Bridge<Int>()
++            var source = [10, 20, 30].makeIterator()
++            bridge.push(draining: { source.next() })
++            bridge.finish()
+ 
+-        var received: [Int] = []
+-        while let value = await bridge.next() { received.append(value) }
+-        #expect(received == [10, 20, 30])
+-    }
++            var received: [Int] = []
++            while let value = await bridge.next() { received.append(value) }
++            #expect(received == [10, 20, 30])
++        }
+ 
+-    @Test
+-    func `pushing an empty array leaves the bridge empty`() async {
+-        let bridge = Async.Bridge<Int>()
+-        bridge.push([Int]())
+-        bridge.finish()
++        @Test
++        func `pushing an empty array leaves the bridge empty`() async {
++            let bridge = Async.Bridge<Int>()
++            bridge.push([Int]())
++            bridge.finish()
+ 
+-        #expect(await bridge.next() == nil)
++            #expect(await bridge.next() == nil)
++        }
+     }
+ }
+diff --git a/Tests/Async Bridge Tests/Async.Bridge Tests.swift b/Tests/Async Bridge Tests/Async.Bridge Tests.swift
+index e36c147..13bfbf2 100644
+--- a/Tests/Async Bridge Tests/Async.Bridge Tests.swift	
++++ b/Tests/Async Bridge Tests/Async.Bridge Tests.swift	
+@@ -2,43 +2,47 @@ import Async
+ import Async_Bridge
+ import Testing
+ 
+-@Suite
+-struct `Async bridges deliver values and preserve cancellation behavior` {
++enum `Async.Bridge Tests` {}
+ 
+-    @Test
+-    func `Next() does not observe Task cancellation`() async {
++extension `Async.Bridge Tests` {
++    @Suite
++    struct `Async bridges deliver values and preserve cancellation behavior` {
+ 
+-        let bridge = Async.Bridge<Int>()
++        @Test
++        func `Next() does not observe Task cancellation`() async {
+ 
+-        let task = Task { await bridge.next() }
++            let bridge = Async.Bridge<Int>()
+ 
+-        await Task.yield()
++            let task = Task { await bridge.next() }
+ 
+-        task.cancel()
++            await Task.yield()
+ 
+-        await Task.yield()
++            task.cancel()
+ 
+-        bridge.push(42)
++            await Task.yield()
+ 
+-        let result = await task.value
+-        #expect(result == 42, "cancelled consumer still receives the pushed element")
+-        #expect(task.isCancelled, "task should still report itself as cancelled")
+-    }
++            bridge.push(42)
++
++            let result = await task.value
++            #expect(result == 42, "cancelled consumer still receives the pushed element")
++            #expect(task.isCancelled, "task should still report itself as cancelled")
++        }
+ 
+-    @Test
+-    func `Next() returns nil after finish on cancelled task`() async {
++        @Test
++        func `Next() returns nil after finish on cancelled task`() async {
+ 
+-        let bridge = Async.Bridge<Int>()
++            let bridge = Async.Bridge<Int>()
+ 
+-        let task = Task { await bridge.next() }
++            let task = Task { await bridge.next() }
+ 
+-        await Task.yield()
+-        task.cancel()
+-        await Task.yield()
++            await Task.yield()
++            task.cancel()
++            await Task.yield()
+ 
+-        bridge.finish()
++            bridge.finish()
+ 
+-        let result = await task.value
+-        #expect(result == nil, "cancelled consumer resumes with nil after finish()")
++            let result = await task.value
++            #expect(result == nil, "cancelled consumer resumes with nil after finish()")
++        }
+     }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,1644 @@
+From 01ebc4540ea169eaf676a12947112b06dd0cdc83 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:09 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Text Carrier Tests.swift                  |   56 +-
+ .../Text Byte Tests.swift                     |  144 +-
+ .../Text.Line.Map.Lookup Tests.swift          |   22 +-
+ Tests/Text Tests/Text Tests.swift             | 1209 +++++++++--------
+ 4 files changed, 748 insertions(+), 683 deletions(-)
+
+diff --git a/Tests/Consolidated swift-text-carrier/Text Carrier Tests/Text Carrier Tests.swift b/Tests/Consolidated swift-text-carrier/Text Carrier Tests/Text Carrier Tests.swift
+index 5cb0d39..c5f69f1 100644
+--- a/Tests/Consolidated swift-text-carrier/Text Carrier Tests/Text Carrier Tests.swift	
++++ b/Tests/Consolidated swift-text-carrier/Text Carrier Tests/Text Carrier Tests.swift	
+@@ -2,43 +2,47 @@ import Carrier
+ import Testing
+ import Text
+ 
+-@Suite
+-struct `Text Line Number Carrier Tests` {
+-    @Test
+-    func `Carrier conformance — Underlying is UInt`() {
+-
+-        let number = Text.Line.Number(UInt(42))
+-        let carried: UInt = number.underlying
+-        #expect(carried == 42)
+-    }
++enum `Text Carrier Tests` {}
+ 
+-    @Test
+-    func `Carrier conformance — generic dispatch`() {
++extension `Text Carrier Tests` {
++    @Suite
++    struct `Text Line Number Carrier Tests` {
++        @Test
++        func `Carrier conformance — Underlying is UInt`() {
+ 
+-        func extract<C: Carrier.`Protocol`<UInt>>(_ carrier: C) -> UInt {
+-            carrier.underlying
++            let number = Text.Line.Number(UInt(42))
++            let carried: UInt = number.underlying
++            #expect(carried == 42)
+         }
+ 
+-        let number = Text.Line.Number(UInt(42))
+-        #expect(extract(number) == 42)
+-    }
++        @Test
++        func `Carrier conformance — generic dispatch`() {
+ 
+-    @Test
+-    func `Carrier conformance — validating init`() throws {
++            func extract<C: Carrier.`Protocol`<UInt>>(_ carrier: C) -> UInt {
++                carrier.underlying
++            }
+ 
+-        enum Validation: Swift::Error, Equatable {
+-            case rejected
++            let number = Text.Line.Number(UInt(42))
++            #expect(extract(number) == 42)
+         }
+ 
+-        let valid = try Text.Line.Number(42) { (raw: borrowing UInt) throws(Validation) in
+-            if raw == 0 { throw .rejected }
+-        }
+-        #expect(valid.underlying == 42)
++        @Test
++        func `Carrier conformance — validating init`() throws {
+ 
+-        #expect(throws: Validation.rejected) {
+-            try Text.Line.Number(0) { (raw: borrowing UInt) throws(Validation) in
++            enum Validation: Swift::Error, Equatable {
++                case rejected
++            }
++
++            let valid = try Text.Line.Number(42) { (raw: borrowing UInt) throws(Validation) in
+                 if raw == 0 { throw .rejected }
+             }
++            #expect(valid.underlying == 42)
++
++            #expect(throws: Validation.rejected) {
++                try Text.Line.Number(0) { (raw: borrowing UInt) throws(Validation) in
++                    if raw == 0 { throw .rejected }
++                }
++            }
+         }
+     }
+ }
+diff --git a/Tests/Text Tests/Absorbed swift-text-byte/Text Byte Tests.swift b/Tests/Text Tests/Absorbed swift-text-byte/Text Byte Tests.swift
+index 8be121d..ee19bef 100644
+--- a/Tests/Text Tests/Absorbed swift-text-byte/Text Byte Tests.swift	
++++ b/Tests/Text Tests/Absorbed swift-text-byte/Text Byte Tests.swift	
+@@ -5,89 +5,93 @@
+     import Text
+     import Tagged
+ 
+-    @Suite
+-    struct `Byte scanning preserves text line starts across newline encodings` {
++enum `Text Byte Tests` {}
+ 
+-        private func lineMap(for string: Swift::String) -> Text.Line.Map {
+-            Text.Line.Map(scanning: string.utf8.map(Byte.init(bitPattern:)))
+-        }
++extension `Text Byte Tests` {
++        @Suite
++        struct `Byte scanning preserves text line starts across newline encodings` {
+ 
+-        private func offset(
+-            in map: Text.Line.Map,
+-            forLine line: UInt
+-        ) -> UInt? {
+-            map.offset(forLine: Text.Line.Number(line))?.underlying.rawValue
+-        }
++            private func lineMap(for string: Swift::String) -> Text.Line.Map {
++                Text.Line.Map(scanning: string.utf8.map(Byte.init(bitPattern:)))
++            }
+ 
+-        @Test
+-        func `Empty content has one line beginning at zero`() {
+-            let map = lineMap(for: "")
+-            #expect(map.lineCount == 1)
+-            #expect(offset(in: map, forLine: 1) == 0)
+-        }
++            private func offset(
++                in map: Text.Line.Map,
++                forLine line: UInt
++            ) -> UInt? {
++                map.offset(forLine: Text.Line.Number(line))?.underlying.rawValue
++            }
+ 
+-        @Test
+-        func `Content without a newline has one line beginning at zero`() {
+-            let map = lineMap(for: "hello")
+-            #expect(map.lineCount == 1)
+-            #expect(offset(in: map, forLine: 1) == 0)
+-        }
++            @Test
++            func `Empty content has one line beginning at zero`() {
++                let map = lineMap(for: "")
++                #expect(map.lineCount == 1)
++                #expect(offset(in: map, forLine: 1) == 0)
++            }
+ 
+-        @Test
+-        func `Each line feed begins a new line after its byte`() {
++            @Test
++            func `Content without a newline has one line beginning at zero`() {
++                let map = lineMap(for: "hello")
++                #expect(map.lineCount == 1)
++                #expect(offset(in: map, forLine: 1) == 0)
++            }
+ 
+-            let map = lineMap(for: "a\nb\nc")
+-            #expect(map.lineCount == 3)
+-            #expect(offset(in: map, forLine: 1) == 0)
+-            #expect(offset(in: map, forLine: 2) == 2)
+-            #expect(offset(in: map, forLine: 3) == 4)
+-        }
++            @Test
++            func `Each line feed begins a new line after its byte`() {
+ 
+-        @Test
+-        func `Each carriage return begins a new line after its byte`() {
++                let map = lineMap(for: "a\nb\nc")
++                #expect(map.lineCount == 3)
++                #expect(offset(in: map, forLine: 1) == 0)
++                #expect(offset(in: map, forLine: 2) == 2)
++                #expect(offset(in: map, forLine: 3) == 4)
++            }
+ 
+-            let map = lineMap(for: "a\rb\rc")
+-            #expect(map.lineCount == 3)
+-            #expect(offset(in: map, forLine: 1) == 0)
+-            #expect(offset(in: map, forLine: 2) == 2)
+-            #expect(offset(in: map, forLine: 3) == 4)
+-        }
++            @Test
++            func `Each carriage return begins a new line after its byte`() {
+ 
+-        @Test
+-        func `Each carriage return and line feed pair begins one new line`() {
++                let map = lineMap(for: "a\rb\rc")
++                #expect(map.lineCount == 3)
++                #expect(offset(in: map, forLine: 1) == 0)
++                #expect(offset(in: map, forLine: 2) == 2)
++                #expect(offset(in: map, forLine: 3) == 4)
++            }
+ 
+-            let map = lineMap(for: "a\r\nb\r\nc")
+-            #expect(map.lineCount == 3)
+-            #expect(offset(in: map, forLine: 1) == 0)
+-            #expect(offset(in: map, forLine: 2) == 3)
+-            #expect(offset(in: map, forLine: 3) == 6)
+-        }
++            @Test
++            func `Each carriage return and line feed pair begins one new line`() {
+ 
+-        @Test
+-        func `A trailing newline begins an empty final line`() {
+-            let map = lineMap(for: "a\n")
+-            #expect(map.lineCount == 2)
+-            #expect(offset(in: map, forLine: 2) == 2)
+-        }
++                let map = lineMap(for: "a\r\nb\r\nc")
++                #expect(map.lineCount == 3)
++                #expect(offset(in: map, forLine: 1) == 0)
++                #expect(offset(in: map, forLine: 2) == 3)
++                #expect(offset(in: map, forLine: 3) == 6)
++            }
+ 
+-        @Test
+-        func `Mixed newline encodings preserve each line start`() {
++            @Test
++            func `A trailing newline begins an empty final line`() {
++                let map = lineMap(for: "a\n")
++                #expect(map.lineCount == 2)
++                #expect(offset(in: map, forLine: 2) == 2)
++            }
+ 
+-            let map = lineMap(for: "a\nb\rc\r\nd")
+-            #expect(map.lineCount == 4)
+-            #expect(offset(in: map, forLine: 1) == 0)
+-            #expect(offset(in: map, forLine: 2) == 2)
+-            #expect(offset(in: map, forLine: 3) == 4)
+-            #expect(offset(in: map, forLine: 4) == 7)
+-        }
++            @Test
++            func `Mixed newline encodings preserve each line start`() {
++
++                let map = lineMap(for: "a\nb\rc\r\nd")
++                #expect(map.lineCount == 4)
++                #expect(offset(in: map, forLine: 1) == 0)
++                #expect(offset(in: map, forLine: 2) == 2)
++                #expect(offset(in: map, forLine: 3) == 4)
++                #expect(offset(in: map, forLine: 4) == 7)
++            }
+ 
+-        @Test
+-        func `Columns count UTF8 bytes and Unicode line separators remain within a line`() {
+-            let map = lineMap(for: "é\u{2028}😀\r\nz")
+-            #expect(map.lineCount == 2)
+-            #expect(offset(in: map, forLine: 2) == 11)
+-            #expect(map.column(for: 9) == 10)
+-            #expect(map.location(for: 12) == Text.Location(line: 2, column: 2))
++            @Test
++            func `Columns count UTF8 bytes and Unicode line separators remain within a line`() {
++                let map = lineMap(for: "é\u{2028}😀\r\nz")
++                #expect(map.lineCount == 2)
++                #expect(offset(in: map, forLine: 2) == 11)
++                #expect(map.column(for: 9) == 10)
++                #expect(map.location(for: 12) == Text.Location(line: 2, column: 2))
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Text Tests/Absorbed swift-text-byte/Text.Line.Map.Lookup Tests.swift b/Tests/Text Tests/Absorbed swift-text-byte/Text.Line.Map.Lookup Tests.swift
+index 600bb9c..0b87b5b 100644
+--- a/Tests/Text Tests/Absorbed swift-text-byte/Text.Line.Map.Lookup Tests.swift	
++++ b/Tests/Text Tests/Absorbed swift-text-byte/Text.Line.Map.Lookup Tests.swift	
+@@ -2,14 +2,18 @@
+     import Testing
+     import Text
+ 
+-    @Suite
+-    struct `Scanned text line maps reject every out of range line number` {
+-        @Test(arguments: [UInt.zero, 3, UInt(Int.max), UInt(Int.max) + 1, UInt.max])
+-        func `Invalid line numbers have no byte position`(_ line: UInt) {
+-            let map = Text.Line.Map(scanning: [Byte(bitPattern: 0x0A)])
+-            #expect(map.offset(forLine: Text.Line.Number(line)) == nil)
+-            #expect(map.offset(forLine: 1) == .zero)
+-            #expect(map.offset(forLine: 2) == Text.Position(1))
++enum `Text.Line.Map.Lookup Tests` {}
++
++extension `Text.Line.Map.Lookup Tests` {
++        @Suite
++        struct `Scanned text line maps reject every out of range line number` {
++            @Test(arguments: [UInt.zero, 3, UInt(Int.max), UInt(Int.max) + 1, UInt.max])
++            func `Invalid line numbers have no byte position`(_ line: UInt) {
++                let map = Text.Line.Map(scanning: [Byte(bitPattern: 0x0A)])
++                #expect(map.offset(forLine: Text.Line.Number(line)) == nil)
++                #expect(map.offset(forLine: 1) == .zero)
++                #expect(map.offset(forLine: 2) == Text.Position(1))
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Text Tests/Text Tests.swift b/Tests/Text Tests/Text Tests.swift
+index b5df2eb..01ccca1 100644
+--- a/Tests/Text Tests/Text Tests.swift	
++++ b/Tests/Text Tests/Text Tests.swift	
+@@ -6,712 +6,765 @@ import Testing
+ import Text
+ import Text_Test_Support
+ 
+-@Suite
+-struct `Text positions preserve byte offsets through arithmetic ordering and formatting` {
++enum `Text Tests` {}
++
++extension `Text Tests` {
++    @Suite
++    struct `Text positions preserve byte offsets through arithmetic ordering and formatting` {
++
++        @Test
++        func `zero is byte offset 0`() {
++            let position = Text.Position.zero
++            #expect(position == 0)
++        }
++
++        @Test
++        func `A text position preserves its integer literal value`() {
++            let position: Text.Position = 42
++            #expect(position == 42)
++        }
++
++        @Test
++        func `Text positions compare in byte offset order`() {
++            let a: Text.Position = 10
++            let b: Text.Position = 20
++            #expect(a < b)
++            #expect(a <= b)
++            #expect(b > a)
++            #expect(b >= a)
++            #expect(a == 10)
++        }
++
++        @Test
++        func `subtraction returns typed offset`() throws {
++            let a: Text.Position = 25
++            let b: Text.Position = 10
++            let offset: Text.Offset = a - b
++            #expect(offset == Text.Offset(15))
++        }
++
++        @Test
++        func `Adding a text offset advances a position and zero preserves it`() throws {
++            let position: Text.Position = 10
++            let offset = Text.Offset(5)
++            #expect(try position + offset == 15)
++            #expect(try position + Text.Offset.zero == position)
++        }
++
++        @Test
++        func `Equal text positions share a hash and occupy one set entry`() {
++            let a: Text.Position = 42
++            let b: Text.Position = 42
++            #expect(a.hashValue == b.hashValue)
++
++            var set: Set<Text.Position> = [a, b]
++            #expect(set.count == 1)
++            let c: Text.Position = 99
++            set.insert(c)
++            #expect(set.count == 2)
++        }
++
++        @Test
++        func `Text position descriptions contain their numeric byte offsets`() {
++            let pos: Text.Position = 42
++            #expect(pos.description == "42")
++            #expect(Text.Position.zero.description == "0")
++        }
++    }
++}
++
++extension `Text Tests`.`Text positions preserve byte offsets through arithmetic ordering and formatting` {
+     @Suite struct `No text position unit cases are defined` {}
++
+     @Suite struct `No text position boundary cases are defined` {}
++
+     @Suite struct `No text position integration cases are defined` {}
++}
+ 
+-    @Test
+-    func `zero is byte offset 0`() {
+-        let position = Text.Position.zero
+-        #expect(position == 0)
+-    }
++extension `Text Tests` {
++    @Suite
++    struct `Text offsets preserve signed differences through equality ordering and formatting` {
+ 
+-    @Test
+-    func `A text position preserves its integer literal value`() {
+-        let position: Text.Position = 42
+-        #expect(position == 42)
+-    }
++        @Test
++        func `The zero text offset equals an offset constructed from zero`() {
++            #expect(Text.Offset.zero == Text.Offset(0))
++        }
+ 
+-    @Test
+-    func `Text positions compare in byte offset order`() {
+-        let a: Text.Position = 10
+-        let b: Text.Position = 20
+-        #expect(a < b)
+-        #expect(a <= b)
+-        #expect(b > a)
+-        #expect(b >= a)
+-        #expect(a == 10)
+-    }
++        @Test
++        func `Equal signed integer inputs construct equal text offsets`() {
++            #expect(Text.Offset(42) == Text.Offset(42))
++            #expect(Text.Offset(-5) == Text.Offset(-5))
++        }
+ 
+-    @Test
+-    func `subtraction returns typed offset`() throws {
+-        let a: Text.Position = 25
+-        let b: Text.Position = 10
+-        let offset: Text.Offset = a - b
+-        #expect(offset == Text.Offset(15))
+-    }
++        @Test
++        func `Text offsets order negative zero and positive differences`() {
++            let a = Text.Offset(-1)
++            let b = Text.Offset(0)
++            let c = Text.Offset(1)
++            #expect(a < b)
++            #expect(b < c)
++        }
+ 
+-    @Test
+-    func `Adding a text offset advances a position and zero preserves it`() throws {
+-        let position: Text.Position = 10
+-        let offset = Text.Offset(5)
+-        #expect(try position + offset == 15)
+-        #expect(try position + Text.Offset.zero == position)
+-    }
++        @Test
++        func `Text offset equality distinguishes different differences`() {
++            let a = Text.Offset(10)
++            let b = Text.Offset(10)
++            let c = Text.Offset(11)
++            #expect(a == b)
++            #expect(a != c)
++        }
+ 
+-    @Test
+-    func `Equal text positions share a hash and occupy one set entry`() {
+-        let a: Text.Position = 42
+-        let b: Text.Position = 42
+-        #expect(a.hashValue == b.hashValue)
+-
+-        var set: Set<Text.Position> = [a, b]
+-        #expect(set.count == 1)
+-        let c: Text.Position = 99
+-        set.insert(c)
+-        #expect(set.count == 2)
+-    }
++        @Test
++        func `Equal text offsets occupy one set entry`() {
++            let a = Text.Offset(5)
++            let b = Text.Offset(5)
++            let set: Set<Text.Offset> = [a, b]
++            #expect(set.count == 1)
++        }
++
++        @Test
++        func `A text offset exposes its stored difference`() {
++            let offset = Text.Offset(42)
+ 
+-    @Test
+-    func `Text position descriptions contain their numeric byte offsets`() {
+-        let pos: Text.Position = 42
+-        #expect(pos.description == "42")
+-        #expect(Text.Position.zero.description == "0")
++            #expect(offset.difference == Difference(42))
++        }
++
++        @Test
++        func `Text offset descriptions preserve signed numeric values`() {
++            #expect(Text.Offset(15).description == "15")
++            #expect(Text.Offset(-3).description == "-3")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Text offsets preserve signed differences through equality ordering and formatting` {
++extension `Text Tests`.`Text offsets preserve signed differences through equality ordering and formatting` {
+     @Suite struct `No text offset unit cases are defined` {}
++
+     @Suite struct `No text offset boundary cases are defined` {}
+-    @Suite struct `No text offset integration cases are defined` {}
+ 
+-    @Test
+-    func `The zero text offset equals an offset constructed from zero`() {
+-        #expect(Text.Offset.zero == Text.Offset(0))
+-    }
++    @Suite struct `No text offset integration cases are defined` {}
++}
+ 
+-    @Test
+-    func `Equal signed integer inputs construct equal text offsets`() {
+-        #expect(Text.Offset(42) == Text.Offset(42))
+-        #expect(Text.Offset(-5) == Text.Offset(-5))
+-    }
++extension `Text Tests` {
++    @Suite
++    struct `Text counts preserve magnitudes through comparison conversion and formatting` {
+ 
+-    @Test
+-    func `Text offsets order negative zero and positive differences`() {
+-        let a = Text.Offset(-1)
+-        let b = Text.Offset(0)
+-        let c = Text.Offset(1)
+-        #expect(a < b)
+-        #expect(b < c)
+-    }
++        @Test
++        func `A text count preserves its integer literal value`() {
++            let count: Text.Count = 42
++            #expect(count == 42)
++        }
+ 
+-    @Test
+-    func `Text offset equality distinguishes different differences`() {
+-        let a = Text.Offset(10)
+-        let b = Text.Offset(10)
+-        let c = Text.Offset(11)
+-        #expect(a == b)
+-        #expect(a != c)
+-    }
++        @Test
++        func `A text offset magnitude supplies the corresponding text count`() {
++            let offset = Text.Offset(15)
++            let count: Text.Count = offset.magnitude.map(\.value)
++            #expect(count == 15)
++        }
+ 
+-    @Test
+-    func `Equal text offsets occupy one set entry`() {
+-        let a = Text.Offset(5)
+-        let b = Text.Offset(5)
+-        let set: Set<Text.Offset> = [a, b]
+-        #expect(set.count == 1)
+-    }
++        @Test
++        func `Text counts compare in magnitude order`() {
++            let a: Text.Count = 5
++            let b: Text.Count = 10
++            #expect(a < b)
++            #expect(b > a)
++        }
+ 
+-    @Test
+-    func `A text offset exposes its stored difference`() {
+-        let offset = Text.Offset(42)
++        @Test
++        func `Equal numeric values construct equal text counts`() {
++            let a: Text.Count = 10
++            let b: Text.Count = 10
++            #expect(a == b)
++        }
+ 
+-        #expect(offset.difference == Difference(42))
+-    }
++        @Test
++        func `Converting a text count to Int preserves its value`() throws {
++            let count: Text.Count = 42
++            #expect(try Int(count) == 42)
++        }
+ 
+-    @Test
+-    func `Text offset descriptions preserve signed numeric values`() {
+-        #expect(Text.Offset(15).description == "15")
+-        #expect(Text.Offset(-3).description == "-3")
++        @Test
++        func `A text count description contains its numeric value`() {
++            let count: Text.Count = 15
++            #expect(count.description == "15")
++        }
+     }
+ }
+ 
+-@Suite
+-struct `Text counts preserve magnitudes through comparison conversion and formatting` {
++extension `Text Tests`.`Text counts preserve magnitudes through comparison conversion and formatting` {
+     @Suite struct `No text count unit cases are defined` {}
++
+     @Suite struct `No text count boundary cases are defined` {}
++
+     @Suite struct `No text count integration cases are defined` {}
++}
+ 
+-    @Test
+-    func `A text count preserves its integer literal value`() {
+-        let count: Text.Count = 42
+-        #expect(count == 42)
+-    }
++extension `Text Tests` {
++    @Suite
++    struct `Text ranges preserve bounds counts and half open membership` {
+ 
+-    @Test
+-    func `A text offset magnitude supplies the corresponding text count`() {
+-        let offset = Text.Offset(15)
+-        let count: Text.Count = offset.magnitude.map(\.value)
+-        #expect(count == 15)
+-    }
++        @Test
++        func `Text range construction preserves explicit start and end positions`() {
++            let range = Text.Range(start: 10, end: 20)
++            #expect(range.start == 10)
++            #expect(range.end == 20)
++        }
+ 
+-    @Test
+-    func `Text counts compare in magnitude order`() {
+-        let a: Text.Count = 5
+-        let b: Text.Count = 10
+-        #expect(a < b)
+-        #expect(b > a)
+-    }
++        @Test
++        func `Text range construction adds the count to its start position`() {
++            let range = Text.Range(start: 10, count: 15)
++            #expect(range.start == 10)
++            #expect(range.end == 25)
++        }
+ 
+-    @Test
+-    func `Equal numeric values construct equal text counts`() {
+-        let a: Text.Count = 10
+-        let b: Text.Count = 10
+-        #expect(a == b)
+-    }
++        @Test
++        func `count returns Text.Count`() {
++            let range = Text.Range(start: 10, end: 25)
++            #expect(range.count == 15)
++        }
+ 
+-    @Test
+-    func `Converting a text count to Int preserves its value`() throws {
+-        let count: Text.Count = 42
+-        #expect(try Int(count) == 42)
+-    }
++        @Test
++        func `A text range with equal bounds is empty and has zero count`() {
++            let range = Text.Range(start: 10, end: 10)
++            #expect(range.isEmpty)
++            #expect(range.count == 0)
++        }
+ 
+-    @Test
+-    func `A text count description contains its numeric value`() {
+-        let count: Text.Count = 15
+-        #expect(count.description == "15")
+-    }
+-}
++        @Test
++        func `non-empty range is not empty`() {
++            let range = Text.Range(start: 0, end: 1)
++            #expect(!range.isEmpty)
++        }
+ 
+-@Suite
+-struct `Text ranges preserve bounds counts and half open membership` {
+-    @Suite struct `No text range unit cases are defined` {}
+-    @Suite struct `No text range boundary cases are defined` {}
+-    @Suite struct `No text range integration cases are defined` {}
++        @Test
++        func `Text range membership includes the start and excludes the end`() {
++            let range = Text.Range(start: 10, end: 20)
++            #expect(range.contains(10))
++            #expect(range.contains(15))
++            #expect(range.contains(19))
++            #expect(!range.contains(20))
++            #expect(!range.contains(9))
++            #expect(!range.contains(25))
++        }
+ 
+-    @Test
+-    func `Text range construction preserves explicit start and end positions`() {
+-        let range = Text.Range(start: 10, end: 20)
+-        #expect(range.start == 10)
+-        #expect(range.end == 20)
+-    }
++        @Test
++        func `Text range equality distinguishes different bounds`() {
++            let a = Text.Range(start: 10, end: 20)
++            let b = Text.Range(start: 10, end: 20)
++            let c = Text.Range(start: 10, end: 21)
++            #expect(a == b)
++            #expect(a != c)
++        }
+ 
+-    @Test
+-    func `Text range construction adds the count to its start position`() {
+-        let range = Text.Range(start: 10, count: 15)
+-        #expect(range.start == 10)
+-        #expect(range.end == 25)
+-    }
++        @Test
++        func `Equal text ranges occupy one set entry and distinct ranges add another`() {
++            let a = Text.Range(start: 10, end: 20)
++            let b = Text.Range(start: 10, end: 20)
++            var set: Set<Text.Range> = [a, b]
++            #expect(set.count == 1)
++            set.insert(Text.Range(start: 0, end: 5))
++            #expect(set.count == 2)
++        }
+ 
+-    @Test
+-    func `count returns Text.Count`() {
+-        let range = Text.Range(start: 10, end: 25)
+-        #expect(range.count == 15)
+-    }
++        @Test
++        func `Text range descriptions use half open interval notation`() {
++            let range = Text.Range(start: 10, end: 20)
++            #expect(range.description == "10..<20")
++        }
+ 
+-    @Test
+-    func `A text range with equal bounds is empty and has zero count`() {
+-        let range = Text.Range(start: 10, end: 10)
+-        #expect(range.isEmpty)
+-        #expect(range.count == 0)
+-    }
++        @Test
++        func `A text range with zero bounds is empty and preserves both bounds`() {
++            let range = Text.Range(start: .zero, end: .zero)
++            #expect(range.isEmpty)
++            #expect(range.start == .zero)
++            #expect(range.end == .zero)
++        }
+ 
+-    @Test
+-    func `non-empty range is not empty`() {
+-        let range = Text.Range(start: 0, end: 1)
+-        #expect(!range.isEmpty)
+-    }
++        @Test
++        func `Text ranges preserve the full unsigned extent through both constructors`() {
++            let last = Text.Position(_unchecked: Ordinal(UInt.max))
++            let count = Text.Count(_unchecked: Cardinal(UInt.max))
++            let endpoints = Text.Range(start: .zero, end: last)
++            let counted = Text.Range(start: .zero, count: count)
++
++            #expect(endpoints.start == .zero)
++            #expect(endpoints.end == last)
++            #expect(endpoints.count == count)
++            #expect(!endpoints.isEmpty)
++            #expect(endpoints.contains(.zero))
++            #expect(endpoints.contains(Text.Position(_unchecked: Ordinal(UInt.max - 1))))
++            #expect(!endpoints.contains(last))
++            #expect(endpoints == counted)
++            #expect(endpoints.hashValue == counted.hashValue)
++            #expect(Set([endpoints, counted]).count == 1)
++            #expect(endpoints.description == "0..<\(UInt.max)")
++        }
+ 
+-    @Test
+-    func `Text range membership includes the start and excludes the end`() {
+-        let range = Text.Range(start: 10, end: 20)
+-        #expect(range.contains(10))
+-        #expect(range.contains(15))
+-        #expect(range.contains(19))
+-        #expect(!range.contains(20))
+-        #expect(!range.contains(9))
+-        #expect(!range.contains(25))
+-    }
++        @Test
++        func `Both text range constructors accept an empty extent at the greatest position`() {
++            let last = Text.Position(_unchecked: Ordinal(UInt.max))
++            let endpoints = Text.Range(start: last, end: last)
++            let counted = Text.Range(start: last, count: .zero)
++
++            #expect(endpoints == counted)
++            #expect(endpoints.start == last)
++            #expect(endpoints.end == last)
++            #expect(endpoints.count == .zero)
++            #expect(endpoints.isEmpty)
++            #expect(!endpoints.contains(last))
++            #expect(!endpoints.contains(Text.Position(_unchecked: Ordinal(UInt.max - 1))))
++            #expect(endpoints.description == "\(UInt.max)..<\(UInt.max)")
++        }
+ 
+-    @Test
+-    func `Text range equality distinguishes different bounds`() {
+-        let a = Text.Range(start: 10, end: 20)
+-        let b = Text.Range(start: 10, end: 20)
+-        let c = Text.Range(start: 10, end: 21)
+-        #expect(a == b)
+-        #expect(a != c)
+-    }
++        @Test
++        func `A text range count may end exactly at the greatest position from a nonzero start`() {
++            let count = Text.Count(_unchecked: Cardinal(UInt.max - 1))
++            let range = Text.Range(start: 1, count: count)
++
++            #expect(range.start == 1)
++            #expect(range.end == Text.Position(_unchecked: Ordinal(UInt.max)))
++            #expect(range.count == count)
++            #expect(!range.contains(.zero))
++            #expect(range.contains(1))
++            #expect(!range.contains(range.end))
++        }
+ 
+-    @Test
+-    func `Equal text ranges occupy one set entry and distinct ranges add another`() {
+-        let a = Text.Range(start: 10, end: 20)
+-        let b = Text.Range(start: 10, end: 20)
+-        var set: Set<Text.Range> = [a, b]
+-        #expect(set.count == 1)
+-        set.insert(Text.Range(start: 0, end: 5))
+-        #expect(set.count == 2)
+-    }
++        @Test
++        func `Text exports discrete intervals with its position and count domains`() throws {
++            let interval: Interval.Discrete<Text.Position> = try Interval.Discrete(
++                start: 3,
++                count: Text.Count(4)
++            )
++            let count: Text.Count = interval.count
++
++            #expect(interval.start == 3)
++            #expect(interval.end == 7)
++            #expect(count == 4)
++        }
+ 
+-    @Test
+-    func `Text range descriptions use half open interval notation`() {
+-        let range = Text.Range(start: 10, end: 20)
+-        #expect(range.description == "10..<20")
+-    }
++        @Test
++        func `Text range construction enforces the ordered endpoint precondition`() async {
++            await #expect(processExitsWith: .failure) {
++                _ = Text.Range(start: 2, end: 1)
++            }
++        }
+ 
+-    @Test
+-    func `A text range with zero bounds is empty and preserves both bounds`() {
+-        let range = Text.Range(start: .zero, end: .zero)
+-        #expect(range.isEmpty)
+-        #expect(range.start == .zero)
+-        #expect(range.end == .zero)
++        @Test
++        func `Text range construction enforces a representable exclusive endpoint`() async {
++            await #expect(processExitsWith: .failure) {
++                let last = Text.Position(_unchecked: Ordinal(UInt.max))
++                _ = Text.Range(start: last, count: .one)
++            }
++        }
+     }
++}
+ 
+-    @Test
+-    func `Text ranges preserve the full unsigned extent through both constructors`() {
+-        let last = Text.Position(_unchecked: Ordinal(UInt.max))
+-        let count = Text.Count(_unchecked: Cardinal(UInt.max))
+-        let endpoints = Text.Range(start: .zero, end: last)
+-        let counted = Text.Range(start: .zero, count: count)
+-
+-        #expect(endpoints.start == .zero)
+-        #expect(endpoints.end == last)
+-        #expect(endpoints.count == count)
+-        #expect(!endpoints.isEmpty)
+-        #expect(endpoints.contains(.zero))
+-        #expect(endpoints.contains(Text.Position(_unchecked: Ordinal(UInt.max - 1))))
+-        #expect(!endpoints.contains(last))
+-        #expect(endpoints == counted)
+-        #expect(endpoints.hashValue == counted.hashValue)
+-        #expect(Set([endpoints, counted]).count == 1)
+-        #expect(endpoints.description == "0..<\(UInt.max)")
+-    }
++extension `Text Tests`.`Text ranges preserve bounds counts and half open membership` {
++    @Suite struct `No text range unit cases are defined` {}
+ 
+-    @Test
+-    func `Both text range constructors accept an empty extent at the greatest position`() {
+-        let last = Text.Position(_unchecked: Ordinal(UInt.max))
+-        let endpoints = Text.Range(start: last, end: last)
+-        let counted = Text.Range(start: last, count: .zero)
+-
+-        #expect(endpoints == counted)
+-        #expect(endpoints.start == last)
+-        #expect(endpoints.end == last)
+-        #expect(endpoints.count == .zero)
+-        #expect(endpoints.isEmpty)
+-        #expect(!endpoints.contains(last))
+-        #expect(!endpoints.contains(Text.Position(_unchecked: Ordinal(UInt.max - 1))))
+-        #expect(endpoints.description == "\(UInt.max)..<\(UInt.max)")
+-    }
++    @Suite struct `No text range boundary cases are defined` {}
+ 
+-    @Test
+-    func `A text range count may end exactly at the greatest position from a nonzero start`() {
+-        let count = Text.Count(_unchecked: Cardinal(UInt.max - 1))
+-        let range = Text.Range(start: 1, count: count)
+-
+-        #expect(range.start == 1)
+-        #expect(range.end == Text.Position(_unchecked: Ordinal(UInt.max)))
+-        #expect(range.count == count)
+-        #expect(!range.contains(.zero))
+-        #expect(range.contains(1))
+-        #expect(!range.contains(range.end))
+-    }
++    @Suite struct `No text range integration cases are defined` {}
++}
+ 
+-    @Test
+-    func `Text exports discrete intervals with its position and count domains`() throws {
+-        let interval: Interval.Discrete<Text.Position> = try Interval.Discrete(
+-            start: 3,
+-            count: Text.Count(4)
+-        )
+-        let count: Text.Count = interval.count
++extension `Text Tests` {
++    @Suite
++    struct `Text location trackers preserve current line byte coordinates and enforce their domain` {
+ 
+-        #expect(interval.start == 3)
+-        #expect(interval.end == 7)
+-        #expect(count == 4)
+-    }
++        @Test
++        func `A new text location tracker starts at line one column one`() {
++            let tracker = Text.Location.Tracker()
+ 
+-    @Test
+-    func `Text range construction enforces the ordered endpoint precondition`() async {
+-        await #expect(processExitsWith: .failure) {
+-            _ = Text.Range(start: 2, end: 1)
++            #expect(tracker.line == 1)
++            #expect(tracker.lineStart == .zero)
++            #expect(tracker.location(at: .zero) == Text.Location(line: 1, column: 1))
+         }
+-    }
+ 
+-    @Test
+-    func `Text range construction enforces a representable exclusive endpoint`() async {
+-        await #expect(processExitsWith: .failure) {
+-            let last = Text.Position(_unchecked: Ordinal(UInt.max))
+-            _ = Text.Range(start: last, count: .one)
+-        }
+-    }
+-}
++        @Test
++        func `Text location tracker columns count UTF8 bytes from one`() {
++            let tracker = Text.Location.Tracker()
++            let cursor = Text.Position(_unchecked: Ordinal(UInt("é🦊".utf8.count)))
+ 
+-@Suite
+-struct `Text location trackers preserve current line byte coordinates and enforce their domain` {
++            #expect(tracker.location(at: cursor) == Text.Location(line: 1, column: 7))
++        }
+ 
+-    @Test
+-    func `A new text location tracker starts at line one column one`() {
+-        let tracker = Text.Location.Tracker()
++        @Test
++        func `LF and empty line transitions start the next line after the reported byte`() {
++            var tracker = Text.Location.Tracker()
++            tracker.newline(at: 2)
+ 
+-        #expect(tracker.line == 1)
+-        #expect(tracker.lineStart == .zero)
+-        #expect(tracker.location(at: .zero) == Text.Location(line: 1, column: 1))
+-    }
++            #expect(tracker.lineStart == 3)
++            #expect(tracker.location(at: 3) == Text.Location(line: 2, column: 1))
+ 
+-    @Test
+-    func `Text location tracker columns count UTF8 bytes from one`() {
+-        let tracker = Text.Location.Tracker()
+-        let cursor = Text.Position(_unchecked: Ordinal(UInt("é🦊".utf8.count)))
++            tracker.newline(at: 3)
+ 
+-        #expect(tracker.location(at: cursor) == Text.Location(line: 1, column: 7))
+-    }
++            #expect(tracker.lineStart == 4)
++            #expect(tracker.location(at: 4) == Text.Location(line: 3, column: 1))
++            #expect(tracker.location(at: 6) == Text.Location(line: 3, column: 3))
++        }
+ 
+-    @Test
+-    func `LF and empty line transitions start the next line after the reported byte`() {
+-        var tracker = Text.Location.Tracker()
+-        tracker.newline(at: 2)
++        @Test
++        func `Text location queries may repeat and move backward within the current line`() {
++            var tracker = Text.Location.Tracker()
++            tracker.newline(at: 4)
+ 
+-        #expect(tracker.lineStart == 3)
+-        #expect(tracker.location(at: 3) == Text.Location(line: 2, column: 1))
++            #expect(tracker.location(at: 10) == Text.Location(line: 2, column: 6))
++            #expect(tracker.location(at: 7) == Text.Location(line: 2, column: 3))
++            #expect(tracker.location(at: 7) == Text.Location(line: 2, column: 3))
++            #expect(tracker.location(at: 5) == Text.Location(line: 2, column: 1))
++        }
+ 
+-        tracker.newline(at: 3)
++        @Test
++        func `Public text location tracker state can be restored to an earlier line`() {
++            var tracker = Text.Location.Tracker()
++            let saved = tracker
++            tracker.line = 42
++            tracker.lineStart = 100
+ 
+-        #expect(tracker.lineStart == 4)
+-        #expect(tracker.location(at: 4) == Text.Location(line: 3, column: 1))
+-        #expect(tracker.location(at: 6) == Text.Location(line: 3, column: 3))
+-    }
++            #expect(tracker.location(at: 102) == Text.Location(line: 42, column: 3))
+ 
+-    @Test
+-    func `Text location queries may repeat and move backward within the current line`() {
+-        var tracker = Text.Location.Tracker()
+-        tracker.newline(at: 4)
++            tracker.line = saved.line
++            tracker.lineStart = saved.lineStart
+ 
+-        #expect(tracker.location(at: 10) == Text.Location(line: 2, column: 6))
+-        #expect(tracker.location(at: 7) == Text.Location(line: 2, column: 3))
+-        #expect(tracker.location(at: 7) == Text.Location(line: 2, column: 3))
+-        #expect(tracker.location(at: 5) == Text.Location(line: 2, column: 1))
+-    }
++            #expect(tracker == saved)
++            #expect(tracker.location(at: .zero) == Text.Location(line: 1, column: 1))
++        }
+ 
+-    @Test
+-    func `Public text location tracker state can be restored to an earlier line`() {
+-        var tracker = Text.Location.Tracker()
+-        let saved = tracker
+-        tracker.line = 42
+-        tracker.lineStart = 100
++        @Test
++        func `Text location trackers preserve the greatest representable one based column`() {
++            var tracker = Text.Location.Tracker()
++            let beforeLast = Text.Position(_unchecked: Ordinal(UInt.max - 1))
++            let last = Text.Position(_unchecked: Ordinal(UInt.max))
++            let column = Text.Line.Column(_unchecked: Cardinal(UInt.max))
+ 
+-        #expect(tracker.location(at: 102) == Text.Location(line: 42, column: 3))
++            #expect(tracker.location(at: beforeLast) == Text.Location(line: 1, column: column))
+ 
+-        tracker.line = saved.line
+-        tracker.lineStart = saved.lineStart
++            tracker.lineStart = 1
+ 
+-        #expect(tracker == saved)
+-        #expect(tracker.location(at: .zero) == Text.Location(line: 1, column: 1))
+-    }
++            #expect(tracker.location(at: last) == Text.Location(line: 1, column: column))
++        }
+ 
+-    @Test
+-    func `Text location trackers preserve the greatest representable one based column`() {
+-        var tracker = Text.Location.Tracker()
+-        let beforeLast = Text.Position(_unchecked: Ordinal(UInt.max - 1))
+-        let last = Text.Position(_unchecked: Ordinal(UInt.max))
+-        let column = Text.Line.Column(_unchecked: Cardinal(UInt.max))
++        @Test
++        func `A text location tracker line can start at the greatest position`() {
++            var tracker = Text.Location.Tracker()
++            tracker.newline(at: Text.Position(_unchecked: Ordinal(UInt.max - 1)))
++            let last = Text.Position(_unchecked: Ordinal(UInt.max))
+ 
+-        #expect(tracker.location(at: beforeLast) == Text.Location(line: 1, column: column))
++            #expect(tracker.lineStart == last)
++            #expect(tracker.location(at: last) == Text.Location(line: 2, column: 1))
++        }
+ 
+-        tracker.lineStart = 1
++        @Test
++        func `Text location queries enforce the current line start precondition`() async {
++            await #expect(processExitsWith: .failure) {
++                var tracker = Text.Location.Tracker()
++                tracker.newline(at: 4)
++                _ = tracker.location(at: 4)
++            }
++        }
+ 
+-        #expect(tracker.location(at: last) == Text.Location(line: 1, column: column))
+-    }
++        @Test
++        func `Text location queries require a representable one based column`() async {
++            await #expect(processExitsWith: .failure) {
++                let tracker = Text.Location.Tracker()
++                _ = tracker.location(at: Text.Position(_unchecked: Ordinal(UInt.max)))
++            }
++        }
+ 
+-    @Test
+-    func `A text location tracker line can start at the greatest position`() {
+-        var tracker = Text.Location.Tracker()
+-        tracker.newline(at: Text.Position(_unchecked: Ordinal(UInt.max - 1)))
+-        let last = Text.Position(_unchecked: Ordinal(UInt.max))
++        @Test
++        func `Text location newline transitions require a representable next line start`() async {
++            await #expect(processExitsWith: .failure) {
++                var tracker = Text.Location.Tracker()
++                tracker.newline(at: Text.Position(_unchecked: Ordinal(UInt.max)))
++            }
++        }
+ 
+-        #expect(tracker.lineStart == last)
+-        #expect(tracker.location(at: last) == Text.Location(line: 2, column: 1))
++        @Test
++        func `Text location newline transitions require a representable next line number`() async {
++            await #expect(processExitsWith: .failure) {
++                var tracker = Text.Location.Tracker()
++                tracker.line = Text.Line.Number(UInt.max)
++                tracker.newline(at: .zero)
++            }
++        }
+     }
++}
+ 
+-    @Test
+-    func `Text location queries enforce the current line start precondition`() async {
+-        await #expect(processExitsWith: .failure) {
+-            var tracker = Text.Location.Tracker()
+-            tracker.newline(at: 4)
+-            _ = tracker.location(at: 4)
++extension `Text Tests` {
++    @Suite
++    struct `Text line numbers validate signed inputs and preserve numeric values` {
++
++        @Test
++        func `Text line number construction preserves an unsigned integer`() {
++            let number = Text.Line.Number(1)
++            #expect(number.underlying == 1)
+         }
+-    }
+ 
+-    @Test
+-    func `Text location queries require a representable one based column`() async {
+-        await #expect(processExitsWith: .failure) {
+-            let tracker = Text.Location.Tracker()
+-            _ = tracker.location(at: Text.Position(_unchecked: Ordinal(UInt.max)))
++        @Test
++        func `A text line number preserves its integer literal value`() {
++            let number: Text.Line.Number = 42
++            #expect(number.underlying == 42)
+         }
+-    }
+ 
+-    @Test
+-    func `Text location newline transitions require a representable next line start`() async {
+-        await #expect(processExitsWith: .failure) {
+-            var tracker = Text.Location.Tracker()
+-            tracker.newline(at: Text.Position(_unchecked: Ordinal(UInt.max)))
++        @Test
++        func `Text line number construction preserves a positive signed integer`() throws {
++            let value: Int = 5
++            let number = try Text.Line.Number(value)
++            #expect(number.underlying == 5)
+         }
+-    }
+ 
+-    @Test
+-    func `Text location newline transitions require a representable next line number`() async {
+-        await #expect(processExitsWith: .failure) {
+-            var tracker = Text.Location.Tracker()
+-            tracker.line = Text.Line.Number(UInt.max)
+-            tracker.newline(at: .zero)
++        @Test
++        func `Text line number construction accepts signed zero`() throws {
++            let value: Int = 0
++            let number = try Text.Line.Number(value)
++            #expect(number.underlying == 0)
+         }
+-    }
+-}
+ 
+-@Suite
+-struct `Text line numbers validate signed inputs and preserve numeric values` {
+-    @Suite struct `No text line number unit cases are defined` {}
+-    @Suite struct `No text line number boundary cases are defined` {}
+-    @Suite struct `No text line number integration cases are defined` {}
++        @Test
++        func `init from Int — negative throws`() {
++            let value: Int = -1
++            #expect(throws: Text.Line.Number.Error.negativeSource(-1)) {
++                try Text.Line.Number(value)
++            }
++        }
+ 
+-    @Test
+-    func `Text line number construction preserves an unsigned integer`() {
+-        let number = Text.Line.Number(1)
+-        #expect(number.underlying == 1)
+-    }
++        @Test
++        func `Exact text line number construction preserves a positive signed integer`() {
++            let value: Int = 5
++            let number = Text.Line.Number(exactly: value)
++            #expect(number?.underlying == 5)
++        }
+ 
+-    @Test
+-    func `A text line number preserves its integer literal value`() {
+-        let number: Text.Line.Number = 42
+-        #expect(number.underlying == 42)
+-    }
++        @Test
++        func `init exactly — negative returns nil`() {
++            let value: Int = -1
++            #expect(Text.Line.Number(exactly: value) == nil)
++        }
+ 
+-    @Test
+-    func `Text line number construction preserves a positive signed integer`() throws {
+-        let value: Int = 5
+-        let number = try Text.Line.Number(value)
+-        #expect(number.underlying == 5)
+-    }
++        @Test
++        func `Text line numbers compare in numeric order`() {
++            let a: Text.Line.Number = 1
++            let b: Text.Line.Number = 10
++            #expect(a < b)
++            #expect(b > a)
++            #expect(a <= a)
++        }
+ 
+-    @Test
+-    func `Text line number construction accepts signed zero`() throws {
+-        let value: Int = 0
+-        let number = try Text.Line.Number(value)
+-        #expect(number.underlying == 0)
+-    }
++        @Test
++        func `Text line number equality distinguishes different numeric values`() {
++            let a: Text.Line.Number = 5
++            let b: Text.Line.Number = 5
++            let c: Text.Line.Number = 6
++            #expect(a == b)
++            #expect(a != c)
++        }
+ 
+-    @Test
+-    func `init from Int — negative throws`() {
+-        let value: Int = -1
+-        #expect(throws: Text.Line.Number.Error.negativeSource(-1)) {
+-            try Text.Line.Number(value)
++        @Test
++        func `Equal text line numbers occupy one set entry and distinct numbers add another`() {
++            let a: Text.Line.Number = 5
++            let b: Text.Line.Number = 5
++            var set: Set<Text.Line.Number> = [a, b]
++            #expect(set.count == 1)
++            set.insert(10)
++            #expect(set.count == 2)
+         }
+-    }
+ 
+-    @Test
+-    func `Exact text line number construction preserves a positive signed integer`() {
+-        let value: Int = 5
+-        let number = Text.Line.Number(exactly: value)
+-        #expect(number?.underlying == 5)
+-    }
++        @Test
++        func `A text line number description contains its numeric value`() {
++            let number: Text.Line.Number = 42
++            #expect(number.description == "42")
++        }
+ 
+-    @Test
+-    func `init exactly — negative returns nil`() {
+-        let value: Int = -1
+-        #expect(Text.Line.Number(exactly: value) == nil)
+     }
++}
+ 
+-    @Test
+-    func `Text line numbers compare in numeric order`() {
+-        let a: Text.Line.Number = 1
+-        let b: Text.Line.Number = 10
+-        #expect(a < b)
+-        #expect(b > a)
+-        #expect(a <= a)
+-    }
++extension `Text Tests`.`Text line numbers validate signed inputs and preserve numeric values` {
++    @Suite struct `No text line number unit cases are defined` {}
+ 
+-    @Test
+-    func `Text line number equality distinguishes different numeric values`() {
+-        let a: Text.Line.Number = 5
+-        let b: Text.Line.Number = 5
+-        let c: Text.Line.Number = 6
+-        #expect(a == b)
+-        #expect(a != c)
+-    }
++    @Suite struct `No text line number boundary cases are defined` {}
+ 
+-    @Test
+-    func `Equal text line numbers occupy one set entry and distinct numbers add another`() {
+-        let a: Text.Line.Number = 5
+-        let b: Text.Line.Number = 5
+-        var set: Set<Text.Line.Number> = [a, b]
+-        #expect(set.count == 1)
+-        set.insert(10)
+-        #expect(set.count == 2)
+-    }
++    @Suite struct `No text line number integration cases are defined` {}
++}
+ 
+-    @Test
+-    func `A text line number description contains its numeric value`() {
+-        let number: Text.Line.Number = 42
+-        #expect(number.description == "42")
+-    }
++extension `Text Tests` {
++    @Suite
++    struct `Text locations preserve coordinates and compare lines before columns` {
++
++        @Test
++        func `Text location construction preserves its line and column`() {
++            let location = Text.Location(
++                line: 5,
++                column: Text.Line.Column(_unchecked: Cardinal(10))
++            )
++            #expect(location.line == 5)
++            #expect(location.column == 10)
++        }
+ 
+-}
++        @Test
++        func `description is line:column`() {
++            let location = Text.Location(
++                line: 42,
++                column: Text.Line.Column(_unchecked: Cardinal(17))
++            )
++            #expect(location.description == "42:17")
++        }
+ 
+-@Suite
+-struct `Text locations preserve coordinates and compare lines before columns` {
+-    @Suite struct `No text location unit cases are defined` {}
+-    @Suite struct `No text location boundary cases are defined` {}
+-    @Suite struct `No text location integration cases are defined` {}
++        @Test
++        func `Text locations compare different lines before considering columns`() {
++            let a = Text.Location(
++                line: 1,
++                column: Text.Line.Column(_unchecked: Cardinal(99))
++            )
++            let b = Text.Location(
++                line: 2,
++                column: Text.Line.Column(_unchecked: .one)
++            )
++            #expect(a < b)
++        }
+ 
+-    @Test
+-    func `Text location construction preserves its line and column`() {
+-        let location = Text.Location(
+-            line: 5,
+-            column: Text.Line.Column(_unchecked: Cardinal(10))
+-        )
+-        #expect(location.line == 5)
+-        #expect(location.column == 10)
+-    }
++        @Test
++        func `Text locations on the same line compare their columns`() {
++            let a = Text.Location(
++                line: 5,
++                column: Text.Line.Column(_unchecked: .one)
++            )
++            let b = Text.Location(
++                line: 5,
++                column: Text.Line.Column(_unchecked: Cardinal(10))
++            )
++            #expect(a < b)
++        }
+ 
+-    @Test
+-    func `description is line:column`() {
+-        let location = Text.Location(
+-            line: 42,
+-            column: Text.Line.Column(_unchecked: Cardinal(17))
+-        )
+-        #expect(location.description == "42:17")
+-    }
++        @Test
++        func `Equal text locations do not order before each other`() {
++            let a = Text.Location(
++                line: 5,
++                column: Text.Line.Column(_unchecked: Cardinal(10))
++            )
++            let b = Text.Location(
++                line: 5,
++                column: Text.Line.Column(_unchecked: Cardinal(10))
++            )
++            #expect(a == b)
++            #expect(!(a < b))
++        }
+ 
+-    @Test
+-    func `Text locations compare different lines before considering columns`() {
+-        let a = Text.Location(
+-            line: 1,
+-            column: Text.Line.Column(_unchecked: Cardinal(99))
+-        )
+-        let b = Text.Location(
+-            line: 2,
+-            column: Text.Line.Column(_unchecked: .one)
+-        )
+-        #expect(a < b)
+-    }
++        @Test
++        func `Equal text locations occupy one set entry`() {
++            let a = Text.Location(
++                line: 1,
++                column: Text.Line.Column(_unchecked: .one)
++            )
++            let b = Text.Location(
++                line: 1,
++                column: Text.Line.Column(_unchecked: .one)
++            )
++            let set: Set<Text.Location> = [a, b]
++            #expect(set.count == 1)
++        }
+ 
+-    @Test
+-    func `Text locations on the same line compare their columns`() {
+-        let a = Text.Location(
+-            line: 5,
+-            column: Text.Line.Column(_unchecked: .one)
+-        )
+-        let b = Text.Location(
+-            line: 5,
+-            column: Text.Line.Column(_unchecked: Cardinal(10))
+-        )
+-        #expect(a < b)
+     }
++}
+ 
+-    @Test
+-    func `Equal text locations do not order before each other`() {
+-        let a = Text.Location(
+-            line: 5,
+-            column: Text.Line.Column(_unchecked: Cardinal(10))
+-        )
+-        let b = Text.Location(
+-            line: 5,
+-            column: Text.Line.Column(_unchecked: Cardinal(10))
+-        )
+-        #expect(a == b)
+-        #expect(!(a < b))
+-    }
++extension `Text Tests`.`Text locations preserve coordinates and compare lines before columns` {
++    @Suite struct `No text location unit cases are defined` {}
+ 
+-    @Test
+-    func `Equal text locations occupy one set entry`() {
+-        let a = Text.Location(
+-            line: 1,
+-            column: Text.Line.Column(_unchecked: .one)
+-        )
+-        let b = Text.Location(
+-            line: 1,
+-            column: Text.Line.Column(_unchecked: .one)
+-        )
+-        let set: Set<Text.Location> = [a, b]
+-        #expect(set.count == 1)
+-    }
++    @Suite struct `No text location boundary cases are defined` {}
+ 
++    @Suite struct `No text location integration cases are defined` {}
+ }
+ 
+-@Suite
+-struct `Text line maps validate starts and map positions to lines and columns` {
+-    @Suite struct `No text line map unit cases are defined` {}
+-    @Suite struct `No text line map boundary cases are defined` {}
+-    @Suite struct `No text line map integration cases are defined` {}
++extension `Text Tests` {
++    @Suite
++    struct `Text line maps validate starts and map positions to lines and columns` {
+ 
+-    private func lineMap(_ lineStarts: [Text.Position]) -> Text.Line.Map {
+-        Text.Line.Map(validatingLineStarts: lineStarts)!
+-    }
++        private func lineMap(_ lineStarts: [Text.Position]) -> Text.Line.Map {
++            Text.Line.Map(validatingLineStarts: lineStarts)!
++        }
+ 
+-    @Test
+-    func `validated line starts preserve typed positions`() throws {
+-        let map = try #require(Text.Line.Map(validatingLineStarts: [.zero, 4, 9]))
++        @Test
++        func `validated line starts preserve typed positions`() throws {
++            let map = try #require(Text.Line.Map(validatingLineStarts: [.zero, 4, 9]))
+ 
+-        #expect(map.lineCount == 3)
+-        #expect(map.offset(forLine: 1) == Text.Position.zero)
+-        #expect(map.offset(forLine: 2) == Text.Position(4))
+-        #expect(map.offset(forLine: 3) == Text.Position(9))
+-    }
++            #expect(map.lineCount == 3)
++            #expect(map.offset(forLine: 1) == Text.Position.zero)
++            #expect(map.offset(forLine: 2) == Text.Position(4))
++            #expect(map.offset(forLine: 3) == Text.Position(9))
++        }
+ 
+-    @Test(
+-        arguments: [
+-            [] as [Text.Position],
+-            [1],
+-            [0, 4, 4],
+-            [0, 5, 3],
+-        ]
+-    )
+-    func `invalid line starts are rejected`(_ lineStarts: [Text.Position]) {
+-        #expect(Text.Line.Map(validatingLineStarts: lineStarts) == nil)
+-    }
++        @Test(
++            arguments: [
++                [] as [Text.Position],
++                [1],
++                [0, 4, 4],
++                [0, 5, 3],
++            ]
++        )
++        func `invalid line starts are rejected`(_ lineStarts: [Text.Position]) {
++            #expect(Text.Line.Map(validatingLineStarts: lineStarts) == nil)
++        }
+ 
+-    @Test
+-    func `Text line maps count columns from one within each line`() {
++        @Test
++        func `Text line maps count columns from one within each line`() {
+ 
+-        let map = lineMap([0, 4])
++            let map = lineMap([0, 4])
+ 
+-        #expect(map.column(for: 0) == 1)
++            #expect(map.column(for: 0) == 1)
+ 
+-        #expect(map.column(for: 2) == 3)
++            #expect(map.column(for: 2) == 3)
+ 
+-        #expect(map.column(for: 4) == 1)
++            #expect(map.column(for: 4) == 1)
+ 
+-        #expect(map.column(for: 6) == 3)
+-    }
++            #expect(map.column(for: 6) == 3)
++        }
+ 
+-    @Test
+-    func `Text line maps compose the corresponding line column and description`() {
++        @Test
++        func `Text line maps compose the corresponding line column and description`() {
+ 
+-        let map = lineMap([0, 4])
+-        let location = map.location(for: 6)
+-        #expect(location.line == 2)
+-        #expect(location.column == 3)
+-        #expect(location.description == "2:3")
+-    }
++            let map = lineMap([0, 4])
++            let location = map.location(for: 6)
++            #expect(location.line == 2)
++            #expect(location.column == 3)
++            #expect(location.description == "2:3")
++        }
+ 
+-    @Test
+-    func `Text line maps return the start position for a valid line`() {
++        @Test
++        func `Text line maps return the start position for a valid line`() {
+ 
+-        let map = lineMap([0, 4])
+-        #expect(map.offset(forLine: 1) == 0)
+-        #expect(map.offset(forLine: 2) == 4)
+-    }
++            let map = lineMap([0, 4])
++            #expect(map.offset(forLine: 1) == 0)
++            #expect(map.offset(forLine: 2) == 4)
++        }
+ 
+-    @Test
+-    func `Text line maps return nil for lines outside the stored range`() {
+-        let map = lineMap([.zero])
+-        #expect(map.offset(forLine: 0) == nil)
+-        #expect(map.offset(forLine: 2) == nil)
+-    }
++        @Test
++        func `Text line maps return nil for lines outside the stored range`() {
++            let map = lineMap([.zero])
++            #expect(map.offset(forLine: 0) == nil)
++            #expect(map.offset(forLine: 2) == nil)
++        }
+ 
+-    @Test(arguments: [UInt(Int.max), UInt(Int.max) + 1, UInt.max])
+-    func `Out of range line numbers return nil throughout the unsigned domain`(_ value: UInt) {
+-        let map = lineMap([.zero, 4])
+-        #expect(map.offset(forLine: Text.Line.Number(value)) == nil)
+-    }
++        @Test(arguments: [UInt(Int.max), UInt(Int.max) + 1, UInt.max])
++        func `Out of range line numbers return nil throughout the unsigned domain`(_ value: UInt) {
++            let map = lineMap([.zero, 4])
++            #expect(map.offset(forLine: Text.Line.Number(value)) == nil)
++        }
++
++        @Test
++        func `Line start lookups preserve byte positions beyond the signed limit`() {
++            let last = Text.Position(_unchecked: Ordinal(UInt.max))
++            let map = lineMap([.zero, last])
++            #expect(map.offset(forLine: 1) == .zero)
++            #expect(map.offset(forLine: 2) == last)
++            #expect(map.offset(forLine: 3) == nil)
++        }
+ 
+-    @Test
+-    func `Line start lookups preserve byte positions beyond the signed limit`() {
+-        let last = Text.Position(_unchecked: Ordinal(UInt.max))
+-        let map = lineMap([.zero, last])
+-        #expect(map.offset(forLine: 1) == .zero)
+-        #expect(map.offset(forLine: 2) == last)
+-        #expect(map.offset(forLine: 3) == nil)
+     }
++}
++
++extension `Text Tests`.`Text line maps validate starts and map positions to lines and columns` {
++    @Suite struct `No text line map unit cases are defined` {}
+ 
++    @Suite struct `No text line map boundary cases are defined` {}
++
++    @Suite struct `No text line map integration cases are defined` {}
+ }
+-- 
+2.43.0
+

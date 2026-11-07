@@ -1,0 +1,601 @@
+From 43e45d5f930937d667e55b0bb686575cb119e954 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:20 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Email Codable Tests.swift                 |  80 ++---
+ .../Email RFC 5322 Tests.swift                | 310 +++++++++---------
+ .../README Verification Tests.swift           | 158 ++++-----
+ 3 files changed, 280 insertions(+), 268 deletions(-)
+
+diff --git a/Tests/Email Foundation Integration Tests/Email Codable Tests.swift b/Tests/Email Foundation Integration Tests/Email Codable Tests.swift
+index 5a5e3c3..cfa0cb8 100644
+--- a/Tests/Email Foundation Integration Tests/Email Codable Tests.swift	
++++ b/Tests/Email Foundation Integration Tests/Email Codable Tests.swift	
+@@ -7,43 +7,47 @@ import RFC_5322
+ import RFC_6531
+ import Testing
+ 
+-@Suite
+-struct `Email Codable` {
+-
+-    @Test
+-    func `A text email survives a JSON round trip`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            subject: "Welcome!",
+-            text: "Hello, World!",
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
+-        )
+-
+-        let encoded = try JSONEncoder().encode(email)
+-        let decoded = try JSONDecoder().decode(Email.self, from: encoded)
+-
+-        #expect(decoded == email)
+-    }
+-
+-    @Test
+-    func `A multipart email survives a JSON round trip`() throws {
+-        let multipart = try RFC_2046.Multipart.alternative(
+-            textContent: "Plain text version",
+-            htmlContent: "<p>HTML version</p>"
+-        )
+-
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Newsletter",
+-            body: .multipart(multipart)
+-        )
+-
+-        let encoded = try JSONEncoder().encode(email)
+-        let decoded = try JSONDecoder().decode(Email.self, from: encoded)
+-
+-        #expect(decoded == email)
++enum `Email Codable Tests` {}
++
++extension `Email Codable Tests` {
++    @Suite
++    struct `Email Codable` {
++
++        @Test
++        func `A text email survives a JSON round trip`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                subject: "Welcome!",
++                text: "Hello, World!",
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
++            )
++
++            let encoded = try JSONEncoder().encode(email)
++            let decoded = try JSONDecoder().decode(Email.self, from: encoded)
++
++            #expect(decoded == email)
++        }
++
++        @Test
++        func `A multipart email survives a JSON round trip`() throws {
++            let multipart = try RFC_2046.Multipart.alternative(
++                textContent: "Plain text version",
++                htmlContent: "<p>HTML version</p>"
++            )
++
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Newsletter",
++                body: .multipart(multipart)
++            )
++
++            let encoded = try JSONEncoder().encode(email)
++            let decoded = try JSONDecoder().decode(Email.self, from: encoded)
++
++            #expect(decoded == email)
++        }
+     }
+ }
+diff --git a/Tests/Email Standard Tests/Email RFC 5322 Tests.swift b/Tests/Email Standard Tests/Email RFC 5322 Tests.swift
+index 62a0230..431826a 100644
+--- a/Tests/Email Standard Tests/Email RFC 5322 Tests.swift	
++++ b/Tests/Email Standard Tests/Email RFC 5322 Tests.swift	
+@@ -7,158 +7,162 @@ import RFC_5322
+ import RFC_6531
+ import Testing
+ 
+-@Suite
+-struct `Email to RFC 5322 Message Conversion` {
+-
+-    @Test
+-    func `Convert simple text email to RFC 5322 Message`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Test Email",
+-            body: "Hello, World!"
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-
+-        #expect(message.from.address == "sender@example.com")
+-        #expect(message.to.count == 1)
+-        #expect(message.to[0].address == "recipient@example.com")
+-        #expect(message.subject == "Test Email")
+-        #expect(String(decoding: message.body, as: UTF8.self) == "Hello, World!")
+-
+-        let rendered = String(message)
+-        #expect(rendered.contains("From: sender@example.com"))
+-        #expect(rendered.contains("To: recipient@example.com"))
+-        #expect(rendered.contains("Subject: Test Email"))
+-        #expect(rendered.contains("Hello, World!"))
+-    }
+-
+-    @Test
+-    func `Convert HTML email to RFC 5322 Message`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "HTML Test",
+-            body: .html("<h1>Hello, World!</h1>")
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-
+-        #expect(String(decoding: message.body, as: UTF8.self).contains("<h1>Hello, World!</h1>"))
+-
+-        let rendered = String(message)
+-        #expect(rendered.contains("Content-Type: text/html"))
+-        #expect(rendered.contains("<h1>Hello, World!</h1>"))
+-    }
+-
+-    @Test
+-    func `Convert multipart email to RFC 5322 Message`() throws {
+-        let multipart = try RFC_2046.Multipart.alternative(
+-            textContent: "Plain text version",
+-            htmlContent: "<p>HTML version</p>"
+-        )
+-
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Multipart Test",
+-            body: .multipart(multipart)
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-
+-        let rendered = String(message)
+-        #expect(rendered.contains("Content-Type: multipart/alternative"))
+-        #expect(rendered.contains("Plain text version"))
+-        #expect(rendered.contains("<p>HTML version</p>"))
+-    }
+-
+-    @Test
+-    func `Convert email with CC and Reply-To`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            replyTo: EmailAddress(rfc6531: try RFC_6531.Mailbox("reply@example.com")),
+-            cc: [EmailAddress(rfc6531: try RFC_6531.Mailbox("cc@example.com"))],
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Test with CC",
+-            body: "Test body"
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-
+-        #expect(message.replyTo?.address == "reply@example.com")
+-        #expect(message.cc?.count == 1)
+-        #expect(message.cc?[0].address == "cc@example.com")
+-
+-        let rendered = String(message)
+-        #expect(rendered.contains("Reply-To: reply@example.com"))
+-        #expect(rendered.contains("Cc: cc@example.com"))
+-    }
+-
+-    @Test
+-    func `Convert email with custom headers`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Test",
+-            body: "Test",
+-            additionalHeaders: [
+-                .init(
+-                    name: .init(__unchecked: (), rawValue: "X-Custom-Header"),
+-                    value: try .init("custom-value")
+-                ),
+-                .init(name: .xPriority, value: 1),
+-            ]
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-
+-        let rendered = String(message)
+-        #expect(rendered.contains("X-Custom-Header: custom-value"))
+-        #expect(rendered.contains("X-Priority: 1"))
+-    }
+-
+-    @Test
+-    func `Message-ID is generated if not provided`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Test",
+-            body: "Test"
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-
+-        #expect(message.messageId.description.hasPrefix("<"))
+-        #expect(message.messageId.description.hasSuffix("@example.com>"))
+-        #expect(message.messageId.description.contains("@"))
+-    }
+-
+-    @Test
+-    func `Rendered message carries the envelope headers and the header-body separator`() throws {
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            subject: "Test Email",
+-            body: "Hello, World!"
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-        let emlContent = String(message)
+-
+-        #expect(emlContent.contains("From: "))
+-        #expect(emlContent.contains("To: "))
+-        #expect(emlContent.contains("Subject: "))
+-        #expect(emlContent.contains("Date: "))
+-        #expect(emlContent.contains("Message-ID: "))
+-        #expect(emlContent.contains("\r\n\r\n"))
++enum `Email RFC 5322 Tests` {}
++
++extension `Email RFC 5322 Tests` {
++    @Suite
++    struct `Email to RFC 5322 Message Conversion` {
++
++        @Test
++        func `Convert simple text email to RFC 5322 Message`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Test Email",
++                body: "Hello, World!"
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            #expect(message.from.address == "sender@example.com")
++            #expect(message.to.count == 1)
++            #expect(message.to[0].address == "recipient@example.com")
++            #expect(message.subject == "Test Email")
++            #expect(String(decoding: message.body, as: UTF8.self) == "Hello, World!")
++
++            let rendered = String(message)
++            #expect(rendered.contains("From: sender@example.com"))
++            #expect(rendered.contains("To: recipient@example.com"))
++            #expect(rendered.contains("Subject: Test Email"))
++            #expect(rendered.contains("Hello, World!"))
++        }
++
++        @Test
++        func `Convert HTML email to RFC 5322 Message`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "HTML Test",
++                body: .html("<h1>Hello, World!</h1>")
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            #expect(String(decoding: message.body, as: UTF8.self).contains("<h1>Hello, World!</h1>"))
++
++            let rendered = String(message)
++            #expect(rendered.contains("Content-Type: text/html"))
++            #expect(rendered.contains("<h1>Hello, World!</h1>"))
++        }
++
++        @Test
++        func `Convert multipart email to RFC 5322 Message`() throws {
++            let multipart = try RFC_2046.Multipart.alternative(
++                textContent: "Plain text version",
++                htmlContent: "<p>HTML version</p>"
++            )
++
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Multipart Test",
++                body: .multipart(multipart)
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            let rendered = String(message)
++            #expect(rendered.contains("Content-Type: multipart/alternative"))
++            #expect(rendered.contains("Plain text version"))
++            #expect(rendered.contains("<p>HTML version</p>"))
++        }
++
++        @Test
++        func `Convert email with CC and Reply-To`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                replyTo: EmailAddress(rfc6531: try RFC_6531.Mailbox("reply@example.com")),
++                cc: [EmailAddress(rfc6531: try RFC_6531.Mailbox("cc@example.com"))],
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Test with CC",
++                body: "Test body"
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            #expect(message.replyTo?.address == "reply@example.com")
++            #expect(message.cc?.count == 1)
++            #expect(message.cc?[0].address == "cc@example.com")
++
++            let rendered = String(message)
++            #expect(rendered.contains("Reply-To: reply@example.com"))
++            #expect(rendered.contains("Cc: cc@example.com"))
++        }
++
++        @Test
++        func `Convert email with custom headers`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Test",
++                body: "Test",
++                additionalHeaders: [
++                    .init(
++                        name: .init(__unchecked: (), rawValue: "X-Custom-Header"),
++                        value: try .init("custom-value")
++                    ),
++                    .init(name: .xPriority, value: 1),
++                ]
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            let rendered = String(message)
++            #expect(rendered.contains("X-Custom-Header: custom-value"))
++            #expect(rendered.contains("X-Priority: 1"))
++        }
++
++        @Test
++        func `Message-ID is generated if not provided`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Test",
++                body: "Test"
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            #expect(message.messageId.description.hasPrefix("<"))
++            #expect(message.messageId.description.hasSuffix("@example.com>"))
++            #expect(message.messageId.description.contains("@"))
++        }
++
++        @Test
++        func `Rendered message carries the envelope headers and the header-body separator`() throws {
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                subject: "Test Email",
++                body: "Hello, World!"
++            )
++
++            let message = try RFC_5322.Message(from: email)
++            let emlContent = String(message)
++
++            #expect(emlContent.contains("From: "))
++            #expect(emlContent.contains("To: "))
++            #expect(emlContent.contains("Subject: "))
++            #expect(emlContent.contains("Date: "))
++            #expect(emlContent.contains("Message-ID: "))
++            #expect(emlContent.contains("\r\n\r\n"))
++        }
+     }
+ }
+diff --git a/Tests/Email Standard Tests/README Verification Tests.swift b/Tests/Email Standard Tests/README Verification Tests.swift
+index edfc80e..4a7269e 100644
+--- a/Tests/Email Standard Tests/README Verification Tests.swift	
++++ b/Tests/Email Standard Tests/README Verification Tests.swift	
+@@ -6,88 +6,92 @@ import RFC_5322
+ import RFC_6531
+ import Testing
+ 
+-@Suite
+-struct `README Verification` {
+-
+-    @Test
+-    func `Example from README: Simple HTML Email`() throws {
+-
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            subject: "Welcome!",
+-            html: "<h1>Welcome to our service!</h1>",
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
+-        )
+-
+-        #expect(email.to.count == 1)
+-        #expect(email.from.address == "sender@example.com")
+-        #expect(email.subject == "Welcome!")
+-    }
++enum `README Verification Tests` {}
+ 
+-    @Test
+-    func `Example from README: Plain Text Email`() throws {
++extension `README Verification Tests` {
++    @Suite
++    struct `README Verification` {
+ 
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            subject: "Hello",
+-            text: "Hello, World!",
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
+-        )
++        @Test
++        func `Example from README: Simple HTML Email`() throws {
+ 
+-        let message = try RFC_5322.Message(from: email)
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                subject: "Welcome!",
++                html: "<h1>Welcome to our service!</h1>",
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
++            )
+ 
+-        #expect(email.subject == "Hello")
+-        #expect(String(decoding: message.body, as: UTF8.self) == "Hello, World!")
+-    }
++            #expect(email.to.count == 1)
++            #expect(email.from.address == "sender@example.com")
++            #expect(email.subject == "Welcome!")
++        }
+ 
+-    @Test
+-    func `Example from README: Email with Text and HTML Alternatives`() throws {
+-
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            subject: "Newsletter",
+-            text: "Plain text version of newsletter",
+-            html: "<h1>HTML version</h1><p>Newsletter content...</p>",
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
+-        )
+-
+-        let message = try RFC_5322.Message(from: email)
+-        let rendered = String(message)
+-
+-        #expect(email.subject == "Newsletter")
+-        #expect(rendered.contains("Content-Type: multipart/alternative"))
+-        #expect(rendered.contains("Plain text version of newsletter"))
+-        #expect(rendered.contains("<h1>HTML version</h1>"))
+-    }
++        @Test
++        func `Example from README: Plain Text Email`() throws {
++
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                subject: "Hello",
++                text: "Hello, World!",
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
++            )
++
++            let message = try RFC_5322.Message(from: email)
++
++            #expect(email.subject == "Hello")
++            #expect(String(decoding: message.body, as: UTF8.self) == "Hello, World!")
++        }
++
++        @Test
++        func `Example from README: Email with Text and HTML Alternatives`() throws {
++
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                subject: "Newsletter",
++                text: "Plain text version of newsletter",
++                html: "<h1>HTML version</h1><p>Newsletter content...</p>",
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200)
++            )
++
++            let message = try RFC_5322.Message(from: email)
++            let rendered = String(message)
++
++            #expect(email.subject == "Newsletter")
++            #expect(rendered.contains("Content-Type: multipart/alternative"))
++            #expect(rendered.contains("Plain text version of newsletter"))
++            #expect(rendered.contains("<h1>HTML version</h1>"))
++        }
++
++        @Test
++        func `Example from README: Email with Custom Headers`() throws {
++
++            let email = try Email(
++                to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++                from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++                subject: "Tracked Email",
++                html: "<h1>Hello!</h1>",
++                date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++                additionalHeaders: [
++                    .init(
++                        name: .init(__unchecked: (), rawValue: "X-Campaign-ID"),
++                        value: try .init("newsletter-2024")
++                    ),
++                    .init(
++                        name: .xMailer,
++                        value: try .init("MyApp 1.0")
++                    ),
++                ]
++            )
+ 
+-    @Test
+-    func `Example from README: Email with Custom Headers`() throws {
+-
+-        let email = try Email(
+-            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
+-            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
+-            subject: "Tracked Email",
+-            html: "<h1>Hello!</h1>",
+-            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
+-            additionalHeaders: [
+-                .init(
+-                    name: .init(__unchecked: (), rawValue: "X-Campaign-ID"),
+-                    value: try .init("newsletter-2024")
+-                ),
+-                .init(
+-                    name: .xMailer,
+-                    value: try .init("MyApp 1.0")
+-                ),
+-            ]
+-        )
+-
+-        #expect(
+-            email.additionalHeaders[.init(__unchecked: (), rawValue: "X-Campaign-ID")]
+-                == "newsletter-2024"
+-        )
+-        #expect(email.additionalHeaders[.xMailer] == "MyApp 1.0")
++            #expect(
++                email.additionalHeaders[.init(__unchecked: (), rawValue: "X-Campaign-ID")]
++                    == "newsletter-2024"
++            )
++            #expect(email.additionalHeaders[.xMailer] == "MyApp 1.0")
++        }
+     }
+ }
+-- 
+2.43.0
+

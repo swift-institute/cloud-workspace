@@ -1,0 +1,146 @@
+From d11c3a46b1dd0e3018e0c202d14d4f9944ebd916 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:12 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Queue.Linked.Builder Tests.swift          |  5 +
+ .../QueueDifferential Tests.swift             | 92 ++++++++++---------
+ 2 files changed, 53 insertions(+), 44 deletions(-)
+
+diff --git a/Tests/Queue Linked Tests/Queue.Linked.Builder Tests.swift b/Tests/Queue Linked Tests/Queue.Linked.Builder Tests.swift
+index 56525d8..fe0edb9 100644
+--- a/Tests/Queue Linked Tests/Queue.Linked.Builder Tests.swift	
++++ b/Tests/Queue Linked Tests/Queue.Linked.Builder Tests.swift	
+@@ -8,8 +8,13 @@ struct `Queue.Linked.Builder` {
+     @Suite struct Unit {}
+     @Suite struct `Edge Case` {}
+     @Suite struct Integration {}
++}
++
++extension `Queue.Linked.Builder` {
+     @Suite struct `Non Copyable` {}
++
+     @Suite struct `Static Methods` {}
++
+     @Suite struct FIFOSemantics {}
+ }
+ 
+diff --git a/Tests/Queue Linked Tests/QueueDifferential Tests.swift b/Tests/Queue Linked Tests/QueueDifferential Tests.swift
+index 467da31..a91c0cb 100644
+--- a/Tests/Queue Linked Tests/QueueDifferential Tests.swift	
++++ b/Tests/Queue Linked Tests/QueueDifferential Tests.swift	
+@@ -19,59 +19,63 @@ extension SplitMix64 {
+     }
+ }
+ 
+-@Suite
+-struct `Queue.Linked — differential vs array oracle` {
++enum `QueueDifferential Tests` {}
+ 
+-    @Test
+-    func `600 mixed ops match a plain-array oracle (move-only column)`() {
+-        var rng = SplitMix64(seed: 0x5EED_1157_ADC0_FFEE)
+-        var queue = Queue<Int>.Linked()
+-        var oracle: [Int] = []
++extension `QueueDifferential Tests` {
++    @Suite
++    struct `Queue.Linked — differential vs array oracle` {
+ 
+-        (0..<600).forEach { step in
+-            let op = rng.next() % 5
+-            let value = Int(rng.next() % 10)
+-            switch op {
+-            case 0, 1, 2:
+-                queue.enqueue(value)
+-                oracle.append(value)
++        @Test
++        func `600 mixed ops match a plain-array oracle (move-only column)`() {
++            var rng = SplitMix64(seed: 0x5EED_1157_ADC0_FFEE)
++            var queue = Queue<Int>.Linked()
++            var oracle: [Int] = []
+ 
+-            case 3:
+-                let got = queue.dequeue()
+-                let want = oracle.isEmpty ? nil : oracle.removeFirst()
+-                #expect(got == want, "step \(step): dequeue diverged")
++            (0..<600).forEach { step in
++                let op = rng.next() % 5
++                let value = Int(rng.next() % 10)
++                switch op {
++                case 0, 1, 2:
++                    queue.enqueue(value)
++                    oracle.append(value)
+ 
+-            default:
+-                let front = queue.peek()
+-                #expect(front == oracle.first, "step \(step): peek diverged")
+-            }
++                case 3:
++                    let got = queue.dequeue()
++                    let want = oracle.isEmpty ? nil : oracle.removeFirst()
++                    #expect(got == want, "step \(step): dequeue diverged")
+ 
+-            let count = queue.count
+-            #expect(count == Index<Int>.Count(UInt(oracle.count)), "step \(step): count diverged")
+-            let empty = queue.isEmpty
+-            #expect(empty == oracle.isEmpty, "step \(step): isEmpty diverged")
+-        }
++                default:
++                    let front = queue.peek()
++                    #expect(front == oracle.first, "step \(step): peek diverged")
++                }
+ 
+-        var snapshot: [Int] = []
+-        queue.forEach { (element: borrowing Int) in snapshot.append(copy element) }
+-        #expect(snapshot == oracle)
++                let count = queue.count
++                #expect(count == Index<Int>.Count(UInt(oracle.count)), "step \(step): count diverged")
++                let empty = queue.isEmpty
++                #expect(empty == oracle.isEmpty, "step \(step): isEmpty diverged")
++            }
+ 
+-        let iterated = Array(AnyIterator(queue.makeIterator()))
+-        #expect(iterated == oracle)
+-    }
++            var snapshot: [Int] = []
++            queue.forEach { (element: borrowing Int) in snapshot.append(copy element) }
++            #expect(snapshot == oracle)
+ 
+-    @Test
+-    func `move-only elements drain in FIFO order`() {
+-        struct Token: ~Copyable { let value: Int }
+-        var queue = Queue<Token>.Linked()
+-        (0..<200).forEach { value in queue.enqueue(Token(value: value)) }
++            let iterated = Array(AnyIterator(queue.makeIterator()))
++            #expect(iterated == oracle)
++        }
++
++        @Test
++        func `move-only elements drain in FIFO order`() {
++            struct Token: ~Copyable { let value: Int }
++            var queue = Queue<Token>.Linked()
++            (0..<200).forEach { value in queue.enqueue(Token(value: value)) }
+ 
+-        var drained: [Int] = []
+-        while let token = queue.dequeue() {
+-            drained.append(token.value)
++            var drained: [Int] = []
++            while let token = queue.dequeue() {
++                drained.append(token.value)
++            }
++            #expect(drained == Array(0..<200))
++            let empty = queue.isEmpty
++            #expect(empty)
+         }
+-        #expect(drained == Array(0..<200))
+-        let empty = queue.isEmpty
+-        #expect(empty)
+     }
+ }
+-- 
+2.43.0
+

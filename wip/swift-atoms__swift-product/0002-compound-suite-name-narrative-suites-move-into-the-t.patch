@@ -1,0 +1,462 @@
+From fa7620f66e464964faba8e7ffb919530dd1456ad Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:05 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Product Macro Tests/Consumer Tests.swift  |   2 +-
+ .../Derivation Tests.swift                    | 170 +++++++++---------
+ .../Product Macro Tests/Expansion Tests.swift |   2 +-
+ Tests/Product Tests/Compiler Tests.swift      |  82 +++++----
+ Tests/Product Tests/Product Tests.swift       |  36 ++--
+ .../Product Tests/Product+Codable Tests.swift |   2 +-
+ 6 files changed, 156 insertions(+), 138 deletions(-)
+
+diff --git a/Tests/Product Macro Tests/Consumer Tests.swift b/Tests/Product Macro Tests/Consumer Tests.swift
+index 294a938..758de72 100644
+--- a/Tests/Product Macro Tests/Consumer Tests.swift	
++++ b/Tests/Product Macro Tests/Consumer Tests.swift	
+@@ -61,7 +61,7 @@ private func use<Client: Greeting.`Protocol`>(_ client: Client) async throws ->
+     try await client.greet(name: "Blob")
+ }
+ 
+-extension `Product Derivation Tests` {
++extension `Derivation Tests`.`Product Derivation Tests` {
+     @Suite
+     struct Consumer {
+         @Test
+diff --git a/Tests/Product Macro Tests/Derivation Tests.swift b/Tests/Product Macro Tests/Derivation Tests.swift
+index b03bc5d..9d3b696 100644
+--- a/Tests/Product Macro Tests/Derivation Tests.swift	
++++ b/Tests/Product Macro Tests/Derivation Tests.swift	
+@@ -6,93 +6,97 @@ import Testing
+ 
+ @testable import Product_Macro_Core
+ 
+-@Suite
+-struct `Product Derivation Tests` {
+-    @Test
+-    func `protocol operations derive one product structure`() throws {
+-        let source = Parser.parse(
+-            source: """
+-                protocol Greeting {
+-                    func greet(_ name: String) -> String
+-                    func reset()
+-                }
+-                """
+-        )
+-        let protocolDeclaration = try #require(
+-            source.statements.first?.item.as(ProtocolDeclSyntax.self)
+-        )
+-        let analysis = Product.Analysis(protocolDeclaration)
+-        let declarations = Product.Derivation.peers(of: analysis)
+-        let product = try #require(declarations.first?.as(StructDeclSyntax.self))
++enum `Derivation Tests` {}
+ 
+-        #expect(declarations.count == 1)
+-        #expect(analysis.diagnostics.isEmpty)
+-        #expect(product.name.text == "Product")
+-        #expect(product.memberBlock.members.count == 5)
+-    }
++extension `Derivation Tests` {
++    @Suite
++    struct `Product Derivation Tests` {
++        @Test
++        func `protocol operations derive one product structure`() throws {
++            let source = Parser.parse(
++                source: """
++                    protocol Greeting {
++                        func greet(_ name: String) -> String
++                        func reset()
++                    }
++                    """
++            )
++            let protocolDeclaration = try #require(
++                source.statements.first?.item.as(ProtocolDeclSyntax.self)
++            )
++            let analysis = Product.Analysis(protocolDeclaration)
++            let declarations = Product.Derivation.peers(of: analysis)
++            let product = try #require(declarations.first?.as(StructDeclSyntax.self))
+ 
+-    @Test
+-    func `empty protocol derives an empty product`() throws {
+-        let source = Parser.parse(source: "protocol Empty {}")
+-        let protocolDeclaration = try #require(
+-            source.statements.first?.item.as(ProtocolDeclSyntax.self)
+-        )
+-        let analysis = Product.Analysis(protocolDeclaration)
+-        let declarations = Product.Derivation.peers(of: analysis)
+-        let product = try #require(declarations.first?.as(StructDeclSyntax.self))
++            #expect(declarations.count == 1)
++            #expect(analysis.diagnostics.isEmpty)
++            #expect(product.name.text == "Product")
++            #expect(product.memberBlock.members.count == 5)
++        }
+ 
+-        #expect(product.name.text == "Product")
+-        #expect(analysis.diagnostics.isEmpty)
+-        #expect(product.memberBlock.members.count == 1)
+-    }
++        @Test
++        func `empty protocol derives an empty product`() throws {
++            let source = Parser.parse(source: "protocol Empty {}")
++            let protocolDeclaration = try #require(
++                source.statements.first?.item.as(ProtocolDeclSyntax.self)
++            )
++            let analysis = Product.Analysis(protocolDeclaration)
++            let declarations = Product.Derivation.peers(of: analysis)
++            let product = try #require(declarations.first?.as(StructDeclSyntax.self))
++
++            #expect(product.name.text == "Product")
++            #expect(analysis.diagnostics.isEmpty)
++            #expect(product.memberBlock.members.count == 1)
++        }
+ 
+-    @Test
+-    func `analysis records ordered coordinates and parameter conventions once`() throws {
+-        let source = Parser.parse(
+-            source: """
+-                protocol Transform {
+-                    associatedtype Input: ~Copyable
+-                    func transform(
+-                        _ input: borrowing Input,
+-                        into output: consuming Output
+-                    ) -> Result
+-                    var result: Result { get }
+-                }
+-                """
+-        )
+-        let protocolDeclaration = try #require(
+-            source.statements.first?.item.as(ProtocolDeclSyntax.self)
+-        )
+-        let analysis = Product.Analysis(protocolDeclaration)
+-        let function = try #require(analysis.functionCoordinates.first)
++        @Test
++        func `analysis records ordered coordinates and parameter conventions once`() throws {
++            let source = Parser.parse(
++                source: """
++                    protocol Transform {
++                        associatedtype Input: ~Copyable
++                        func transform(
++                            _ input: borrowing Input,
++                            into output: consuming Output
++                        ) -> Result
++                        var result: Result { get }
++                    }
++                    """
++            )
++            let protocolDeclaration = try #require(
++                source.statements.first?.item.as(ProtocolDeclSyntax.self)
++            )
++            let analysis = Product.Analysis(protocolDeclaration)
++            let function = try #require(analysis.functionCoordinates.first)
+ 
+-        #expect(analysis.diagnostics.isEmpty)
+-        #expect(analysis.coordinates.count == 3)
+-        #expect(analysis.associatedTypeCoordinates.map(\.name.text) == ["Input"])
+-        #expect(analysis.propertyCoordinates.map(\.name.text) == ["result"])
+-        #expect(function.name.text == "transform")
+-        #expect(function.parameters.map(\.localName.text) == ["input", "output"])
+-        #expect(
+-            function.parameters.map(\.closureType.trimmedDescription) == [
+-                "borrowing Input",
+-                "consuming Output",
+-            ]
+-        )
+-        #expect(
+-            function.parameters.map(\.valueType.trimmedDescription) == [
+-                "Input",
+-                "Output",
+-            ]
+-        )
+-        #expect(function.parameters.map(\.transfersOwnership) == [false, true])
+-        #expect(
+-            function.closureType.trimmedDescription
+-                == "(borrowing Input, consuming Output) -> Result"
+-        )
+-        #expect(function.output.trimmedDescription == "Result")
+-        #expect(
+-            function.invocation.trimmedDescription
+-                == "(self._transform)(input, output)"
+-        )
++            #expect(analysis.diagnostics.isEmpty)
++            #expect(analysis.coordinates.count == 3)
++            #expect(analysis.associatedTypeCoordinates.map(\.name.text) == ["Input"])
++            #expect(analysis.propertyCoordinates.map(\.name.text) == ["result"])
++            #expect(function.name.text == "transform")
++            #expect(function.parameters.map(\.localName.text) == ["input", "output"])
++            #expect(
++                function.parameters.map(\.closureType.trimmedDescription) == [
++                    "borrowing Input",
++                    "consuming Output",
++                ]
++            )
++            #expect(
++                function.parameters.map(\.valueType.trimmedDescription) == [
++                    "Input",
++                    "Output",
++                ]
++            )
++            #expect(function.parameters.map(\.transfersOwnership) == [false, true])
++            #expect(
++                function.closureType.trimmedDescription
++                    == "(borrowing Input, consuming Output) -> Result"
++            )
++            #expect(function.output.trimmedDescription == "Result")
++            #expect(
++                function.invocation.trimmedDescription
++                    == "(self._transform)(input, output)"
++            )
++        }
+     }
+ }
+diff --git a/Tests/Product Macro Tests/Expansion Tests.swift b/Tests/Product Macro Tests/Expansion Tests.swift
+index fc24671..db39ac1 100644
+--- a/Tests/Product Macro Tests/Expansion Tests.swift	
++++ b/Tests/Product Macro Tests/Expansion Tests.swift	
+@@ -40,7 +40,7 @@ private func expectProductExpansion(
+     )
+ }
+ 
+-extension `Product Derivation Tests` {
++extension `Derivation Tests`.`Product Derivation Tests` {
+     @Suite
+     struct Expansion {
+         @Test
+diff --git a/Tests/Product Tests/Compiler Tests.swift b/Tests/Product Tests/Compiler Tests.swift
+index ed92a54..ebf38b1 100644
+--- a/Tests/Product Tests/Compiler Tests.swift	
++++ b/Tests/Product Tests/Compiler Tests.swift	
+@@ -2,47 +2,51 @@
+     import Foundation
+     import Testing
+ 
+-    @Suite
+-    private struct `Variadic parameter capabilities remain constrained by the compiler` {
+-        @Test
+-        func `variadic parameters cannot suppress element capabilities`() throws {
+-            let diagnostic = try typecheckFailure(
+-                named: "Suppressed Variadic Elements.swift"
+-            )
++enum `Compiler Tests` {}
+ 
+-            #expect(diagnostic.contains("cannot suppress '~Copyable'"))
+-            #expect(diagnostic.contains("cannot suppress '~Escapable'"))
+-            #expect(diagnostic.contains("each Element"))
+-        }
++extension `Compiler Tests` {
++        @Suite
++        private struct `Variadic parameter capabilities remain constrained by the compiler` {
++            @Test
++            func `variadic parameters cannot suppress element capabilities`() throws {
++                let diagnostic = try typecheckFailure(
++                    named: "Suppressed Variadic Elements.swift"
++                )
++
++                #expect(diagnostic.contains("cannot suppress '~Copyable'"))
++                #expect(diagnostic.contains("cannot suppress '~Escapable'"))
++                #expect(diagnostic.contains("each Element"))
++            }
+ 
+-        private func typecheckFailure(named name: String) throws -> String {
+-            let fixture = Bundle.module.resourceURL!
+-                .appendingPathComponent("Fixtures")
+-                .appendingPathComponent(name)
+-            let process = Process()
+-            let standardError = Pipe()
+-            process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+-            process.arguments = [
+-                "swiftc",
+-                "-enable-upcoming-feature", "MemberImportVisibility",
+-                "-warnings-as-errors",
+-                "-typecheck",
+-                "-swift-version", "6",
+-                "-enable-experimental-feature", "Lifetimes",
+-                "-enable-experimental-feature", "MoveOnlyTuples",
+-                "-module-name", "Proof",
+-                fixture.path,
+-            ]
+-            process.standardError = standardError
+-            try process.run()
+-            process.waitUntilExit()
+-            let diagnostic = String(
+-                decoding: standardError.fileHandleForReading.readDataToEndOfFile(),
+-                as: UTF8.self
+-            )
++            private func typecheckFailure(named name: String) throws -> String {
++                let fixture = Bundle.module.resourceURL!
++                    .appendingPathComponent("Fixtures")
++                    .appendingPathComponent(name)
++                let process = Process()
++                let standardError = Pipe()
++                process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
++                process.arguments = [
++                    "swiftc",
++                    "-enable-upcoming-feature", "MemberImportVisibility",
++                    "-warnings-as-errors",
++                    "-typecheck",
++                    "-swift-version", "6",
++                    "-enable-experimental-feature", "Lifetimes",
++                    "-enable-experimental-feature", "MoveOnlyTuples",
++                    "-module-name", "Proof",
++                    fixture.path,
++                ]
++                process.standardError = standardError
++                try process.run()
++                process.waitUntilExit()
++                let diagnostic = String(
++                    decoding: standardError.fileHandleForReading.readDataToEndOfFile(),
++                    as: UTF8.self
++                )
+ 
+-            #expect(process.terminationStatus != 0, "Fixture unexpectedly typechecked")
+-            return diagnostic
++                #expect(process.terminationStatus != 0, "Fixture unexpectedly typechecked")
++                return diagnostic
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Product Tests/Product Tests.swift b/Tests/Product Tests/Product Tests.swift
+index fcf4a21..4f986e3 100644
+--- a/Tests/Product Tests/Product Tests.swift	
++++ b/Tests/Product Tests/Product Tests.swift	
+@@ -4,15 +4,25 @@ import Testing
+ private func requireCopyable<Value: Copyable>(_: Value) {}
+ private func requireEscapable<Value: Escapable>(_: Value) {}
+ 
+-@Suite
+-struct `Products preserve component arity through operations and checked conformances` {
++enum `Product Tests` {}
++
++extension `Product Tests` {
++    @Suite
++    struct `Products preserve component arity through operations and checked conformances` {
++    }
++}
++
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances` {
+     @Suite struct `Product operations preserve positional values arity and capabilities` {}
++
+     @Suite struct `No product boundary cases are defined` {}
++
+     @Suite struct `No product integration cases are defined` {}
++
+     @Suite(.serialized) struct `No product performance cases are defined` {}
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities` {
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities` {
+     @Suite struct `Product construction preserves components projections and arity` {}
+     @Suite struct `Product conformances compare hash and describe their components` {}
+     @Suite struct `Product mapping transforms components while preserving arity and errors` {}
+@@ -25,7 +35,7 @@ extension `Products preserve component arity through operations and checked conf
+     @Suite struct `Bitwise products preserve tuple layout and inline storage` {}
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product construction preserves components projections and arity`
+ {
+ 
+@@ -80,7 +90,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product conformances compare hash and describe their components`
+ {
+ 
+@@ -135,7 +145,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product mapping transforms components while preserving arity and errors`
+ {
+ 
+@@ -199,7 +209,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product append and prepend extend the expected side`
+ {
+ 
+@@ -230,7 +240,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product zipping pairs corresponding component positions`
+ {
+ 
+@@ -259,7 +269,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product folding combines components and preserves typed failures`
+ {
+ 
+@@ -292,7 +302,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Binary product swapping is an involution`
+ {
+ 
+@@ -313,7 +323,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product coding is available when every component supports coding`
+ {
+ 
+@@ -326,7 +336,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Products inherit equatable hashable and comparable capabilities from components`
+ {
+ 
+@@ -367,7 +377,7 @@ extension `Products preserve component arity through operations and checked conf
+     }
+ }
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Bitwise products preserve tuple layout and inline storage`
+ {
+ 
+diff --git a/Tests/Product Tests/Product+Codable Tests.swift b/Tests/Product Tests/Product+Codable Tests.swift
+index 7d5203b..536a340 100644
+--- a/Tests/Product Tests/Product+Codable Tests.swift	
++++ b/Tests/Product Tests/Product+Codable Tests.swift	
+@@ -2,7 +2,7 @@ import Foundation
+ import Product_Foundation_Integration
+ import Testing
+ 
+-extension `Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
++extension `Product Tests`.`Products preserve component arity through operations and checked conformances`.`Product operations preserve positional values arity and capabilities`
+     .`Product coding is available when every component supports coding`
+ {
+     @Test
+-- 
+2.43.0
+

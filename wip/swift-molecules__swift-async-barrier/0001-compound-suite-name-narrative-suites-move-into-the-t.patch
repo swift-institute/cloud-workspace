@@ -1,0 +1,221 @@
+From 814ae42930dbfdb39684ad02ac29e24999932306 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:10 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Async Barrier Tests.swift                 | 176 +++++++++---------
+ 1 file changed, 90 insertions(+), 86 deletions(-)
+
+diff --git a/Tests/Async Barrier Tests/Async Barrier Tests.swift b/Tests/Async Barrier Tests/Async Barrier Tests.swift
+index c359719..614f3b7 100644
+--- a/Tests/Async Barrier Tests/Async Barrier Tests.swift	
++++ b/Tests/Async Barrier Tests/Async Barrier Tests.swift	
+@@ -2,111 +2,115 @@ import Async
+ import Async_Barrier
+ import Testing
+ 
+-@Suite
+-struct `Async barriers coordinate arrivals and cancellation` {
+-    @Test
+-    func `Init creates unreleased barrier`() {
+-        let barrier = Async.Barrier(parties: 3)
+-        #expect(barrier.arrived == 0)
+-        #expect(!barrier.isReleased)
+-    }
++enum `Async Barrier Tests` {}
+ 
+-    @Test
+-    func `Arrive() throws cancelled on mid-await cancellation`() async throws {
++extension `Async Barrier Tests` {
++    @Suite
++    struct `Async barriers coordinate arrivals and cancellation` {
++        @Test
++        func `Init creates unreleased barrier`() {
++            let barrier = Async.Barrier(parties: 3)
++            #expect(barrier.arrived == 0)
++            #expect(!barrier.isReleased)
++        }
+ 
+-        let barrier = Async.Barrier(parties: 2)
++        @Test
++        func `Arrive() throws cancelled on mid-await cancellation`() async throws {
+ 
+-        let cancellableTask = Task { () async -> Result<Void, Async.Lifecycle.Error> in
+-            do throws(Async.Lifecycle.Error) {
+-                try await barrier.arrive()
+-                return .success(())
+-            } catch {
+-                return .failure(error)
++            let barrier = Async.Barrier(parties: 2)
++
++            let cancellableTask = Task { () async -> Result<Void, Async.Lifecycle.Error> in
++                do throws(Async.Lifecycle.Error) {
++                    try await barrier.arrive()
++                    return .success(())
++                } catch {
++                    return .failure(error)
++                }
+             }
+-        }
+ 
+-        for _ in 0..<1_000_000 where barrier.arrived < 1 { await Task.yield() }
+-        #expect(barrier.arrived == 1, "first party arrived and is suspended")
++            for _ in 0..<1_000_000 where barrier.arrived < 1 { await Task.yield() }
++            #expect(barrier.arrived == 1, "first party arrived and is suspended")
+ 
+-        cancellableTask.cancel()
++            cancellableTask.cancel()
+ 
+-        let firstResult = await cancellableTask.value
+-        if case .failure(.cancelled) = firstResult {
++            let firstResult = await cancellableTask.value
++            if case .failure(.cancelled) = firstResult {
+ 
+-        } else {
+-            Issue.record("expected .failure(.cancelled), got \(firstResult)")
+-        }
+-        #expect(barrier.cancelledCount == 1, "cancellation count incremented")
++            } else {
++                Issue.record("expected .failure(.cancelled), got \(firstResult)")
++            }
++            #expect(barrier.cancelledCount == 1, "cancellation count incremented")
+ 
+-        try await barrier.arrive()
+-        #expect(barrier.isReleased, "barrier releases on effective party count met")
+-        #expect(barrier.arrived == 1, "arrived rolled back the cancelled party")
+-    }
++            try await barrier.arrive()
++            #expect(barrier.isReleased, "barrier releases on effective party count met")
++            #expect(barrier.arrived == 1, "arrived rolled back the cancelled party")
++        }
+ 
+-    @Test
+-    func `Single party barrier releases immediately`() {
+-        let barrier = Async.Barrier(parties: 1)
++        @Test
++        func `Single party barrier releases immediately`() {
++            let barrier = Async.Barrier(parties: 1)
+ 
+-        let publication = Async.Publication<Bool>()
+-        barrier.arrive {
+-            publication.publish(true)
++            let publication = Async.Publication<Bool>()
++            barrier.arrive {
++                publication.publish(true)
++            }
++            #expect(publication.take() == true)
++            #expect(barrier.isReleased)
++            #expect(barrier.arrived == 1)
+         }
+-        #expect(publication.take() == true)
+-        #expect(barrier.isReleased)
+-        #expect(barrier.arrived == 1)
+-    }
+ 
+-    @Test
+-    func `Multi party barrier waits for all arrivals`() {
+-        let barrier = Async.Barrier(parties: 3)
+-
+-        let pub1 = Async.Publication<Bool>()
+-        let pub2 = Async.Publication<Bool>()
+-        let pub3 = Async.Publication<Bool>()
+-
+-        barrier.arrive { pub1.publish(true) }
+-        #expect(pub1.take() == nil)
+-        #expect(barrier.arrived == 1)
+-        #expect(!barrier.isReleased)
+-
+-        barrier.arrive { pub2.publish(true) }
+-        #expect(pub2.take() == nil)
+-        #expect(barrier.arrived == 2)
+-        #expect(!barrier.isReleased)
+-
+-        barrier.arrive { pub3.publish(true) }
+-        #expect(pub1.take() == true)
+-        #expect(pub2.take() == true)
+-        #expect(pub3.take() == true)
+-        #expect(barrier.arrived == 3)
+-        #expect(barrier.isReleased)
+-    }
++        @Test
++        func `Multi party barrier waits for all arrivals`() {
++            let barrier = Async.Barrier(parties: 3)
+ 
+-    @Test
+-    func `Arrive after release invokes callback immediately`() {
+-        let barrier = Async.Barrier(parties: 1)
+-        barrier.arrive {}
++            let pub1 = Async.Publication<Bool>()
++            let pub2 = Async.Publication<Bool>()
++            let pub3 = Async.Publication<Bool>()
+ 
+-        let publication = Async.Publication<Bool>()
+-        barrier.arrive { publication.publish(true) }
+-        #expect(publication.take() == true)
+-    }
++            barrier.arrive { pub1.publish(true) }
++            #expect(pub1.take() == nil)
++            #expect(barrier.arrived == 1)
++            #expect(!barrier.isReleased)
++
++            barrier.arrive { pub2.publish(true) }
++            #expect(pub2.take() == nil)
++            #expect(barrier.arrived == 2)
++            #expect(!barrier.isReleased)
++
++            barrier.arrive { pub3.publish(true) }
++            #expect(pub1.take() == true)
++            #expect(pub2.take() == true)
++            #expect(pub3.take() == true)
++            #expect(barrier.arrived == 3)
++            #expect(barrier.isReleased)
++        }
+ 
+-    #if !hasFeature(Embedded)
+         @Test
+-        func `Async arrive releases when all parties arrive`() async {
+-            let barrier = Async.Barrier(parties: 3)
++        func `Arrive after release invokes callback immediately`() {
++            let barrier = Async.Barrier(parties: 1)
++            barrier.arrive {}
+ 
+-            await withTaskGroup(of: Void.self) { group in
+-                for _ in 0..<3 {
+-                    group.addTask {
+-                        try? await barrier.arrive()
++            let publication = Async.Publication<Bool>()
++            barrier.arrive { publication.publish(true) }
++            #expect(publication.take() == true)
++        }
++
++        #if !hasFeature(Embedded)
++            @Test
++            func `Async arrive releases when all parties arrive`() async {
++                let barrier = Async.Barrier(parties: 3)
++
++                await withTaskGroup(of: Void.self) { group in
++                    for _ in 0..<3 {
++                        group.addTask {
++                            try? await barrier.arrive()
++                        }
+                     }
+                 }
+-            }
+ 
+-            #expect(barrier.isReleased)
+-            #expect(barrier.arrived == 3)
+-        }
+-    #endif
++                #expect(barrier.isReleased)
++                #expect(barrier.arrived == 3)
++            }
++        #endif
++    }
+ }
+-- 
+2.43.0
+

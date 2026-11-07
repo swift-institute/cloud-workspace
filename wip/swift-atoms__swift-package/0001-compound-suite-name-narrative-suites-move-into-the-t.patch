@@ -1,0 +1,375 @@
+From 40b6b8f92e7c2fad4f7fb263e5479bec0b5ad78a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:04 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ Tests/Package Tests/Compiler Tests.swift     |  96 ++++++++-------
+ Tests/Package Tests/Name domain Tests.swift  | 120 ++++++++++---------
+ Tests/Package Tests/Package.Name Tests.swift |  17 ++-
+ Tests/Package Tests/Product.Name Tests.swift |  17 ++-
+ Tests/Package Tests/Target.Name Tests.swift  |  15 ++-
+ 5 files changed, 150 insertions(+), 115 deletions(-)
+
+diff --git a/Tests/Package Tests/Compiler Tests.swift b/Tests/Package Tests/Compiler Tests.swift
+index 53bcaa9..ba7ba15 100644
+--- a/Tests/Package Tests/Compiler Tests.swift	
++++ b/Tests/Package Tests/Compiler Tests.swift	
+@@ -2,54 +2,58 @@
+     import Foundation
+     import Testing
+ 
+-    @Suite(.serialized) struct `The compiler preserves package name domains` {
+-        enum Domain: String, CaseIterable, Sendable {
+-            case package = "PACKAGE"
+-            case product = "PRODUCT"
+-            case target = "TARGET"
+-        }
++enum `Compiler Tests` {}
+ 
+-        @Test(arguments: Domain.allCases, Domain.allCases)
+-        func `names can be assigned only within their declared domain`(
+-            source: Domain,
+-            destination: Domain
+-        ) throws {
+-            var products = Bundle.module.bundleURL
+-            while !FileManager.default.fileExists(
+-                atPath: products.appendingPathComponent("Package.swiftmodule").path
+-            ) {
+-                let parent = products.deletingLastPathComponent()
+-                products = try #require(parent != products ? parent : nil)
++extension `Compiler Tests` {
++        @Suite(.serialized) struct `The compiler preserves package name domains` {
++            enum Domain: String, CaseIterable, Sendable {
++                case package = "PACKAGE"
++                case product = "PRODUCT"
++                case target = "TARGET"
+             }
+-            let fixture = try #require(Bundle.module.resourceURL)
+-                .appendingPathComponent("Name domains.swift")
+-            let process = Process()
+-            let errors = Pipe()
+-            process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+-            process.arguments = [
+-                "swiftc", "-typecheck", "-swift-version", "6",
+-                "-enable-experimental-feature", "Lifetimes",
+-                "-module-name", "PackageDomainClient", "-I", products.path,
+-                "-D", "SOURCE_\(source.rawValue)",
+-                "-D", "DESTINATION_\(destination.rawValue)", fixture.path,
+-            ]
+-            process.standardError = errors
+-            try process.run()
+-            let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+-            DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: watchdog)
+-            defer { watchdog.cancel() }
+-            let diagnostic = String(
+-                decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+-                as: UTF8.self
+-            )
+-            process.waitUntilExit()
+-            #expect(process.terminationReason == .exit, "\(diagnostic)")
+-            #expect((process.terminationStatus == 0) == (source == destination), "\(diagnostic)")
+-            if source != destination {
+-                #expect(diagnostic.contains("cannot assign value of type"), "\(diagnostic)")
+-                #expect(diagnostic.contains("arguments to generic parameter 'Tag'"), "\(diagnostic)")
++
++            @Test(arguments: Domain.allCases, Domain.allCases)
++            func `names can be assigned only within their declared domain`(
++                source: Domain,
++                destination: Domain
++            ) throws {
++                var products = Bundle.module.bundleURL
++                while !FileManager.default.fileExists(
++                    atPath: products.appendingPathComponent("Package.swiftmodule").path
++                ) {
++                    let parent = products.deletingLastPathComponent()
++                    products = try #require(parent != products ? parent : nil)
++                }
++                let fixture = try #require(Bundle.module.resourceURL)
++                    .appendingPathComponent("Name domains.swift")
++                let process = Process()
++                let errors = Pipe()
++                process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
++                process.arguments = [
++                    "swiftc", "-typecheck", "-swift-version", "6",
++                    "-enable-experimental-feature", "Lifetimes",
++                    "-module-name", "PackageDomainClient", "-I", products.path,
++                    "-D", "SOURCE_\(source.rawValue)",
++                    "-D", "DESTINATION_\(destination.rawValue)", fixture.path,
++                ]
++                process.standardError = errors
++                try process.run()
++                let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
++                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: watchdog)
++                defer { watchdog.cancel() }
++                let diagnostic = String(
++                    decoding: errors.fileHandleForReading.readDataToEndOfFile(),
++                    as: UTF8.self
++                )
++                process.waitUntilExit()
++                #expect(process.terminationReason == .exit, "\(diagnostic)")
++                #expect((process.terminationStatus == 0) == (source == destination), "\(diagnostic)")
++                if source != destination {
++                    #expect(diagnostic.contains("cannot assign value of type"), "\(diagnostic)")
++                    #expect(diagnostic.contains("arguments to generic parameter 'Tag'"), "\(diagnostic)")
++                }
++                #expect(!diagnostic.contains("no such module"), "\(diagnostic)")
+             }
+-            #expect(!diagnostic.contains("no such module"), "\(diagnostic)")
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Package Tests/Name domain Tests.swift b/Tests/Package Tests/Name domain Tests.swift
+index 56d81a6..8d66ddd 100644
+--- a/Tests/Package Tests/Name domain Tests.swift	
++++ b/Tests/Package Tests/Name domain Tests.swift	
+@@ -2,69 +2,73 @@ import Foundation
+ import Package
+ import Testing
+ 
+-@Suite struct `Package names preserve their values and capabilities` {
+-    @Test(arguments: ["", "A name with spaces", "é", "quote\"and\\slash", "line\nbreak"])
+-    func `all name domains retain permissive strings through persistence`(text: String) throws {
+-        try roundTrip(Package.Name(_unchecked: text), text: text)
+-        try roundTrip(Product.Name(_unchecked: text), text: text)
+-        try roundTrip(Target.Name(_unchecked: text), text: text)
+-    }
++enum `Name domain Tests` {}
+ 
+-    @Test func `all domains preserve string ordering and keyed collection behavior`() {
+-        checkOrderingAndKeys(Package.Name.self)
+-        checkOrderingAndKeys(Product.Name.self)
+-        checkOrderingAndKeys(Target.Name.self)
+-    }
++extension `Name domain Tests` {
++    @Suite struct `Package names preserve their values and capabilities` {
++        @Test(arguments: ["", "A name with spaces", "é", "quote\"and\\slash", "line\nbreak"])
++        func `all name domains retain permissive strings through persistence`(text: String) throws {
++            try roundTrip(Package.Name(_unchecked: text), text: text)
++            try roundTrip(Product.Name(_unchecked: text), text: text)
++            try roundTrip(Target.Name(_unchecked: text), text: text)
++        }
+ 
+-    @Test func `equal strings in different domains remain distinct erased values`() {
+-        let package: Package.Name = "Same name"
+-        let product: Product.Name = "Same name"
+-        let target: Target.Name = "Same name"
+-        #expect(Set([AnyHashable(package), AnyHashable(product), AnyHashable(target)]).count == 3)
+-        #expect((package as Any) is Package.Name)
+-        #expect(!((package as Any) is Product.Name))
+-        #expect(!((package as Any) is Target.Name))
+-    }
++        @Test func `all domains preserve string ordering and keyed collection behavior`() {
++            checkOrderingAndKeys(Package.Name.self)
++            checkOrderingAndKeys(Product.Name.self)
++            checkOrderingAndKeys(Target.Name.self)
++        }
+ 
+-    @Test func `each name domain can cross an actor boundary without changing its value`() async {
+-        let receiver = Receiver()
+-        let values: (Package.Name, Product.Name, Target.Name) = ("Package name", "Product name", "Target name")
+-        let received = await receiver.receive(values)
+-        #expect(received.0 == values.0)
+-        #expect(received.1 == values.1)
+-        #expect(received.2 == values.2)
+-    }
++        @Test func `equal strings in different domains remain distinct erased values`() {
++            let package: Package.Name = "Same name"
++            let product: Product.Name = "Same name"
++            let target: Target.Name = "Same name"
++            #expect(Set([AnyHashable(package), AnyHashable(product), AnyHashable(target)]).count == 3)
++            #expect((package as Any) is Package.Name)
++            #expect(!((package as Any) is Product.Name))
++            #expect(!((package as Any) is Target.Name))
++        }
+ 
+-    private func roundTrip<Domain>(
+-        _ name: Tagged<Domain, String>,
+-        text: String
+-    ) throws {
+-        let encoded = try JSONEncoder().encode(name)
+-        #expect(try JSONDecoder().decode(String.self, from: encoded) == text)
+-        #expect(try JSONDecoder().decode(Tagged<Domain, String>.self, from: encoded) == name)
+-        #expect(name.description == text)
+-        #expect(Tagged<Domain, String>(text) == name)
+-        #expect(Array(name) == Array(text))
+-    }
++        @Test func `each name domain can cross an actor boundary without changing its value`() async {
++            let receiver = Receiver()
++            let values: (Package.Name, Product.Name, Target.Name) = ("Package name", "Product name", "Target name")
++            let received = await receiver.receive(values)
++            #expect(received.0 == values.0)
++            #expect(received.1 == values.1)
++            #expect(received.2 == values.2)
++        }
+ 
+-    private func checkOrderingAndKeys<Name>(_: Name.Type)
+-    where Name: Comparable & Hashable & Sendable & ExpressibleByStringLiteral {
+-        let first: Name = "A name"
+-        let last: Name = "Z name"
+-        #expect([last, first].sorted() == [first, last])
+-        var dictionary = [first: 1, last: 2]
+-        let same: Name = "A name"
+-        dictionary[same] = 3
+-        #expect(dictionary.count == 2)
+-        #expect(dictionary[first] == 3)
+-        #expect(dictionary[last] == 2)
+-    }
++        private func roundTrip<Domain>(
++            _ name: Tagged<Domain, String>,
++            text: String
++        ) throws {
++            let encoded = try JSONEncoder().encode(name)
++            #expect(try JSONDecoder().decode(String.self, from: encoded) == text)
++            #expect(try JSONDecoder().decode(Tagged<Domain, String>.self, from: encoded) == name)
++            #expect(name.description == text)
++            #expect(Tagged<Domain, String>(text) == name)
++            #expect(Array(name) == Array(text))
++        }
++
++        private func checkOrderingAndKeys<Name>(_: Name.Type)
++        where Name: Comparable & Hashable & Sendable & ExpressibleByStringLiteral {
++            let first: Name = "A name"
++            let last: Name = "Z name"
++            #expect([last, first].sorted() == [first, last])
++            var dictionary = [first: 1, last: 2]
++            let same: Name = "A name"
++            dictionary[same] = 3
++            #expect(dictionary.count == 2)
++            #expect(dictionary[first] == 3)
++            #expect(dictionary[last] == 2)
++        }
+ 
+-    private actor Receiver {
+-        func receive(
+-            _ values: (Package.Name, Product.Name, Target.Name)
+-        )
+-            -> (Package.Name, Product.Name, Target.Name)
+-        { values }
++        private actor Receiver {
++            func receive(
++                _ values: (Package.Name, Product.Name, Target.Name)
++            )
++                -> (Package.Name, Product.Name, Target.Name)
++            { values }
++        }
+     }
+ }
+diff --git a/Tests/Package Tests/Package.Name Tests.swift b/Tests/Package Tests/Package.Name Tests.swift
+index b99a148..3b43c81 100644
+--- a/Tests/Package Tests/Package.Name Tests.swift	
++++ b/Tests/Package Tests/Package.Name Tests.swift	
+@@ -1,14 +1,23 @@
+ import Package
+ import Testing
+ 
+-@Suite
+-struct `Package names preserve their declared values` {
++enum `Package.Name Tests` {}
++
++extension `Package.Name Tests` {
++    @Suite
++    struct `Package names preserve their declared values` {
++    }
++}
++
++extension `Package.Name Tests`.`Package names preserve their declared values` {
+     @Suite struct `Names retain their values` {}
++
+     @Suite struct `Names accept permissive input` {}
++
+     @Suite struct `Names preserve their domain` {}
+ }
+ 
+-extension `Package names preserve their declared values`.`Names retain their values` {
++extension `Package.Name Tests`.`Package names preserve their declared values`.`Names retain their values` {
+     @Test
+     func `names can be constructed from string literals`() {
+         let name: Package.Name = "swift-package"
+@@ -46,7 +55,7 @@ extension `Package names preserve their declared values`.`Names retain their val
+     }
+ }
+ 
+-extension `Package names preserve their declared values`.`Names accept permissive input` {
++extension `Package.Name Tests`.`Package names preserve their declared values`.`Names accept permissive input` {
+     @Test
+     func `empty names remain valid`() {
+         let name: Package.Name = ""
+diff --git a/Tests/Package Tests/Product.Name Tests.swift b/Tests/Package Tests/Product.Name Tests.swift
+index 08213d9..73ff819 100644
+--- a/Tests/Package Tests/Product.Name Tests.swift	
++++ b/Tests/Package Tests/Product.Name Tests.swift	
+@@ -1,14 +1,23 @@
+ import Package
+ import Testing
+ 
+-@Suite
+-struct `Product names preserve their declared values` {
++enum `Product.Name Tests` {}
++
++extension `Product.Name Tests` {
++    @Suite
++    struct `Product names preserve their declared values` {
++    }
++}
++
++extension `Product.Name Tests`.`Product names preserve their declared values` {
+     @Suite struct `Names retain their values` {}
++
+     @Suite struct `Names accept permissive input` {}
++
+     @Suite struct `Names preserve their domain` {}
+ }
+ 
+-extension `Product names preserve their declared values`.`Names retain their values` {
++extension `Product.Name Tests`.`Product names preserve their declared values`.`Names retain their values` {
+     @Test
+     func `names can be constructed from string literals`() {
+         let name: Product.Name = "Package"
+@@ -32,7 +41,7 @@ extension `Product names preserve their declared values`.`Names retain their val
+     }
+ }
+ 
+-extension `Product names preserve their declared values`.`Names accept permissive input` {
++extension `Product.Name Tests`.`Product names preserve their declared values`.`Names accept permissive input` {
+     @Test
+     func `names preserve embedded spaces`() {
+         let name: Product.Name = "Package Tagged"
+diff --git a/Tests/Package Tests/Target.Name Tests.swift b/Tests/Package Tests/Target.Name Tests.swift
+index e5aaaa1..6b0b006 100644
+--- a/Tests/Package Tests/Target.Name Tests.swift	
++++ b/Tests/Package Tests/Target.Name Tests.swift	
+@@ -1,14 +1,23 @@
+ import Package
+ import Testing
+ 
+-@Suite
+-struct `Target names preserve their declared values` {
++enum `Target.Name Tests` {}
++
++extension `Target.Name Tests` {
++    @Suite
++    struct `Target names preserve their declared values` {
++    }
++}
++
++extension `Target.Name Tests`.`Target names preserve their declared values` {
+     @Suite struct `Names retain their values` {}
++
+     @Suite struct `Names accept permissive input` {}
++
+     @Suite struct `Names preserve their domain` {}
+ }
+ 
+-extension `Target names preserve their declared values`.`Names retain their values` {
++extension `Target.Name Tests`.`Target names preserve their declared values`.`Names retain their values` {
+     @Test
+     func `names can be constructed from string literals`() {
+         let name: Target.Name = "Package"
+-- 
+2.43.0
+

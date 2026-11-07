@@ -1,0 +1,1884 @@
+From 6ebf5d8682575cbebafd9677f4d9e9e78aaee022 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:10 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Async.Channel.Bounded Tests.swift         | 504 ++++++++--------
+ .../Async.Channel.Namespace Tests.swift       |  16 +-
+ .../Async.Channel.Typed Tests.swift           | 534 ++++++++---------
+ .../Async.Channel.Unbounded Tests.swift       | 550 +++++++++---------
+ 4 files changed, 810 insertions(+), 794 deletions(-)
+
+diff --git a/Tests/Async Channel Tests/Async.Channel.Bounded Tests.swift b/Tests/Async Channel Tests/Async.Channel.Bounded Tests.swift
+index 025fff8..9e500f1 100644
+--- a/Tests/Async Channel Tests/Async.Channel.Bounded Tests.swift	
++++ b/Tests/Async Channel Tests/Async.Channel.Bounded Tests.swift	
+@@ -4,326 +4,330 @@ import Async_Channel
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Bounded async channels preserve delivery and backpressure` {
+-
+-    @Test
+-    func `Send and receive single element`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        try await channel.sender.send(42)
+-        channel.close()
+-        let value = try await channel.receiver.receive()
+-        #expect(value == 42)
+-    }
++enum `Async.Channel.Bounded Tests` {}
+ 
+-    @Test
+-    func `Send succeeds when channel has space`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 10)
+-        try await channel.sender.send(42)
+-        channel.close()
+-        _ = try await channel.receiver.receive()
+-    }
++extension `Async.Channel.Bounded Tests` {
++    @Suite
++    struct `Bounded async channels preserve delivery and backpressure` {
+ 
+-    @Test
+-    func `Closed channel rejects send`() async {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        channel.close()
+-        do throws(Async.Channel<Int>.Error) {
++        @Test
++        func `Send and receive single element`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
+             try await channel.sender.send(42)
+-            Issue.record("Expected send to throw .closed")
+-        } catch {
+-            switch error {
+-            case .closed:
+-                break
+-
+-            case .cancelled, .full, .empty:
+-                Issue.record("Expected .closed but got \(error)")
+-            }
++            channel.close()
++            let value = try await channel.receiver.receive()
++            #expect(value == 42)
+         }
+-    }
+ 
+-    @Test
+-    func `Send.immediate throws full when buffer full`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        try channel.sender.send.immediate(1)
+-        do throws(Async.Channel<Int>.Error) {
+-            try channel.sender.send.immediate(2)
+-            Issue.record("Expected send.immediate to throw .full")
+-        } catch {
+-            switch error {
+-            case .full:
+-                break
+-
+-            case .closed, .cancelled, .empty:
+-                Issue.record("Expected .full but got \(error)")
+-            }
++        @Test
++        func `Send succeeds when channel has space`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 10)
++            try await channel.sender.send(42)
++            channel.close()
++            _ = try await channel.receiver.receive()
+         }
+-        _ = try channel.receiver.receive.immediate()
+-    }
+ 
+-    @Test
+-    func `Receive returns nil after close and drain`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 10)
+-        try await channel.sender.send(1)
+-        try await channel.sender.send(2)
+-        channel.close()
++        @Test
++        func `Closed channel rejects send`() async {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            channel.close()
++            do throws(Async.Channel<Int>.Error) {
++                try await channel.sender.send(42)
++                Issue.record("Expected send to throw .closed")
++            } catch {
++                switch error {
++                case .closed:
++                    break
+ 
+-        let first = try await channel.receiver.receive()
+-        let second = try await channel.receiver.receive()
+-        let third = try await channel.receiver.receive()
++                case .cancelled, .full, .empty:
++                    Issue.record("Expected .closed but got \(error)")
++                }
++            }
++        }
+ 
+-        #expect(first == 1)
+-        #expect(second == 2)
+-        #expect(third == nil)
+-    }
++        @Test
++        func `Send.immediate throws full when buffer full`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            try channel.sender.send.immediate(1)
++            do throws(Async.Channel<Int>.Error) {
++                try channel.sender.send.immediate(2)
++                Issue.record("Expected send.immediate to throw .full")
++            } catch {
++                switch error {
++                case .full:
++                    break
+ 
+-    @Test
+-    func `Receive.immediate throws empty when buffer empty`() {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        do throws(Async.Channel<Int>.Error) {
+-            _ = try channel.receiver.receive.immediate()
+-            Issue.record("Expected receive.immediate to throw .empty")
+-        } catch {
+-            switch error {
+-            case .empty:
+-                break
+-
+-            case .closed, .cancelled, .full:
+-                Issue.record("Expected .empty but got \(error)")
++                case .closed, .cancelled, .empty:
++                    Issue.record("Expected .full but got \(error)")
++                }
+             }
++            _ = try channel.receiver.receive.immediate()
+         }
+-        _ = channel.sender
+-    }
+ 
+-    @Test
+-    func `Receive.immediate returns element when available`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        try await channel.sender.send(42)
+-        let result = try channel.receiver.receive.immediate()
+-        #expect(result == 42)
+-    }
++        @Test
++        func `Receive returns nil after close and drain`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 10)
++            try await channel.sender.send(1)
++            try await channel.sender.send(2)
++            channel.close()
+ 
+-    @Test
+-    func `The closed query reflects bounded channel state`() {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        #expect(channel.sender.isClosed == false)
+-        #expect(channel.isClosed == false)
+-        channel.close()
+-        #expect(channel.sender.isClosed == true)
+-        #expect(channel.isClosed == true)
+-    }
++            let first = try await channel.receiver.receive()
++            let second = try await channel.receiver.receive()
++            let third = try await channel.receiver.receive()
+ 
+-    @Test
+-    func `Receive suspends until element available`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let started = Async.Barrier(parties: 2)
+-
+-        let receiveTask = Task {
+-            try? try await started.arrive()
+-            return try await channel.receiver.receive()
++            #expect(first == 1)
++            #expect(second == 2)
++            #expect(third == nil)
+         }
+ 
+-        try? try await started.arrive()
+-        try await sender.send(42)
+-
+-        let result = try await receiveTask.value
+-        #expect(result == 42)
+-    }
+-
+-    @Test
+-    func `Receive resumes with nil on close`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let started = Async.Barrier(parties: 2)
++        @Test
++        func `Receive.immediate throws empty when buffer empty`() {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            do throws(Async.Channel<Int>.Error) {
++                _ = try channel.receiver.receive.immediate()
++                Issue.record("Expected receive.immediate to throw .empty")
++            } catch {
++                switch error {
++                case .empty:
++                    break
+ 
+-        let receiveTask = Task {
+-            try? try await started.arrive()
+-            return try await channel.receiver.receive()
++                case .closed, .cancelled, .full:
++                    Issue.record("Expected .empty but got \(error)")
++                }
++            }
++            _ = channel.sender
+         }
+ 
+-        try? try await started.arrive()
+-        sender.close()
++        @Test
++        func `Receive.immediate returns element when available`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            try await channel.sender.send(42)
++            let result = try channel.receiver.receive.immediate()
++            #expect(result == 42)
++        }
+ 
+-        let result = try await receiveTask.value
+-        #expect(result == nil)
+-    }
++        @Test
++        func `The closed query reflects bounded channel state`() {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            #expect(channel.sender.isClosed == false)
++            #expect(channel.isClosed == false)
++            channel.close()
++            #expect(channel.sender.isClosed == true)
++            #expect(channel.isClosed == true)
++        }
+ 
+-    @Test
+-    func `Send suspends when buffer is full`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let started = Async.Barrier(parties: 2)
++        @Test
++        func `Receive suspends until element available`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let started = Async.Barrier(parties: 2)
+ 
+-        try await sender.send(1)
++            let receiveTask = Task {
++                try? try await started.arrive()
++                return try await channel.receiver.receive()
++            }
+ 
+-        let sendTask = Task {
+             try? try await started.arrive()
+-            try await sender.send(2)
++            try await sender.send(42)
++
++            let result = try await receiveTask.value
++            #expect(result == 42)
+         }
+ 
+-        try? try await started.arrive()
++        @Test
++        func `Receive resumes with nil on close`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let started = Async.Barrier(parties: 2)
+ 
+-        let first = try await channel.receiver.receive()
+-        #expect(first == 1)
++            let receiveTask = Task {
++                try? try await started.arrive()
++                return try await channel.receiver.receive()
++            }
+ 
+-        try await sendTask.value
++            try? try await started.arrive()
++            sender.close()
+ 
+-        let second = try await channel.receiver.receive()
+-        #expect(second == 2)
+-    }
++            let result = try await receiveTask.value
++            #expect(result == nil)
++        }
+ 
+-    @Test
+-    func `Close cancels pending sends`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let started = Async.Barrier(parties: 2)
++        @Test
++        func `Send suspends when buffer is full`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let started = Async.Barrier(parties: 2)
+ 
+-        try await sender.send(1)
++            try await sender.send(1)
+ 
+-        let sendTask = Task { () -> Async.Channel<Int>.Error? in
+-            try? try await started.arrive()
+-            do {
++            let sendTask = Task {
++                try? try await started.arrive()
+                 try await sender.send(2)
+-                return nil
+-            } catch let error as Async.Channel<Int>.Error {
+-                return error
+-            } catch {
+-                return nil
+             }
+-        }
+ 
+-        try? try await started.arrive()
+-        sender.close()
++            try? try await started.arrive()
+ 
+-        let error = await sendTask.value
+-        #expect(error == .closed)
++            let first = try await channel.receiver.receive()
++            #expect(first == 1)
+ 
+-        _ = try await channel.receiver.receive()
+-    }
++            try await sendTask.value
+ 
+-    @Test
+-    func `Backpressure preserves bounded channel order`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 2)
+-        let sender = channel.sender
++            let second = try await channel.receiver.receive()
++            #expect(second == 2)
++        }
+ 
+-        let producer = Task {
+-            for i in 1...5 {
+-                try await sender.send(i)
++        @Test
++        func `Close cancels pending sends`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let started = Async.Barrier(parties: 2)
++
++            try await sender.send(1)
++
++            let sendTask = Task { () -> Async.Channel<Int>.Error? in
++                try? try await started.arrive()
++                do {
++                    try await sender.send(2)
++                    return nil
++                } catch let error as Async.Channel<Int>.Error {
++                    return error
++                } catch {
++                    return nil
++                }
+             }
++
++            try? try await started.arrive()
+             sender.close()
+-        }
+ 
+-        var received: [Int] = []
+-        while let value = try await channel.receiver.receive() {
+-            received.append(value)
++            let error = await sendTask.value
++            #expect(error == .closed)
++
++            _ = try await channel.receiver.receive()
+         }
+ 
+-        try await producer.value
++        @Test
++        func `Backpressure preserves bounded channel order`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 2)
++            let sender = channel.sender
+ 
+-        #expect(received == [1, 2, 3, 4, 5])
+-    }
++            let producer = Task {
++                for i in 1...5 {
++                    try await sender.send(i)
++                }
++                sender.close()
++            }
+ 
+-    @Test
+-    func `Direct delivery when receiver waiting`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let started = Async.Barrier(parties: 2)
++            var received: [Int] = []
++            while let value = try await channel.receiver.receive() {
++                received.append(value)
++            }
+ 
+-        let receiveTask = Task {
+-            try? try await started.arrive()
+-            return try await channel.receiver.receive()
++            try await producer.value
++
++            #expect(received == [1, 2, 3, 4, 5])
+         }
+ 
+-        try? try await started.arrive()
+-        try await sender.send(42)
++        @Test
++        func `Direct delivery when receiver waiting`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let started = Async.Barrier(parties: 2)
+ 
+-        let result = try await receiveTask.value
+-        #expect(result == 42)
+-    }
++            let receiveTask = Task {
++                try? try await started.arrive()
++                return try await channel.receiver.receive()
++            }
+ 
+-    @Test
+-    func `Bounded channel iteration delivers the sent elements`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 10)
+-        try await channel.sender.send(1)
+-        try await channel.sender.send(2)
+-        try await channel.sender.send(3)
+-        channel.close()
+-
+-        var received: [Int] = []
+-        for try await value in channel.receiver.elements {
+-            received.append(value)
+-        }
++            try? try await started.arrive()
++            try await sender.send(42)
+ 
+-        #expect(received == [1, 2, 3])
+-    }
++            let result = try await receiveTask.value
++            #expect(result == 42)
++        }
+ 
+-    @Test
+-    func `Auto-close when sender drops`() async throws {
+-        var ends: Async.Channel<Int>.Bounded.Ends
+-        do {
+-            let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-            try await channel.sender.send(42)
+-            ends = channel.take().ends()
++        @Test
++        func `Bounded channel iteration delivers the sent elements`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 10)
++            try await channel.sender.send(1)
++            try await channel.sender.send(2)
++            try await channel.sender.send(3)
++            channel.close()
++
++            var received: [Int] = []
++            for try await value in channel.receiver.elements {
++                received.append(value)
++            }
+ 
++            #expect(received == [1, 2, 3])
+         }
+ 
+-        let isClosed = ends.isClosed
+-        #expect(isClosed)
++        @Test
++        func `Auto-close when sender drops`() async throws {
++            var ends: Async.Channel<Int>.Bounded.Ends
++            do {
++                let channel = Async.Channel<Int>.Bounded(capacity: 1)
++                try await channel.sender.send(42)
++                ends = channel.take().ends()
+ 
+-        let value = try await ends.receiver.receive()
+-        #expect(value == 42)
++            }
+ 
+-        let closed = try await ends.receiver.receive()
+-        #expect(closed == nil)
+-    }
++            let isClosed = ends.isClosed
++            #expect(isClosed)
+ 
+-    @Test
+-    func `Cancellation throws cancelled error for suspended send`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let started = Async.Barrier(parties: 2)
++            let value = try await ends.receiver.receive()
++            #expect(value == 42)
+ 
+-        try await sender.send(1)
++            let closed = try await ends.receiver.receive()
++            #expect(closed == nil)
++        }
+ 
+-        let sendTask = Task { () -> Async.Channel<Int>.Error? in
+-            try? try await started.arrive()
+-            do {
+-                try await sender.send(2)
+-                return nil
+-            } catch let error as Async.Channel<Int>.Error {
+-                return error
+-            } catch {
+-                return nil
++        @Test
++        func `Cancellation throws cancelled error for suspended send`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let started = Async.Barrier(parties: 2)
++
++            try await sender.send(1)
++
++            let sendTask = Task { () -> Async.Channel<Int>.Error? in
++                try? try await started.arrive()
++                do {
++                    try await sender.send(2)
++                    return nil
++                } catch let error as Async.Channel<Int>.Error {
++                    return error
++                } catch {
++                    return nil
++                }
+             }
+-        }
+ 
+-        try? try await started.arrive()
+-        sendTask.cancel()
++            try? try await started.arrive()
++            sendTask.cancel()
+ 
+-        let error = await sendTask.value
+-        #expect(error == .cancelled)
++            let error = await sendTask.value
++            #expect(error == .cancelled)
+ 
+-        _ = try await channel.receiver.receive()
+-    }
++            _ = try await channel.receiver.receive()
++        }
+ 
+-    @Test
+-    func `Sender copies share storage`() async throws {
+-        let channel = Async.Channel<Int>.Bounded(capacity: 10)
+-        let sender1 = channel.sender
+-        let sender2 = sender1
++        @Test
++        func `Sender copies share storage`() async throws {
++            let channel = Async.Channel<Int>.Bounded(capacity: 10)
++            let sender1 = channel.sender
++            let sender2 = sender1
+ 
+-        try await sender1.send(1)
+-        try await sender2.send(2)
++            try await sender1.send(1)
++            try await sender2.send(2)
+ 
+-        sender1.close()
++            sender1.close()
+ 
+-        let first = try await channel.receiver.receive()
+-        let second = try await channel.receiver.receive()
+-        let third = try await channel.receiver.receive()
++            let first = try await channel.receiver.receive()
++            let second = try await channel.receiver.receive()
++            let third = try await channel.receiver.receive()
+ 
+-        #expect(first == 1)
+-        #expect(second == 2)
+-        #expect(third == nil)
++            #expect(first == 1)
++            #expect(second == 2)
++            #expect(third == nil)
++        }
+     }
+ }
+diff --git a/Tests/Async Channel Tests/Async.Channel.Namespace Tests.swift b/Tests/Async Channel Tests/Async.Channel.Namespace Tests.swift
+index ab46885..e73b9c4 100644
+--- a/Tests/Async Channel Tests/Async.Channel.Namespace Tests.swift	
++++ b/Tests/Async Channel Tests/Async.Channel.Namespace Tests.swift	
+@@ -3,12 +3,16 @@ import Async_Channel
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Async channels retain the shared async namespace` {
++enum `Async.Channel.Namespace Tests` {}
+ 
+-    @Test
+-    func `Async channel declarations retain the shared namespace`() {
+-        _ = Async.self
+-        _ = Async.Channel<Never>.self
++extension `Async.Channel.Namespace Tests` {
++    @Suite
++    struct `Async channels retain the shared async namespace` {
++
++        @Test
++        func `Async channel declarations retain the shared namespace`() {
++            _ = Async.self
++            _ = Async.Channel<Never>.self
++        }
+     }
+ }
+diff --git a/Tests/Async Channel Tests/Async.Channel.Typed Tests.swift b/Tests/Async Channel Tests/Async.Channel.Typed Tests.swift
+index bc8b960..90b9eab 100644
+--- a/Tests/Async Channel Tests/Async.Channel.Typed Tests.swift	
++++ b/Tests/Async Channel Tests/Async.Channel.Typed Tests.swift	
+@@ -16,327 +16,331 @@ import Testing
+ 
+ @testable import Async_Channel
+ 
+-@Suite
+-struct `Typed channels preserve terminal identity and handoff` {
+-    enum Failure: Swift::Error, Sendable, Equatable {
+-        case stopped(Int)
+-    }
+-
+-    struct Token: ~Copyable, Sendable {
+-        let value: Int
+-    }
++enum `Async.Channel.Typed Tests` {}
+ 
+-    @Test
+-    func `sender sends and finishes receiver`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+-
+-        try await channel.sender.send(42)
+-        channel.sender.finish()
+-
+-        #expect(try await channel.receiver.receive() == 42)
+-        #expect(try await channel.receiver.receive() == nil)
+-    }
+-
+-    @Test
+-    func `sender failure preserves buffered drain and identity`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 2)
+-
+-        try await channel.sender.send(1)
+-        channel.sender.fail(.stopped(2))
++extension `Async.Channel.Typed Tests` {
++    @Suite
++    struct `Typed channels preserve terminal identity and handoff` {
++        enum Failure: Swift::Error, Sendable, Equatable {
++            case stopped(Int)
++        }
+ 
+-        #expect(try await channel.receiver.receive() == 1)
+-        do throws(Async.Channel<Int>.Typed<Failure>.Error) {
+-            _ = try await channel.receiver.receive()
+-            Issue.record("Expected sender failure after the buffered drain")
+-        } catch {
+-            switch error {
+-            case .failed(.stopped(2)):
+-                break
+-            default:
+-                Issue.record("Expected the sender's declared failure")
+-            }
++        struct Token: ~Copyable, Sendable {
++            let value: Int
+         }
+-    }
+ 
+-    @Test
+-    func `receiver failure propagates to sender`() async {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
++        @Test
++        func `sender sends and finishes receiver`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+ 
+-        channel.receiver.fail(.stopped(3))
++            try await channel.sender.send(42)
++            channel.sender.finish()
+ 
+-        do throws(Async.Channel<Int>.Typed<Failure>.Error) {
+-            try await channel.sender.send(1)
+-            Issue.record("Expected receiver failure to reject the sender")
+-        } catch {
+-            switch error {
+-            case .failed(.stopped(3)):
+-                break
+-            default:
+-                Issue.record("Expected the receiver's declared failure")
+-            }
++            #expect(try await channel.receiver.receive() == 42)
++            #expect(try await channel.receiver.receive() == nil)
+         }
+-    }
+ 
+-    @Test
+-    func `first terminal operation wins`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
++        @Test
++        func `sender failure preserves buffered drain and identity`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 2)
+ 
+-        channel.sender.fail(.stopped(4))
+-        channel.sender.finish()
++            try await channel.sender.send(1)
++            channel.sender.fail(.stopped(2))
+ 
+-        do throws(Async.Channel<Int>.Typed<Failure>.Error) {
+-            _ = try await channel.receiver.receive()
+-            Issue.record("Expected the first terminal failure")
+-        } catch {
+-            switch error {
+-            case .failed(.stopped(4)):
+-                break
+-            default:
+-                Issue.record("Expected the first terminal operation to win")
++            #expect(try await channel.receiver.receive() == 1)
++            do throws(Async.Channel<Int>.Typed<Failure>.Error) {
++                _ = try await channel.receiver.receive()
++                Issue.record("Expected sender failure after the buffered drain")
++            } catch {
++                switch error {
++                case .failed(.stopped(2)):
++                    break
++                default:
++                    Issue.record("Expected the sender's declared failure")
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `typed sender retains bounded backpressure`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let gate = Async.Barrier(parties: 2)
++        @Test
++        func `receiver failure propagates to sender`() async {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+ 
+-        try await sender.send(1)
+-        let blocked = Task {
+-            try? await gate.arrive()
+-            try await sender.send(2)
+-        }
++            channel.receiver.fail(.stopped(3))
+ 
+-        try? await gate.arrive()
+-        #expect(try await channel.receiver.receive() == 1)
+-        try await blocked.value
+-        #expect(try await channel.receiver.receive() == 2)
+-    }
+-
+-    @Test
+-    func `receiver failure resumes a backpressured sender with the same failure`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let gate = Async.Barrier(parties: 2)
+-
+-        try await sender.send(1)
+-        let blocked = Task { () -> Async.Channel<Int>.Typed<Failure>.Error? in
+-            try? await gate.arrive()
+             do throws(Async.Channel<Int>.Typed<Failure>.Error) {
+-                try await sender.send(2)
+-                return nil
++                try await channel.sender.send(1)
++                Issue.record("Expected receiver failure to reject the sender")
+             } catch {
+-                return error
++                switch error {
++                case .failed(.stopped(3)):
++                    break
++                default:
++                    Issue.record("Expected the receiver's declared failure")
++                }
+             }
+         }
+ 
+-        try? await gate.arrive()
+-        channel.receiver.fail(.stopped(5))
++        @Test
++        func `first terminal operation wins`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+ 
+-        let result = await blocked.value
+-        switch result {
+-        case .some(.failed(.stopped(5))):
+-            break
+-        default:
+-            Issue.record("Expected receiver failure to resume the blocked sender")
+-        }
+-    }
++            channel.sender.fail(.stopped(4))
++            channel.sender.finish()
+ 
+-    @Test
+-    func `cancelling a backpressured sender preserves cancellation`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
+-        let sender = channel.sender
+-        let gate = Async.Barrier(parties: 2)
+-
+-        try await sender.send(1)
+-        let blocked = Task { () -> Async.Channel<Int>.Typed<Failure>.Error? in
+-            try? await gate.arrive()
+             do throws(Async.Channel<Int>.Typed<Failure>.Error) {
+-                try await sender.send(2)
+-                return nil
++                _ = try await channel.receiver.receive()
++                Issue.record("Expected the first terminal failure")
+             } catch {
+-                return error
++                switch error {
++                case .failed(.stopped(4)):
++                    break
++                default:
++                    Issue.record("Expected the first terminal operation to win")
++                }
+             }
+         }
+ 
+-        try? await gate.arrive()
+-        blocked.cancel()
++        @Test
++        func `typed sender retains bounded backpressure`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let gate = Async.Barrier(parties: 2)
+ 
+-        let result = await blocked.value
+-        switch result {
+-        case .some(.cancelled):
+-            break
+-        default:
+-            Issue.record("Expected cancellation to remain distinct from terminal failure")
+-        }
+-    }
+-
+-    @Test
+-    func `rendezvous pairs sender first without storing an element`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
+-        let sender = channel.sender
+-        let sending = Task {
+-            switch await sender.send(1) {
+-            case .sent: return true
+-            case .rejected: return false
++            try await sender.send(1)
++            let blocked = Task {
++                try? await gate.arrive()
++                try await sender.send(2)
+             }
+-        }
+ 
+-        #expect(try await channel.receiver.receive() == 1)
+-        #expect(await sending.value)
+-    }
+-
+-    @Test
+-    func `rendezvous pairs receiver first`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
+-        let sender = channel.sender
+-        let receiver = consume channel.receiver
+-        let receiving = Task { try await receiver.receive() }
++            try? await gate.arrive()
++            #expect(try await channel.receiver.receive() == 1)
++            try await blocked.value
++            #expect(try await channel.receiver.receive() == 2)
++        }
++
++        @Test
++        func `receiver failure resumes a backpressured sender with the same failure`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let gate = Async.Barrier(parties: 2)
++
++            try await sender.send(1)
++            let blocked = Task { () -> Async.Channel<Int>.Typed<Failure>.Error? in
++                try? await gate.arrive()
++                do throws(Async.Channel<Int>.Typed<Failure>.Error) {
++                    try await sender.send(2)
++                    return nil
++                } catch {
++                    return error
++                }
++            }
+ 
+-        switch await sender.send(2) {
+-        case .sent: break
+-        case .rejected: Issue.record("Expected direct receiver handoff")
+-        }
+-        #expect(try await receiving.value == 2)
+-    }
++            try? await gate.arrive()
++            channel.receiver.fail(.stopped(5))
+ 
+-    @Test
+-    func `rendezvous preserves FIFO sender pairing`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
+-        let sender = channel.sender
+-        let storage = sender.storage
+-        let first = Task {
+-            switch await sender.send(1) {
+-            case .sent: true
+-            case .rejected: false
++            let result = await blocked.value
++            switch result {
++            case .some(.failed(.stopped(5))):
++                break
++            default:
++                Issue.record("Expected receiver failure to resume the blocked sender")
+             }
+         }
+-        var spins = 0
+-        while storage.withLock({ $0.senders.isEmpty }) && spins < 1_000_000 {
+-            spins += 1
+-            await Task.yield()
+-        }
+-        let firstEnqueued = !storage.withLock { $0.senders.isEmpty }
+-        #expect(firstEnqueued)
+-        let second = Task {
+-            switch await sender.send(2) {
+-            case .sent: true
+-            case .rejected: false
++
++        @Test
++        func `cancelling a backpressured sender preserves cancellation`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Bounded(capacity: 1)
++            let sender = channel.sender
++            let gate = Async.Barrier(parties: 2)
++
++            try await sender.send(1)
++            let blocked = Task { () -> Async.Channel<Int>.Typed<Failure>.Error? in
++                try? await gate.arrive()
++                do throws(Async.Channel<Int>.Typed<Failure>.Error) {
++                    try await sender.send(2)
++                    return nil
++                } catch {
++                    return error
++                }
+             }
+-        }
+-        spins = 0
+-        while storage.withLock({ $0.senders.count != 2 }) && spins < 1_000_000 {
+-            spins += 1
+-            await Task.yield()
+-        }
+-        let bothEnqueued = storage.withLock { $0.senders.count == 2 }
+-        #expect(bothEnqueued)
+ 
+-        #expect(try await channel.receiver.receive() == 1)
+-        #expect(try await channel.receiver.receive() == 2)
+-        #expect(await first.value)
+-        #expect(await second.value)
+-    }
++            try? await gate.arrive()
++            blocked.cancel()
+ 
+-    @Test
+-    func `rendezvous cancellation returns the unpaired sender element`() async {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
+-        let sender = channel.sender
+-        let receiver = consume channel.receiver
+-        let task = Task { () -> Int? in
+-            switch await sender.send(3) {
+-            case .sent: return nil
+-            case .rejected(let element, .cancelled): return element
+-            case .rejected: return nil
++            let result = await blocked.value
++            switch result {
++            case .some(.cancelled):
++                break
++            default:
++                Issue.record("Expected cancellation to remain distinct from terminal failure")
+             }
+         }
+-        task.cancel()
+-        #expect(await task.value == 3)
+-    }
+ 
+-    @Test
+-    func `rendezvous receiver cancellation removes only that waiter`() async {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
+-        let receiver = consume channel.receiver
+-        let task = Task { try await receiver.receive() }
+-        task.cancel()
+-        do {
+-            _ = try await task.value
+-            Issue.record("Expected receiver cancellation")
+-        } catch {
+-            guard case .cancelled? = error as? Async.Channel<Int>.Typed<Failure>.Error else {
+-                Issue.record("Expected cancellation identity, got \(error)")
+-                return
++        @Test
++        func `rendezvous pairs sender first without storing an element`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
++            let sender = channel.sender
++            let sending = Task {
++                switch await sender.send(1) {
++                case .sent: return true
++                case .rejected: return false
++                }
+             }
++
++            #expect(try await channel.receiver.receive() == 1)
++            #expect(await sending.value)
+         }
+-    }
+ 
+-    @Test
+-    func `rendezvous terminal wakes waiters and preserves exact failure`() async throws {
+-        let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
+-        let sender = channel.sender
+-        let waiting = Task { () -> (Int, Failure?) in
+-            switch await sender.send(4) {
+-            case .sent: return (0, nil)
+-            case .rejected(let element, .failed(let failure)): return (element, failure)
+-            case .rejected(let element, _): return (element, nil)
++        @Test
++        func `rendezvous pairs receiver first`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
++            let sender = channel.sender
++            let receiver = consume channel.receiver
++            let receiving = Task { try await receiver.receive() }
++
++            switch await sender.send(2) {
++            case .sent: break
++            case .rejected: Issue.record("Expected direct receiver handoff")
++            }
++            #expect(try await receiving.value == 2)
++        }
++
++        @Test
++        func `rendezvous preserves FIFO sender pairing`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
++            let sender = channel.sender
++            let storage = sender.storage
++            let first = Task {
++                switch await sender.send(1) {
++                case .sent: true
++                case .rejected: false
++                }
++            }
++            var spins = 0
++            while storage.withLock({ $0.senders.isEmpty }) && spins < 1_000_000 {
++                spins += 1
++                await Task.yield()
++            }
++            let firstEnqueued = !storage.withLock { $0.senders.isEmpty }
++            #expect(firstEnqueued)
++            let second = Task {
++                switch await sender.send(2) {
++                case .sent: true
++                case .rejected: false
++                }
++            }
++            spins = 0
++            while storage.withLock({ $0.senders.count != 2 }) && spins < 1_000_000 {
++                spins += 1
++                await Task.yield()
++            }
++            let bothEnqueued = storage.withLock { $0.senders.count == 2 }
++            #expect(bothEnqueued)
++
++            #expect(try await channel.receiver.receive() == 1)
++            #expect(try await channel.receiver.receive() == 2)
++            #expect(await first.value)
++            #expect(await second.value)
++        }
++
++        @Test
++        func `rendezvous cancellation returns the unpaired sender element`() async {
++            let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
++            let sender = channel.sender
++            let receiver = consume channel.receiver
++            let task = Task { () -> Int? in
++                switch await sender.send(3) {
++                case .sent: return nil
++                case .rejected(let element, .cancelled): return element
++                case .rejected: return nil
++                }
++            }
++            task.cancel()
++            #expect(await task.value == 3)
++        }
++
++        @Test
++        func `rendezvous receiver cancellation removes only that waiter`() async {
++            let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
++            let receiver = consume channel.receiver
++            let task = Task { try await receiver.receive() }
++            task.cancel()
++            do {
++                _ = try await task.value
++                Issue.record("Expected receiver cancellation")
++            } catch {
++                guard case .cancelled? = error as? Async.Channel<Int>.Typed<Failure>.Error else {
++                    Issue.record("Expected cancellation identity, got \(error)")
++                    return
++                }
+             }
+         }
+-        channel.receiver.fail(.stopped(7))
+ 
+-        let (element, failure) = await waiting.value
+-        #expect(element == 4)
+-        #expect(failure == .stopped(7))
++        @Test
++        func `rendezvous terminal wakes waiters and preserves exact failure`() async throws {
++            let channel = Async.Channel<Int>.Typed<Failure>.Rendezvous()
++            let sender = channel.sender
++            let waiting = Task { () -> (Int, Failure?) in
++                switch await sender.send(4) {
++                case .sent: return (0, nil)
++                case .rejected(let element, .failed(let failure)): return (element, failure)
++                case .rejected(let element, _): return (element, nil)
++                }
++            }
++            channel.receiver.fail(.stopped(7))
+ 
+-        channel.sender.fail(.stopped(8))
+-        do throws(Async.Channel<Int>.Typed<Failure>.Error) {
+-            _ = try await channel.receiver.receive()
+-            Issue.record("Expected sender failure")
+-        } catch {
+-            if case .failed(.stopped(8)) = error {} else { Issue.record("Expected exact sender failure") }
+-        }
+-    }
++            let (element, failure) = await waiting.value
++            #expect(element == 4)
++            #expect(failure == .stopped(7))
+ 
+-    @Test
+-    func `rendezvous duplex half close and shutdown remain directional`() async throws {
+-        let duplexes = Async.Channel<Int>.Typed<Failure>.Rendezvous.Duplex.pair()
+-        let outbound = duplexes.first.outbound
+-        let sending = Task { () -> Bool in
+-            switch await outbound.send(5) {
+-            case .sent: true
+-            case .rejected: false
++            channel.sender.fail(.stopped(8))
++            do throws(Async.Channel<Int>.Typed<Failure>.Error) {
++                _ = try await channel.receiver.receive()
++                Issue.record("Expected sender failure")
++            } catch {
++                if case .failed(.stopped(8)) = error {} else { Issue.record("Expected exact sender failure") }
+             }
+         }
+-        #expect(try await duplexes.second.inbound.receive() == 5)
+-        #expect(await sending.value, "Expected duplex handoff")
+-        duplexes.first.outbound.finish()
+-        #expect(try await duplexes.second.inbound.receive() == nil)
+-        duplexes.second.shutdown()
+-    }
+ 
+-    @Test
+-    func `rendezvous transfers a move only element exactly once`() async throws {
+-        let channel = Async.Channel<Token>.Typed<Failure>.Rendezvous()
+-        let sender = channel.sender
+-        let sending = Task {
+-            switch await sender.send(Token(value: 9)) {
+-            case .sent: return true
+-            case .rejected: return false
++        @Test
++        func `rendezvous duplex half close and shutdown remain directional`() async throws {
++            let duplexes = Async.Channel<Int>.Typed<Failure>.Rendezvous.Duplex.pair()
++            let outbound = duplexes.first.outbound
++            let sending = Task { () -> Bool in
++                switch await outbound.send(5) {
++                case .sent: true
++                case .rejected: false
++                }
+             }
++            #expect(try await duplexes.second.inbound.receive() == 5)
++            #expect(await sending.value, "Expected duplex handoff")
++            duplexes.first.outbound.finish()
++            #expect(try await duplexes.second.inbound.receive() == nil)
++            duplexes.second.shutdown()
++        }
++
++        @Test
++        func `rendezvous transfers a move only element exactly once`() async throws {
++            let channel = Async.Channel<Token>.Typed<Failure>.Rendezvous()
++            let sender = channel.sender
++            let sending = Task {
++                switch await sender.send(Token(value: 9)) {
++                case .sent: return true
++                case .rejected: return false
++                }
++            }
++            guard let token = try await channel.receiver.receive() else {
++                Issue.record("Expected move-only token")
++                return
++            }
++            let value = token.value
++            #expect(value == 9)
++            #expect(await sending.value)
+         }
+-        guard let token = try await channel.receiver.receive() else {
+-            Issue.record("Expected move-only token")
+-            return
+-        }
+-        let value = token.value
+-        #expect(value == 9)
+-        #expect(await sending.value)
+     }
+ }
+ 
+-extension `Typed channels preserve terminal identity and handoff` {
++extension `Async.Channel.Typed Tests`.`Typed channels preserve terminal identity and handoff` {
+     final class Tracker: Sendable {
+         let drops = Async.Mutex(0)
+         var count: Int { drops.withLock { $0 } }
+diff --git a/Tests/Async Channel Tests/Async.Channel.Unbounded Tests.swift b/Tests/Async Channel Tests/Async.Channel.Unbounded Tests.swift
+index 0bbbdde..d621dcc 100644
+--- a/Tests/Async Channel Tests/Async.Channel.Unbounded Tests.swift	
++++ b/Tests/Async Channel Tests/Async.Channel.Unbounded Tests.swift	
+@@ -5,371 +5,375 @@ import Ownership
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Unbounded async channels preserve delivery and closure` {
++enum `Async.Channel.Unbounded Tests` {}
+ 
+-    @Test
+-    func `Send and receive single element`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
++extension `Async.Channel.Unbounded Tests` {
++    @Suite
++    struct `Unbounded async channels preserve delivery and closure` {
+ 
+-        try ends.sender.send(42)
+-        ends.close()
+-        let value = try await ends.receiver.receive()
+-        #expect(value == 42)
+-    }
+-
+-    @Test
+-    func `Send succeeds when channel is open`() throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        try ends.sender.send(42)
+-        ends.close()
+-    }
++        @Test
++        func `Send and receive single element`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-    @Test
+-    func `Closed channel rejects send`() {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        ends.close()
+-        #expect(throws: Async.Channel<Int>.Error.closed) {
+             try ends.sender.send(42)
++            ends.close()
++            let value = try await ends.receiver.receive()
++            #expect(value == 42)
+         }
+-    }
+ 
+-    @Test
+-    func `Receive returns nil after close and drain`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
++        @Test
++        func `Send succeeds when channel is open`() throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            try ends.sender.send(42)
++            ends.close()
++        }
+ 
+-        try ends.sender.send(1)
+-        try ends.sender.send(2)
+-        ends.close()
++        @Test
++        func `Closed channel rejects send`() {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            ends.close()
++            #expect(throws: Async.Channel<Int>.Error.closed) {
++                try ends.sender.send(42)
++            }
++        }
+ 
+-        let first = try await ends.receiver.receive()
+-        let second = try await ends.receiver.receive()
+-        let third = try await ends.receiver.receive()
++        @Test
++        func `Receive returns nil after close and drain`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-        #expect(first == 1)
+-        #expect(second == 2)
+-        #expect(third == nil)
+-    }
++            try ends.sender.send(1)
++            try ends.sender.send(2)
++            ends.close()
+ 
+-    @Test
+-    func `Poll returns nil when empty`() {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let result = ends.receiver.poll()
+-        #expect(result == nil)
+-    }
++            let first = try await ends.receiver.receive()
++            let second = try await ends.receiver.receive()
++            let third = try await ends.receiver.receive()
+ 
+-    @Test
+-    func `Poll returns element when available`() throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-
+-        try ends.sender.send(42)
+-        let result = ends.receiver.poll()
+-        #expect(result == 42)
+-    }
++            #expect(first == 1)
++            #expect(second == 2)
++            #expect(third == nil)
++        }
+ 
+-    @Test
+-    func `Unbounded channels deliver every element in a batch`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
++        @Test
++        func `Poll returns nil when empty`() {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let result = ends.receiver.poll()
++            #expect(result == nil)
++        }
+ 
+-        try ends.sender.send(
+-            contentsOf: [Ownership.Slot(1), Ownership.Slot(2), Ownership.Slot(3)]
+-        )
+-        ends.close()
++        @Test
++        func `Poll returns element when available`() throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-        var received: [Int] = []
+-        while let value = try await ends.receiver.receive() {
+-            received.append(value)
++            try ends.sender.send(42)
++            let result = ends.receiver.poll()
++            #expect(result == 42)
+         }
+-        #expect(received == [1, 2, 3])
+-    }
+ 
+-    @Test
+-    func `The closed query reflects channel state`() {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
++        @Test
++        func `Unbounded channels deliver every element in a batch`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-        #expect(ends.sender.closed == false)
+-        #expect(ends.receiver.closed == false)
+-        ends.close()
+-        #expect(ends.sender.closed == true)
+-        #expect(ends.receiver.closed == true)
+-    }
++            try ends.sender.send(
++                contentsOf: [Ownership.Slot(1), Ownership.Slot(2), Ownership.Slot(3)]
++            )
++            ends.close()
+ 
+-    @Test
+-    func `Receive suspends until element available`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let started = Async.Barrier(parties: 2)
++            var received: [Int] = []
++            while let value = try await ends.receiver.receive() {
++                received.append(value)
++            }
++            #expect(received == [1, 2, 3])
++        }
+ 
+-        let elements = ends.receiver.elements
+-        let sender = ends.sender
++        @Test
++        func `The closed query reflects channel state`() {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-        let receiveTask = Task {
+-            try? try await started.arrive()
+-            var iterator = elements.makeAsyncIterator()
+-            return try await iterator.next()
++            #expect(ends.sender.closed == false)
++            #expect(ends.receiver.closed == false)
++            ends.close()
++            #expect(ends.sender.closed == true)
++            #expect(ends.receiver.closed == true)
+         }
+ 
+-        try? try await started.arrive()
++        @Test
++        func `Receive suspends until element available`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let started = Async.Barrier(parties: 2)
+ 
+-        try sender.send(42)
++            let elements = ends.receiver.elements
++            let sender = ends.sender
+ 
+-        let result = try await receiveTask.value
+-        #expect(result == 42)
+-    }
++            let receiveTask = Task {
++                try? try await started.arrive()
++                var iterator = elements.makeAsyncIterator()
++                return try await iterator.next()
++            }
+ 
+-    @Test
+-    func `Receive resumes with nil on close`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let started = Async.Barrier(parties: 2)
++            try? try await started.arrive()
+ 
+-        let elements = ends.receiver.elements
+-        let sender = ends.sender
++            try sender.send(42)
+ 
+-        let receiveTask = Task {
+-            try? try await started.arrive()
+-            var iterator = elements.makeAsyncIterator()
+-            return try await iterator.next()
++            let result = try await receiveTask.value
++            #expect(result == 42)
+         }
+ 
+-        try? try await started.arrive()
++        @Test
++        func `Receive resumes with nil on close`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let started = Async.Barrier(parties: 2)
+ 
+-        sender.close()
++            let elements = ends.receiver.elements
++            let sender = ends.sender
+ 
+-        let result = try await receiveTask.value
+-        #expect(result == nil)
+-    }
++            let receiveTask = Task {
++                try? try await started.arrive()
++                var iterator = elements.makeAsyncIterator()
++                return try await iterator.next()
++            }
++
++            try? try await started.arrive()
+ 
+-    @Test
+-    func `Multiple producers can send concurrently`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let sender = ends.sender
+-        let count = 100
++            sender.close()
+ 
+-        await withThrowingTaskGroup(of: Void.self) { group in
+-            for i in 0..<count {
+-                group.addTask {
+-                    try sender.send(i)
++            let result = try await receiveTask.value
++            #expect(result == nil)
++        }
++
++        @Test
++        func `Multiple producers can send concurrently`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let sender = ends.sender
++            let count = 100
++
++            await withThrowingTaskGroup(of: Void.self) { group in
++                for i in 0..<count {
++                    group.addTask {
++                        try sender.send(i)
++                    }
+                 }
+             }
+-        }
+ 
+-        sender.close()
++            sender.close()
+ 
+-        var received: Set<Int> = []
+-        while let value = try await ends.receiver.receive() {
+-            received.insert(value)
+-        }
++            var received: Set<Int> = []
++            while let value = try await ends.receiver.receive() {
++                received.insert(value)
++            }
+ 
+-        #expect(received.count == count)
+-        (0..<count).forEach { i in
+-            #expect(received.contains(i))
++            #expect(received.count == count)
++            (0..<count).forEach { i in
++                #expect(received.contains(i))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Cancellation throws cancelled error`() async {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let started = Async.Barrier(parties: 2)
++        @Test
++        func `Cancellation throws cancelled error`() async {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let started = Async.Barrier(parties: 2)
+ 
+-        let elements = ends.receiver.elements
++            let elements = ends.receiver.elements
+ 
+-        let receiveTask = Task {
+-            try? try await started.arrive()
+-            var iterator = elements.makeAsyncIterator()
+-            return try await iterator.next()
+-        }
++            let receiveTask = Task {
++                try? try await started.arrive()
++                var iterator = elements.makeAsyncIterator()
++                return try await iterator.next()
++            }
+ 
+-        try? try await started.arrive()
++            try? try await started.arrive()
+ 
+-        receiveTask.cancel()
++            receiveTask.cancel()
+ 
+-        do {
+-            _ = try await receiveTask.value
+-            Issue.record("Expected cancellation error")
+-        } catch let error as Async.Channel<Int>.Error {
+-            #expect(error == .cancelled)
+-        } catch {
+-            Issue.record("Unexpected error type: \(error)")
++            do {
++                _ = try await receiveTask.value
++                Issue.record("Expected cancellation error")
++            } catch let error as Async.Channel<Int>.Error {
++                #expect(error == .cancelled)
++            } catch {
++                Issue.record("Unexpected error type: \(error)")
++            }
+         }
+-    }
+-
+-    @Test
+-    func `Close with buffered elements drains then returns nil`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-        try ends.sender.send(1)
+-        try ends.sender.send(2)
+-        try ends.sender.send(3)
++        @Test
++        func `Close with buffered elements drains then returns nil`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-        ends.close()
++            try ends.sender.send(1)
++            try ends.sender.send(2)
++            try ends.sender.send(3)
+ 
+-        let first = try await ends.receiver.receive()
+-        let second = try await ends.receiver.receive()
+-        let third = try await ends.receiver.receive()
++            ends.close()
+ 
+-        #expect(first == 1)
+-        #expect(second == 2)
+-        #expect(third == 3)
++            let first = try await ends.receiver.receive()
++            let second = try await ends.receiver.receive()
++            let third = try await ends.receiver.receive()
+ 
+-        let fourth = try await ends.receiver.receive()
+-        #expect(fourth == nil)
+-    }
++            #expect(first == 1)
++            #expect(second == 2)
++            #expect(third == 3)
+ 
+-    @Test
+-    func `Sender copies share storage`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let sender1 = ends.sender
+-        let sender2 = sender1
++            let fourth = try await ends.receiver.receive()
++            #expect(fourth == nil)
++        }
+ 
+-        try sender1.send(1)
+-        try sender2.send(2)
++        @Test
++        func `Sender copies share storage`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let sender1 = ends.sender
++            let sender2 = sender1
+ 
+-        let first = ends.receiver.poll()
+-        let second = ends.receiver.poll()
++            try sender1.send(1)
++            try sender2.send(2)
+ 
+-        #expect(first == 1)
+-        #expect(second == 2)
++            let first = ends.receiver.poll()
++            let second = ends.receiver.poll()
+ 
+-        sender1.close()
+-        #expect(sender2.closed == true)
+-        #expect(ends.receiver.closed == true)
+-    }
++            #expect(first == 1)
++            #expect(second == 2)
+ 
+-    @Test
+-    func `Sender copies compare equal by endpoint identity`() {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let sender = ends.sender
+-        let copy = sender
++            sender1.close()
++            #expect(sender2.closed == true)
++            #expect(ends.receiver.closed == true)
++        }
+ 
+-        #expect(sender == copy)
+-    }
++        @Test
++        func `Sender copies compare equal by endpoint identity`() {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let sender = ends.sender
++            let copy = sender
+ 
+-    @Test
+-    func `Senders from distinct channels compare unequal`() {
+-        let first = Async.Channel<Int>.Unbounded().take().ends()
+-        let second = Async.Channel<Int>.Unbounded().take().ends()
++            #expect(sender == copy)
++        }
+ 
+-        #expect(first.sender != second.sender)
+-    }
++        @Test
++        func `Senders from distinct channels compare unequal`() {
++            let first = Async.Channel<Int>.Unbounded().take().ends()
++            let second = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-    @Test
+-    func `Sender equality remains stable after close`() {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let sender = ends.sender
+-        let copy = sender
++            #expect(first.sender != second.sender)
++        }
+ 
+-        sender.close()
++        @Test
++        func `Sender equality remains stable after close`() {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let sender = ends.sender
++            let copy = sender
+ 
+-        #expect(sender == copy)
+-    }
++            sender.close()
+ 
+-    @Test
+-    func `Sender equality supports noncopyable elements`() {
+-        final class Payload {}
+-        struct Parcel: ~Copyable {
+-            let payload: Payload
++            #expect(sender == copy)
+         }
+ 
+-        let ends = Async.Channel<Parcel>.Unbounded().take().ends()
+-        let sender = ends.sender
+-        let copy = sender
++        @Test
++        func `Sender equality supports noncopyable elements`() {
++            final class Payload {}
++            struct Parcel: ~Copyable {
++                let payload: Payload
++            }
+ 
+-        #expect(sender == copy)
+-    }
++            let ends = Async.Channel<Parcel>.Unbounded().take().ends()
++            let sender = ends.sender
++            let copy = sender
++
++            #expect(sender == copy)
++        }
+ 
+-    @Test
+-    func `Direct delivery when receiver waiting`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let started = Async.Barrier(parties: 2)
++        @Test
++        func `Direct delivery when receiver waiting`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let started = Async.Barrier(parties: 2)
+ 
+-        let elements = ends.receiver.elements
+-        let sender = ends.sender
++            let elements = ends.receiver.elements
++            let sender = ends.sender
++
++            let receiveTask = Task {
++                try? try await started.arrive()
++                var iterator = elements.makeAsyncIterator()
++                return try await iterator.next()
++            }
+ 
+-        let receiveTask = Task {
+             try? try await started.arrive()
+-            var iterator = elements.makeAsyncIterator()
+-            return try await iterator.next()
+-        }
+ 
+-        try? try await started.arrive()
++            try sender.send(42)
+ 
+-        try sender.send(42)
++            let value = try await receiveTask.value
++            #expect(value == 42)
+ 
+-        let value = try await receiveTask.value
+-        #expect(value == 42)
++            let remaining = ends.receiver.poll()
++            #expect(remaining == nil)
++        }
+ 
+-        let remaining = ends.receiver.poll()
+-        #expect(remaining == nil)
+-    }
++        @Test
++        func `Channel sequence iteration delivers every sent value`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
+ 
+-    @Test
+-    func `Channel sequence iteration delivers every sent value`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
++            try ends.sender.send(
++                contentsOf: [Ownership.Slot(1), Ownership.Slot(2), Ownership.Slot(3)]
++            )
++            ends.close()
+ 
+-        try ends.sender.send(
+-            contentsOf: [Ownership.Slot(1), Ownership.Slot(2), Ownership.Slot(3)]
+-        )
+-        ends.close()
++            var received: [Int] = []
++            for try await value in ends.receiver.elements {
++                received.append(value)
++            }
+ 
+-        var received: [Int] = []
+-        for try await value in ends.receiver.elements {
+-            received.append(value)
++            #expect(received == [1, 2, 3])
+         }
+ 
+-        #expect(received == [1, 2, 3])
+-    }
++        @Test
++        func `Poll does not affect suspension state`() async throws {
++            let ends = Async.Channel<Int>.Unbounded().take().ends()
++            let started = Async.Barrier(parties: 2)
++            let sender = ends.sender
+ 
+-    @Test
+-    func `Poll does not affect suspension state`() async throws {
+-        let ends = Async.Channel<Int>.Unbounded().take().ends()
+-        let started = Async.Barrier(parties: 2)
+-        let sender = ends.sender
++            #expect(ends.receiver.poll() == nil)
+ 
+-        #expect(ends.receiver.poll() == nil)
++            let elements = ends.receiver.elements
+ 
+-        let elements = ends.receiver.elements
++            let receiveTask = Task {
++                try? try await started.arrive()
++                var iterator = elements.makeAsyncIterator()
++                return try await iterator.next()
++            }
+ 
+-        let receiveTask = Task {
+             try? try await started.arrive()
+-            var iterator = elements.makeAsyncIterator()
+-            return try await iterator.next()
+-        }
+ 
+-        try? try await started.arrive()
++            try sender.send(42)
+ 
+-        try sender.send(42)
++            let value = try await receiveTask.value
++            #expect(value == 42)
++        }
+ 
+-        let value = try await receiveTask.value
+-        #expect(value == 42)
+-    }
++        @Test
++        func `Non-Sendable element exits receive() across an isolation boundary (sending result)`()
++            async throws
++        {
+ 
+-    @Test
+-    func `Non-Sendable element exits receive() across an isolation boundary (sending result)`()
+-        async throws
+-    {
++            final class Payload {
++                var value: Int
++                init(value: Int) { self.value = value }
++            }
++            struct Parcel: ~Copyable {
++                let payload: Payload
++            }
++            actor Sink {
++                func consume(_ parcel: consuming sending Parcel) -> Int {
++                    parcel.payload.value
++                }
++            }
+ 
+-        final class Payload {
+-            var value: Int
+-            init(value: Int) { self.value = value }
+-        }
+-        struct Parcel: ~Copyable {
+-            let payload: Payload
+-        }
+-        actor Sink {
+-            func consume(_ parcel: consuming sending Parcel) -> Int {
+-                parcel.payload.value
++            let ends = Async.Channel<Parcel>.Unbounded().take().ends()
++            try ends.sender.send(Parcel(payload: Payload(value: 99)))
++            ends.sender.close()
++            guard let parcel = try await ends.receiver.receive() else {
++                Issue.record("expected an element before close drained")
++                return
+             }
+-        }
+ 
+-        let ends = Async.Channel<Parcel>.Unbounded().take().ends()
+-        try ends.sender.send(Parcel(payload: Payload(value: 99)))
+-        ends.sender.close()
+-        guard let parcel = try await ends.receiver.receive() else {
+-            Issue.record("expected an element before close drained")
+-            return
++            let sink = Sink()
++            let received = await sink.consume(parcel)
++            #expect(received == 99)
+         }
+-
+-        let sink = Sink()
+-        let received = await sink.consume(parcel)
+-        #expect(received == 99)
+     }
+ }
+-- 
+2.43.0
+

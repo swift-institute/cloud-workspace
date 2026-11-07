@@ -1,0 +1,242 @@
+From 3ac810b896ce43eaf704ac6c695b4d3b6a8a9e40 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:17 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../RFC_8288.Link Relation Case Tests.swift   |  36 ++--
+ .../RFC_8288.Link.Parse Tests.swift           | 154 +++++++++---------
+ 2 files changed, 99 insertions(+), 91 deletions(-)
+
+diff --git a/Tests/RFC 8288 Tests/RFC_8288.Link Relation Case Tests.swift b/Tests/RFC 8288 Tests/RFC_8288.Link Relation Case Tests.swift
+index 708bba6..b3a2929 100644
+--- a/Tests/RFC 8288 Tests/RFC_8288.Link Relation Case Tests.swift	
++++ b/Tests/RFC 8288 Tests/RFC_8288.Link Relation Case Tests.swift	
+@@ -2,24 +2,28 @@ import RFC_8288
+ import RFC_9110
+ import Testing
+ 
+-@Suite
+-struct `Link relation case` {
+-    @Test(arguments: ["Next", "NEXT", "nExT"])
+-    func `a registered relation type is case-insensitive`(_ rel: String) throws {
+-        let links = try RFC_8288.Link.Parse()(RFC_9110.Field.Value("<https://a.test/2>; rel=\(rel)"))
+-        #expect(links.first?.relations == [.next])
+-    }
++enum `RFC_8288.Link Relation Case Tests` {}
+ 
+-    @Test
+-    func `an extension relation URI still parses`() throws {
+-        let links = try RFC_8288.Link.Parse()(RFC_9110.Field.Value(#"<https://a.test/2>; rel="https://example.com/rel/Item""#))
+-        #expect(links.first?.relations.count == 1)
+-    }
++extension `RFC_8288.Link Relation Case Tests` {
++    @Suite
++    struct `Link relation case` {
++        @Test(arguments: ["Next", "NEXT", "nExT"])
++        func `a registered relation type is case-insensitive`(_ rel: String) throws {
++            let links = try RFC_8288.Link.Parse()(RFC_9110.Field.Value("<https://a.test/2>; rel=\(rel)"))
++            #expect(links.first?.relations == [.next])
++        }
++
++        @Test
++        func `an extension relation URI still parses`() throws {
++            let links = try RFC_8288.Link.Parse()(RFC_9110.Field.Value(#"<https://a.test/2>; rel="https://example.com/rel/Item""#))
++            #expect(links.first?.relations.count == 1)
++        }
+ 
+-    @Test(arguments: ["N_ext", "Ne/xt", "-next"])
+-    func `malformed relation types are still refused`(_ rel: String) {
+-        #expect(throws: RFC_8288.Link.Parse.Error.self) {
+-            try RFC_8288.Link.Parse()(RFC_9110.Field.Value("<https://a.test/2>; rel=\"\(rel)\""))
++        @Test(arguments: ["N_ext", "Ne/xt", "-next"])
++        func `malformed relation types are still refused`(_ rel: String) {
++            #expect(throws: RFC_8288.Link.Parse.Error.self) {
++                try RFC_8288.Link.Parse()(RFC_9110.Field.Value("<https://a.test/2>; rel=\"\(rel)\""))
++            }
+         }
+     }
+ }
+diff --git a/Tests/RFC 8288 Tests/RFC_8288.Link.Parse Tests.swift b/Tests/RFC 8288 Tests/RFC_8288.Link.Parse Tests.swift
+index c0bd726..9c6ae53 100644
+--- a/Tests/RFC 8288 Tests/RFC_8288.Link.Parse Tests.swift	
++++ b/Tests/RFC 8288 Tests/RFC_8288.Link.Parse Tests.swift	
+@@ -3,93 +3,97 @@ import RFC_8288
+ import RFC_9110
+ import Testing
+ 
+-@Suite
+-struct `RFC 8288 Link Parse Tests` {
+-    @Test
+-    func `Single next link`() throws {
+-        let links = try parse("<https://api.example.test/items?page=2>; rel=next")
+-
+-        #expect(links.count == 1)
+-        #expect(links[0].target.value == "https://api.example.test/items?page=2")
+-        #expect(links[0].relations == [.next])
+-    }
+-
+-    @Test
+-    func `Multiple values and field instances preserve order`() throws {
+-        let headers = RFC_9110.Message.Headers([
+-            try .init(
+-                name: "Link",
+-                value: "<https://example.test/1>; rel=first, <https://example.test/2>; rel=next"
+-            ),
+-            try .init(name: "Link", value: "<https://example.test/3>; rel=last"),
+-        ])
+-
+-        let links = try RFC_8288.Link.Parse()(headers)
++enum `RFC_8288.Link.Parse Tests` {}
++
++extension `RFC_8288.Link.Parse Tests` {
++    @Suite
++    struct `RFC 8288 Link Parse Tests` {
++        @Test
++        func `Single next link`() throws {
++            let links = try parse("<https://api.example.test/items?page=2>; rel=next")
++
++            #expect(links.count == 1)
++            #expect(links[0].target.value == "https://api.example.test/items?page=2")
++            #expect(links[0].relations == [.next])
++        }
+ 
+-        #expect(
+-            links.map(\.target.value) == [
+-                "https://example.test/1",
+-                "https://example.test/2",
+-                "https://example.test/3",
+-            ]
+-        )
+-        #expect(links[1].relations.contains(.next))
+-    }
++        @Test
++        func `Multiple values and field instances preserve order`() throws {
++            let headers = RFC_9110.Message.Headers([
++                try .init(
++                    name: "Link",
++                    value: "<https://example.test/1>; rel=first, <https://example.test/2>; rel=next"
++                ),
++                try .init(name: "Link", value: "<https://example.test/3>; rel=last"),
++            ])
++
++            let links = try RFC_8288.Link.Parse()(headers)
++
++            #expect(
++                links.map(\.target.value) == [
++                    "https://example.test/1",
++                    "https://example.test/2",
++                    "https://example.test/3",
++                ]
++            )
++            #expect(links[1].relations.contains(.next))
++        }
+ 
+-    @Test
+-    func `Quoted delimiters and escapes remain parameter data`() throws {
+-        let links = try parse(
+-            #"</items?page=2>; rel="next prev"; title="a,b;c\\d"; x-extension=opaque; flag"#
+-        )
++        @Test
++        func `Quoted delimiters and escapes remain parameter data`() throws {
++            let links = try parse(
++                #"</items?page=2>; rel="next prev"; title="a,b;c\\d"; x-extension=opaque; flag"#
++            )
+ 
+-        #expect(links[0].target.value == "/items?page=2")
+-        #expect(links[0].relations.map(\.rawValue) == ["next", "prev"])
+-        #expect(links[0].parameters[1].value?.rawValue == #"a,b;c\d"#)
++            #expect(links[0].target.value == "/items?page=2")
++            #expect(links[0].relations.map(\.rawValue) == ["next", "prev"])
++            #expect(links[0].parameters[1].value?.rawValue == #"a,b;c\d"#)
+ 
+-        #expect(links[0].parameters[2].name.rawValue == "x-extension")
+-        #expect(links[0].parameters[2].value?.rawValue == "opaque")
+-        #expect(links[0].parameters[3].value == nil)
+-    }
++            #expect(links[0].parameters[2].name.rawValue == "x-extension")
++            #expect(links[0].parameters[2].value?.rawValue == "opaque")
++            #expect(links[0].parameters[3].value == nil)
++        }
+ 
+-    @Test
+-    func `Token and quoted relations are equivalent`() throws {
+-        let token = try parse("</next>; rel=next")
+-        let quoted = try parse(#"</next>; rel="next""#)
++        @Test
++        func `Token and quoted relations are equivalent`() throws {
++            let token = try parse("</next>; rel=next")
++            let quoted = try parse(#"</next>; rel="next""#)
+ 
+-        #expect(token[0].relations == quoted[0].relations)
+-    }
++            #expect(token[0].relations == quoted[0].relations)
++        }
+ 
+-    @Test
+-    func `Only first relation parameter determines semantics`() throws {
+-        let links = try parse(#"</next>; rel="next"; REL=last"#)
++        @Test
++        func `Only first relation parameter determines semantics`() throws {
++            let links = try parse(#"</next>; rel="next"; REL=last"#)
+ 
+-        #expect(links[0].parameters.count == 2)
+-        #expect(links[0].relations == [.next])
+-    }
++            #expect(links[0].parameters.count == 2)
++            #expect(links[0].relations == [.next])
++        }
+ 
+-    @Test
+-    func `Empty list members are ignored`() throws {
+-        let links = try parse(", , </next>; rel=next, ")
++        @Test
++        func `Empty list members are ignored`() throws {
++            let links = try parse(", , </next>; rel=next, ")
+ 
+-        #expect(links.count == 1)
+-    }
++            #expect(links.count == 1)
++        }
+ 
+-    @Test(arguments: [
+-        "items?page=2>; rel=next",
+-        "<items?page=2; rel=next",
+-        "<https://example.test/{page}>; rel=next",
+-        "</next>; =value",
+-        "</next>; title=",
+-        #"</next>; title="unterminated"#,
+-        "</next>; rel=next trailing",
+-    ])
+-    func `Malformed fields throw typed errors`(_ value: String) throws {
+-        #expect(throws: RFC_8288.Link.Parse.Error.self) {
+-            _ = try parse(value)
++        @Test(arguments: [
++            "items?page=2>; rel=next",
++            "<items?page=2; rel=next",
++            "<https://example.test/{page}>; rel=next",
++            "</next>; =value",
++            "</next>; title=",
++            #"</next>; title="unterminated"#,
++            "</next>; rel=next trailing",
++        ])
++        func `Malformed fields throw typed errors`(_ value: String) throws {
++            #expect(throws: RFC_8288.Link.Parse.Error.self) {
++                _ = try parse(value)
++            }
+         }
+-    }
+ 
+-    private func parse(_ rawValue: String) throws -> [RFC_8288.Link] {
+-        try RFC_8288.Link.Parse()(RFC_9110.Field.Value(rawValue))
++        private func parse(_ rawValue: String) throws -> [RFC_8288.Link] {
++            try RFC_8288.Link.Parse()(RFC_9110.Field.Value(rawValue))
++        }
+     }
+ }
+-- 
+2.43.0
+

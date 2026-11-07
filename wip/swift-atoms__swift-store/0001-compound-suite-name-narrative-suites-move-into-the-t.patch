@@ -1,0 +1,1425 @@
+From d5016f0506137e547261b8cebe9c7b5d953e4405 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:08 +0000
+Subject: [PATCH] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ Tests/Store Tests/Store.Effect Tests.swift    |  48 +--
+ .../Store.Initialization Tests.swift          | 208 +++++------
+ Tests/Store Tests/Store.Inline Tests.swift    | 252 ++++++-------
+ Tests/Store Tests/Store.Key Tests.swift       |   8 +-
+ Tests/Store Tests/Store.Ledgered Tests.swift  |  46 +--
+ .../Store.Protocol Defaults Tests.swift       | 338 +++++++++---------
+ Tests/Store Tests/Store.Protocol Tests.swift  |   8 +-
+ Tests/Store Tests/Store.Split Tests.swift     | 192 +++++-----
+ Tests/Store Tests/Store.Update Tests.swift    |  42 ++-
+ ...wift-storage-split.Store.Split Tests.swift | 106 +++---
+ 10 files changed, 647 insertions(+), 601 deletions(-)
+
+diff --git a/Tests/Store Tests/Store.Effect Tests.swift b/Tests/Store Tests/Store.Effect Tests.swift
+index 52f8e9b..e30a141 100644
+--- a/Tests/Store Tests/Store.Effect Tests.swift	
++++ b/Tests/Store Tests/Store.Effect Tests.swift	
+@@ -1,31 +1,37 @@
+ import Store
+ import Testing
+ 
+-@Suite
+-struct `Store effects preserve composition structure and mapped actions` {
+-    enum Action: Equatable, Sendable {
+-        case first
+-        case second
+-        case third
+-    }
++enum `Store.Effect Tests` {}
+ 
+-    enum Job: Equatable, Sendable {
+-        case load
+-        case save
+-    }
++extension `Store.Effect Tests` {
++    @Suite
++    struct `Store effects preserve composition structure and mapped actions` {
++        enum Action: Equatable, Sendable {
++            case first
++            case second
++            case third
++        }
+ 
+-    typealias Effect = Store::Store.Effect<Action, Job>
++        enum Job: Equatable, Sendable {
++            case load
++            case save
++        }
++
++        typealias Effect = Store::Store.Effect<Action, Job>
+ 
+-    static let samples: [Effect] = [
+-        .none,
+-        .send(.first),
+-        .run(.load),
+-        .merge([.send(.first), .run(.save)]),
+-        .sequence([.send(.second), .run(.load)]),
+-        .merge([]),
+-        .sequence([]),
+-    ]
++        static let samples: [Effect] = [
++            .none,
++            .send(.first),
++            .run(.load),
++            .merge([.send(.first), .run(.save)]),
++            .sequence([.send(.second), .run(.load)]),
++            .merge([]),
++            .sequence([]),
++        ]
++    }
++}
+ 
++extension `Store.Effect Tests`.`Store effects preserve composition structure and mapped actions` {
+     @Suite
+     struct `Store effect composition preserves identities associativity and mapping laws` {
+ 
+diff --git a/Tests/Store Tests/Store.Initialization Tests.swift b/Tests/Store Tests/Store.Initialization Tests.swift
+index 2623a26..574b5a8 100644
+--- a/Tests/Store Tests/Store.Initialization Tests.swift	
++++ b/Tests/Store Tests/Store.Initialization Tests.swift	
+@@ -6,107 +6,111 @@ import Store_Test_Support
+ import Tagged
+ import Testing
+ 
+-@Suite
+-struct `Store initialization ledgers preserve occupied ranges counts and visitation order` {
+-
+-    @Test
+-    func `linear(count:) of zero is .empty`() {
+-        let ledger = Store::Store.Initialization<Int>.linear(count: .zero)
+-        #expect(ledger == .empty)
+-        #expect(ledger.isEmpty)
+-        #expect(ledger.count == .zero)
+-    }
+-
+-    @Test
+-    func `linear(count:) covers 0..<count`() {
+-        let ledger = Store::Store.Initialization<Int>.linear(count: 3)
+-        #expect(ledger == .one(Swift.Range<Index<Int>>(start: .zero, count: 3)))
+-        #expect(!ledger.isEmpty)
+-        #expect(ledger.count == 3)
+-    }
+-
+-    @Test
+-    func `.two counts both spans`() {
+-        let first = Swift.Range<Index<Int>>(start: .zero, count: 3)
+-        let second = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
+-        let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
+-        #expect(ledger.count == 5)
+-        #expect(!ledger.isEmpty)
+-    }
+-
+-    @Test
+-    func `.empty is empty`() {
+-        let ledger = Store::Store.Initialization<Int>.empty
+-        #expect(ledger.isEmpty)
+-        #expect(ledger.count == .zero)
+-    }
+-
+-    @Test
+-    func `isPrefixShaped is true for .empty`() {
+-        let ledger = Store::Store.Initialization<Int>.empty
+-        #expect(ledger.isPrefixShaped)
+-    }
+-
+-    @Test
+-    func `isPrefixShaped is true for .one starting at zero`() {
+-        let ledger = Store::Store.Initialization<Int>.linear(count: 3)
+-        #expect(ledger.isPrefixShaped)
+-    }
+-
+-    @Test
+-    func `isPrefixShaped is false for .one NOT starting at zero`() {
+-        let range = Swift.Range<Index<Int>>(start: Index<Int>(2), count: 3)
+-        let ledger = Store::Store.Initialization<Int>.one(range)
+-        #expect(!ledger.isPrefixShaped)
+-    }
+-
+-    @Test
+-    func `isPrefixShaped is false for .two (wrapped)`() {
+-        let first = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
+-        let second = Swift.Range<Index<Int>>(start: .zero, count: 3)
+-        let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
+-        #expect(!ledger.isPrefixShaped)
+-    }
+-
+-    @Test
+-    func `forEach visits ranges in order`() {
+-        let first = Swift.Range<Index<Int>>(start: .zero, count: 3)
+-        let second = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
+-        let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
+-
+-        var visited: [Swift.Range<Index<Int>>] = []
+-        ledger.forEach { visited.append($0) }
+-        #expect(visited == [first, second])
+-
+-        var emptyVisited = 0
+-        Store::Store.Initialization<Int>.empty.forEach { _ in emptyVisited += 1 }
+-        #expect(emptyVisited == 0)
+-    }
+-
+-    @Test
+-    func `linearize packs disjoint ranges into contiguous offsets`() {
+-
+-        let first = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
+-        let second = Swift.Range<Index<Int>>(start: .zero, count: 3)
+-        let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
+-
+-        var visits: [(Swift.Range<Index<Int>>, Index<Int>)] = []
+-        ledger.linearize { range, offset in visits.append((range, offset)) }
+-
+-        #expect(visits.count == 2)
+-        #expect(visits[0].0 == first)
+-        #expect(visits[0].1 == .zero)
+-        #expect(visits[1].0 == second)
+-        #expect(visits[1].1 == Index<Int>(2))
+-    }
+-
+-    @Test
+-    func `Store initialization equality distinguishes range payloads and empty state`() {
+-        let a = Store::Store.Initialization<Int>.linear(count: 3)
+-        let b = Store::Store.Initialization<Int>.linear(count: 3)
+-        let c = Store::Store.Initialization<Int>.linear(count: 4)
+-        #expect(a == b)
+-        #expect(a != c)
+-        #expect(Store::Store.Initialization<Int>.empty != a)
++enum `Store.Initialization Tests` {}
++
++extension `Store.Initialization Tests` {
++    @Suite
++    struct `Store initialization ledgers preserve occupied ranges counts and visitation order` {
++
++        @Test
++        func `linear(count:) of zero is .empty`() {
++            let ledger = Store::Store.Initialization<Int>.linear(count: .zero)
++            #expect(ledger == .empty)
++            #expect(ledger.isEmpty)
++            #expect(ledger.count == .zero)
++        }
++
++        @Test
++        func `linear(count:) covers 0..<count`() {
++            let ledger = Store::Store.Initialization<Int>.linear(count: 3)
++            #expect(ledger == .one(Swift.Range<Index<Int>>(start: .zero, count: 3)))
++            #expect(!ledger.isEmpty)
++            #expect(ledger.count == 3)
++        }
++
++        @Test
++        func `.two counts both spans`() {
++            let first = Swift.Range<Index<Int>>(start: .zero, count: 3)
++            let second = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
++            let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
++            #expect(ledger.count == 5)
++            #expect(!ledger.isEmpty)
++        }
++
++        @Test
++        func `.empty is empty`() {
++            let ledger = Store::Store.Initialization<Int>.empty
++            #expect(ledger.isEmpty)
++            #expect(ledger.count == .zero)
++        }
++
++        @Test
++        func `isPrefixShaped is true for .empty`() {
++            let ledger = Store::Store.Initialization<Int>.empty
++            #expect(ledger.isPrefixShaped)
++        }
++
++        @Test
++        func `isPrefixShaped is true for .one starting at zero`() {
++            let ledger = Store::Store.Initialization<Int>.linear(count: 3)
++            #expect(ledger.isPrefixShaped)
++        }
++
++        @Test
++        func `isPrefixShaped is false for .one NOT starting at zero`() {
++            let range = Swift.Range<Index<Int>>(start: Index<Int>(2), count: 3)
++            let ledger = Store::Store.Initialization<Int>.one(range)
++            #expect(!ledger.isPrefixShaped)
++        }
++
++        @Test
++        func `isPrefixShaped is false for .two (wrapped)`() {
++            let first = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
++            let second = Swift.Range<Index<Int>>(start: .zero, count: 3)
++            let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
++            #expect(!ledger.isPrefixShaped)
++        }
++
++        @Test
++        func `forEach visits ranges in order`() {
++            let first = Swift.Range<Index<Int>>(start: .zero, count: 3)
++            let second = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
++            let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
++
++            var visited: [Swift.Range<Index<Int>>] = []
++            ledger.forEach { visited.append($0) }
++            #expect(visited == [first, second])
++
++            var emptyVisited = 0
++            Store::Store.Initialization<Int>.empty.forEach { _ in emptyVisited += 1 }
++            #expect(emptyVisited == 0)
++        }
++
++        @Test
++        func `linearize packs disjoint ranges into contiguous offsets`() {
++
++            let first = Swift.Range<Index<Int>>(start: Index<Int>(6), count: 2)
++            let second = Swift.Range<Index<Int>>(start: .zero, count: 3)
++            let ledger = Store::Store.Initialization<Int>.two(first: first, second: second)
++
++            var visits: [(Swift.Range<Index<Int>>, Index<Int>)] = []
++            ledger.linearize { range, offset in visits.append((range, offset)) }
++
++            #expect(visits.count == 2)
++            #expect(visits[0].0 == first)
++            #expect(visits[0].1 == .zero)
++            #expect(visits[1].0 == second)
++            #expect(visits[1].1 == Index<Int>(2))
++        }
++
++        @Test
++        func `Store initialization equality distinguishes range payloads and empty state`() {
++            let a = Store::Store.Initialization<Int>.linear(count: 3)
++            let b = Store::Store.Initialization<Int>.linear(count: 3)
++            let c = Store::Store.Initialization<Int>.linear(count: 4)
++            #expect(a == b)
++            #expect(a != c)
++            #expect(Store::Store.Initialization<Int>.empty != a)
++        }
+     }
+ }
+diff --git a/Tests/Store Tests/Store.Inline Tests.swift b/Tests/Store Tests/Store.Inline Tests.swift
+index 3e2a839..64fbce8 100644
+--- a/Tests/Store Tests/Store.Inline Tests.swift	
++++ b/Tests/Store Tests/Store.Inline Tests.swift	
+@@ -29,137 +29,141 @@ extension Probe {
+     static var destroyedSorted: [Int] { unsafe _destroyed.sorted() }
+ }
+ 
+-@Suite(.serialized)
+-struct `Inline stores preserve element mutation transfer and single destruction` {
+-
+-    @Test
+-    func `create reports capacity empty`() {
+-        let s = Store::Store.Inline<Int, 4>()
+-        let cap = s.capacity
+-        let empty = s.isEmpty
+-        #expect(cap == Index<Int>.Count(4))
+-        #expect(empty)
+-    }
+-
+-    @Test
+-    func `Inline storage preserves a mutated value through transfer and destroys it once`() {
+-        Probe.reset()
+-        var s = Store::Store.Inline<Item, 4>()
+-        s.initialize(at: 0, to: Item(7, value: 70))
+-        let v0 = s[0].value
+-        #expect(v0 == 70)
+-        s[0].bump()
+-        let v0b = s[0].value
+-        #expect(v0b == 71)
+-        let cnt = s.count
+-        #expect(cnt == Index<Item>.Count(1))
+-        let moved = s.move(at: 0)
+-        let mv = moved.value
+-        let dEmpty = Probe.destroyed.isEmpty
+-        #expect(mv == 71)
+-        #expect(dEmpty)
+-        _ = consume moved
+-        let dAfter = Probe.destroyed
+-        #expect(dAfter == [7])
+-    }
++enum `Store.Inline Tests` {}
++
++extension `Store.Inline Tests` {
++    @Suite(.serialized)
++    struct `Inline stores preserve element mutation transfer and single destruction` {
++
++        @Test
++        func `create reports capacity empty`() {
++            let s = Store::Store.Inline<Int, 4>()
++            let cap = s.capacity
++            let empty = s.isEmpty
++            #expect(cap == Index<Int>.Count(4))
++            #expect(empty)
++        }
+ 
+-    @Test
+-    func `teardown destroys live prefix once`() {
+-        Probe.reset()
+-        do {
+-            var s = Store::Store.Inline<Item, 8>()
+-            s.initialize(at: 0, to: Item(1))
+-            s.initialize(at: 1, to: Item(2))
+-            s.initialize(at: 2, to: Item(3))
++        @Test
++        func `Inline storage preserves a mutated value through transfer and destroys it once`() {
++            Probe.reset()
++            var s = Store::Store.Inline<Item, 4>()
++            s.initialize(at: 0, to: Item(7, value: 70))
++            let v0 = s[0].value
++            #expect(v0 == 70)
++            s[0].bump()
++            let v0b = s[0].value
++            #expect(v0b == 71)
++            let cnt = s.count
++            #expect(cnt == Index<Item>.Count(1))
++            let moved = s.move(at: 0)
++            let mv = moved.value
++            let dEmpty = Probe.destroyed.isEmpty
++            #expect(mv == 71)
++            #expect(dEmpty)
++            _ = consume moved
++            let dAfter = Probe.destroyed
++            #expect(dAfter == [7])
+         }
+-        let ds = Probe.destroyedSorted
+-        #expect(ds == [1, 2, 3])
+-    }
+ 
+-    @Test
+-    func
+-        `move at every slot round trips without leaking or double freeing (F-001 pointer-escape regression)`()
+-    {
+-
+-        Probe.reset()
+-        var s = Store::Store.Inline<Item, 4>()
+-        s.initialize(at: 0, to: Item(101))
+-        s.initialize(at: 1, to: Item(102))
+-        s.initialize(at: 2, to: Item(103))
+-        s.initialize(at: 3, to: Item(104))
+-
+-        let m3 = s.move(at: 3)
+-        let m0 = s.move(at: 0)
+-        let m2 = s.move(at: 2)
+-        let m1 = s.move(at: 1)
+-        let ids = [m3.id, m0.id, m2.id, m1.id]
+-        #expect(ids == [104, 101, 103, 102])
+-        let emptyBeforeDrop = Probe.destroyed.isEmpty
+-        #expect(emptyBeforeDrop)
+-        _ = consume m3
+-        _ = consume m0
+-        _ = consume m2
+-        _ = consume m1
+-        let destroyedAfterConsume = Probe.destroyedSorted
+-        #expect(destroyedAfterConsume == [101, 102, 103, 104])
+-        let cnt = s.count
+-        #expect(cnt == .zero)
+-    }
++        @Test
++        func `teardown destroys live prefix once`() {
++            Probe.reset()
++            do {
++                var s = Store::Store.Inline<Item, 8>()
++                s.initialize(at: 0, to: Item(1))
++                s.initialize(at: 1, to: Item(2))
++                s.initialize(at: 2, to: Item(3))
++            }
++            let ds = Probe.destroyedSorted
++            #expect(ds == [1, 2, 3])
++        }
+ 
+-    @Test
+-    func
+-        `_isValidPrefixTailRemoval accepts only the tail on a prefix-shaped ledger (F-004 regression)`()
+-    {
+-
+-        var s = Store::Store.Inline<Int, 4>()
+-        s.initialize(at: 0, to: 10)
+-        s.initialize(at: 1, to: 11)
+-        s.initialize(at: 2, to: 12)
+-
+-        let tail = Swift.Range<Index<Int>>(start: 2, count: .one)
+-        let notTail0 = Swift.Range<Index<Int>>(start: 0, count: .one)
+-        let notTail1 = Swift.Range<Index<Int>>(start: 1, count: .one)
+-        let tailIsValid = s._isValidPrefixTailRemoval(range: tail)
+-        let notTail0IsValid = s._isValidPrefixTailRemoval(range: notTail0)
+-        let notTail1IsValid = s._isValidPrefixTailRemoval(range: notTail1)
+-        #expect(tailIsValid)
+-        #expect(!notTail0IsValid)
+-        #expect(!notTail1IsValid)
+-
+-        s.initialization = .two(
+-            first: Swift.Range<Index<Int>>(start: 2, count: .one),
+-            second: Swift.Range<Index<Int>>(start: 0, count: .one)
+-        )
+-        let notTail0IsValidWhenWrapped = s._isValidPrefixTailRemoval(range: notTail0)
+-        #expect(notTail0IsValidWhenWrapped)
+-
+-        s.initialization = .linear(count: 3)
+-        _ = s.move(at: 2)
+-        _ = s.move(at: 1)
+-        _ = s.move(at: 0)
+-    }
++        @Test
++        func
++            `move at every slot round trips without leaking or double freeing (F-001 pointer-escape regression)`()
++        {
++
++            Probe.reset()
++            var s = Store::Store.Inline<Item, 4>()
++            s.initialize(at: 0, to: Item(101))
++            s.initialize(at: 1, to: Item(102))
++            s.initialize(at: 2, to: Item(103))
++            s.initialize(at: 3, to: Item(104))
++
++            let m3 = s.move(at: 3)
++            let m0 = s.move(at: 0)
++            let m2 = s.move(at: 2)
++            let m1 = s.move(at: 1)
++            let ids = [m3.id, m0.id, m2.id, m1.id]
++            #expect(ids == [104, 101, 103, 102])
++            let emptyBeforeDrop = Probe.destroyed.isEmpty
++            #expect(emptyBeforeDrop)
++            _ = consume m3
++            _ = consume m0
++            _ = consume m2
++            _ = consume m1
++            let destroyedAfterConsume = Probe.destroyedSorted
++            #expect(destroyedAfterConsume == [101, 102, 103, 104])
++            let cnt = s.count
++            #expect(cnt == .zero)
++        }
+ 
+-    @Test
+-    func `move only elements ride the seam`() {
++        @Test
++        func
++            `_isValidPrefixTailRemoval accepts only the tail on a prefix-shaped ledger (F-004 regression)`()
++        {
++
++            var s = Store::Store.Inline<Int, 4>()
++            s.initialize(at: 0, to: 10)
++            s.initialize(at: 1, to: 11)
++            s.initialize(at: 2, to: 12)
++
++            let tail = Swift.Range<Index<Int>>(start: 2, count: .one)
++            let notTail0 = Swift.Range<Index<Int>>(start: 0, count: .one)
++            let notTail1 = Swift.Range<Index<Int>>(start: 1, count: .one)
++            let tailIsValid = s._isValidPrefixTailRemoval(range: tail)
++            let notTail0IsValid = s._isValidPrefixTailRemoval(range: notTail0)
++            let notTail1IsValid = s._isValidPrefixTailRemoval(range: notTail1)
++            #expect(tailIsValid)
++            #expect(!notTail0IsValid)
++            #expect(!notTail1IsValid)
++
++            s.initialization = .two(
++                first: Swift.Range<Index<Int>>(start: 2, count: .one),
++                second: Swift.Range<Index<Int>>(start: 0, count: .one)
++            )
++            let notTail0IsValidWhenWrapped = s._isValidPrefixTailRemoval(range: notTail0)
++            #expect(notTail0IsValidWhenWrapped)
++
++            s.initialization = .linear(count: 3)
++            _ = s.move(at: 2)
++            _ = s.move(at: 1)
++            _ = s.move(at: 0)
++        }
+ 
+-        Probe2.reset()
+-        do {
+-            var s = Store::Store.Inline<MoveOnly, 4>()
+-            s.initialize(at: 0, to: MoveOnly(id: 1))
+-            s.initialize(at: 1, to: MoveOnly(id: 2))
+-            let borrowedID = s[0].id
+-            #expect(borrowedID == 1)
+-            let cnt = s.count
+-            #expect(cnt == Index<MoveOnly>.Count(2))
+-            let moved = s.move(at: 1)
+-            let movedID = moved.id
+-            #expect(movedID == 2)
+-            _ = consume moved
+-            let mid = Probe2.destroyedSorted
+-            #expect(mid == [2])
++        @Test
++        func `move only elements ride the seam`() {
++
++            Probe2.reset()
++            do {
++                var s = Store::Store.Inline<MoveOnly, 4>()
++                s.initialize(at: 0, to: MoveOnly(id: 1))
++                s.initialize(at: 1, to: MoveOnly(id: 2))
++                let borrowedID = s[0].id
++                #expect(borrowedID == 1)
++                let cnt = s.count
++                #expect(cnt == Index<MoveOnly>.Count(2))
++                let moved = s.move(at: 1)
++                let movedID = moved.id
++                #expect(movedID == 2)
++                _ = consume moved
++                let mid = Probe2.destroyedSorted
++                #expect(mid == [2])
++            }
++            let ds = Probe2.destroyedSorted
++            #expect(ds == [1, 2])
+         }
+-        let ds = Probe2.destroyedSorted
+-        #expect(ds == [1, 2])
+     }
+ }
+ 
+diff --git a/Tests/Store Tests/Store.Key Tests.swift b/Tests/Store Tests/Store.Key Tests.swift
+index ec1dbe2..fefc09c 100644
+--- a/Tests/Store Tests/Store.Key Tests.swift	
++++ b/Tests/Store Tests/Store.Key Tests.swift	
+@@ -3,14 +3,18 @@ import Testing
+ 
+ @Suite
+ struct `Store keys expose their supplied initial values` {
+-    @Suite struct `Store keys retain ordinary initial values and callable command values` {}
+-    @Suite struct `No store key boundary cases are defined` {}
+     enum Palette {}
+ 
+     enum Dismiss {}
+ 
+ }
+ 
++extension `Store keys expose their supplied initial values` {
++    @Suite struct `Store keys retain ordinary initial values and callable command values` {}
++
++    @Suite struct `No store key boundary cases are defined` {}
++}
++
+ extension `Store keys expose their supplied initial values`.Palette: Store::Store.Key.`Protocol` {
+     static var initial: Int { 7 }
+ }
+diff --git a/Tests/Store Tests/Store.Ledgered Tests.swift b/Tests/Store Tests/Store.Ledgered Tests.swift
+index 718dd7f..1597187 100644
+--- a/Tests/Store Tests/Store.Ledgered Tests.swift	
++++ b/Tests/Store Tests/Store.Ledgered Tests.swift	
+@@ -37,28 +37,32 @@ private func relabel<S: Store::Store.Ledgered.`Protocol` & ~Copyable>(
+     store.initialization = shape
+ }
+ 
+-@Suite
+-struct `Ledgered stores expose mutable ledgers and generic storage operations` {
++enum `Store.Ledgered Tests` {}
+ 
+-    @Test
+-    func `the settable ledger requirement is generically writable and readable`() {
+-        var store = TwoSlot()
+-        store.initialize(at: Index<Int>(Ordinal(UInt(0))), to: 7)
+-        let one = Index<Int>(Ordinal(UInt(0)))..<Index<Int>(Ordinal(UInt(1)))
+-        relabel(&store, to: .one(one))
+-        #expect(store.initialization == .one(one))
+-        relabel(&store, to: .empty)
+-        #expect(store.initialization == .empty)
+-    }
++extension `Store.Ledgered Tests` {
++    @Suite
++    struct `Ledgered stores expose mutable ledgers and generic storage operations` {
++
++        @Test
++        func `the settable ledger requirement is generically writable and readable`() {
++            var store = TwoSlot()
++            store.initialize(at: Index<Int>(Ordinal(UInt(0))), to: 7)
++            let one = Index<Int>(Ordinal(UInt(0)))..<Index<Int>(Ordinal(UInt(1)))
++            relabel(&store, to: .one(one))
++            #expect(store.initialization == .one(one))
++            relabel(&store, to: .empty)
++            #expect(store.initialization == .empty)
++        }
+ 
+-    @Test
+-    func `the refinement is a Store.Protocol (seam ops reachable through the bound)`() {
+-        var store = TwoSlot()
+-        store.unshare()
+-        store.initialize(at: Index<Int>(Ordinal(UInt(1))), to: 9)
+-        let read = store[Index<Int>(Ordinal(UInt(1)))]
+-        #expect(read == 9)
+-        let moved = store.move(at: Index<Int>(Ordinal(UInt(1))))
+-        #expect(moved == 9)
++        @Test
++        func `the refinement is a Store.Protocol (seam ops reachable through the bound)`() {
++            var store = TwoSlot()
++            store.unshare()
++            store.initialize(at: Index<Int>(Ordinal(UInt(1))), to: 9)
++            let read = store[Index<Int>(Ordinal(UInt(1)))]
++            #expect(read == 9)
++            let moved = store.move(at: Index<Int>(Ordinal(UInt(1))))
++            #expect(moved == 9)
++        }
+     }
+ }
+diff --git a/Tests/Store Tests/Store.Protocol Defaults Tests.swift b/Tests/Store Tests/Store.Protocol Defaults Tests.swift
+index ee2e0ca..f489da7 100644
+--- a/Tests/Store Tests/Store.Protocol Defaults Tests.swift	
++++ b/Tests/Store Tests/Store.Protocol Defaults Tests.swift	
+@@ -55,189 +55,193 @@ private enum VisitFailure: Error {
+     case stopped
+ }
+ 
+-@Suite
+-struct `Store defaults preserve valid slot states and callback failures` {
+-    @Test(arguments: [false, true])
+-    func `Overlapping moves preserve element order and leave the vacated slot empty`(
+-        towardHigherSlots: Bool
+-    ) {
+-        var store = CheckedSlots<Int>(
+-            towardHigherSlots ? [10, 20, 30, nil] : [nil, 10, 20, 30]
+-        )
+-        store.moveInitialize(
+-            from: towardHigherSlots ? 0 : 1,
+-            to: towardHigherSlots ? 1 : 0,
+-            count: 3
+-        )
+-
+-        let slots = store.slots
+-        let moves = store.movedSlots
+-        let initializations = store.initializedSlots
+-        #expect(slots == (towardHigherSlots ? [nil, 10, 20, 30] : [10, 20, 30, nil]))
+-        #expect(moves == (towardHigherSlots ? [2, 1, 0] : [1, 2, 3]))
+-        #expect(initializations == (towardHigherSlots ? [3, 2, 1] : [0, 1, 2]))
+-    }
++enum `Store.Protocol Defaults Tests` {}
++
++extension `Store.Protocol Defaults Tests` {
++    @Suite
++    struct `Store defaults preserve valid slot states and callback failures` {
++        @Test(arguments: [false, true])
++        func `Overlapping moves preserve element order and leave the vacated slot empty`(
++            towardHigherSlots: Bool
++        ) {
++            var store = CheckedSlots<Int>(
++                towardHigherSlots ? [10, 20, 30, nil] : [nil, 10, 20, 30]
++            )
++            store.moveInitialize(
++                from: towardHigherSlots ? 0 : 1,
++                to: towardHigherSlots ? 1 : 0,
++                count: 3
++            )
++
++            let slots = store.slots
++            let moves = store.movedSlots
++            let initializations = store.initializedSlots
++            #expect(slots == (towardHigherSlots ? [nil, 10, 20, 30] : [10, 20, 30, nil]))
++            #expect(moves == (towardHigherSlots ? [2, 1, 0] : [1, 2, 3]))
++            #expect(initializations == (towardHigherSlots ? [3, 2, 1] : [0, 1, 2]))
++        }
+ 
+-    @Test
+-    func `Moving zero elements or using equal positions leaves every slot untouched`() {
+-        var store = CheckedSlots<Int>([10, 20, nil])
+-        store.moveInitialize(from: 0, to: 2, count: 0)
+-        store.moveInitialize(from: 0, to: 0, count: 2)
+-        store.move(from: 1, to: 1)
+-
+-        let slots = store.slots
+-        let moves = store.movedSlots
+-        let initializations = store.initializedSlots
+-        #expect(slots == [10, 20, nil])
+-        #expect(moves.isEmpty)
+-        #expect(initializations.isEmpty)
+-    }
++        @Test
++        func `Moving zero elements or using equal positions leaves every slot untouched`() {
++            var store = CheckedSlots<Int>([10, 20, nil])
++            store.moveInitialize(from: 0, to: 2, count: 0)
++            store.moveInitialize(from: 0, to: 0, count: 2)
++            store.move(from: 1, to: 1)
++
++            let slots = store.slots
++            let moves = store.movedSlots
++            let initializations = store.initializedSlots
++            #expect(slots == [10, 20, nil])
++            #expect(moves.isEmpty)
++            #expect(initializations.isEmpty)
++        }
+ 
+-    @Test
+-    func `Moving one element transfers it to a vacant slot that can be reused`() {
+-        var store = CheckedSlots<Int>([10, nil, nil])
+-        store.move(from: 0, to: 2)
+-        let afterMove = store.slots
+-        #expect(afterMove == [nil, nil, 10])
+-        store.initialize(at: 0, to: 20)
+-        let afterReuse = store.slots
+-        #expect(afterReuse == [20, nil, 10])
+-    }
++        @Test
++        func `Moving one element transfers it to a vacant slot that can be reused`() {
++            var store = CheckedSlots<Int>([10, nil, nil])
++            store.move(from: 0, to: 2)
++            let afterMove = store.slots
++            #expect(afterMove == [nil, nil, 10])
++            store.initialize(at: 0, to: 20)
++            let afterReuse = store.slots
++            #expect(afterReuse == [20, nil, 10])
++        }
+ 
+-    @Test
+-    func `Copying an explicit live prefix preserves its source and unused destination slots`() {
+-        let source = CheckedSlots<Int>([10, 20, nil, nil])
+-        var destination = CheckedSlots<Int>([nil, nil, 99])
+-        source.copy(to: &destination, count: 2)
+-        source.copy(to: &destination, count: 0)
+-
+-        let original = source.slots
+-        let copied = destination.slots
+-        let initializations = destination.initializedSlots
+-        #expect(original == [10, 20, nil, nil])
+-        #expect(copied == [10, 20, 99])
+-        #expect(initializations == [0, 1])
+-    }
++        @Test
++        func `Copying an explicit live prefix preserves its source and unused destination slots`() {
++            let source = CheckedSlots<Int>([10, 20, nil, nil])
++            var destination = CheckedSlots<Int>([nil, nil, 99])
++            source.copy(to: &destination, count: 2)
++            source.copy(to: &destination, count: 0)
++
++            let original = source.slots
++            let copied = destination.slots
++            let initializations = destination.initializedSlots
++            #expect(original == [10, 20, nil, nil])
++            #expect(copied == [10, 20, 99])
++            #expect(initializations == [0, 1])
++        }
+ 
+-    @Test
+-    func `Filling an explicit vacant range preserves neighboring live slots`() {
+-        var store = CheckedSlots<Int>([1, nil, nil, 4])
+-        store.fill(range: 1..<3, with: 7)
+-        store.fill(range: 2..<2, with: 99)
++        @Test
++        func `Filling an explicit vacant range preserves neighboring live slots`() {
++            var store = CheckedSlots<Int>([1, nil, nil, 4])
++            store.fill(range: 1..<3, with: 7)
++            store.fill(range: 2..<2, with: 99)
+ 
+-        let slots = store.slots
+-        let initializations = store.initializedSlots
+-        #expect(slots == [1, 7, 7, 4])
+-        #expect(initializations == [1, 2])
+-    }
++            let slots = store.slots
++            let initializations = store.initializedSlots
++            #expect(slots == [1, 7, 7, 4])
++            #expect(initializations == [1, 2])
++        }
+ 
+-    @Test
+-    func `Explicit deinitialization destroys only the requested live slots once`() {
+-        let log = DestructionLog()
+-        do {
+-            var store = CheckedSlots<TrackedItem>([
+-                TrackedItem(0, log: log), TrackedItem(1, log: log),
+-                TrackedItem(2, log: log), TrackedItem(3, log: log), nil,
+-            ])
+-            store.deinitialize(range: 1..<3)
+-            #expect(log.ids.sorted() == [1, 2])
+-            store.deinitialize(at: 3)
+-            store.deinitialize(range: 0..<0)
+-            #expect(log.ids.sorted() == [1, 2, 3])
+-
+-            let liveIDs = store.slots.map { $0?.id }
+-            #expect(liveIDs == [0, nil, nil, nil, nil])
++        @Test
++        func `Explicit deinitialization destroys only the requested live slots once`() {
++            let log = DestructionLog()
++            do {
++                var store = CheckedSlots<TrackedItem>([
++                    TrackedItem(0, log: log), TrackedItem(1, log: log),
++                    TrackedItem(2, log: log), TrackedItem(3, log: log), nil,
++                ])
++                store.deinitialize(range: 1..<3)
++                #expect(log.ids.sorted() == [1, 2])
++                store.deinitialize(at: 3)
++                store.deinitialize(range: 0..<0)
++                #expect(log.ids.sorted() == [1, 2, 3])
++
++                let liveIDs = store.slots.map { $0?.id }
++                #expect(liveIDs == [0, nil, nil, nil, nil])
++            }
++            #expect(log.ids.sorted() == [0, 1, 2, 3])
+         }
+-        #expect(log.ids.sorted() == [0, 1, 2, 3])
+-    }
+ 
+-    @Test(arguments: [false, true])
+-    func `Clearing a fully initialized store destroys every value exactly once`(
+-        throughRemoveAll: Bool
+-    ) {
+-        let log = DestructionLog()
+-        do {
+-            var store = CheckedSlots<TrackedItem>([
+-                TrackedItem(0, log: log), TrackedItem(1, log: log),
+-            ])
+-            if throughRemoveAll { store.removeAll() } else { store.clear() }
+-            let vacant = store.slots.allSatisfy { $0 == nil }
+-            #expect(vacant)
++        @Test(arguments: [false, true])
++        func `Clearing a fully initialized store destroys every value exactly once`(
++            throughRemoveAll: Bool
++        ) {
++            let log = DestructionLog()
++            do {
++                var store = CheckedSlots<TrackedItem>([
++                    TrackedItem(0, log: log), TrackedItem(1, log: log),
++                ])
++                if throughRemoveAll { store.removeAll() } else { store.clear() }
++                let vacant = store.slots.allSatisfy { $0 == nil }
++                #expect(vacant)
++                #expect(log.ids.sorted() == [0, 1])
++            }
+             #expect(log.ids.sorted() == [0, 1])
+         }
+-        #expect(log.ids.sorted() == [0, 1])
+-    }
+ 
+-    @Test
+-    func `Whole store defaults operate on fully initialized or fully vacant capacity`() {
+-        var source = CheckedSlots<Int>([nil, nil, nil])
+-        source.fill(with: 7)
+-        var destination = CheckedSlots<Int>([nil, nil, nil])
+-        source.copy(to: &destination)
+-        let copied = destination.slots
+-        #expect(copied == [7, 7, 7])
+-
+-        var visited: [Int] = []
+-        destination.forEach { visited.append($0) }
+-        let sum = destination.reduce(into: 0) { $0 += $1 }
+-        let found = destination.contains(7)
+-        let missing = destination.contains(8)
+-        #expect(visited == [7, 7, 7])
+-        #expect(sum == 21)
+-        #expect(found)
+-        #expect(!missing)
+-    }
++        @Test
++        func `Whole store defaults operate on fully initialized or fully vacant capacity`() {
++            var source = CheckedSlots<Int>([nil, nil, nil])
++            source.fill(with: 7)
++            var destination = CheckedSlots<Int>([nil, nil, nil])
++            source.copy(to: &destination)
++            let copied = destination.slots
++            #expect(copied == [7, 7, 7])
++
++            var visited: [Int] = []
++            destination.forEach { visited.append($0) }
++            let sum = destination.reduce(into: 0) { $0 += $1 }
++            let found = destination.contains(7)
++            let missing = destination.contains(8)
++            #expect(visited == [7, 7, 7])
++            #expect(sum == 21)
++            #expect(found)
++            #expect(!missing)
++        }
+ 
+-    @Test(arguments: ["forEach", "reduce", "contains"])
+-    func `Throwing callbacks stop before visiting later slots and preserve the source`(
+-        operation: String
+-    ) {
+-        let store = CheckedSlots<Int>([10, 20, 30])
+-        var visited: [Int] = []
+-        var partial = 0
+-        var failure: VisitFailure?
+-        do throws(VisitFailure) {
+-            switch operation {
+-            case "forEach":
+-                try store.forEach { (value: borrowing Int) throws(VisitFailure) in
+-                    visited.append(copy value)
+-                    if value == 20 { throw .stopped }
+-                }
+-            case "reduce":
+-                _ = try store.reduce(into: 0) {
+-                    (sum: inout Int, value: borrowing Int) throws(VisitFailure) in
+-                    visited.append(copy value)
+-                    if value == 20 { throw .stopped }
+-                    sum += value
+-                    partial = sum
+-                }
+-            default:
+-                _ = try store.contains { (value: borrowing Int) throws(VisitFailure) -> Bool in
+-                    visited.append(copy value)
+-                    if value == 20 { throw .stopped }
+-                    return false
++        @Test(arguments: ["forEach", "reduce", "contains"])
++        func `Throwing callbacks stop before visiting later slots and preserve the source`(
++            operation: String
++        ) {
++            let store = CheckedSlots<Int>([10, 20, 30])
++            var visited: [Int] = []
++            var partial = 0
++            var failure: VisitFailure?
++            do throws(VisitFailure) {
++                switch operation {
++                case "forEach":
++                    try store.forEach { (value: borrowing Int) throws(VisitFailure) in
++                        visited.append(copy value)
++                        if value == 20 { throw .stopped }
++                    }
++                case "reduce":
++                    _ = try store.reduce(into: 0) {
++                        (sum: inout Int, value: borrowing Int) throws(VisitFailure) in
++                        visited.append(copy value)
++                        if value == 20 { throw .stopped }
++                        sum += value
++                        partial = sum
++                    }
++                default:
++                    _ = try store.contains { (value: borrowing Int) throws(VisitFailure) -> Bool in
++                        visited.append(copy value)
++                        if value == 20 { throw .stopped }
++                        return false
++                    }
+                 }
++            } catch {
++                failure = error
+             }
+-        } catch {
+-            failure = error
+-        }
+ 
+-        let slots = store.slots
+-        #expect(failure == .stopped)
+-        #expect(visited == [10, 20])
+-        #expect(slots == [10, 20, 30])
+-        if operation == "reduce" { #expect(partial == 10) }
+-    }
++            let slots = store.slots
++            #expect(failure == .stopped)
++            #expect(visited == [10, 20])
++            #expect(slots == [10, 20, 30])
++            if operation == "reduce" { #expect(partial == 10) }
++        }
+ 
+-    @Test
+-    func `A matching predicate stops visiting the remaining initialized slots`() {
+-        let store = CheckedSlots<Int>([10, 20, 30])
+-        var visited: [Int] = []
+-        let found = store.contains {
+-            visited.append($0)
+-            return $0 == 20
++        @Test
++        func `A matching predicate stops visiting the remaining initialized slots`() {
++            let store = CheckedSlots<Int>([10, 20, 30])
++            var visited: [Int] = []
++            let found = store.contains {
++                visited.append($0)
++                return $0 == 20
++            }
++            #expect(found)
++            #expect(visited == [10, 20])
+         }
+-        #expect(found)
+-        #expect(visited == [10, 20])
+     }
+ }
+diff --git a/Tests/Store Tests/Store.Protocol Tests.swift b/Tests/Store Tests/Store.Protocol Tests.swift
+index f109697..b56744c 100644
+--- a/Tests/Store Tests/Store.Protocol Tests.swift	
++++ b/Tests/Store Tests/Store.Protocol Tests.swift	
+@@ -136,8 +136,14 @@ func driveTokenSeam<S: Store.`Protocol` & ~Copyable>(
+     return store.move(at: slot)
+ }
+ 
+-@Suite struct `Store capabilities preserve element access mutation and transfer` {
++enum `Store.Protocol Tests` {}
+ 
++extension `Store.Protocol Tests` {
++    @Suite struct `Store capabilities preserve element access mutation and transfer` {
++    }
++}
++
++extension `Store.Protocol Tests`.`Store capabilities preserve element access mutation and transfer` {
+     @Suite struct `Store construction and element operations preserve capacity and reusable slots` {
+ 
+         @Test
+diff --git a/Tests/Store Tests/Store.Split Tests.swift b/Tests/Store Tests/Store.Split Tests.swift
+index 520ec71..5836c3f 100644
+--- a/Tests/Store Tests/Store.Split Tests.swift	
++++ b/Tests/Store Tests/Store.Split Tests.swift	
+@@ -94,104 +94,108 @@ private struct CopyOnWriteStore: Store.`Protocol` {
+     }
+ }
+ 
+-@Suite
+-struct `Split preserves the operations of its owned planes` {
+-    @Test(arguments: [false, true])
+-    func `Swapping live elements preserves the specialized operation and lane values`(
+-        throughProtocol: Bool
+-    ) {
+-        var store = Store.Split(
+-            lanes: TailStore(values: [1, 2, 3]),
+-            elements: TailStore(values: [10, 20, 30])
+-        )
+-
+-        if throughProtocol {
+-            swap(&store, 0, 2)
+-        } else {
+-            store.swapAt(0, 2)
++enum `Store.Split Tests` {}
++
++extension `Store.Split Tests` {
++    @Suite
++    struct `Split preserves the operations of its owned planes` {
++        @Test(arguments: [false, true])
++        func `Swapping live elements preserves the specialized operation and lane values`(
++            throughProtocol: Bool
++        ) {
++            var store = Store.Split(
++                lanes: TailStore(values: [1, 2, 3]),
++                elements: TailStore(values: [10, 20, 30])
++            )
++
++            if throughProtocol {
++                swap(&store, 0, 2)
++            } else {
++                store.swapAt(0, 2)
++            }
++
++            let elements = store.elements.values
++            let lanes = store.lanes.values
++            let capacity = store.capacity
++            let elementSwaps = store.elements.swapCalls
++            let laneSwaps = store.lanes.swapCalls
++            let moves = store.elements.moveCalls
++            let initializations = store.elements.initializeCalls
++            #expect(elements == [30, 20, 10])
++            #expect(lanes == [1, 2, 3])
++            #expect(capacity == 4)
++            #expect(elementSwaps == 1)
++            #expect(laneSwaps == 0)
++            #expect(moves == 0)
++            #expect(initializations == 0)
+         }
+ 
+-        let elements = store.elements.values
+-        let lanes = store.lanes.values
+-        let capacity = store.capacity
+-        let elementSwaps = store.elements.swapCalls
+-        let laneSwaps = store.lanes.swapCalls
+-        let moves = store.elements.moveCalls
+-        let initializations = store.elements.initializeCalls
+-        #expect(elements == [30, 20, 10])
+-        #expect(lanes == [1, 2, 3])
+-        #expect(capacity == 4)
+-        #expect(elementSwaps == 1)
+-        #expect(laneSwaps == 0)
+-        #expect(moves == 0)
+-        #expect(initializations == 0)
+-    }
+-
+-    @Test
+-    func `Equal indices reach the element plane without changing either plane`() {
+-        var store = Store.Split(
+-            lanes: TailStore(values: [1, 2, 3]),
+-            elements: TailStore(values: [10, 20, 30])
+-        )
+-        swap(&store, 1, 1)
+-
+-        let elements = store.elements.values
+-        let lanes = store.lanes.values
+-        let elementSwaps = store.elements.swapCalls
+-        let laneSwaps = store.lanes.swapCalls
+-        #expect(elements == [10, 20, 30])
+-        #expect(lanes == [1, 2, 3])
+-        #expect(elementSwaps == 1)
+-        #expect(laneSwaps == 0)
+-    }
+-
+-    @Test(arguments: [false, true])
+-    func `Unsharing invokes both owned planes without changing their values`(
+-        throughProtocol: Bool
+-    ) {
+-        var store = Store.Split(
+-            lanes: TailStore(values: [1, 2]),
+-            elements: TailStore(values: [10, 20, 30])
+-        )
+-        if throughProtocol {
+-            unshare(&store)
+-        } else {
+-            store.unshare()
++        @Test
++        func `Equal indices reach the element plane without changing either plane`() {
++            var store = Store.Split(
++                lanes: TailStore(values: [1, 2, 3]),
++                elements: TailStore(values: [10, 20, 30])
++            )
++            swap(&store, 1, 1)
++
++            let elements = store.elements.values
++            let lanes = store.lanes.values
++            let elementSwaps = store.elements.swapCalls
++            let laneSwaps = store.lanes.swapCalls
++            #expect(elements == [10, 20, 30])
++            #expect(lanes == [1, 2, 3])
++            #expect(elementSwaps == 1)
++            #expect(laneSwaps == 0)
+         }
+ 
+-        let elementCalls = store.elements.unshareCalls
+-        let laneCalls = store.lanes.unshareCalls
+-        let elements = store.elements.values
+-        let lanes = store.lanes.values
+-        let capacity = store.capacity
+-        #expect(elementCalls == 1)
+-        #expect(laneCalls == 1)
+-        #expect(elements == [10, 20, 30])
+-        #expect(lanes == [1, 2])
+-        #expect(capacity == 4)
+-    }
++        @Test(arguments: [false, true])
++        func `Unsharing invokes both owned planes without changing their values`(
++            throughProtocol: Bool
++        ) {
++            var store = Store.Split(
++                lanes: TailStore(values: [1, 2]),
++                elements: TailStore(values: [10, 20, 30])
++            )
++            if throughProtocol {
++                unshare(&store)
++            } else {
++                store.unshare()
++            }
++
++            let elementCalls = store.elements.unshareCalls
++            let laneCalls = store.lanes.unshareCalls
++            let elements = store.elements.values
++            let lanes = store.lanes.values
++            let capacity = store.capacity
++            #expect(elementCalls == 1)
++            #expect(laneCalls == 1)
++            #expect(elements == [10, 20, 30])
++            #expect(lanes == [1, 2])
++            #expect(capacity == 4)
++        }
+ 
+-    @Test
+-    func `Unsharing a copied split detaches both backing stores and preserves its sibling`() {
+-        let original = Store.Split(
+-            lanes: CopyOnWriteStore([1, 2]),
+-            elements: CopyOnWriteStore([10, 20, 30])
+-        )
+-        var detached = original
+-        #expect(detached.lanes.storage === original.lanes.storage)
+-        #expect(detached.elements.storage === original.elements.storage)
+-
+-        unshare(&detached)
+-
+-        #expect(detached.lanes.storage !== original.lanes.storage)
+-        #expect(detached.elements.storage !== original.elements.storage)
+-        #expect(detached.lanes.storage.values == [1, 2])
+-        #expect(detached.elements.storage.values == [10, 20, 30])
+-        detached.lanes[0] = 9
+-        detached[0] = 90
+-        #expect(detached.lanes.storage.values == [9, 2])
+-        #expect(detached.elements.storage.values == [90, 20, 30])
+-        #expect(original.lanes.storage.values == [1, 2])
+-        #expect(original.elements.storage.values == [10, 20, 30])
++        @Test
++        func `Unsharing a copied split detaches both backing stores and preserves its sibling`() {
++            let original = Store.Split(
++                lanes: CopyOnWriteStore([1, 2]),
++                elements: CopyOnWriteStore([10, 20, 30])
++            )
++            var detached = original
++            #expect(detached.lanes.storage === original.lanes.storage)
++            #expect(detached.elements.storage === original.elements.storage)
++
++            unshare(&detached)
++
++            #expect(detached.lanes.storage !== original.lanes.storage)
++            #expect(detached.elements.storage !== original.elements.storage)
++            #expect(detached.lanes.storage.values == [1, 2])
++            #expect(detached.elements.storage.values == [10, 20, 30])
++            detached.lanes[0] = 9
++            detached[0] = 90
++            #expect(detached.lanes.storage.values == [9, 2])
++            #expect(detached.elements.storage.values == [90, 20, 30])
++            #expect(original.lanes.storage.values == [1, 2])
++            #expect(original.elements.storage.values == [10, 20, 30])
++        }
+     }
+ }
+diff --git a/Tests/Store Tests/Store.Update Tests.swift b/Tests/Store Tests/Store.Update Tests.swift
+index 9a0f128..1677fd9 100644
+--- a/Tests/Store Tests/Store.Update Tests.swift	
++++ b/Tests/Store Tests/Store.Update Tests.swift	
+@@ -1,30 +1,36 @@
+ import Store
+ import Testing
+ 
+-@Suite
+-struct `Store updates compose state changes and merge their effects` {
+-    enum Counter: Equatable, Sendable {
+-        case increment
+-        case decrement
+-    }
++enum `Store.Update Tests` {}
+ 
+-    enum Job: Equatable, Sendable {
+-        case beacon
+-        case audit
+-    }
++extension `Store.Update Tests` {
++    @Suite
++    struct `Store updates compose state changes and merge their effects` {
++        enum Counter: Equatable, Sendable {
++            case increment
++            case decrement
++        }
+ 
+-    static let counter = Store::Store.Update<Int, Counter, Job> { count, action in
+-        switch action {
+-        case .increment:
+-            count += 1
+-            return .run(.beacon)
++        enum Job: Equatable, Sendable {
++            case beacon
++            case audit
++        }
+ 
+-        case .decrement:
+-            count -= 1
+-            return .none
++        static let counter = Store::Store.Update<Int, Counter, Job> { count, action in
++            switch action {
++            case .increment:
++                count += 1
++                return .run(.beacon)
++
++            case .decrement:
++                count -= 1
++                return .none
++            }
+         }
+     }
++}
+ 
++extension `Store.Update Tests`.`Store updates compose state changes and merge their effects` {
+     @Suite
+     struct `Store update composition preserves identity associativity and ordered state changes` {
+ 
+diff --git a/Tests/Store Tests/swift-storage-split/swift-storage-split.Store.Split Tests.swift b/Tests/Store Tests/swift-storage-split/swift-storage-split.Store.Split Tests.swift
+index 4fbc08c..0a3052a 100644
+--- a/Tests/Store Tests/swift-storage-split/swift-storage-split.Store.Split Tests.swift	
++++ b/Tests/Store Tests/swift-storage-split/swift-storage-split.Store.Split Tests.swift	
+@@ -4,56 +4,60 @@ import Testing
+ 
+ private typealias Plane<Element: ~Copyable> = Store.Inline<Element, 4>
+ 
+-@Suite
+-struct `Store Split Tests` {
+-
+-    @Test
+-    func `payload seam forwards to element plane`() {
+-        var split = Store.Split(
+-            lanes: Plane<UInt8>(),
+-            elements: Plane<Int>()
+-        )
+-        let cap = split.capacity
+-        #expect(cap == Index<Int>.Count(4))
+-
+-        let first = Index<Int>(0)
+-        let second = Index<Int>(1)
+-        split.initialize(at: first, to: 42)
+-        split.initialize(at: second, to: 43)
+-        let v0 = split[first]
+-        let v1 = split[second]
+-        #expect(v0 == 42)
+-        #expect(v1 == 43)
+-
+-        split[first] = 99
+-        let v0b = split[first]
+-        #expect(v0b == 99)
+-
+-        let moved = split.move(at: second)
+-        #expect(moved == 43)
+-    }
+-
+-    @Test
+-    func `lane plane is independently accessible`() {
+-        var split = Store.Split(
+-            lanes: Plane<UInt8>(),
+-            elements: Plane<Int>()
+-        )
+-
+-        let firstLane = Index<UInt8>(0)
+-        let secondLane = Index<UInt8>(1)
+-        let firstElement = Index<Int>(0)
+-        split.lanes.initialize(at: firstLane, to: 0x80)
+-        split.lanes.initialize(at: secondLane, to: 0x01)
+-        split.initialize(at: firstElement, to: 1000)
+-
+-        let lane0 = split.lanes[firstLane]
+-        let lane1 = split.lanes[secondLane]
+-        let laneCap = split.lanes.capacity
+-        let payload0 = split[firstElement]
+-        #expect(lane0 == 0x80)
+-        #expect(lane1 == 0x01)
+-        #expect(laneCap == Index<UInt8>.Count(4))
+-        #expect(payload0 == 1000)
++enum `swift-storage-split.Store.Split Tests` {}
++
++extension `swift-storage-split.Store.Split Tests` {
++    @Suite
++    struct `Store Split Tests` {
++
++        @Test
++        func `payload seam forwards to element plane`() {
++            var split = Store.Split(
++                lanes: Plane<UInt8>(),
++                elements: Plane<Int>()
++            )
++            let cap = split.capacity
++            #expect(cap == Index<Int>.Count(4))
++
++            let first = Index<Int>(0)
++            let second = Index<Int>(1)
++            split.initialize(at: first, to: 42)
++            split.initialize(at: second, to: 43)
++            let v0 = split[first]
++            let v1 = split[second]
++            #expect(v0 == 42)
++            #expect(v1 == 43)
++
++            split[first] = 99
++            let v0b = split[first]
++            #expect(v0b == 99)
++
++            let moved = split.move(at: second)
++            #expect(moved == 43)
++        }
++
++        @Test
++        func `lane plane is independently accessible`() {
++            var split = Store.Split(
++                lanes: Plane<UInt8>(),
++                elements: Plane<Int>()
++            )
++
++            let firstLane = Index<UInt8>(0)
++            let secondLane = Index<UInt8>(1)
++            let firstElement = Index<Int>(0)
++            split.lanes.initialize(at: firstLane, to: 0x80)
++            split.lanes.initialize(at: secondLane, to: 0x01)
++            split.initialize(at: firstElement, to: 1000)
++
++            let lane0 = split.lanes[firstLane]
++            let lane1 = split.lanes[secondLane]
++            let laneCap = split.lanes.capacity
++            let payload0 = split[firstElement]
++            #expect(lane0 == 0x80)
++            #expect(lane1 == 0x01)
++            #expect(laneCap == Index<UInt8>.Count(4))
++            #expect(payload0 == 1000)
++        }
+     }
+ }
+-- 
+2.43.0
+

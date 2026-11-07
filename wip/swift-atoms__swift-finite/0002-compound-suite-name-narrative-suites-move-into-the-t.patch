@@ -1,0 +1,2443 @@
+From e3178df86dee29e5e2bba81682faf327272ad735 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 19:34:00 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into the test
+ module's namespace `<File> Tests` (#239's layout), nested suites into
+ extension <Path>.<Parent> (overnight/compound-suites.py); parse-checked;
+ builds pending (coenttb/work#242)
+
+---
+ .../Bounded arithmetic Tests.swift            | 248 +++++----
+ .../Bounded conversion Tests.swift            |  86 +--
+ .../Finite Tests/Collection laws Tests.swift  | 218 ++++----
+ Tests/Finite Tests/Core Tests.swift           |  68 +--
+ Tests/Finite Tests/Enumerable Tests.swift     | 128 +++--
+ Tests/Finite Tests/Enumeration Tests.swift    | 376 +++++++------
+ Tests/Finite Tests/Index.Bounded Tests.swift  | 218 ++++----
+ .../Nominal construction Tests.swift          | 312 ++++++-----
+ Tests/Finite Tests/Ordinal Tests.swift        | 524 +++++++++---------
+ 9 files changed, 1124 insertions(+), 1054 deletions(-)
+
+diff --git a/Tests/Finite Tests/Bounded arithmetic Tests.swift b/Tests/Finite Tests/Bounded arithmetic Tests.swift
+index 3770784..42595ab 100644
+--- a/Tests/Finite Tests/Bounded arithmetic Tests.swift	
++++ b/Tests/Finite Tests/Bounded arithmetic Tests.swift	
+@@ -1,147 +1,151 @@
+ import Finite
+ import Testing
+ 
+-@Suite
+-struct `Bounded ordinals preserve their domains through arithmetic` {
+-    @Test(arguments: ["offset", "clamp", "decompose", "compose"])
+-    func `Unrepresentable intermediate arithmetic returns the declared result`(operation: String) async {
+-        await #expect(processExitsWith: .success) { [operation = operation as String] in
+-            let value = Ordinal.Finite<2>(Int(1))!
+-            typealias Wide = Ordinal.Finite<4_294_967_296>
+-            switch operation {
+-            case "offset":
+-                precondition(value.offset(by: Int.max) == nil)
+-            case "clamp":
+-                precondition(value.clamped(offsetBy: Int.max) == value)
+-            case "decompose":
+-                precondition((value.decomposed() as (Wide, Wide)?) == nil)
+-            case "compose":
+-                let result: Ordinal.Finite<2>? = .composed(
+-                    row: Wide(Int(1))!,
+-                    column: Wide(Int(1))!
+-                )
+-                precondition(result == nil)
+-            default:
+-                preconditionFailure("Unknown operation")
++enum `Bounded arithmetic Tests` {}
++
++extension `Bounded arithmetic Tests` {
++    @Suite
++    struct `Bounded ordinals preserve their domains through arithmetic` {
++        @Test(arguments: ["offset", "clamp", "decompose", "compose"])
++        func `Unrepresentable intermediate arithmetic returns the declared result`(operation: String) async {
++            await #expect(processExitsWith: .success) { [operation = operation as String] in
++                let value = Ordinal.Finite<2>(Int(1))!
++                typealias Wide = Ordinal.Finite<4_294_967_296>
++                switch operation {
++                case "offset":
++                    precondition(value.offset(by: Int.max) == nil)
++                case "clamp":
++                    precondition(value.clamped(offsetBy: Int.max) == value)
++                case "decompose":
++                    precondition((value.decomposed() as (Wide, Wide)?) == nil)
++                case "compose":
++                    let result: Ordinal.Finite<2>? = .composed(
++                        row: Wide(Int(1))!,
++                        column: Wide(Int(1))!
++                    )
++                    precondition(result == nil)
++                default:
++                    preconditionFailure("Unknown operation")
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `Offsets and clamps agree with wider arithmetic at both integer extremes`() {
+-        let offsets = [Int.min, Int.min + 1, -100, -17, -1, 0, 1, 17, 100, Int.max - 1, Int.max]
+-        (0..<17).forEach { position in
+-            let value = Ordinal.Finite<17>(position)!
+-            for offset in offsets {
+-                let mathematical = Int128(position) + Int128(offset)
+-                let expected = (0..<17).contains(mathematical) ? UInt(mathematical) : nil
+-                #expect(value.offset(by: offset)?.underlying.rawValue == expected)
+-                let clamped = max(0, min(mathematical, 16))
+-                #expect(value.clamped(offsetBy: offset).underlying.rawValue == UInt(clamped))
++        @Test
++        func `Offsets and clamps agree with wider arithmetic at both integer extremes`() {
++            let offsets = [Int.min, Int.min + 1, -100, -17, -1, 0, 1, 17, 100, Int.max - 1, Int.max]
++            (0..<17).forEach { position in
++                let value = Ordinal.Finite<17>(position)!
++                for offset in offsets {
++                    let mathematical = Int128(position) + Int128(offset)
++                    let expected = (0..<17).contains(mathematical) ? UInt(mathematical) : nil
++                    #expect(value.offset(by: offset)?.underlying.rawValue == expected)
++                    let clamped = max(0, min(mathematical, 16))
++                    #expect(value.clamped(offsetBy: offset).underlying.rawValue == UInt(clamped))
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `A singleton retains its sole ordinal under every clamped offset`() {
+-        let value = Ordinal.Finite<1>(Int(0))!
+-        for offset in [Int.min, -1, 0, 1, Int.max] {
+-            #expect(value.clamped(offsetBy: offset) == value)
+-            #expect((value.offset(by: offset) != nil) == (offset == 0))
++        @Test
++        func `A singleton retains its sole ordinal under every clamped offset`() {
++            let value = Ordinal.Finite<1>(Int(0))!
++            for offset in [Int.min, -1, 0, 1, Int.max] {
++                #expect(value.clamped(offsetBy: offset) == value)
++                #expect((value.offset(by: offset) != nil) == (offset == 0))
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Wide bounded positions retain exact offsets and endpoint clamps`() {
+-        let position = 4_294_967_295
+-        #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: -position)?.underlying.rawValue == 0)
+-        #expect(
+-            Ordinal.Finite<4_294_967_296>(position)!.offset(by: 0)?.underlying.rawValue == UInt(position)
+-        )
+-        #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: 1)?.underlying.rawValue == nil)
+-        #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: Int.max)?.underlying.rawValue == nil)
+-        #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: Int.min)?.underlying.rawValue == nil)
+-        #expect(
+-            Ordinal.Finite<4_294_967_296>(position)!.clamped(offsetBy: Int.max).underlying.rawValue
+-                == UInt(position)
+-        )
+-        #expect(
+-            Ordinal.Finite<4_294_967_296>(position)!.clamped(offsetBy: Int.min).underlying.rawValue == 0
+-        )
+-    }
++        @Test
++        func `Wide bounded positions retain exact offsets and endpoint clamps`() {
++            let position = 4_294_967_295
++            #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: -position)?.underlying.rawValue == 0)
++            #expect(
++                Ordinal.Finite<4_294_967_296>(position)!.offset(by: 0)?.underlying.rawValue == UInt(position)
++            )
++            #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: 1)?.underlying.rawValue == nil)
++            #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: Int.max)?.underlying.rawValue == nil)
++            #expect(Ordinal.Finite<4_294_967_296>(position)!.offset(by: Int.min)?.underlying.rawValue == nil)
++            #expect(
++                Ordinal.Finite<4_294_967_296>(position)!.clamped(offsetBy: Int.max).underlying.rawValue
++                    == UInt(position)
++            )
++            #expect(
++                Ordinal.Finite<4_294_967_296>(position)!.clamped(offsetBy: Int.min).underlying.rawValue == 0
++            )
++        }
+ 
+-    @Test
+-    func `Row major products agree with independent coordinate arithmetic`() {
+-        (0..<3).forEach { row in
+-            for column in 0..<7 {
+-                let expected = row * 7 + column
+-                let value: Ordinal.Finite<21>? = .composed(
+-                    row: Ordinal.Finite<3>(row)!,
+-                    column: Ordinal.Finite<7>(column)!
+-                )
+-                #expect(value?.underlying.rawValue == UInt(expected))
+-                let coordinates: (Ordinal.Finite<3>, Ordinal.Finite<7>)? =
+-                    Ordinal.Finite<21>(expected)!.decomposed()
+-                #expect(coordinates?.0.underlying.rawValue == UInt(row))
+-                #expect(coordinates?.1.underlying.rawValue == UInt(column))
++        @Test
++        func `Row major products agree with independent coordinate arithmetic`() {
++            (0..<3).forEach { row in
++                for column in 0..<7 {
++                    let expected = row * 7 + column
++                    let value: Ordinal.Finite<21>? = .composed(
++                        row: Ordinal.Finite<3>(row)!,
++                        column: Ordinal.Finite<7>(column)!
++                    )
++                    #expect(value?.underlying.rawValue == UInt(expected))
++                    let coordinates: (Ordinal.Finite<3>, Ordinal.Finite<7>)? =
++                        Ordinal.Finite<21>(expected)!.decomposed()
++                    #expect(coordinates?.0.underlying.rawValue == UInt(row))
++                    #expect(coordinates?.1.underlying.rawValue == UInt(column))
++                }
+             }
+         }
+-    }
+ 
+-    @Test
+-    func `Wide representable products preserve the final row and column`() {
+-        let row = Ordinal.Finite<65536>(Int(65_535))!
+-        let column = Ordinal.Finite<65536>(Int(65_535))!
+-        #expect(
+-            Ordinal.Finite<4_294_967_296>.composed(row: row, column: column)?.underlying.rawValue
+-                == 4_294_967_295
+-        )
+-        let coordinates: (Ordinal.Finite<65536>, Ordinal.Finite<65536>)? =
+-            Ordinal.Finite<4_294_967_296>.composed(row: row, column: column)?.decomposed()
+-        #expect(coordinates?.0 == row)
+-        #expect(coordinates?.1 == column)
+-    }
++        @Test
++        func `Wide representable products preserve the final row and column`() {
++            let row = Ordinal.Finite<65536>(Int(65_535))!
++            let column = Ordinal.Finite<65536>(Int(65_535))!
++            #expect(
++                Ordinal.Finite<4_294_967_296>.composed(row: row, column: column)?.underlying.rawValue
++                    == 4_294_967_295
++            )
++            let coordinates: (Ordinal.Finite<65536>, Ordinal.Finite<65536>)? =
++                Ordinal.Finite<4_294_967_296>.composed(row: row, column: column)?.decomposed()
++            #expect(coordinates?.0 == row)
++            #expect(coordinates?.1 == column)
++        }
+ 
+-    @Test
+-    func `Empty and negative dimensions cannot decompose a nonempty domain`() {
+-        let value = Ordinal.Finite<4>(Int(1))!
+-        let emptyRows: (Ordinal.Finite<0>, Ordinal.Finite<4>)? = value.decomposed()
+-        let emptyColumns: (Ordinal.Finite<4>, Ordinal.Finite<0>)? = value.decomposed()
+-        let negativeIsNil =
+-            (value.decomposed() as (Ordinal.Finite<-2>, Ordinal.Finite<-2>)?) == nil
+-        #expect(emptyRows == nil)
+-        #expect(emptyColumns == nil)
+-        #expect(negativeIsNil)
+-    }
++        @Test
++        func `Empty and negative dimensions cannot decompose a nonempty domain`() {
++            let value = Ordinal.Finite<4>(Int(1))!
++            let emptyRows: (Ordinal.Finite<0>, Ordinal.Finite<4>)? = value.decomposed()
++            let emptyColumns: (Ordinal.Finite<4>, Ordinal.Finite<0>)? = value.decomposed()
++            let negativeIsNil =
++                (value.decomposed() as (Ordinal.Finite<-2>, Ordinal.Finite<-2>)?) == nil
++            #expect(emptyRows == nil)
++            #expect(emptyColumns == nil)
++            #expect(negativeIsNil)
++        }
+ 
+-    @Test
+-    func `Constructing an ordinal for an empty domain is rejected`() async {
+-        await withKnownIssue("Swift integer generic specialization collision: https://github.com/swiftlang/swift/issues/90739") {
+-            await #expect(processExitsWith: .failure) {
+-                print(Ordinal.Finite<0>(_unchecked: Int(0)).underlying.rawValue)
++        @Test
++        func `Constructing an ordinal for an empty domain is rejected`() async {
++            await withKnownIssue("Swift integer generic specialization collision: https://github.com/swiftlang/swift/issues/90739") {
++                await #expect(processExitsWith: .failure) {
++                    print(Ordinal.Finite<0>(_unchecked: Int(0)).underlying.rawValue)
++                }
++            } when: {
++                !_isDebugAssertConfiguration()
++            } matching: { issue in
++                guard case .expectationFailed = issue.kind else { return false }
++                return issue.description.contains("EXIT_SUCCESS")
+             }
+-        } when: {
+-            !_isDebugAssertConfiguration()
+-        } matching: { issue in
+-            guard case .expectationFailed = issue.kind else { return false }
+-            return issue.description.contains("EXIT_SUCCESS")
+         }
+-    }
+ 
+-    @Test
+-    func `Distinct finite bounds retain distinct runtime type identities`() {
+-        withKnownIssue("Swift integer generic metadata collision: https://github.com/swiftlang/swift/issues/90739") {
+-            #expect(ObjectIdentifier(Finite.Bound<0>.self) != ObjectIdentifier(Finite.Bound<4_294_967_296>.self))
+-        } matching: { issue in
+-            if case .expectationFailed = issue.kind { return true }
+-            return false
++        @Test
++        func `Distinct finite bounds retain distinct runtime type identities`() {
++            withKnownIssue("Swift integer generic metadata collision: https://github.com/swiftlang/swift/issues/90739") {
++                #expect(ObjectIdentifier(Finite.Bound<0>.self) != ObjectIdentifier(Finite.Bound<4_294_967_296>.self))
++            } matching: { issue in
++                if case .expectationFailed = issue.kind { return true }
++                return false
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `The compatibility initializer rejects the upper bound of its domain`() async {
+-        await #expect(processExitsWith: .failure) {
+-            print(Ordinal.Finite<2>(_unchecked: Int(2)).underlying.rawValue)
++        @Test
++        func `The compatibility initializer rejects the upper bound of its domain`() async {
++            await #expect(processExitsWith: .failure) {
++                print(Ordinal.Finite<2>(_unchecked: Int(2)).underlying.rawValue)
++            }
+         }
+     }
+ }
+diff --git a/Tests/Finite Tests/Bounded conversion Tests.swift b/Tests/Finite Tests/Bounded conversion Tests.swift
+index 809d4f6..c878db4 100644
+--- a/Tests/Finite Tests/Bounded conversion Tests.swift	
++++ b/Tests/Finite Tests/Bounded conversion Tests.swift	
+@@ -1,54 +1,58 @@
+ import Finite
+ import Testing
+ 
+-@Suite
+-struct `Bounded ordinal conversions preserve the destination domain` {
+-    @Test(arguments: [0, 1, 2])
+-    func `Injection preserves every source value in equal and larger domains`(position: Int) {
+-        let source = Ordinal.Finite<3>(position)!
+-        let same: Ordinal.Finite<3> = source.injected()
+-        let larger: Ordinal.Finite<8> = source.injected()
+-        #expect(same.underlying.rawValue == UInt(position))
+-        #expect(larger.underlying.rawValue == UInt(position))
+-        let restored: Ordinal.Finite<3>? = larger.projected()
+-        #expect(restored == source)
+-    }
++enum `Bounded conversion Tests` {}
+ 
+-    @Test(arguments: [0, 4])
+-    func `Injection rejects a smaller destination even when one value would fit`(position: Int) async {
+-        await #expect(processExitsWith: .failure) { [position = position as Int] in
+-            let source = Ordinal.Finite<5>(position)!
+-            let result: Ordinal.Finite<3> = source.injected()
+-            print(result.underlying.rawValue)
++extension `Bounded conversion Tests` {
++    @Suite
++    struct `Bounded ordinal conversions preserve the destination domain` {
++        @Test(arguments: [0, 1, 2])
++        func `Injection preserves every source value in equal and larger domains`(position: Int) {
++            let source = Ordinal.Finite<3>(position)!
++            let same: Ordinal.Finite<3> = source.injected()
++            let larger: Ordinal.Finite<8> = source.injected()
++            #expect(same.underlying.rawValue == UInt(position))
++            #expect(larger.underlying.rawValue == UInt(position))
++            let restored: Ordinal.Finite<3>? = larger.projected()
++            #expect(restored == source)
+         }
+-    }
+ 
+-    @Test
+-    func `The compatibility initializer rejects an invalid conversion source`() async {
+-        await #expect(processExitsWith: .failure) {
+-            let source = Ordinal.Finite<3>(_unchecked: Int(3))
+-            print(source.underlying.rawValue)
++        @Test(arguments: [0, 4])
++        func `Injection rejects a smaller destination even when one value would fit`(position: Int) async {
++            await #expect(processExitsWith: .failure) { [position = position as Int] in
++                let source = Ordinal.Finite<5>(position)!
++                let result: Ordinal.Finite<3> = source.injected()
++                print(result.underlying.rawValue)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Projection selects exactly the destination prefix of the source domain`() {
+-        (0..<8).forEach { position in
+-            let source = Ordinal.Finite<8>(position)!
+-            let result: Ordinal.Finite<3>? = source.projected()
+-            #expect(result?.underlying.rawValue == (position < 3 ? UInt(position) : nil))
+-            let empty: Ordinal.Finite<0>? = source.projected()
+-            #expect(empty == nil)
++        @Test
++        func `The compatibility initializer rejects an invalid conversion source`() async {
++            await #expect(processExitsWith: .failure) {
++                let source = Ordinal.Finite<3>(_unchecked: Int(3))
++                print(source.underlying.rawValue)
++            }
++        }
++
++        @Test
++        func `Projection selects exactly the destination prefix of the source domain`() {
++            (0..<8).forEach { position in
++                let source = Ordinal.Finite<8>(position)!
++                let result: Ordinal.Finite<3>? = source.projected()
++                #expect(result?.underlying.rawValue == (position < 3 ? UInt(position) : nil))
++                let empty: Ordinal.Finite<0>? = source.projected()
++                #expect(empty == nil)
++            }
+         }
+-    }
+ 
+-    @Test
+-    func `Projection into a negative bound returns no ordinal`() async {
+-        await #expect(processExitsWith: .success) {
+-            let source = Ordinal.Finite<3>(Int(1))!
+-            typealias Negative = Ordinal.Finite<-3>
+-            let resultIsNil = (source.projected() as Negative?) == nil
+-            precondition(resultIsNil)
++        @Test
++        func `Projection into a negative bound returns no ordinal`() async {
++            await #expect(processExitsWith: .success) {
++                let source = Ordinal.Finite<3>(Int(1))!
++                typealias Negative = Ordinal.Finite<-3>
++                let resultIsNil = (source.projected() as Negative?) == nil
++                precondition(resultIsNil)
++            }
+         }
+     }
+ }
+diff --git a/Tests/Finite Tests/Collection laws Tests.swift b/Tests/Finite Tests/Collection laws Tests.swift
+index 58d4400..a9a56a9 100644
+--- a/Tests/Finite Tests/Collection laws Tests.swift	
++++ b/Tests/Finite Tests/Collection laws Tests.swift	
+@@ -14,127 +14,131 @@
+         static var count: Cardinal { Cardinal(UInt.max) }
+     }
+ 
+-    @Suite
+-    struct `Finite enumeration obeys collection index laws` {
+-        @Test
+-        func `An empty enumeration contains no values and retains its end index`() {
+-            let enumeration = Ordinal.Finite<0>.allCases
+-            #expect(enumeration.count == 0)
+-            #expect(enumeration.isEmpty)
+-            #expect(enumeration.startIndex == enumeration.endIndex)
+-            #expect(enumeration.element(at: 0) == nil)
+-            #expect(enumeration.index(enumeration.endIndex, offsetBy: 0) == enumeration.endIndex)
+-            #expect(enumeration.index(enumeration.endIndex, offsetBy: 1, limitedBy: enumeration.endIndex) == nil)
+-            #expect(enumeration.index(enumeration.endIndex, offsetBy: -1, limitedBy: enumeration.endIndex) == nil)
+-            var iterator = enumeration.makeIterator()
+-            #expect(iterator.next() == nil)
+-            #expect(iterator.next() == nil)
+-        }
++enum `Collection laws Tests` {}
+ 
+-        @Test
+-        func `Limited offsets agree with Swift when the limit lies in either direction`() {
+-            let reference = Array(0..<10)
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias Position = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            var mismatches: [String] = []
+-            for start in 0...10 {
+-                for limit in 0...10 {
+-                    for distance in -12...12 {
+-                        let result = start + distance
+-                        let crossesLimit =
+-                            distance > 0 && limit >= start && result > limit
+-                            || distance < 0 && limit <= start && result < limit
+-                        guard (0...10).contains(result) || crossesLimit else { continue }
+-                        let expected = reference.index(start, offsetBy: distance, limitedBy: limit)
+-                        let actual = enumeration.index(
+-                            Position(_unchecked: Ordinal(UInt(start))),
+-                            offsetBy: distance,
+-                            limitedBy: Position(_unchecked: Ordinal(UInt(limit)))
+-                        )
+-                        if actual.map({ Int($0.underlying.rawValue) }) != expected {
+-                            mismatches.append("\(start), \(distance), \(limit)")
++extension `Collection laws Tests` {
++        @Suite
++        struct `Finite enumeration obeys collection index laws` {
++            @Test
++            func `An empty enumeration contains no values and retains its end index`() {
++                let enumeration = Ordinal.Finite<0>.allCases
++                #expect(enumeration.count == 0)
++                #expect(enumeration.isEmpty)
++                #expect(enumeration.startIndex == enumeration.endIndex)
++                #expect(enumeration.element(at: 0) == nil)
++                #expect(enumeration.index(enumeration.endIndex, offsetBy: 0) == enumeration.endIndex)
++                #expect(enumeration.index(enumeration.endIndex, offsetBy: 1, limitedBy: enumeration.endIndex) == nil)
++                #expect(enumeration.index(enumeration.endIndex, offsetBy: -1, limitedBy: enumeration.endIndex) == nil)
++                var iterator = enumeration.makeIterator()
++                #expect(iterator.next() == nil)
++                #expect(iterator.next() == nil)
++            }
++
++            @Test
++            func `Limited offsets agree with Swift when the limit lies in either direction`() {
++                let reference = Array(0..<10)
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias Position = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                var mismatches: [String] = []
++                for start in 0...10 {
++                    for limit in 0...10 {
++                        for distance in -12...12 {
++                            let result = start + distance
++                            let crossesLimit =
++                                distance > 0 && limit >= start && result > limit
++                                || distance < 0 && limit <= start && result < limit
++                            guard (0...10).contains(result) || crossesLimit else { continue }
++                            let expected = reference.index(start, offsetBy: distance, limitedBy: limit)
++                            let actual = enumeration.index(
++                                Position(_unchecked: Ordinal(UInt(start))),
++                                offsetBy: distance,
++                                limitedBy: Position(_unchecked: Ordinal(UInt(limit)))
++                            )
++                            if actual.map({ Int($0.underlying.rawValue) }) != expected {
++                                mismatches.append("\(start), \(distance), \(limit)")
++                            }
+                         }
+                     }
+                 }
++                #expect(mismatches.isEmpty)
+             }
+-            #expect(mismatches.isEmpty)
+-        }
+ 
+-        @Test
+-        func `Distances and offsets are inverses for all small collection indices`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias Position = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            (0...10).forEach { start in
+-                for end in 0...10 {
+-                    let first = Position(_unchecked: Ordinal(UInt(start)))
+-                    let last = Position(_unchecked: Ordinal(UInt(end)))
+-                    let distance = enumeration.distance(from: first, to: last)
+-                    #expect(distance == end - start)
+-                    #expect(enumeration.index(first, offsetBy: distance) == last)
++            @Test
++            func `Distances and offsets are inverses for all small collection indices`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias Position = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                (0...10).forEach { start in
++                    for end in 0...10 {
++                        let first = Position(_unchecked: Ordinal(UInt(start)))
++                        let last = Position(_unchecked: Ordinal(UInt(end)))
++                        let distance = enumeration.distance(from: first, to: last)
++                        #expect(distance == end - start)
++                        #expect(enumeration.index(first, offsetBy: distance) == last)
++                    }
++                }
++                let middle = enumeration[
++                    Position(_unchecked: Ordinal(2))..<Position(_unchecked: Ordinal(6))
++                ]
++                #expect(middle.map(\.underlying.rawValue) == [2, 3, 4, 5])
++                #expect(middle.reversed().map(\.underlying.rawValue) == [5, 4, 3, 2])
++            }
++
++            @Test(arguments: ["count", "positive-distance", "subscript", "after", "before", "offset"])
++            func `Invalid collection operations fail without manufacturing values`(operation: String) async {
++                await #expect(processExitsWith: .failure) { [operation = operation as String] in
++                    let wide = WideElement.allCases
++                    let small = Ordinal.Finite<3>.allCases
++                    switch operation {
++                    case "count":
++                        _ = wide.count
++                    case "positive-distance":
++                        let high = Finite.Enumeration<WideElement>.Index(
++                            _unchecked: Ordinal(UInt(Int.max) + 1)
++                        )
++                        _ = wide.distance(from: wide.startIndex, to: high)
++                    case "subscript":
++                        _ = small[small.endIndex]
++                    case "after":
++                        _ = small.index(after: small.endIndex)
++                    case "before":
++                        let outside = Finite.Enumeration<Ordinal.Finite<3>>.Index(_unchecked: Ordinal(4))
++                        _ = small.index(before: outside)
++                    case "offset":
++                        _ = small.index(small.endIndex, offsetBy: 1)
++                    default:
++                        preconditionFailure("Unknown operation")
++                    }
+                 }
+             }
+-            let middle = enumeration[
+-                Position(_unchecked: Ordinal(2))..<Position(_unchecked: Ordinal(6))
+-            ]
+-            #expect(middle.map(\.underlying.rawValue) == [2, 3, 4, 5])
+-            #expect(middle.reversed().map(\.underlying.rawValue) == [5, 4, 3, 2])
+-        }
+ 
+-        @Test(arguments: ["count", "positive-distance", "subscript", "after", "before", "offset"])
+-        func `Invalid collection operations fail without manufacturing values`(operation: String) async {
+-            await #expect(processExitsWith: .failure) { [operation = operation as String] in
+-                let wide = WideElement.allCases
+-                let small = Ordinal.Finite<3>.allCases
+-                switch operation {
+-                case "count":
+-                    _ = wide.count
+-                case "positive-distance":
+-                    let high = Finite.Enumeration<WideElement>.Index(
+-                        _unchecked: Ordinal(UInt(Int.max) + 1)
+-                    )
+-                    _ = wide.distance(from: wide.startIndex, to: high)
+-                case "subscript":
+-                    _ = small[small.endIndex]
+-                case "after":
+-                    _ = small.index(after: small.endIndex)
+-                case "before":
+-                    let outside = Finite.Enumeration<Ordinal.Finite<3>>.Index(_unchecked: Ordinal(4))
+-                    _ = small.index(before: outside)
+-                case "offset":
+-                    _ = small.index(small.endIndex, offsetBy: 1)
+-                default:
+-                    preconditionFailure("Unknown operation")
++            @Test
++            func `Large valid indices preserve signed distance and offset direction`() async {
++                await #expect(processExitsWith: .success) {
++                    let enumeration = WideElement.allCases
++                    typealias Position = Finite.Enumeration<WideElement>.Index
++                    let low = Position(_unchecked: Ordinal(UInt(Int.max)))
++                    let high = Position(_unchecked: Ordinal(UInt(Int.max) + 1))
++                    precondition(enumeration.index(low, offsetBy: 1) == high)
++                    precondition(enumeration.index(high, offsetBy: -1) == low)
++                    precondition(enumeration.distance(from: high, to: enumeration.startIndex) == Int.min)
++                    let shifted = enumeration.index(enumeration.endIndex, offsetBy: Int.min)
++                    precondition(shifted == low)
++                    precondition(enumeration.index(high, offsetBy: Int.min, limitedBy: low) == nil)
+                 }
+             }
+-        }
+ 
+-        @Test
+-        func `Large valid indices preserve signed distance and offset direction`() async {
+-            await #expect(processExitsWith: .success) {
++            @Test
++            func `Wide cardinality keeps lazy access to both ends without narrowing the collection`() {
+                 let enumeration = WideElement.allCases
+-                typealias Position = Finite.Enumeration<WideElement>.Index
+-                let low = Position(_unchecked: Ordinal(UInt(Int.max)))
+-                let high = Position(_unchecked: Ordinal(UInt(Int.max) + 1))
+-                precondition(enumeration.index(low, offsetBy: 1) == high)
+-                precondition(enumeration.index(high, offsetBy: -1) == low)
+-                precondition(enumeration.distance(from: high, to: enumeration.startIndex) == Int.min)
+-                let shifted = enumeration.index(enumeration.endIndex, offsetBy: Int.min)
+-                precondition(shifted == low)
+-                precondition(enumeration.index(high, offsetBy: Int.min, limitedBy: low) == nil)
++                var iterator = enumeration.makeIterator()
++                #expect(iterator.next()?.ordinal == Ordinal.zero)
++                #expect(iterator.next()?.ordinal == Ordinal(1))
++                let last = enumeration.index(before: enumeration.endIndex)
++                #expect(enumeration[last].ordinal == Ordinal(UInt.max - 1))
++                #expect(enumeration.distance(from: last, to: enumeration.endIndex) == 1)
++                #expect(enumeration.distance(from: enumeration.endIndex, to: last) == -1)
+             }
+         }
+-
+-        @Test
+-        func `Wide cardinality keeps lazy access to both ends without narrowing the collection`() {
+-            let enumeration = WideElement.allCases
+-            var iterator = enumeration.makeIterator()
+-            #expect(iterator.next()?.ordinal == Ordinal.zero)
+-            #expect(iterator.next()?.ordinal == Ordinal(1))
+-            let last = enumeration.index(before: enumeration.endIndex)
+-            #expect(enumeration[last].ordinal == Ordinal(UInt.max - 1))
+-            #expect(enumeration.distance(from: last, to: enumeration.endIndex) == 1)
+-            #expect(enumeration.distance(from: enumeration.endIndex, to: last) == -1)
+-        }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Finite Tests/Core Tests.swift b/Tests/Finite Tests/Core Tests.swift
+index 748e937..8bc9f8a 100644
+--- a/Tests/Finite Tests/Core Tests.swift	
++++ b/Tests/Finite Tests/Core Tests.swift	
+@@ -2,40 +2,44 @@ import Finite
+ import Ordinal
+ import Testing
+ 
+-@Suite struct `Core finite enumeration` {
+-    @Test func `enumeration preserves order and random access without tagging`() {
+-        let values = Ordinal.Finite<3>.allCases
+-        #expect(values.count == 3)
+-        #expect(values.map { $0.underlying.rawValue } == [0, 1, 2])
+-        #expect(values.reversed().map { $0.underlying.rawValue } == [2, 1, 0])
+-        #expect(values.element(at: -1) == nil)
+-        #expect(values.element(at: 3) == nil)
+-        #if !Tagged
+-            #expect(values[1].underlying.rawValue == 1)
+-        #endif
+-    }
++enum `Core Tests` {}
++
++extension `Core Tests` {
++    @Suite struct `Core finite enumeration` {
++        @Test func `enumeration preserves order and random access without tagging`() {
++            let values = Ordinal.Finite<3>.allCases
++            #expect(values.count == 3)
++            #expect(values.map { $0.underlying.rawValue } == [0, 1, 2])
++            #expect(values.reversed().map { $0.underlying.rawValue } == [2, 1, 0])
++            #expect(values.element(at: -1) == nil)
++            #expect(values.element(at: 3) == nil)
++            #if !Tagged
++                #expect(values[1].underlying.rawValue == 1)
++            #endif
++        }
+ 
+-    #if !Tagged
+-        @Test func `limited offsets agree with arrays across both directions`() {
+-            let values = Ordinal.Finite<10>.allCases
+-            let reference = Array(0..<10)
+-            for start in 0...10 {
+-                for limit in 0...10 {
+-                    for distance in -12...12 {
+-                        let result = start + distance
+-                        let crossesLimit =
+-                            distance > 0 && limit >= start && result > limit
+-                            || distance < 0 && limit <= start && result < limit
+-                        guard (0...10).contains(result) || crossesLimit else { continue }
+-                        #expect(
+-                            values.index(start, offsetBy: distance, limitedBy: limit)
+-                                == reference.index(start, offsetBy: distance, limitedBy: limit)
+-                        )
++        #if !Tagged
++            @Test func `limited offsets agree with arrays across both directions`() {
++                let values = Ordinal.Finite<10>.allCases
++                let reference = Array(0..<10)
++                for start in 0...10 {
++                    for limit in 0...10 {
++                        for distance in -12...12 {
++                            let result = start + distance
++                            let crossesLimit =
++                                distance > 0 && limit >= start && result > limit
++                                || distance < 0 && limit <= start && result < limit
++                            guard (0...10).contains(result) || crossesLimit else { continue }
++                            #expect(
++                                values.index(start, offsetBy: distance, limitedBy: limit)
++                                    == reference.index(start, offsetBy: distance, limitedBy: limit)
++                            )
++                        }
+                     }
+                 }
++                #expect(values.index(0, offsetBy: Int.max, limitedBy: 10) == nil)
++                #expect(values.index(10, offsetBy: Int.min, limitedBy: 0) == nil)
+             }
+-            #expect(values.index(0, offsetBy: Int.max, limitedBy: 10) == nil)
+-            #expect(values.index(10, offsetBy: Int.min, limitedBy: 0) == nil)
+-        }
+-    #endif
++        #endif
++    }
+ }
+diff --git a/Tests/Finite Tests/Enumerable Tests.swift b/Tests/Finite Tests/Enumerable Tests.swift
+index 59b212c..ec43fe0 100644
+--- a/Tests/Finite Tests/Enumerable Tests.swift	
++++ b/Tests/Finite Tests/Enumerable Tests.swift	
+@@ -8,78 +8,84 @@
+ 
+     @testable import Finite
+ 
+-    @Suite
+-    struct `Finite enumeration preserves counts and ordinal construction` {
++enum `Enumerable Tests` {}
+ 
+-        @Test
+-        func `count returns correct count`() {
+-            #expect(Ordinal.Finite<5>.count == 5)
+-            #expect(Ordinal.Finite<10>.count == 10)
+-        }
++extension `Enumerable Tests` {
++        @Suite
++        struct `Finite enumeration preserves counts and ordinal construction` {
+ 
+-        @Test(arguments: [0, 1, 2])
+-        func `ordinal returns valid index`(index: Int) {
+-            let ordinal = Ordinal.Finite<5>(index)!
+-            let ord = ordinal.ordinal
+-            #expect(ord >= 0)
+-            #expect(ord < Ordinal.Finite<5>.count)
+-        }
++            @Test
++            func `count returns correct count`() {
++                #expect(Ordinal.Finite<5>.count == 5)
++                #expect(Ordinal.Finite<10>.count == 10)
++            }
+ 
+-        @Test(arguments: [0, 1, 2, 3, 4])
+-        func `init __unchecked creates correct value`(index: Int) {
+-            let ordinal = Ordinal.Finite<5>(_unchecked: index)
+-            #expect(ordinal == Ordinal.Finite(index)!)
+-        }
++            @Test(arguments: [0, 1, 2])
++            func `ordinal returns valid index`(index: Int) {
++                let ordinal = Ordinal.Finite<5>(index)!
++                let ord = ordinal.ordinal
++                #expect(ord >= 0)
++                #expect(ord < Ordinal.Finite<5>.count)
++            }
+ 
+-        @Test(arguments: [0, 1, 2, 3, 4])
+-        func `Reconstructing a bounded ordinal preserves its position`(index: Int) {
+-            let ordinal = Ordinal.Finite<5>(_unchecked: index)
+-            let ord = ordinal.ordinal
+-            let reconstructed = Ordinal.Finite<5>(_unchecked: (), ordinal: ord)
+-            #expect(reconstructed == ordinal)
+-        }
++            @Test(arguments: [0, 1, 2, 3, 4])
++            func `init __unchecked creates correct value`(index: Int) {
++                let ordinal = Ordinal.Finite<5>(_unchecked: index)
++                #expect(ordinal == Ordinal.Finite(index)!)
++            }
+ 
+-        @Test
+-        func `allCases returns Enumeration`() {
+-            let allCases = Ordinal.Finite<5>.allCases
+-            #expect(allCases.count == 5)
+-        }
++            @Test(arguments: [0, 1, 2, 3, 4])
++            func `Reconstructing a bounded ordinal preserves its position`(index: Int) {
++                let ordinal = Ordinal.Finite<5>(_unchecked: index)
++                let ord = ordinal.ordinal
++                let reconstructed = Ordinal.Finite<5>(_unchecked: (), ordinal: ord)
++                #expect(reconstructed == ordinal)
++            }
+ 
+-        @Test(arguments: [0, 1, 2])
+-        func `failable init returns value for valid index`(index: Int) {
+-            let ordinal: Ordinal.Finite<3>? = Ordinal.Finite(index)
+-            #expect(ordinal != nil)
+-        }
++            @Test
++            func `allCases returns Enumeration`() {
++                let allCases = Ordinal.Finite<5>.allCases
++                #expect(allCases.count == 5)
++            }
+ 
+-        @Test(arguments: [-1, 3, 10, 100])
+-        func `failable init returns nil for invalid index`(index: Int) {
+-            let invalid: Ordinal.Finite<3>? = Ordinal.Finite(index)
+-            #expect(invalid == nil)
+-        }
+-    }
++            @Test(arguments: [0, 1, 2])
++            func `failable init returns value for valid index`(index: Int) {
++                let ordinal: Ordinal.Finite<3>? = Ordinal.Finite(index)
++                #expect(ordinal != nil)
++            }
+ 
+-    @Suite
+-    struct `Bounded ordinals enumerate their complete domains` {
+-        @Test
+-        func `Ordinal conforms to Enumerable`() {
+-            let ordinal: Ordinal.Finite<5> = 2
+-            #expect(ordinal.ordinal == 2)
+-            #expect(Ordinal.Finite<5>.count == 5)
++            @Test(arguments: [-1, 3, 10, 100])
++            func `failable init returns nil for invalid index`(index: Int) {
++                let invalid: Ordinal.Finite<3>? = Ordinal.Finite(index)
++                #expect(invalid == nil)
++            }
+         }
++}
+ 
+-        @Test(arguments: [0, 1, 2, 3, 4])
+-        func `Each enumerated ordinal matches its array position`(expectedIndex: Int) {
+-            let allCases = Array(Ordinal.Finite<5>.allCases)
+-            #expect(allCases[expectedIndex] == Ordinal.Finite(expectedIndex)!)
+-        }
++extension `Enumerable Tests` {
++        @Suite
++        struct `Bounded ordinals enumerate their complete domains` {
++            @Test
++            func `Ordinal conforms to Enumerable`() {
++                let ordinal: Ordinal.Finite<5> = 2
++                #expect(ordinal.ordinal == 2)
++                #expect(Ordinal.Finite<5>.count == 5)
++            }
++
++            @Test(arguments: [0, 1, 2, 3, 4])
++            func `Each enumerated ordinal matches its array position`(expectedIndex: Int) {
++                let allCases = Array(Ordinal.Finite<5>.allCases)
++                #expect(allCases[expectedIndex] == Ordinal.Finite(expectedIndex)!)
++            }
+ 
+-        @Test
+-        func `Ordinal Enumeration is RandomAccessCollection`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            #expect(enumeration.count == 10)
+-            #expect(enumeration.startIndex == .zero)
+-            #expect(enumeration.endIndex == 10)
++            @Test
++            func `Ordinal Enumeration is RandomAccessCollection`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                #expect(enumeration.count == 10)
++                #expect(enumeration.startIndex == .zero)
++                #expect(enumeration.endIndex == 10)
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Finite Tests/Enumeration Tests.swift b/Tests/Finite Tests/Enumeration Tests.swift
+index f14b59f..f3f769c 100644
+--- a/Tests/Finite Tests/Enumeration Tests.swift	
++++ b/Tests/Finite Tests/Enumeration Tests.swift	
+@@ -8,211 +8,225 @@
+ 
+     @testable import Finite
+ 
+-    @Suite
+-    struct `Finite enumeration satisfies collection index operations` {
+-        @Test
+-        func `startIndex is zero`() {
+-            let enumeration = Ordinal.Finite<5>.allCases
+-            #expect(enumeration.startIndex == .zero)
+-        }
++enum `Enumeration Tests` {}
++
++extension `Enumeration Tests` {
++        @Suite
++        struct `Finite enumeration satisfies collection index operations` {
++            @Test
++            func `startIndex is zero`() {
++                let enumeration = Ordinal.Finite<5>.allCases
++                #expect(enumeration.startIndex == .zero)
++            }
+ 
+-        @Test
+-        func `endIndex equals count`() {
+-            let enumeration = Ordinal.Finite<7>.allCases
+-            #expect(enumeration.endIndex == 7)
+-        }
++            @Test
++            func `endIndex equals count`() {
++                let enumeration = Ordinal.Finite<7>.allCases
++                #expect(enumeration.endIndex == 7)
++            }
+ 
+-        @Test
+-        func `count equals count`() {
+-            let enumeration = Ordinal.Finite<7>.allCases
+-            #expect(enumeration.count == 7)
+-        }
++            @Test
++            func `count equals count`() {
++                let enumeration = Ordinal.Finite<7>.allCases
++                #expect(enumeration.count == 7)
++            }
+ 
+-        @Test(arguments: [0, 1, 2, 3])
+-        func `subscript returns correct element`(index: Int) throws {
+-            let enumeration = Ordinal.Finite<5>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<5>>.Index
+-            let position: I = .init(_unchecked: try Ordinal(index))
+-            let element = enumeration[position]
+-            #expect(element == Ordinal.Finite(index)!)
+-        }
++            @Test(arguments: [0, 1, 2, 3])
++            func `subscript returns correct element`(index: Int) throws {
++                let enumeration = Ordinal.Finite<5>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<5>>.Index
++                let position: I = .init(_unchecked: try Ordinal(index))
++                let element = enumeration[position]
++                #expect(element == Ordinal.Finite(index)!)
++            }
+ 
+-        @Test
+-        func `index after increments by 1`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            #expect(enumeration.index(after: enumeration.startIndex) == 1)
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i5: I = 5
+-            #expect(enumeration.index(after: i5) == 6)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Finite enumeration supports traversal in both directions` {
+-        @Test
+-        func `index before decrements by 1`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i5: I = 5
+-            let i1: I = 1
+-            #expect(enumeration.index(before: i5) == 4)
+-            #expect(enumeration.index(before: i1) == 0)
++            @Test
++            func `index after increments by 1`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                #expect(enumeration.index(after: enumeration.startIndex) == 1)
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i5: I = 5
++                #expect(enumeration.index(after: i5) == 6)
++            }
+         }
++}
++
++extension `Enumeration Tests` {
++        @Suite
++        struct `Finite enumeration supports traversal in both directions` {
++            @Test
++            func `index before decrements by 1`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i5: I = 5
++                let i1: I = 1
++                #expect(enumeration.index(before: i5) == 4)
++                #expect(enumeration.index(before: i1) == 0)
++            }
+ 
+-        @Test
+-        func `Reversed enumeration visits positions in descending order`() {
+-            let enumeration = Ordinal.Finite<3>.allCases
+-            let reversed = Array(enumeration.reversed())
+-            #expect(reversed.count == 3)
+-            #expect(reversed[0] == 2)
+-            #expect(reversed[1] == 1)
+-            #expect(reversed[2] == 0)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Finite enumeration preserves distances and bounded offsets` {
+-        @Test
+-        func `The full index distance equals the domain size`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            let distance = enumeration.distance(from: enumeration.startIndex, to: enumeration.endIndex)
+-            #expect(distance == 10)
++            @Test
++            func `Reversed enumeration visits positions in descending order`() {
++                let enumeration = Ordinal.Finite<3>.allCases
++                let reversed = Array(enumeration.reversed())
++                #expect(reversed.count == 3)
++                #expect(reversed[0] == 2)
++                #expect(reversed[1] == 1)
++                #expect(reversed[2] == 0)
++            }
+         }
++}
+ 
+-        @Test
+-        func `Index distances equal their positional differences`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i0: I = 0
+-            let i1: I = 1
+-            let i2: I = 2
+-            let i5: I = 5
+-            let i8: I = 8
+-            #expect(enumeration.distance(from: i0, to: i5) == 5)
+-            #expect(enumeration.distance(from: i2, to: i8) == 6)
+-            #expect(enumeration.distance(from: i1, to: i1) == 0)
+-        }
++extension `Enumeration Tests` {
++        @Suite
++        struct `Finite enumeration preserves distances and bounded offsets` {
++            @Test
++            func `The full index distance equals the domain size`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                let distance = enumeration.distance(from: enumeration.startIndex, to: enumeration.endIndex)
++                #expect(distance == 10)
++            }
+ 
+-        @Test
+-        func `Index offsets preserve their signed distances`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i0: I = 0
+-            let i3: I = 3
+-            let i5: I = 5
+-            #expect(enumeration.index(i0, offsetBy: 5) == 5)
+-            #expect(enumeration.index(i3, offsetBy: 2) == 5)
+-            #expect(enumeration.index(i5, offsetBy: -3) == 2)
+-        }
++            @Test
++            func `Index distances equal their positional differences`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i0: I = 0
++                let i1: I = 1
++                let i2: I = 2
++                let i5: I = 5
++                let i8: I = 8
++                #expect(enumeration.distance(from: i0, to: i5) == 5)
++                #expect(enumeration.distance(from: i2, to: i8) == 6)
++                #expect(enumeration.distance(from: i1, to: i1) == 0)
++            }
+ 
+-        @Test
+-        func `index offsetBy limitedBy succeeds when within limit`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i0: I = 0
+-            let i7: I = 7
+-            let result = enumeration.index(i0, offsetBy: 5, limitedBy: i7)
+-            #expect(result == 5)
+-        }
++            @Test
++            func `Index offsets preserve their signed distances`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i0: I = 0
++                let i3: I = 3
++                let i5: I = 5
++                #expect(enumeration.index(i0, offsetBy: 5) == 5)
++                #expect(enumeration.index(i3, offsetBy: 2) == 5)
++                #expect(enumeration.index(i5, offsetBy: -3) == 2)
++            }
+ 
+-        @Test
+-        func `index offsetBy limitedBy returns nil when exceeding limit`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i0: I = 0
+-            let i5: I = 5
+-            let result = enumeration.index(i0, offsetBy: 8, limitedBy: i5)
+-            #expect(result == nil)
+-        }
++            @Test
++            func `index offsetBy limitedBy succeeds when within limit`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i0: I = 0
++                let i7: I = 7
++                let result = enumeration.index(i0, offsetBy: 5, limitedBy: i7)
++                #expect(result == 5)
++            }
+ 
+-        @Test
+-        func `Backward offsets respect limits in their direction`() {
+-            let enumeration = Ordinal.Finite<10>.allCases
+-            typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
+-            let i5: I = 5
+-            let i1: I = 1
+-            let i2: I = 2
+-            let result1 = enumeration.index(i5, offsetBy: -3, limitedBy: i1)
+-            #expect(result1 == 2)
+-
+-            let result2 = enumeration.index(i5, offsetBy: -6, limitedBy: i2)
+-            #expect(result2 == nil)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Finite iterators visit their domains and stop at the end` {
+-        @Test
+-        func `iterator produces all elements in order`() {
+-            let enumeration = Ordinal.Finite<4>.allCases
+-            var iterator = enumeration.makeIterator()
+-
+-            #expect(iterator.next() == 0)
+-            #expect(iterator.next() == 1)
+-            #expect(iterator.next() == 2)
+-            #expect(iterator.next() == 3)
+-            #expect(iterator.next() == nil)
++            @Test
++            func `index offsetBy limitedBy returns nil when exceeding limit`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i0: I = 0
++                let i5: I = 5
++                let result = enumeration.index(i0, offsetBy: 8, limitedBy: i5)
++                #expect(result == nil)
++            }
++
++            @Test
++            func `Backward offsets respect limits in their direction`() {
++                let enumeration = Ordinal.Finite<10>.allCases
++                typealias I = Finite.Enumeration<Ordinal.Finite<10>>.Index
++                let i5: I = 5
++                let i1: I = 1
++                let i2: I = 2
++                let result1 = enumeration.index(i5, offsetBy: -3, limitedBy: i1)
++                #expect(result1 == 2)
++
++                let result2 = enumeration.index(i5, offsetBy: -6, limitedBy: i2)
++                #expect(result2 == nil)
++            }
+         }
++}
++
++extension `Enumeration Tests` {
++        @Suite
++        struct `Finite iterators visit their domains and stop at the end` {
++            @Test
++            func `iterator produces all elements in order`() {
++                let enumeration = Ordinal.Finite<4>.allCases
++                var iterator = enumeration.makeIterator()
++
++                #expect(iterator.next() == 0)
++                #expect(iterator.next() == 1)
++                #expect(iterator.next() == 2)
++                #expect(iterator.next() == 3)
++                #expect(iterator.next() == nil)
++            }
+ 
+-        @Test
+-        func `An exhausted iterator continues returning no element`() {
+-            let enumeration = Ordinal.Finite<5>.allCases
+-            var iterator = enumeration.makeIterator()
++            @Test
++            func `An exhausted iterator continues returning no element`() {
++                let enumeration = Ordinal.Finite<5>.allCases
++                var iterator = enumeration.makeIterator()
++
++                var count = 0
++                while iterator.next() != nil {
++                    count += 1
++                }
++                #expect(count == 5)
++                #expect(iterator.next() == nil)
++            }
+ 
+-            var count = 0
+-            while iterator.next() != nil {
+-                count += 1
++            @Test
++            func `A loop visits each bounded ordinal in ascending order`() {
++                var values: [Ordinal.Finite<5>] = []
++                for ordinal in Ordinal.Finite<5>.allCases {
++                    values.append(ordinal)
++                }
++                #expect(values.count == 5)
++                #expect(values[0] == 0)
++                #expect(values[4] == 4)
+             }
+-            #expect(count == 5)
+-            #expect(iterator.next() == nil)
+         }
++}
+ 
+-        @Test
+-        func `A loop visits each bounded ordinal in ascending order`() {
+-            var values: [Ordinal.Finite<5>] = []
+-            for ordinal in Ordinal.Finite<5>.allCases {
+-                values.append(ordinal)
++extension `Enumeration Tests` {
++        @Suite
++        struct `Element lookup returns values only within the domain` {
++            @Test(arguments: [0, 1, 2, 3, 4])
++            func `element at returns value for valid index`(index: Int) {
++                let enumeration = Ordinal.Finite<5>.allCases
++                let element = enumeration.element(at: index)
++                #expect(element != nil)
+             }
+-            #expect(values.count == 5)
+-            #expect(values[0] == 0)
+-            #expect(values[4] == 4)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Element lookup returns values only within the domain` {
+-        @Test(arguments: [0, 1, 2, 3, 4])
+-        func `element at returns value for valid index`(index: Int) {
+-            let enumeration = Ordinal.Finite<5>.allCases
+-            let element = enumeration.element(at: index)
+-            #expect(element != nil)
+-        }
+ 
+-        @Test(arguments: [-1, 5, 10, 100])
+-        func `element at returns nil for invalid index`(index: Int) {
+-            let enumeration = Ordinal.Finite<5>.allCases
+-            let element = enumeration.element(at: index)
+-            #expect(element == nil)
++            @Test(arguments: [-1, 5, 10, 100])
++            func `element at returns nil for invalid index`(index: Int) {
++                let enumeration = Ordinal.Finite<5>.allCases
++                let element = enumeration.element(at: index)
++                #expect(element == nil)
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Repeated finite enumeration preserves its values` {
+-        @Test
+-        func `Equally bounded enumerations produce the same values`() {
+-            let enum1 = Ordinal.Finite<3>.allCases
+-            let enum2 = Ordinal.Finite<3>.allCases
++extension `Enumeration Tests` {
++        @Suite
++        struct `Repeated finite enumeration preserves its values` {
++            @Test
++            func `Equally bounded enumerations produce the same values`() {
++                let enum1 = Ordinal.Finite<3>.allCases
++                let enum2 = Ordinal.Finite<3>.allCases
+ 
+-            #expect(Array(enum1) == Array(enum2))
+-        }
++                #expect(Array(enum1) == Array(enum2))
++            }
+ 
+-        @Test
+-        func `multiple iterations produce same sequence`() {
+-            let enumeration = Ordinal.Finite<5>.allCases
+-            let array1 = Array(enumeration)
+-            let array2 = Array(enumeration)
+-            #expect(array1 == array2)
++            @Test
++            func `multiple iterations produce same sequence`() {
++                let enumeration = Ordinal.Finite<5>.allCases
++                let array1 = Array(enumeration)
++                let array2 = Array(enumeration)
++                #expect(array1 == array2)
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Finite Tests/Index.Bounded Tests.swift b/Tests/Finite Tests/Index.Bounded Tests.swift
+index a764b08..6482f6e 100644
+--- a/Tests/Finite Tests/Index.Bounded Tests.swift	
++++ b/Tests/Finite Tests/Index.Bounded Tests.swift	
+@@ -8,122 +8,132 @@
+ 
+     @testable import Finite
+ 
+-    @Suite
+-    struct `Bounded indices retain their element tags and nominal domains` {
+-        @Test
+-        func `The bounded index alias tags a nominal bounded ordinal`() {
+-            let finite: Ordinal.Finite<8> = 0
+-            let idx: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
+-            let _: Tagged<Int, Ordinal.Finite<8>> = idx
+-        }
++enum `Index.Bounded Tests` {}
+ 
+-        @Test
+-        func `memory layout matches Ordinal`() {
+-            #expect(MemoryLayout<Index<Int>.Bounded<8>>.size == MemoryLayout<Ordinal>.size)
+-            #expect(MemoryLayout<Index<Int>.Bounded<8>>.stride == MemoryLayout<Ordinal>.stride)
+-            #expect(MemoryLayout<Index<Int>.Bounded<8>>.alignment == MemoryLayout<Ordinal>.alignment)
+-        }
++extension `Index.Bounded Tests` {
++        @Suite
++        struct `Bounded indices retain their element tags and nominal domains` {
++            @Test
++            func `The bounded index alias tags a nominal bounded ordinal`() {
++                let finite: Ordinal.Finite<8> = 0
++                let idx: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
++                let _: Tagged<Int, Ordinal.Finite<8>> = idx
++            }
+ 
+-        @Test
+-        func `memory layout matches unbounded Index`() {
+-            #expect(MemoryLayout<Index<Int>.Bounded<8>>.size == MemoryLayout<Index<Int>>.size)
+-            #expect(MemoryLayout<Index<Int>.Bounded<8>>.stride == MemoryLayout<Index<Int>>.stride)
+-            #expect(MemoryLayout<Index<Int>.Bounded<8>>.alignment == MemoryLayout<Index<Int>>.alignment)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded index bridges preserve valid positions` {
+-        @Test(arguments: [0, 1, 2, 3, 7])
+-        func `narrowing init returns Some for valid indices`(value: Int) {
+-            let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
+-            let bounded: Index<Int>.Bounded<8>? = .init(index)
+-            #expect(bounded != nil)
+-        }
++            @Test
++            func `memory layout matches Ordinal`() {
++                #expect(MemoryLayout<Index<Int>.Bounded<8>>.size == MemoryLayout<Ordinal>.size)
++                #expect(MemoryLayout<Index<Int>.Bounded<8>>.stride == MemoryLayout<Ordinal>.stride)
++                #expect(MemoryLayout<Index<Int>.Bounded<8>>.alignment == MemoryLayout<Ordinal>.alignment)
++            }
+ 
+-        @Test(arguments: [8, 9, 100])
+-        func `narrowing init returns nil for out-of-bounds`(value: Int) {
+-            let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
+-            let bounded: Index<Int>.Bounded<8>? = .init(index)
+-            #expect(bounded == nil)
++            @Test
++            func `memory layout matches unbounded Index`() {
++                #expect(MemoryLayout<Index<Int>.Bounded<8>>.size == MemoryLayout<Index<Int>>.size)
++                #expect(MemoryLayout<Index<Int>.Bounded<8>>.stride == MemoryLayout<Index<Int>>.stride)
++                #expect(MemoryLayout<Index<Int>.Bounded<8>>.alignment == MemoryLayout<Index<Int>>.alignment)
++            }
+         }
++}
+ 
+-        @Test(arguments: [0, 1, 2, 3, 7])
+-        func `widening init round-trips correctly`(value: Int) {
+-            let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
+-            let bounded: Index<Int>.Bounded<8> = .init(index)!
+-            let roundTripped: Index<Int> = .init(bounded)
+-            #expect(roundTripped == index)
+-        }
++extension `Index.Bounded Tests` {
++        @Suite
++        struct `Bounded index bridges preserve valid positions` {
++            @Test(arguments: [0, 1, 2, 3, 7])
++            func `narrowing init returns Some for valid indices`(value: Int) {
++                let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
++                let bounded: Index<Int>.Bounded<8>? = .init(index)
++                #expect(bounded != nil)
++            }
+ 
+-        @Test(arguments: [0, 1, 2, 3, 7])
+-        func `map underlying produces same result as widening init`(value: Int) {
+-            let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
+-            let bounded: Index<Int>.Bounded<8> = .init(index)!
+-            let viaInit: Index<Int> = .init(bounded)
+-            let viaMap = bounded.map { $0.underlying }
+-            #expect(viaInit == viaMap)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded index arithmetic preserves its finite domain` {
+-        @Test
+-        func `The bounded index exposes its next ordinal`() {
+-            let finite: Ordinal.Finite<8> = 3
+-            let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
+-            let next = bounded.underlying.successor()
+-            #expect(next != nil)
+-            let expected: Ordinal.Finite<8> = 4
+-            #expect(next == expected)
+-        }
++            @Test(arguments: [8, 9, 100])
++            func `narrowing init returns nil for out-of-bounds`(value: Int) {
++                let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
++                let bounded: Index<Int>.Bounded<8>? = .init(index)
++                #expect(bounded == nil)
++            }
+ 
+-        @Test
+-        func `successor at max returns nil`() {
+-            let finite: Ordinal.Finite<8> = 7
+-            let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
+-            let next = bounded.underlying.successor()
+-            #expect(next == nil)
+-        }
++            @Test(arguments: [0, 1, 2, 3, 7])
++            func `widening init round-trips correctly`(value: Int) {
++                let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
++                let bounded: Index<Int>.Bounded<8> = .init(index)!
++                let roundTripped: Index<Int> = .init(bounded)
++                #expect(roundTripped == index)
++            }
+ 
+-        @Test
+-        func `The bounded index exposes its previous ordinal`() {
+-            let finite: Ordinal.Finite<8> = 3
+-            let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
+-            let previous = bounded.underlying.predecessor()
+-            #expect(previous != nil)
+-            let expected: Ordinal.Finite<8> = 2
+-            #expect(previous == expected)
++            @Test(arguments: [0, 1, 2, 3, 7])
++            func `map underlying produces same result as widening init`(value: Int) {
++                let index: Index<Int> = Index(_unchecked: Ordinal(UInt(value)))
++                let bounded: Index<Int>.Bounded<8> = .init(index)!
++                let viaInit: Index<Int> = .init(bounded)
++                let viaMap = bounded.map { $0.underlying }
++                #expect(viaInit == viaMap)
++            }
+         }
++}
+ 
+-        @Test
+-        func `The bounded index exposes its shifted ordinal`() {
+-            let finite: Ordinal.Finite<8> = 3
+-            let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
+-            let offset = bounded.underlying.offset(by: 2)
+-            let expected: Ordinal.Finite<8> = 5
+-            #expect(offset == expected)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded indices respect empty and singleton domains` {
+-        @Test
+-        func `narrowing with zero capacity always returns nil`() {
+-            let index: Index<Int> = Index(_unchecked: .zero)
+-            let bounded: Index<Int>.Bounded<0>? = .init(index)
+-            #expect(bounded == nil)
++extension `Index.Bounded Tests` {
++        @Suite
++        struct `Bounded index arithmetic preserves its finite domain` {
++            @Test
++            func `The bounded index exposes its next ordinal`() {
++                let finite: Ordinal.Finite<8> = 3
++                let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
++                let next = bounded.underlying.successor()
++                #expect(next != nil)
++                let expected: Ordinal.Finite<8> = 4
++                #expect(next == expected)
++            }
++
++            @Test
++            func `successor at max returns nil`() {
++                let finite: Ordinal.Finite<8> = 7
++                let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
++                let next = bounded.underlying.successor()
++                #expect(next == nil)
++            }
++
++            @Test
++            func `The bounded index exposes its previous ordinal`() {
++                let finite: Ordinal.Finite<8> = 3
++                let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
++                let previous = bounded.underlying.predecessor()
++                #expect(previous != nil)
++                let expected: Ordinal.Finite<8> = 2
++                #expect(previous == expected)
++            }
++
++            @Test
++            func `The bounded index exposes its shifted ordinal`() {
++                let finite: Ordinal.Finite<8> = 3
++                let bounded: Index<Int>.Bounded<8> = Tagged(_unchecked: finite)
++                let offset = bounded.underlying.offset(by: 2)
++                let expected: Ordinal.Finite<8> = 5
++                #expect(offset == expected)
++            }
+         }
++}
++
++extension `Index.Bounded Tests` {
++        @Suite
++        struct `Bounded indices respect empty and singleton domains` {
++            @Test
++            func `narrowing with zero capacity always returns nil`() {
++                let index: Index<Int> = Index(_unchecked: .zero)
++                let bounded: Index<Int>.Bounded<0>? = .init(index)
++                #expect(bounded == nil)
++            }
+ 
+-        @Test
+-        func `narrowing with capacity 1 accepts only zero`() {
+-            let zero: Index<Int> = Index(_unchecked: .zero)
+-            let one: Index<Int> = Index(_unchecked: Ordinal(UInt(1)))
+-            let zeroBounded: Index<Int>.Bounded<1>? = .init(zero)
+-            let oneBounded: Index<Int>.Bounded<1>? = .init(one)
+-            #expect(zeroBounded != nil)
+-            #expect(oneBounded == nil)
++            @Test
++            func `narrowing with capacity 1 accepts only zero`() {
++                let zero: Index<Int> = Index(_unchecked: .zero)
++                let one: Index<Int> = Index(_unchecked: Ordinal(UInt(1)))
++                let zeroBounded: Index<Int>.Bounded<1>? = .init(zero)
++                let oneBounded: Index<Int>.Bounded<1>? = .init(one)
++                #expect(zeroBounded != nil)
++                #expect(oneBounded == nil)
++            }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Tests/Finite Tests/Nominal construction Tests.swift b/Tests/Finite Tests/Nominal construction Tests.swift
+index 105222d..62ecf19 100644
+--- a/Tests/Finite Tests/Nominal construction Tests.swift	
++++ b/Tests/Finite Tests/Nominal construction Tests.swift	
+@@ -8,176 +8,180 @@ private func construct<E: Finite.Enumerable>(
+     E(_unchecked: (), ordinal: ordinal)
+ }
+ 
+-@Suite
+-struct `Nominal bounded ordinals enforce their construction domain` {
+-    @Test(arguments: [Int.min, -1, 0, 1, 2, 3, Int.max])
+-    func `Checked integer construction accepts exactly the declared domain`(position: Int) {
+-        let value = Ordinal.Finite<3>(position)
+-        let expected = (0..<3).contains(position) ? UInt(position) : nil
+-        #expect(value?.underlying.rawValue == expected)
+-    }
+-
+-    @Test(arguments: [UInt(0), 1, 2, 3, UInt(Int.max), UInt.max])
+-    func `Checked ordinal construction rejects positions without signed narrowing`(position: UInt) {
+-        let value = Ordinal.Finite<3>(Ordinal(position))
+-        #expect(value?.underlying.rawValue == (position < 3 ? position : nil))
+-    }
++enum `Nominal construction Tests` {}
+ 
+-    @Test
+-    func `Empty and negative domains reject checked construction`() {
+-        let emptyInteger = Ordinal.Finite<0>(Int(0))
+-        withKnownIssue("Swift integer generic specialization collision: https://github.com/swiftlang/swift/issues/90739") {
+-            #expect(emptyInteger == nil)
+-        } when: {
+-            !_isDebugAssertConfiguration()
+-        } matching: { issue in
+-            guard case .expectationFailed = issue.kind else { return false }
+-            return issue.description == "Expectation failed: emptyInteger == nil (error)"
+-                && emptyInteger?.underlying.rawValue == 0
++extension `Nominal construction Tests` {
++    @Suite
++    struct `Nominal bounded ordinals enforce their construction domain` {
++        @Test(arguments: [Int.min, -1, 0, 1, 2, 3, Int.max])
++        func `Checked integer construction accepts exactly the declared domain`(position: Int) {
++            let value = Ordinal.Finite<3>(position)
++            let expected = (0..<3).contains(position) ? UInt(position) : nil
++            #expect(value?.underlying.rawValue == expected)
+         }
+-        #expect(Ordinal.Finite<0>(Ordinal.zero) == nil)
+-        typealias Negative = Ordinal.Finite<-3>
+-        let negativeIntegerIsNil = Negative(Int(0)) == nil
+-        let negativeOrdinalIsNil = Negative(Ordinal.zero) == nil
+-        #expect(negativeIntegerIsNil)
+-        #expect(negativeOrdinalIsNil)
+-    }
+-
+-    @Test(arguments: [0, 1, 2])
+-    func `Every retained constructor preserves valid positions`(position: Int) {
+-        let expected = Ordinal(UInt(position))
+-        let checked = Ordinal.Finite<3>(position)!
+-        let compatibleInteger = Ordinal.Finite<3>(_unchecked: position)
+-        let compatibleOrdinal = Ordinal.Finite<3>(_unchecked: expected)
+-        let literalInitializer = Ordinal.Finite<3>(integerLiteral: UInt(position))
+-        let enumerable = construct(Ordinal.Finite<3>.self, at: expected)
+-        #expect(checked.underlying == expected)
+-        #expect(compatibleInteger == checked)
+-        #expect(compatibleOrdinal == checked)
+-        #expect(literalInitializer == checked)
+-        #expect(enumerable == checked)
+-    }
+ 
+-    @Test
+-    func `Enumeration contains every constructible ordinal exactly once`() {
+-        let values = Array(Ordinal.Finite<7>.allCases)
+-        #expect(values.map { $0.underlying.rawValue } == Array(UInt(0)..<7))
+-        (0..<7).forEach { position in
+-            let constructed = Ordinal.Finite<7>(position)!
+-            #expect(values.filter { $0 == constructed }.count == 1)
++        @Test(arguments: [UInt(0), 1, 2, 3, UInt(Int.max), UInt.max])
++        func `Checked ordinal construction rejects positions without signed narrowing`(position: UInt) {
++            let value = Ordinal.Finite<3>(Ordinal(position))
++            #expect(value?.underlying.rawValue == (position < 3 ? position : nil))
+         }
+-        #expect(Ordinal.Finite<7>(Int(7)) == nil)
+-    }
+ 
+-    @Test(arguments: [
+-        "integer", "ordinal", "literal", "enumerable", "negativeInteger",
+-        "wideOrdinal", "wideLiteral", "boundedIndexLiteral",
+-    ])
+-    func `Nonfailable public constructors reject positions outside the domain`(
+-        constructor: String
+-    ) async {
+-        await #expect(processExitsWith: .failure) { [constructor = constructor as String] in
+-            switch constructor {
+-            case "integer":
+-                print(Ordinal.Finite<3>(_unchecked: Int(3)).underlying.rawValue)
+-            case "ordinal":
+-                print(Ordinal.Finite<3>(_unchecked: Ordinal(3)).underlying.rawValue)
+-            case "literal":
+-                let value: Ordinal.Finite<3> = 3
+-                print(value.underlying.rawValue)
+-            case "enumerable":
+-                print(construct(Ordinal.Finite<3>.self, at: Ordinal(3)).underlying.rawValue)
+-            case "negativeInteger":
+-                print(Ordinal.Finite<3>(_unchecked: Int(-1)).underlying.rawValue)
+-            case "wideOrdinal":
+-                print(Ordinal.Finite<3>(_unchecked: Ordinal(UInt.max)).underlying.rawValue)
+-            case "wideLiteral":
+-                print(Ordinal.Finite<3>(integerLiteral: UInt.max).underlying.rawValue)
+-            #if Tagged
+-                case "boundedIndexLiteral":
+-                    let value: Index<Int>.Bounded<3> = 3
+-                    print(value.underlying.underlying.rawValue)
+-            #endif
+-            default:
+-                preconditionFailure("Unknown constructor")
++        @Test
++        func `Empty and negative domains reject checked construction`() {
++            let emptyInteger = Ordinal.Finite<0>(Int(0))
++            withKnownIssue("Swift integer generic specialization collision: https://github.com/swiftlang/swift/issues/90739") {
++                #expect(emptyInteger == nil)
++            } when: {
++                !_isDebugAssertConfiguration()
++            } matching: { issue in
++                guard case .expectationFailed = issue.kind else { return false }
++                return issue.description == "Expectation failed: emptyInteger == nil (error)"
++                    && emptyInteger?.underlying.rawValue == 0
+             }
++            #expect(Ordinal.Finite<0>(Ordinal.zero) == nil)
++            typealias Negative = Ordinal.Finite<-3>
++            let negativeIntegerIsNil = Negative(Int(0)) == nil
++            let negativeOrdinalIsNil = Negative(Ordinal.zero) == nil
++            #expect(negativeIntegerIsNil)
++            #expect(negativeOrdinalIsNil)
++        }
++
++        @Test(arguments: [0, 1, 2])
++        func `Every retained constructor preserves valid positions`(position: Int) {
++            let expected = Ordinal(UInt(position))
++            let checked = Ordinal.Finite<3>(position)!
++            let compatibleInteger = Ordinal.Finite<3>(_unchecked: position)
++            let compatibleOrdinal = Ordinal.Finite<3>(_unchecked: expected)
++            let literalInitializer = Ordinal.Finite<3>(integerLiteral: UInt(position))
++            let enumerable = construct(Ordinal.Finite<3>.self, at: expected)
++            #expect(checked.underlying == expected)
++            #expect(compatibleInteger == checked)
++            #expect(compatibleOrdinal == checked)
++            #expect(literalInitializer == checked)
++            #expect(enumerable == checked)
+         }
+-    }
+ 
+-    @Test
+-    func `Zero requires a nonempty bounded domain`() async {
+-        let valid: Ordinal.Finite<1> = .zero
+-        #expect(valid.underlying == 0)
+-        await withKnownIssue("Swift integer generic specialization collision: https://github.com/swiftlang/swift/issues/90739") {
+-            await #expect(processExitsWith: .failure) {
+-                print(Ordinal.Finite<0>.zero.underlying.rawValue)
++        @Test
++        func `Enumeration contains every constructible ordinal exactly once`() {
++            let values = Array(Ordinal.Finite<7>.allCases)
++            #expect(values.map { $0.underlying.rawValue } == Array(UInt(0)..<7))
++            (0..<7).forEach { position in
++                let constructed = Ordinal.Finite<7>(position)!
++                #expect(values.filter { $0 == constructed }.count == 1)
+             }
+-        } when: {
+-            !_isDebugAssertConfiguration()
+-        } matching: { issue in
+-            guard case .expectationFailed = issue.kind else { return false }
+-            return issue.description.contains("EXIT_SUCCESS")
++            #expect(Ordinal.Finite<7>(Int(7)) == nil)
+         }
+-    }
+ 
+-    @Test(arguments: ["integer", "ordinal", "literal", "enumerable", "zero"])
+-    func `Nonfailable construction cannot produce an ordinal for a negative domain`(
+-        constructor: String
+-    ) async {
+-        await #expect(processExitsWith: .failure) { [constructor = constructor as String] in
+-            typealias Negative = Ordinal.Finite<-3>
+-            switch constructor {
+-            case "integer":
+-                print(Negative(_unchecked: Int(0)).underlying.rawValue)
+-            case "ordinal":
+-                print(Negative(_unchecked: Ordinal.zero).underlying.rawValue)
+-            case "literal":
+-                print((0 as Negative).underlying.rawValue)
+-            case "enumerable":
+-                print(construct(Negative.self, at: .zero).underlying.rawValue)
+-            case "zero":
+-                print(Negative.zero.underlying.rawValue)
+-            default:
+-                preconditionFailure("Unknown constructor")
++        @Test(arguments: [
++            "integer", "ordinal", "literal", "enumerable", "negativeInteger",
++            "wideOrdinal", "wideLiteral", "boundedIndexLiteral",
++        ])
++        func `Nonfailable public constructors reject positions outside the domain`(
++            constructor: String
++        ) async {
++            await #expect(processExitsWith: .failure) { [constructor = constructor as String] in
++                switch constructor {
++                case "integer":
++                    print(Ordinal.Finite<3>(_unchecked: Int(3)).underlying.rawValue)
++                case "ordinal":
++                    print(Ordinal.Finite<3>(_unchecked: Ordinal(3)).underlying.rawValue)
++                case "literal":
++                    let value: Ordinal.Finite<3> = 3
++                    print(value.underlying.rawValue)
++                case "enumerable":
++                    print(construct(Ordinal.Finite<3>.self, at: Ordinal(3)).underlying.rawValue)
++                case "negativeInteger":
++                    print(Ordinal.Finite<3>(_unchecked: Int(-1)).underlying.rawValue)
++                case "wideOrdinal":
++                    print(Ordinal.Finite<3>(_unchecked: Ordinal(UInt.max)).underlying.rawValue)
++                case "wideLiteral":
++                    print(Ordinal.Finite<3>(integerLiteral: UInt.max).underlying.rawValue)
++                #if Tagged
++                    case "boundedIndexLiteral":
++                        let value: Index<Int>.Bounded<3> = 3
++                        print(value.underlying.underlying.rawValue)
++                #endif
++                default:
++                    preconditionFailure("Unknown constructor")
++                }
+             }
+         }
+-    }
+ 
+-    #if Tagged
+         @Test
+-        func `Safe scalar conveniences preserve their domain and ordinal views`() {
+-            let low: Ordinal.Finite<3> = 0
+-            let high: Ordinal.Finite<3> = 2
+-            #expect(Ordinal.Finite<3>.min(low, high) == low)
+-            #expect(Ordinal.Finite<3>.max(low, high) == high)
+-            #expect(high.position == high.ordinal)
+-            #expect(high.description == "2")
+-            let count: Ordinal.Finite<3>.Count = .init(Ordinal.Finite<3>.capacity())
+-            let offset: Ordinal.Finite<3>.Offset = .init(Difference(-1))
+-            let _: Ordinal.Finite<3>.Domain.Type = Finite.Bound<3>.self
+-            let underlying: Ordinal.Finite<3>.Underlying = high.underlying
+-            #expect(count.underlying == 3)
+-            #expect(offset.underlying == -1)
+-            #expect(underlying == 2)
++        func `Zero requires a nonempty bounded domain`() async {
++            let valid: Ordinal.Finite<1> = .zero
++            #expect(valid.underlying == 0)
++            await withKnownIssue("Swift integer generic specialization collision: https://github.com/swiftlang/swift/issues/90739") {
++                await #expect(processExitsWith: .failure) {
++                    print(Ordinal.Finite<0>.zero.underlying.rawValue)
++                }
++            } when: {
++                !_isDebugAssertConfiguration()
++            } matching: { issue in
++                guard case .expectationFailed = issue.kind else { return false }
++                return issue.description.contains("EXIT_SUCCESS")
++            }
+         }
+-    #endif
+ 
+-    #if Tagged
+-        @Test
+-        func `Outer index tags retain bounded values through retagging and checked bridges`() {
+-            struct Domain: ~Copyable, ~Escapable {}
+-            let ordinal: Ordinal.Finite<3> = 2
+-            let index: Index<Int>.Bounded<3> = Tagged(_unchecked: ordinal)
+-            let retagged: Index<Domain>.Bounded<3> = index.retag(Domain.self)
+-            let widened: Index<Domain> = Index(retagged)
+-            let mapped: Index<Domain> = retagged.map { $0.underlying }
+-            let restored: Index<Domain>.Bounded<3>? = .init(widened)
+-            #expect(retagged.underlying == ordinal)
+-            #expect(widened == mapped)
+-            #expect(restored?.underlying == ordinal)
+-            let outside: Index<Domain> = .init(Ordinal(3))
+-            let rejected: Index<Domain>.Bounded<3>? = .init(outside)
+-            #expect(rejected == nil)
++        @Test(arguments: ["integer", "ordinal", "literal", "enumerable", "zero"])
++        func `Nonfailable construction cannot produce an ordinal for a negative domain`(
++            constructor: String
++        ) async {
++            await #expect(processExitsWith: .failure) { [constructor = constructor as String] in
++                typealias Negative = Ordinal.Finite<-3>
++                switch constructor {
++                case "integer":
++                    print(Negative(_unchecked: Int(0)).underlying.rawValue)
++                case "ordinal":
++                    print(Negative(_unchecked: Ordinal.zero).underlying.rawValue)
++                case "literal":
++                    print((0 as Negative).underlying.rawValue)
++                case "enumerable":
++                    print(construct(Negative.self, at: .zero).underlying.rawValue)
++                case "zero":
++                    print(Negative.zero.underlying.rawValue)
++                default:
++                    preconditionFailure("Unknown constructor")
++                }
++            }
+         }
+-    #endif
++
++        #if Tagged
++            @Test
++            func `Safe scalar conveniences preserve their domain and ordinal views`() {
++                let low: Ordinal.Finite<3> = 0
++                let high: Ordinal.Finite<3> = 2
++                #expect(Ordinal.Finite<3>.min(low, high) == low)
++                #expect(Ordinal.Finite<3>.max(low, high) == high)
++                #expect(high.position == high.ordinal)
++                #expect(high.description == "2")
++                let count: Ordinal.Finite<3>.Count = .init(Ordinal.Finite<3>.capacity())
++                let offset: Ordinal.Finite<3>.Offset = .init(Difference(-1))
++                let _: Ordinal.Finite<3>.Domain.Type = Finite.Bound<3>.self
++                let underlying: Ordinal.Finite<3>.Underlying = high.underlying
++                #expect(count.underlying == 3)
++                #expect(offset.underlying == -1)
++                #expect(underlying == 2)
++            }
++        #endif
++
++        #if Tagged
++            @Test
++            func `Outer index tags retain bounded values through retagging and checked bridges`() {
++                struct Domain: ~Copyable, ~Escapable {}
++                let ordinal: Ordinal.Finite<3> = 2
++                let index: Index<Int>.Bounded<3> = Tagged(_unchecked: ordinal)
++                let retagged: Index<Domain>.Bounded<3> = index.retag(Domain.self)
++                let widened: Index<Domain> = Index(retagged)
++                let mapped: Index<Domain> = retagged.map { $0.underlying }
++                let restored: Index<Domain>.Bounded<3>? = .init(widened)
++                #expect(retagged.underlying == ordinal)
++                #expect(widened == mapped)
++                #expect(restored?.underlying == ordinal)
++                let outside: Index<Domain> = .init(Ordinal(3))
++                let rejected: Index<Domain>.Bounded<3>? = .init(outside)
++                #expect(rejected == nil)
++            }
++        #endif
++    }
+ }
+diff --git a/Tests/Finite Tests/Ordinal Tests.swift b/Tests/Finite Tests/Ordinal Tests.swift
+index d9dd4b8..e2faefe 100644
+--- a/Tests/Finite Tests/Ordinal Tests.swift	
++++ b/Tests/Finite Tests/Ordinal Tests.swift	
+@@ -8,296 +8,316 @@
+ 
+     @testable import Finite
+ 
+-    @Suite
+-    struct `Bounded ordinals expose their positions and domain limits` {
+-        @Test(arguments: [0, 1, 2])
+-        func `The position view preserves the supplied integer`(value: Int) {
+-            let ordinal: Ordinal.Finite<5> = Ordinal.Finite(value)!
+-            #expect(ordinal.position.rawValue == UInt(value))
+-        }
++enum `Ordinal Tests` {}
++
++extension `Ordinal Tests` {
++        @Suite
++        struct `Bounded ordinals expose their positions and domain limits` {
++            @Test(arguments: [0, 1, 2])
++            func `The position view preserves the supplied integer`(value: Int) {
++                let ordinal: Ordinal.Finite<5> = Ordinal.Finite(value)!
++                #expect(ordinal.position.rawValue == UInt(value))
++            }
+ 
+-        @Test(arguments: [0, 1, 2])
+-        func `Repeated integer construction preserves the same bounded position`(value: Int) {
+-            let ordinal: Ordinal.Finite<5> = Ordinal.Finite(value)!
+-            #expect(ordinal == Ordinal.Finite(value)!)
+-        }
++            @Test(arguments: [0, 1, 2])
++            func `Repeated integer construction preserves the same bounded position`(value: Int) {
++                let ordinal: Ordinal.Finite<5> = Ordinal.Finite(value)!
++                #expect(ordinal == Ordinal.Finite(value)!)
++            }
+ 
+-        @Test
+-        func `Capacity equals the declared finite bound`() {
+-            #expect(Ordinal.Finite<3>.capacity() == 3)
+-            #expect(Ordinal.Finite<10>.capacity() == 10)
+-            #expect(Ordinal.Finite<1>.capacity() == 1)
+-            #expect(Ordinal.Finite<0>.capacity() == 0)
+-        }
++            @Test
++            func `Capacity equals the declared finite bound`() {
++                #expect(Ordinal.Finite<3>.capacity() == 3)
++                #expect(Ordinal.Finite<10>.capacity() == 10)
++                #expect(Ordinal.Finite<1>.capacity() == 1)
++                #expect(Ordinal.Finite<0>.capacity() == 0)
++            }
+ 
+-        @Test
+-        func `The maximum exists only for a nonempty domain`() {
+-            #expect(Ordinal.Finite<5>.max() == 4)
+-            #expect(Ordinal.Finite<1>.max() == 0)
+-            #expect(Ordinal.Finite<0>.max() == nil)
+-        }
++            @Test
++            func `The maximum exists only for a nonempty domain`() {
++                #expect(Ordinal.Finite<5>.max() == 4)
++                #expect(Ordinal.Finite<1>.max() == 0)
++                #expect(Ordinal.Finite<0>.max() == nil)
++            }
+ 
+-        @Test
+-        func `Zero denotes the first position of a nonempty domain`() {
+-            let zero: Ordinal.Finite<5> = .zero
+-            #expect(zero == 0)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Adjacent bounded ordinals stop at their domain endpoints` {
+-        @Test
+-        func `successor returns next value`() {
+-            let ordinal: Ordinal.Finite<5> = 2
+-            let next = ordinal.successor()
+-            #expect(next == 3)
++            @Test
++            func `Zero denotes the first position of a nonempty domain`() {
++                let zero: Ordinal.Finite<5> = .zero
++                #expect(zero == 0)
++            }
+         }
++}
+ 
+-        @Test
+-        func `successor returns nil at max`() {
+-            let ordinal: Ordinal.Finite<5> = 4
+-            let next = ordinal.successor()
+-            #expect(next == nil)
+-        }
++extension `Ordinal Tests` {
++        @Suite
++        struct `Adjacent bounded ordinals stop at their domain endpoints` {
++            @Test
++            func `successor returns next value`() {
++                let ordinal: Ordinal.Finite<5> = 2
++                let next = ordinal.successor()
++                #expect(next == 3)
++            }
+ 
+-        @Test
+-        func `predecessor returns previous value`() {
+-            let ordinal: Ordinal.Finite<5> = 2
+-            let previous = ordinal.predecessor()
+-            #expect(previous == 1)
+-        }
++            @Test
++            func `successor returns nil at max`() {
++                let ordinal: Ordinal.Finite<5> = 4
++                let next = ordinal.successor()
++                #expect(next == nil)
++            }
+ 
+-        @Test
+-        func `predecessor returns nil at zero`() {
+-            let ordinal: Ordinal.Finite<5> = 0
+-            let previous = ordinal.predecessor()
+-            #expect(previous == nil)
+-        }
++            @Test
++            func `predecessor returns previous value`() {
++                let ordinal: Ordinal.Finite<5> = 2
++                let previous = ordinal.predecessor()
++                #expect(previous == 1)
++            }
+ 
+-        @Test
+-        func `Successive ordinals visit the entire domain in order`() {
+-            var ordinal: Ordinal.Finite<4> = .zero
+-            var values: [Ordinal.Finite<4>] = [ordinal]
+-            while let next = ordinal.successor() {
+-                ordinal = next
+-                values.append(ordinal)
++            @Test
++            func `predecessor returns nil at zero`() {
++                let ordinal: Ordinal.Finite<5> = 0
++                let previous = ordinal.predecessor()
++                #expect(previous == nil)
+             }
+-            #expect(values == [0, 1, 2, 3])
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded ordinal distances and offsets preserve positions` {
+-        @Test
+-        func `distance to calculates signed distance`() {
+-            let a: Ordinal.Finite<10> = 2
+-            let b: Ordinal.Finite<10> = 7
+-            #expect(a.distance(to: b) == 5)
+-            #expect(b.distance(to: a) == -5)
+-        }
+ 
+-        @Test
+-        func `offset returns shifted ordinal`() {
+-            let ordinal: Ordinal.Finite<10> = 5
+-            #expect(ordinal.offset(by: 2) == 7)
+-            #expect(ordinal.offset(by: -3) == 2)
++            @Test
++            func `Successive ordinals visit the entire domain in order`() {
++                var ordinal: Ordinal.Finite<4> = .zero
++                var values: [Ordinal.Finite<4>] = [ordinal]
++                while let next = ordinal.successor() {
++                    ordinal = next
++                    values.append(ordinal)
++                }
++                #expect(values == [0, 1, 2, 3])
++            }
+         }
++}
++
++extension `Ordinal Tests` {
++        @Suite
++        struct `Bounded ordinal distances and offsets preserve positions` {
++            @Test
++            func `distance to calculates signed distance`() {
++                let a: Ordinal.Finite<10> = 2
++                let b: Ordinal.Finite<10> = 7
++                #expect(a.distance(to: b) == 5)
++                #expect(b.distance(to: a) == -5)
++            }
+ 
+-        @Test
+-        func `offset returns nil when out of bounds`() {
+-            let ordinal: Ordinal.Finite<10> = 5
+-            #expect(ordinal.offset(by: 10) == nil)
+-            #expect(ordinal.offset(by: -6) == nil)
+-        }
++            @Test
++            func `offset returns shifted ordinal`() {
++                let ordinal: Ordinal.Finite<10> = 5
++                #expect(ordinal.offset(by: 2) == 7)
++                #expect(ordinal.offset(by: -3) == 2)
++            }
+ 
+-        @Test
+-        func `clamped offsetBy stays within bounds`() {
+-            let ordinal: Ordinal.Finite<10> = 5
+-            #expect(ordinal.clamped(offsetBy: 100) == 9)
+-            #expect(ordinal.clamped(offsetBy: -100) == 0)
+-            #expect(ordinal.clamped(offsetBy: 2) == 7)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Ordinal complements reflect their finite domains` {
+-        @Test
+-        func `complement mirrors position`() {
+-            #expect(Ordinal.Finite<4>(_unchecked: 0).complement() == 3)
+-            #expect(Ordinal.Finite<4>(_unchecked: 1).complement() == 2)
+-            #expect(Ordinal.Finite<4>(_unchecked: 2).complement() == 1)
+-            #expect(Ordinal.Finite<4>(_unchecked: 3).complement() == 0)
+-        }
++            @Test
++            func `offset returns nil when out of bounds`() {
++                let ordinal: Ordinal.Finite<10> = 5
++                #expect(ordinal.offset(by: 10) == nil)
++                #expect(ordinal.offset(by: -6) == nil)
++            }
+ 
+-        @Test
+-        func `complement is involution`() {
+-            (0..<5).forEach { i in
+-                let ordinal = Ordinal.Finite<5>(i)!
+-                #expect(ordinal.complement().complement() == ordinal)
++            @Test
++            func `clamped offsetBy stays within bounds`() {
++                let ordinal: Ordinal.Finite<10> = 5
++                #expect(ordinal.clamped(offsetBy: 100) == 9)
++                #expect(ordinal.clamped(offsetBy: -100) == 0)
++                #expect(ordinal.clamped(offsetBy: 2) == 7)
+             }
+         }
+-    }
+-
+-    @Suite
+-    struct `Product coordinates preserve bounded ordinal positions` {
+-        @Test
+-        func `decomposed extracts row and column`() {
+-            let index: Ordinal.Finite<12> = 7
+-            let result: (Ordinal.Finite<3>, Ordinal.Finite<4>)? = index.decomposed()
+-            #expect(result?.0 == 1)
+-            #expect(result?.1 == 3)
+-        }
++}
++
++extension `Ordinal Tests` {
++        @Suite
++        struct `Ordinal complements reflect their finite domains` {
++            @Test
++            func `complement mirrors position`() {
++                #expect(Ordinal.Finite<4>(_unchecked: 0).complement() == 3)
++                #expect(Ordinal.Finite<4>(_unchecked: 1).complement() == 2)
++                #expect(Ordinal.Finite<4>(_unchecked: 2).complement() == 1)
++                #expect(Ordinal.Finite<4>(_unchecked: 3).complement() == 0)
++            }
+ 
+-        @Test
+-        func `decomposed returns nil for mismatched dimensions`() {
+-            let index: Ordinal.Finite<12> = 7
+-            let result: (Ordinal.Finite<5>, Ordinal.Finite<5>)? = index.decomposed()
+-            #expect(result == nil)
++            @Test
++            func `complement is involution`() {
++                (0..<5).forEach { i in
++                    let ordinal = Ordinal.Finite<5>(i)!
++                    #expect(ordinal.complement().complement() == ordinal)
++                }
++            }
+         }
++}
++
++extension `Ordinal Tests` {
++        @Suite
++        struct `Product coordinates preserve bounded ordinal positions` {
++            @Test
++            func `decomposed extracts row and column`() {
++                let index: Ordinal.Finite<12> = 7
++                let result: (Ordinal.Finite<3>, Ordinal.Finite<4>)? = index.decomposed()
++                #expect(result?.0 == 1)
++                #expect(result?.1 == 3)
++            }
+ 
+-        @Test
+-        func `composed from row and column combines correctly`() {
+-            let row: Ordinal.Finite<3> = 1
+-            let column: Ordinal.Finite<4> = 3
+-            let index: Ordinal.Finite<12>? = .composed(row: row, column: column)
+-            #expect(index == 7)
+-        }
++            @Test
++            func `decomposed returns nil for mismatched dimensions`() {
++                let index: Ordinal.Finite<12> = 7
++                let result: (Ordinal.Finite<5>, Ordinal.Finite<5>)? = index.decomposed()
++                #expect(result == nil)
++            }
+ 
+-        @Test
+-        func `composed returns nil for mismatched dimensions`() {
+-            let row: Ordinal.Finite<3> = 1
+-            let column: Ordinal.Finite<4> = 3
+-            let index: Ordinal.Finite<10>? = .composed(row: row, column: column)
+-            #expect(index == nil)
+-        }
++            @Test
++            func `composed from row and column combines correctly`() {
++                let row: Ordinal.Finite<3> = 1
++                let column: Ordinal.Finite<4> = 3
++                let index: Ordinal.Finite<12>? = .composed(row: row, column: column)
++                #expect(index == 7)
++            }
+ 
+-        @Test
+-        func `decomposed and composed are inverses`() {
+-            (0..<12).forEach { i in
+-                let index: Ordinal.Finite<12> = Ordinal.Finite(i)!
+-                let (row, column): (Ordinal.Finite<3>, Ordinal.Finite<4>) = index.decomposed()!
+-                let reconstructed: Ordinal.Finite<12> = .composed(row: row, column: column)!
+-                #expect(reconstructed == index)
++            @Test
++            func `composed returns nil for mismatched dimensions`() {
++                let row: Ordinal.Finite<3> = 1
++                let column: Ordinal.Finite<4> = 3
++                let index: Ordinal.Finite<10>? = .composed(row: row, column: column)
++                #expect(index == nil)
+             }
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded ordinal constructors preserve valid positions` {
+-        @Test(arguments: [0, 1, 2, 3, 4])
+-        func `Checked integer construction preserves every valid position`(value: Int) {
+-            let ordinal: Ordinal.Finite<5>? = Ordinal.Finite(value)
+-            #expect(ordinal != nil)
+-            #expect(ordinal == Ordinal.Finite(value)!)
+-        }
+ 
+-        @Test(arguments: [-1, 5, 10, 100])
+-        func `init from Int with invalid value returns nil`(value: Int) {
+-            let ordinal: Ordinal.Finite<5>? = Ordinal.Finite(value)
+-            #expect(ordinal == nil)
++            @Test
++            func `decomposed and composed are inverses`() {
++                (0..<12).forEach { i in
++                    let index: Ordinal.Finite<12> = Ordinal.Finite(i)!
++                    let (row, column): (Ordinal.Finite<3>, Ordinal.Finite<4>) = index.decomposed()!
++                    let reconstructed: Ordinal.Finite<12> = .composed(row: row, column: column)!
++                    #expect(reconstructed == index)
++                }
++            }
+         }
++}
+ 
+-        @Test(arguments: [0, 1, 2])
+-        func `Checked ordinal construction preserves every valid position`(value: Int) {
+-            let ordinal: Ordinal.Finite<5>? = Ordinal.Finite(Ordinal(UInt(value)))
+-            #expect(ordinal != nil)
+-            #expect(ordinal == Ordinal.Finite(value)!)
+-        }
++extension `Ordinal Tests` {
++        @Suite
++        struct `Bounded ordinal constructors preserve valid positions` {
++            @Test(arguments: [0, 1, 2, 3, 4])
++            func `Checked integer construction preserves every valid position`(value: Int) {
++                let ordinal: Ordinal.Finite<5>? = Ordinal.Finite(value)
++                #expect(ordinal != nil)
++                #expect(ordinal == Ordinal.Finite(value)!)
++            }
+ 
+-        @Test(arguments: [0, 1, 2])
+-        func `The compatibility initializer preserves each valid position`(value: Int) {
+-            let ordinal: Ordinal.Finite<5> = Ordinal.Finite(_unchecked: value)
+-            #expect(ordinal == Ordinal.Finite(value)!)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded ordinal conversions preserve their destination domains` {
+-        @Test
+-        func `injected safely converts to larger domain`() {
+-            let ord2: Ordinal.Finite<2> = 0
+-            let ord5: Ordinal.Finite<5> = ord2.injected()
+-            #expect(ord5 == 0)
+-        }
++            @Test(arguments: [-1, 5, 10, 100])
++            func `init from Int with invalid value returns nil`(value: Int) {
++                let ordinal: Ordinal.Finite<5>? = Ordinal.Finite(value)
++                #expect(ordinal == nil)
++            }
+ 
+-        @Test(arguments: [0, 1])
+-        func `injected preserves value`(value: Int) {
+-            let ord2: Ordinal.Finite<2> = Ordinal.Finite(value)!
+-            let ord10: Ordinal.Finite<10> = ord2.injected()
+-            #expect(ord10 == Ordinal.Finite(value)!)
+-        }
++            @Test(arguments: [0, 1, 2])
++            func `Checked ordinal construction preserves every valid position`(value: Int) {
++                let ordinal: Ordinal.Finite<5>? = Ordinal.Finite(Ordinal(UInt(value)))
++                #expect(ordinal != nil)
++                #expect(ordinal == Ordinal.Finite(value)!)
++            }
+ 
+-        @Test
+-        func `projected converts to smaller domain when valid`() {
+-            let ord10: Ordinal.Finite<10> = 2
+-            let ord5: Ordinal.Finite<5>? = ord10.projected()
+-            #expect(ord5 == 2)
++            @Test(arguments: [0, 1, 2])
++            func `The compatibility initializer preserves each valid position`(value: Int) {
++                let ordinal: Ordinal.Finite<5> = Ordinal.Finite(_unchecked: value)
++                #expect(ordinal == Ordinal.Finite(value)!)
++            }
+         }
++}
+ 
+-        @Test
+-        func `projected returns nil when value too large`() {
+-            let ord10: Ordinal.Finite<10> = 7
+-            let ord5: Ordinal.Finite<5>? = ord10.projected()
+-            #expect(ord5 == nil)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded ordinal conformances preserve value semantics` {
+-        @Test
+-        func `Equality distinguishes bounded ordinal positions`() {
+-            let ord1: Ordinal.Finite<5> = 2
+-            let ord2: Ordinal.Finite<5> = 2
+-            let ord3: Ordinal.Finite<5> = 3
+-            #expect(ord1 == ord2)
+-            #expect(ord1 != ord3)
+-        }
++extension `Ordinal Tests` {
++        @Suite
++        struct `Bounded ordinal conversions preserve their destination domains` {
++            @Test
++            func `injected safely converts to larger domain`() {
++                let ord2: Ordinal.Finite<2> = 0
++                let ord5: Ordinal.Finite<5> = ord2.injected()
++                #expect(ord5 == 0)
++            }
+ 
+-        @Test
+-        func `Hashable produces unique hashes`() {
+-            let set: Set<Ordinal.Finite<5>> = [0, 1, 0]
+-            #expect(set.count == 2)
+-        }
++            @Test(arguments: [0, 1])
++            func `injected preserves value`(value: Int) {
++                let ord2: Ordinal.Finite<2> = Ordinal.Finite(value)!
++                let ord10: Ordinal.Finite<10> = ord2.injected()
++                #expect(ord10 == Ordinal.Finite(value)!)
++            }
+ 
+-        @Test
+-        func `Bounded ordinals are ordered by their positions`() {
+-            let ord1: Ordinal.Finite<5> = 1
+-            let ord2: Ordinal.Finite<5> = 3
+-            #expect(ord1 < ord2)
+-            #expect(ord2 > ord1)
+-        }
++            @Test
++            func `projected converts to smaller domain when valid`() {
++                let ord10: Ordinal.Finite<10> = 2
++                let ord5: Ordinal.Finite<5>? = ord10.projected()
++                #expect(ord5 == 2)
++            }
+ 
+-        @Test
+-        func `A bounded ordinal can be used as a Sendable value`() {
+-            let ordinal: Ordinal.Finite<5> = 2
+-            let _: any Sendable = ordinal
+-        }
+-    }
+-
+-    @Suite
+-    struct `Bounded ordinals retain their nominal representation` {
+-        @Test
+-        func `A bounded ordinal has a distinct nominal type`() {
+-            let ordinal: Ordinal.Finite<5> = .zero
+-            #expect(
+-                ObjectIdentifier(type(of: ordinal))
+-                    != ObjectIdentifier(Tagged<Finite.Bound<5>, Ordinal>.self)
+-            )
++            @Test
++            func `projected returns nil when value too large`() {
++                let ord10: Ordinal.Finite<10> = 7
++                let ord5: Ordinal.Finite<5>? = ord10.projected()
++                #expect(ord5 == nil)
++            }
+         }
++}
++
++extension `Ordinal Tests` {
++        @Suite
++        struct `Bounded ordinal conformances preserve value semantics` {
++            @Test
++            func `Equality distinguishes bounded ordinal positions`() {
++                let ord1: Ordinal.Finite<5> = 2
++                let ord2: Ordinal.Finite<5> = 2
++                let ord3: Ordinal.Finite<5> = 3
++                #expect(ord1 == ord2)
++                #expect(ord1 != ord3)
++            }
++
++            @Test
++            func `Hashable produces unique hashes`() {
++                let set: Set<Ordinal.Finite<5>> = [0, 1, 0]
++                #expect(set.count == 2)
++            }
+ 
+-        @Test
+-        func `underlying is Ordinal`() {
+-            let ordinal: Ordinal.Finite<5> = 3
+-            let raw: Ordinal = ordinal.underlying
+-            #expect(raw == 3)
++            @Test
++            func `Bounded ordinals are ordered by their positions`() {
++                let ord1: Ordinal.Finite<5> = 1
++                let ord2: Ordinal.Finite<5> = 3
++                #expect(ord1 < ord2)
++                #expect(ord2 > ord1)
++            }
++
++            @Test
++            func `A bounded ordinal can be used as a Sendable value`() {
++                let ordinal: Ordinal.Finite<5> = 2
++                let _: any Sendable = ordinal
++            }
+         }
++}
++
++extension `Ordinal Tests` {
++        @Suite
++        struct `Bounded ordinals retain their nominal representation` {
++            @Test
++            func `A bounded ordinal has a distinct nominal type`() {
++                let ordinal: Ordinal.Finite<5> = .zero
++                #expect(
++                    ObjectIdentifier(type(of: ordinal))
++                        != ObjectIdentifier(Tagged<Finite.Bound<5>, Ordinal>.self)
++                )
++            }
+ 
+-        @Test
+-        func `The position view preserves the stored ordinal`() {
+-            let ordinal: Ordinal.Finite<5> = 3
+-            let position: Ordinal = ordinal.position
+-            #expect(position == 3)
++            @Test
++            func `underlying is Ordinal`() {
++                let ordinal: Ordinal.Finite<5> = 3
++                let raw: Ordinal = ordinal.underlying
++                #expect(raw == 3)
++            }
++
++            @Test
++            func `The position view preserves the stored ordinal`() {
++                let ordinal: Ordinal.Finite<5> = 3
++                let position: Ordinal = ordinal.position
++                #expect(position == 3)
++            }
+         }
+-    }
++}
+ 
+ #endif
+-- 
+2.43.0
+
