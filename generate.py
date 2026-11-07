@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes Package.swift: every checkout in repos/ as a path dependency, so a change in one is seen by all above it.
 A path dependency at the root overrides the same package's URL everywhere in the graph, so no repository's own manifest changes."""
-import concurrent.futures, glob, json, os, subprocess, sys
+import concurrent.futures, glob, json, os, re, subprocess, sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 os.chdir(here)
@@ -12,13 +12,27 @@ packages = sorted(p for p in glob.glob("repos/*/*") if os.path.exists(p + "/Pack
 requested = {}
 
 
+APPLE = re.compile(r"^(?:public |package |@preconcurrency )*import (?:AppKit|UIKit|SwiftUI|ScreenCaptureKit|AVFoundation|CoreGraphics|CoreImage|Metal)\b", re.M)
+
+
+def apple_only(dirs):
+    """A product whose targets import an Apple-only framework outside any #if: built on Apple platforms only."""
+    for d in dirs:
+        for f in glob.glob(os.path.join(d, "**/*.swift"), recursive=True):
+            t = open(f, errors="replace").read()
+            if "#if" not in t and APPLE.search(t):
+                return True
+    return False
+
+
 def dump(path):
     r = subprocess.run(["swift", "package", "dump-package", "--package-path", path], capture_output=True, text=True)
     if r.returncode:
         print("UNREADABLE", path, r.stderr[-300:], file=sys.stderr)
         return path, None, []
     m = json.loads(r.stdout)
-    libs = [p["name"] for p in m["products"] if "library" in p["type"]]
+    paths = {t["name"]: os.path.join(path, t.get("path") or f"Sources/{t['name']}") for t in m["targets"]}
+    libs = [(p["name"], apple_only(paths.get(t, "") for t in p["targets"])) for p in m["products"] if "library" in p["type"]]
     for d in m["dependencies"]:
         for v in next(iter(d.values())):
             for t in v.get("traits") or []:
@@ -41,7 +55,9 @@ def dependency(p):
 
 deps = "".join(dependency(p) for p, _, _ in dumped)
 products = "".join(
-    f'                .product(name: "{l}", package: "{os.path.basename(p)}"),\n' for p, n, libs in dumped for l in libs
+    f'                .product(name: "{l}", package: "{os.path.basename(p)}"'
+    + (", condition: .when(platforms: [.macOS, .iOS, .tvOS, .watchOS, .visionOS])" if apple else "") + "),\n"
+    for p, n, libs in dumped for l, apple in libs
 )
 open("Package.swift", "w").write(
     f"""// swift-tools-version: 6.4
@@ -65,4 +81,4 @@ let package = Package(
 )
 os.makedirs("Sources/Everything", exist_ok=True)
 open("Sources/Everything/Everything.swift", "w").write("// Holds the graph together. Never built on its own.\n")
-print(f"{len(dumped)} packages, {sum(len(l) for _, _, l in dumped)} library products")
+print(f"{len(dumped)} packages, {sum(len(l) for _, _, l in dumped)} library products, {sum(a for _, _, l in dumped for _, a in l)} Apple-only")
