@@ -2,6 +2,19 @@
 
 Coen's decision, 7 Nov (coenttb/work#242): rule work has stopped. Now fix the findings in code, across the whole ecosystem, in this workspace. Read `CLAUDE.md` and the latest `## Closing` in `status-execute.md`. Attach `coenttb/work` and read #242, whose comments override this file. Nobody can answer you, and you can't message back.
 
+## Start here
+
+A first session linted all packages (30,436 findings, `overnight/findings-start.json`) and fixed 441 `minimal type body` findings, saved unverified as patches on the `findings-wip` branch (`wip/<owner>__<name>/`). Apply those patches with `git am` in each repository first, then verify them (root build, test builds of those packages) and continue. Read `status-execute.md`.
+
+**Coen's target: 40–80% of the 30,436 fixed in code, at least 12,000.** Work largest rule first, naming and structure rules included (`compound suite name`, `compound identifier`, `path name grammar`, `extension file naming`, `minimal type body` by hand, `raw value access`, `single type per file`, `compound type name`, ...). Public renames are fine: update every caller across the workspace in the same batch. Skip only a fix that needs a new type or changes behaviour or a stored format, and count the skips per rule. Write a small script per rule where the pattern repeats, and apply it everywhere at once.
+
+**Lessons from the first session:**
+- The runner's repairs are less safe than the audit said: prefer scripts and hand fixes, and revert any repair that breaks more than a few files.
+- The disk fills: delete lint mirrors and old build output after each batch.
+- Don't block on background jobs: start the root build, prepare the next batch while it runs.
+- Test-build only the changed packages when the batch leaves public API alone; add their direct dependents only when it changes public API (the root build already compiles every library against the change).
+- Don't ask for confirmation between batches: there is nobody to answer. Coen's instructions come through this file and #242.
+
 ## No measuring phase
 
 The counts exist. Don't build a baseline or re-measure before you start fixing. Start from the latest lint output: `status-execute.md`'s closing and `overnight/execute-lint.json` (or whatever its closing names). Re-lint only the packages you changed, to see each batch's effect.
