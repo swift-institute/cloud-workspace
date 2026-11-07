@@ -1,0 +1,177 @@
+From 623488bf735b6ac962c9ddbbf41b6cb27d5c07d7 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:48:53 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into extension
+ <Type> named after their test file, nested suites into extension
+ <Type>.<Parent> (overnight/compound-suites.py); parse-checked; builds pending
+ (coenttb/work#242)
+
+---
+ .../Memory.Shared Tests.swift                 | 68 ++++++++++---------
+ Tests/Memory Tests/Memory.Heap Tests.swift    |  8 ++-
+ Tests/Memory Tests/Memory.Page Tests.swift    | 22 +++---
+ Tests/Memory Tests/Memory.Shift Tests.swift   |  8 ++-
+ 4 files changed, 59 insertions(+), 47 deletions(-)
+
+diff --git a/Tests/Absorbed swift-memory-shared Tests/Memory.Shared Tests.swift b/Tests/Absorbed swift-memory-shared Tests/Memory.Shared Tests.swift
+index 9c58c80..b8b385c 100644
+--- a/Tests/Absorbed swift-memory-shared Tests/Memory.Shared Tests.swift	
++++ b/Tests/Absorbed swift-memory-shared Tests/Memory.Shared Tests.swift	
+@@ -3,42 +3,44 @@
+ 
+     import Memory
+ 
+-    @Suite
+-    struct `Shared memory errors preserve operation and payload` {
+-        @Test
+-        func `Open errors preserve POSIX codes and compare payloads`() {
+-            let error = Memory.Shared.Error.open(.posix(13))
+-            guard case .open(let code) = error else {
+-                Issue.record("Expected an open error")
+-                return
++extension Memory.Shared {
++        @Suite
++        struct `Shared memory errors preserve operation and payload` {
++            @Test
++            func `Open errors preserve POSIX codes and compare payloads`() {
++                let error = Memory.Shared.Error.open(.posix(13))
++                guard case .open(let code) = error else {
++                    Issue.record("Expected an open error")
++                    return
++                }
++                #expect(code == .posix(13))
++                #expect(error == .open(.posix(13)))
++                #expect(error != .open(.posix(2)))
++                #expect(error != .unlink(.posix(13)))
++                #expect(error.description == "shm_open failed: posix(13)")
+             }
+-            #expect(code == .posix(13))
+-            #expect(error == .open(.posix(13)))
+-            #expect(error != .open(.posix(2)))
+-            #expect(error != .unlink(.posix(13)))
+-            #expect(error.description == "shm_open failed: posix(13)")
+-        }
+ 
+-        @Test
+-        func `Unlink errors preserve the full Windows code`() {
+-            let error = Memory.Shared.Error.unlink(.win32(.max))
+-            guard case .unlink(let code) = error else {
+-                Issue.record("Expected an unlink error")
+-                return
++            @Test
++            func `Unlink errors preserve the full Windows code`() {
++                let error = Memory.Shared.Error.unlink(.win32(.max))
++                guard case .unlink(let code) = error else {
++                    Issue.record("Expected an unlink error")
++                    return
++                }
++                #expect(code == .win32(UInt32.max))
++                #expect(error == .unlink(.win32(.max)))
++                #expect(error != .unlink(.posix(-1)))
++                #expect(error.description == "shm_unlink failed: win32(4294967295)")
+             }
+-            #expect(code == .win32(UInt32.max))
+-            #expect(error == .unlink(.win32(.max)))
+-            #expect(error != .unlink(.posix(-1)))
+-            #expect(error.description == "shm_unlink failed: win32(4294967295)")
+-        }
+ 
+-        @Test
+-        func `Exhaustion remains distinct from operation failures`() {
+-            let error = Memory.Shared.Error.exhausted
+-            #expect(error == .exhausted)
+-            #expect(error != .open(.posix(12)))
+-            #expect(error != .unlink(.posix(12)))
+-            #expect(error.description == "out of memory")
++            @Test
++            func `Exhaustion remains distinct from operation failures`() {
++                let error = Memory.Shared.Error.exhausted
++                #expect(error == .exhausted)
++                #expect(error != .open(.posix(12)))
++                #expect(error != .unlink(.posix(12)))
++                #expect(error.description == "out of memory")
++            }
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Memory Tests/Memory.Heap Tests.swift b/Tests/Memory Tests/Memory.Heap Tests.swift
+index 678cf74..d2c56a5 100644
+--- a/Tests/Memory Tests/Memory.Heap Tests.swift	
++++ b/Tests/Memory Tests/Memory.Heap Tests.swift	
+@@ -10,11 +10,15 @@ enum `Memory.Heap Tests` {}
+ extension `Memory.Heap Tests` {
+     @Suite
+     struct `Heap allocation preserves byte capacity and stable base addresses` {
+-        @Suite struct `Heap construction retains requested capacities and stable base addresses` {}
+-        @Suite struct `A single byte heap allocation retains its requested capacity` {}
+     }
+ }
+ 
++extension `Memory.Heap Tests`.`Heap allocation preserves byte capacity and stable base addresses` {
++    @Suite struct `Heap construction retains requested capacities and stable base addresses` {}
++
++    @Suite struct `A single byte heap allocation retains its requested capacity` {}
++}
++
+ extension `Memory.Heap Tests`.`Heap allocation preserves byte capacity and stable base addresses`.`Heap construction retains requested capacities and stable base addresses` {
+     @Test
+     func `fresh allocation reports the requested byte capacity`() {
+diff --git a/Tests/Memory Tests/Memory.Page Tests.swift b/Tests/Memory Tests/Memory.Page Tests.swift
+index 458a9a9..17742ef 100644
+--- a/Tests/Memory Tests/Memory.Page Tests.swift	
++++ b/Tests/Memory Tests/Memory.Page Tests.swift	
+@@ -1,16 +1,18 @@
+ import Memory
+ import Testing
+ 
+-@Suite struct `Memory page sizes expose alignment and capacities retain the unsigned range` {
+-    @Test func `page Size Produces Its Alignment`() {
+-        let size = Memory.Page.Size(_unchecked: Cardinal(4096 as UInt))
+-        #expect(size.alignment == .`4096`)
+-        #expect(size.alignment.isAligned(8192))
+-        #expect(!size.alignment.isAligned(4097))
+-    }
++extension Memory.Page {
++    @Suite struct `Memory page sizes expose alignment and capacities retain the unsigned range` {
++        @Test func `page Size Produces Its Alignment`() {
++            let size = Memory.Page.Size(_unchecked: Cardinal(4096 as UInt))
++            #expect(size.alignment == .`4096`)
++            #expect(size.alignment.isAligned(8192))
++            #expect(!size.alignment.isAligned(4097))
++        }
+ 
+-    @Test func `capacity Retains Unsigned Range`() {
+-        let capacity = Memory.Capacity(_unchecked: Cardinal(UInt.max))
+-        #expect(UInt64(capacity) == UInt64(UInt.max))
++        @Test func `capacity Retains Unsigned Range`() {
++            let capacity = Memory.Capacity(_unchecked: Cardinal(UInt.max))
++            #expect(UInt64(capacity) == UInt64(UInt.max))
++        }
+     }
+ }
+diff --git a/Tests/Memory Tests/Memory.Shift Tests.swift b/Tests/Memory Tests/Memory.Shift Tests.swift
+index ed4c8e8..1ff6e82 100644
+--- a/Tests/Memory Tests/Memory.Shift Tests.swift	
++++ b/Tests/Memory Tests/Memory.Shift Tests.swift	
+@@ -7,11 +7,15 @@ enum `Memory.Shift Tests` {}
+ extension `Memory.Shift Tests` {
+     @Suite
+     struct `Memory shifts preserve powers masks and carrier width validation` {
+-        @Suite struct `Memory shifts derive powers and masks within the validated carrier width` {}
+-        @Suite struct `Memory shifts preserve top bit values and reject computations beyond carrier width` {}
+     }
+ }
+ 
++extension `Memory.Shift Tests`.`Memory shifts preserve powers masks and carrier width validation` {
++    @Suite struct `Memory shifts derive powers and masks within the validated carrier width` {}
++
++    @Suite struct `Memory shifts preserve top bit values and reject computations beyond carrier width` {}
++}
++
+ extension `Memory.Shift Tests`.`Memory shifts preserve powers masks and carrier width validation`.`Memory shifts derive powers and masks within the validated carrier width` {
+     @Test
+     func `magnitude computes the power of two within carrier width`() throws {
+-- 
+2.43.0
+

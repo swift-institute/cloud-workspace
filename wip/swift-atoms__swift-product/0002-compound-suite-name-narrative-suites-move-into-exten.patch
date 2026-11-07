@@ -1,0 +1,247 @@
+From c948755a67e392fe74df898cb8bc478218a32d41 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:48:55 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into extension
+ <Type> named after their test file, nested suites into extension
+ <Type>.<Parent> (overnight/compound-suites.py); parse-checked; builds pending
+ (coenttb/work#242)
+
+---
+ .../Product Macro Tests/Consumer Tests.swift  |   2 +-
+ .../Derivation Tests.swift                    | 168 +++++++++---------
+ .../Product Macro Tests/Expansion Tests.swift |   2 +-
+ Tests/Product Tests/Product Tests.swift       |   6 +
+ 4 files changed, 93 insertions(+), 85 deletions(-)
+
+diff --git a/Tests/Product Macro Tests/Consumer Tests.swift b/Tests/Product Macro Tests/Consumer Tests.swift
+index 294a938..2a40caa 100644
+--- a/Tests/Product Macro Tests/Consumer Tests.swift	
++++ b/Tests/Product Macro Tests/Consumer Tests.swift	
+@@ -61,7 +61,7 @@ private func use<Client: Greeting.`Protocol`>(_ client: Client) async throws ->
+     try await client.greet(name: "Blob")
+ }
+ 
+-extension `Product Derivation Tests` {
++extension Derivation.`Product Derivation Tests` {
+     @Suite
+     struct Consumer {
+         @Test
+diff --git a/Tests/Product Macro Tests/Derivation Tests.swift b/Tests/Product Macro Tests/Derivation Tests.swift
+index b03bc5d..827c769 100644
+--- a/Tests/Product Macro Tests/Derivation Tests.swift	
++++ b/Tests/Product Macro Tests/Derivation Tests.swift	
+@@ -6,93 +6,95 @@ import Testing
+ 
+ @testable import Product_Macro_Core
+ 
+-@Suite
+-struct `Product Derivation Tests` {
+-    @Test
+-    func `protocol operations derive one product structure`() throws {
+-        let source = Parser.parse(
+-            source: """
+-                protocol Greeting {
+-                    func greet(_ name: String) -> String
+-                    func reset()
+-                }
+-                """
+-        )
+-        let protocolDeclaration = try #require(
+-            source.statements.first?.item.as(ProtocolDeclSyntax.self)
+-        )
+-        let analysis = Product.Analysis(protocolDeclaration)
+-        let declarations = Product.Derivation.peers(of: analysis)
+-        let product = try #require(declarations.first?.as(StructDeclSyntax.self))
++extension Derivation {
++    @Suite
++    struct `Product Derivation Tests` {
++        @Test
++        func `protocol operations derive one product structure`() throws {
++            let source = Parser.parse(
++                source: """
++                    protocol Greeting {
++                        func greet(_ name: String) -> String
++                        func reset()
++                    }
++                    """
++            )
++            let protocolDeclaration = try #require(
++                source.statements.first?.item.as(ProtocolDeclSyntax.self)
++            )
++            let analysis = Product.Analysis(protocolDeclaration)
++            let declarations = Product.Derivation.peers(of: analysis)
++            let product = try #require(declarations.first?.as(StructDeclSyntax.self))
+ 
+-        #expect(declarations.count == 1)
+-        #expect(analysis.diagnostics.isEmpty)
+-        #expect(product.name.text == "Product")
+-        #expect(product.memberBlock.members.count == 5)
+-    }
++            #expect(declarations.count == 1)
++            #expect(analysis.diagnostics.isEmpty)
++            #expect(product.name.text == "Product")
++            #expect(product.memberBlock.members.count == 5)
++        }
+ 
+-    @Test
+-    func `empty protocol derives an empty product`() throws {
+-        let source = Parser.parse(source: "protocol Empty {}")
+-        let protocolDeclaration = try #require(
+-            source.statements.first?.item.as(ProtocolDeclSyntax.self)
+-        )
+-        let analysis = Product.Analysis(protocolDeclaration)
+-        let declarations = Product.Derivation.peers(of: analysis)
+-        let product = try #require(declarations.first?.as(StructDeclSyntax.self))
++        @Test
++        func `empty protocol derives an empty product`() throws {
++            let source = Parser.parse(source: "protocol Empty {}")
++            let protocolDeclaration = try #require(
++                source.statements.first?.item.as(ProtocolDeclSyntax.self)
++            )
++            let analysis = Product.Analysis(protocolDeclaration)
++            let declarations = Product.Derivation.peers(of: analysis)
++            let product = try #require(declarations.first?.as(StructDeclSyntax.self))
+ 
+-        #expect(product.name.text == "Product")
+-        #expect(analysis.diagnostics.isEmpty)
+-        #expect(product.memberBlock.members.count == 1)
+-    }
++            #expect(product.name.text == "Product")
++            #expect(analysis.diagnostics.isEmpty)
++            #expect(product.memberBlock.members.count == 1)
++        }
+ 
+-    @Test
+-    func `analysis records ordered coordinates and parameter conventions once`() throws {
+-        let source = Parser.parse(
+-            source: """
+-                protocol Transform {
+-                    associatedtype Input: ~Copyable
+-                    func transform(
+-                        _ input: borrowing Input,
+-                        into output: consuming Output
+-                    ) -> Result
+-                    var result: Result { get }
+-                }
+-                """
+-        )
+-        let protocolDeclaration = try #require(
+-            source.statements.first?.item.as(ProtocolDeclSyntax.self)
+-        )
+-        let analysis = Product.Analysis(protocolDeclaration)
+-        let function = try #require(analysis.functionCoordinates.first)
++        @Test
++        func `analysis records ordered coordinates and parameter conventions once`() throws {
++            let source = Parser.parse(
++                source: """
++                    protocol Transform {
++                        associatedtype Input: ~Copyable
++                        func transform(
++                            _ input: borrowing Input,
++                            into output: consuming Output
++                        ) -> Result
++                        var result: Result { get }
++                    }
++                    """
++            )
++            let protocolDeclaration = try #require(
++                source.statements.first?.item.as(ProtocolDeclSyntax.self)
++            )
++            let analysis = Product.Analysis(protocolDeclaration)
++            let function = try #require(analysis.functionCoordinates.first)
+ 
+-        #expect(analysis.diagnostics.isEmpty)
+-        #expect(analysis.coordinates.count == 3)
+-        #expect(analysis.associatedTypeCoordinates.map(\.name.text) == ["Input"])
+-        #expect(analysis.propertyCoordinates.map(\.name.text) == ["result"])
+-        #expect(function.name.text == "transform")
+-        #expect(function.parameters.map(\.localName.text) == ["input", "output"])
+-        #expect(
+-            function.parameters.map(\.closureType.trimmedDescription) == [
+-                "borrowing Input",
+-                "consuming Output",
+-            ]
+-        )
+-        #expect(
+-            function.parameters.map(\.valueType.trimmedDescription) == [
+-                "Input",
+-                "Output",
+-            ]
+-        )
+-        #expect(function.parameters.map(\.transfersOwnership) == [false, true])
+-        #expect(
+-            function.closureType.trimmedDescription
+-                == "(borrowing Input, consuming Output) -> Result"
+-        )
+-        #expect(function.output.trimmedDescription == "Result")
+-        #expect(
+-            function.invocation.trimmedDescription
+-                == "(self._transform)(input, output)"
+-        )
++            #expect(analysis.diagnostics.isEmpty)
++            #expect(analysis.coordinates.count == 3)
++            #expect(analysis.associatedTypeCoordinates.map(\.name.text) == ["Input"])
++            #expect(analysis.propertyCoordinates.map(\.name.text) == ["result"])
++            #expect(function.name.text == "transform")
++            #expect(function.parameters.map(\.localName.text) == ["input", "output"])
++            #expect(
++                function.parameters.map(\.closureType.trimmedDescription) == [
++                    "borrowing Input",
++                    "consuming Output",
++                ]
++            )
++            #expect(
++                function.parameters.map(\.valueType.trimmedDescription) == [
++                    "Input",
++                    "Output",
++                ]
++            )
++            #expect(function.parameters.map(\.transfersOwnership) == [false, true])
++            #expect(
++                function.closureType.trimmedDescription
++                    == "(borrowing Input, consuming Output) -> Result"
++            )
++            #expect(function.output.trimmedDescription == "Result")
++            #expect(
++                function.invocation.trimmedDescription
++                    == "(self._transform)(input, output)"
++            )
++        }
+     }
+ }
+diff --git a/Tests/Product Macro Tests/Expansion Tests.swift b/Tests/Product Macro Tests/Expansion Tests.swift
+index fc24671..1840b89 100644
+--- a/Tests/Product Macro Tests/Expansion Tests.swift	
++++ b/Tests/Product Macro Tests/Expansion Tests.swift	
+@@ -40,7 +40,7 @@ private func expectProductExpansion(
+     )
+ }
+ 
+-extension `Product Derivation Tests` {
++extension Derivation.`Product Derivation Tests` {
+     @Suite
+     struct Expansion {
+         @Test
+diff --git a/Tests/Product Tests/Product Tests.swift b/Tests/Product Tests/Product Tests.swift
+index fcf4a21..b332b80 100644
+--- a/Tests/Product Tests/Product Tests.swift	
++++ b/Tests/Product Tests/Product Tests.swift	
+@@ -6,9 +6,15 @@ private func requireEscapable<Value: Escapable>(_: Value) {}
+ 
+ @Suite
+ struct `Products preserve component arity through operations and checked conformances` {
++}
++
++extension `Products preserve component arity through operations and checked conformances` {
+     @Suite struct `Product operations preserve positional values arity and capabilities` {}
++
+     @Suite struct `No product boundary cases are defined` {}
++
+     @Suite struct `No product integration cases are defined` {}
++
+     @Suite(.serialized) struct `No product performance cases are defined` {}
+ }
+ 
+-- 
+2.43.0
+

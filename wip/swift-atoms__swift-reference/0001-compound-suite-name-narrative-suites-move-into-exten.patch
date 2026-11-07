@@ -1,0 +1,113 @@
+From 59b34e9db51dc8374ac824cd3f67fa52904d2339 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:48:56 +0000
+Subject: [PATCH] compound suite name: narrative suites move into extension
+ <Type> named after their test file, nested suites into extension
+ <Type>.<Parent> (overnight/compound-suites.py); parse-checked; builds pending
+ (coenttb/work#242)
+
+---
+ Tests/Reference Tests/Reference Tests.swift | 73 +++++++++++----------
+ 1 file changed, 40 insertions(+), 33 deletions(-)
+
+diff --git a/Tests/Reference Tests/Reference Tests.swift b/Tests/Reference Tests/Reference Tests.swift
+index e7332e2..e5fb065 100644
+--- a/Tests/Reference Tests/Reference Tests.swift	
++++ b/Tests/Reference Tests/Reference Tests.swift	
+@@ -5,12 +5,17 @@ enum `Reference Tests` {}
+ 
+ extension `Reference Tests` {
+     @Suite struct `Reference wrappers preserve weak and unowned value access` {
+-        @Suite struct `Reference construction preserves nil values stored objects and wrapper access` {}
+-        @Suite struct `No reference wrapper boundary cases are defined` {}
+-        @Suite struct `No reference wrapper integration cases are defined` {}
+     }
+ }
+ 
++extension `Reference Tests`.`Reference wrappers preserve weak and unowned value access` {
++    @Suite struct `Reference construction preserves nil values stored objects and wrapper access` {}
++
++    @Suite struct `No reference wrapper boundary cases are defined` {}
++
++    @Suite struct `No reference wrapper integration cases are defined` {}
++}
++
+ extension `Reference Tests`.`Reference wrappers preserve weak and unowned value access`.`Reference construction preserves nil values stored objects and wrapper access` {
+     @Test func `weak reference accepts nil`() {
+         final class Node: Sendable {}
+@@ -45,40 +50,42 @@ extension `Reference Tests`.`Reference wrappers preserve weak and unowned value
+     }
+ }
+ 
+-@Suite
+-struct `References preserve lifetime behavior and declared transfer capabilities` {
+-    @Test
+-    func `weak references become nil when the final strong owner is released`() {
+-        final class Node: Sendable {}
+-        let weak: Reference.Weak<Node>
+-        do {
+-            let owner = Node()
+-            weak = Reference.Weak(owner)
+-            #expect(weak.value === owner)
+-            _fixLifetime(owner)
++extension Reference {
++    @Suite
++    struct `References preserve lifetime behavior and declared transfer capabilities` {
++        @Test
++        func `weak references become nil when the final strong owner is released`() {
++            final class Node: Sendable {}
++            let weak: Reference.Weak<Node>
++            do {
++                let owner = Node()
++                weak = Reference.Weak(owner)
++                #expect(weak.value === owner)
++                _fixLifetime(owner)
++            }
++            #expect(weak.value == nil)
+         }
+-        #expect(weak.value == nil)
+-    }
+ 
+-    @Test
+-    func `checked unowned references cross tasks while a strong owner remains alive`() async {
+-        final class Node: Sendable {
+-            let value = 42
++        @Test
++        func `checked unowned references cross tasks while a strong owner remains alive`() async {
++            final class Node: Sendable {
++                let value = 42
++            }
++            let owner = Node()
++            let reference = Reference.Unowned<Node>.Sendable.Checked(owner)
++            let received = await Task.detached { reference.value.value }.value
++            #expect(received == 42)
++            _fixLifetime(owner)
+         }
+-        let owner = Node()
+-        let reference = Reference.Unowned<Node>.Sendable.Checked(owner)
+-        let received = await Task.detached { reference.value.value }.value
+-        #expect(received == 42)
+-        _fixLifetime(owner)
+-    }
+ 
+-    @Test
+-    func `unchecked sendability can transfer a noncopyable value`() async {
+-        struct Payload: ~Copyable { let value: Int }
+-        let wrapped = Reference.Sendability.Unchecked(__unchecked: Payload(value: 42))
+-        func receive(_ value: consuming sending Reference.Sendability.Unchecked<Payload>) async -> Int {
+-            value.value.value
++        @Test
++        func `unchecked sendability can transfer a noncopyable value`() async {
++            struct Payload: ~Copyable { let value: Int }
++            let wrapped = Reference.Sendability.Unchecked(__unchecked: Payload(value: 42))
++            func receive(_ value: consuming sending Reference.Sendability.Unchecked<Payload>) async -> Int {
++                value.value.value
++            }
++            #expect(await receive(wrapped) == 42)
+         }
+-        #expect(await receive(wrapped) == 42)
+     }
+ }
+-- 
+2.43.0
+

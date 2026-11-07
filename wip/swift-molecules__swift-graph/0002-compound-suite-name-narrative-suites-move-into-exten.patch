@@ -1,0 +1,814 @@
+From bc2dd65ab08edc31ed45df7ed5c791e567e023e5 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:48:58 +0000
+Subject: [PATCH 2/2] compound suite name: narrative suites move into extension
+ <Type> named after their test file, nested suites into extension
+ <Type>.<Parent> (overnight/compound-suites.py); parse-checked; builds pending
+ (coenttb/work#242)
+
+---
+ Tests/Graph Tests/Transform Tests.swift | 258 ++++++++-------
+ Tests/Graph Tests/Traversal Tests.swift | 422 ++++++++++++------------
+ 2 files changed, 345 insertions(+), 335 deletions(-)
+
+diff --git a/Tests/Graph Tests/Transform Tests.swift b/Tests/Graph Tests/Transform Tests.swift
+index 19c2f6c..3d58a58 100644
+--- a/Tests/Graph Tests/Transform Tests.swift	
++++ b/Tests/Graph Tests/Transform Tests.swift	
+@@ -25,185 +25,189 @@
+         return set
+     }
+ 
+-    @Suite
+-    struct `Graph Sequential Transform Payloads Tests` {
+-        @Test
+-        func `Payload mapping preserves node count`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+-
+-            let c = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            let b = builder.allocate(Graph.Adjacency.List(adjacent: [c]))
+-            let a = builder.allocate(Graph.Adjacency.List(adjacent: [b, c]))
+-
+-            let graph = builder.build()
+-
+-            let mapped = graph.transform.payloads { $0.adjacent.count }
++extension Transform {
++        @Suite
++        struct `Graph Sequential Transform Payloads Tests` {
++            @Test
++            func `Payload mapping preserves node count`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++
++                let c = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let b = builder.allocate(Graph.Adjacency.List(adjacent: [c]))
++                let a = builder.allocate(Graph.Adjacency.List(adjacent: [b, c]))
++
++                let graph = builder.build()
++
++                let mapped = graph.transform.payloads { $0.adjacent.count }
++
++                #expect(mapped.count == graph.count)
++                #expect(mapped.count == 3)
++                #expect(mapped[a] == 2)
++                #expect(mapped[b] == 1)
++                #expect(mapped[c] == 0)
++            }
+ 
+-            #expect(mapped.count == graph.count)
+-            #expect(mapped.count == 3)
+-            #expect(mapped[a] == 2)
+-            #expect(mapped[b] == 1)
+-            #expect(mapped[c] == 0)
+-        }
++            @Test
++            func `Payload mapping on empty graph`() {
++                let builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++                let graph = builder.build()
+ 
+-        @Test
+-        func `Payload mapping on empty graph`() {
+-            let builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+-            let graph = builder.build()
++                let mapped = graph.transform.payloads { $0.adjacent.count }
+ 
+-            let mapped = graph.transform.payloads { $0.adjacent.count }
++                #expect(mapped.count == 0)
++                #expect(mapped.isEmpty)
++            }
+ 
+-            #expect(mapped.count == 0)
+-            #expect(mapped.isEmpty)
+-        }
++            @Test
++            func `Payload mapping changes payload type`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-        @Test
+-        func `Payload mapping changes payload type`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++                let a = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let b = builder.allocate(Graph.Adjacency.List(adjacent: [a]))
+ 
+-            let a = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            let b = builder.allocate(Graph.Adjacency.List(adjacent: [a]))
++                let graph = builder.build()
+ 
+-            let graph = builder.build()
++                let mapped: Graph.Sequential<TestTag, String> = graph.transform.payloads { payload in
++                    "edges: \(payload.adjacent.count)"
++                }
+ 
+-            let mapped: Graph.Sequential<TestTag, String> = graph.transform.payloads { payload in
+-                "edges: \(payload.adjacent.count)"
++                #expect(mapped[a] == "edges: 0")
++                #expect(mapped[b] == "edges: 1")
+             }
+-
+-            #expect(mapped[a] == "edges: 0")
+-            #expect(mapped[b] == "edges: 1")
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Graph Sequential Transform Subgraph Tests` {
+-        @Test
+-        func `Induced subgraph drops edges to excluded nodes`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++extension Transform {
++        @Suite
++        struct `Graph Sequential Transform Subgraph Tests` {
++            @Test
++            func `Induced subgraph drops edges to excluded nodes`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-            let d = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            let b = builder.allocate(Graph.Adjacency.List(adjacent: [d]))
+-            let c = builder.allocate(Graph.Adjacency.List(adjacent: [d]))
+-            let a = builder.allocate(Graph.Adjacency.List(adjacent: [b, c]))
++                let d = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let b = builder.allocate(Graph.Adjacency.List(adjacent: [d]))
++                let c = builder.allocate(Graph.Adjacency.List(adjacent: [d]))
++                let a = builder.allocate(Graph.Adjacency.List(adjacent: [b, c]))
+ 
+-            let graph = builder.build()
++                let graph = builder.build()
+ 
+-            let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, b))
++                let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, b))
+ 
+-            #expect(subgraph != nil)
+-            #expect(subgraph!.count == 2)
++                #expect(subgraph != nil)
++                #expect(subgraph!.count == 2)
+ 
+-            for node in subgraph!.nodes {
+-                let payload = subgraph![node]
+-                for adjacent in payload.adjacent {
+-                    #expect(adjacent < subgraph!.count)
++                for node in subgraph!.nodes {
++                    let payload = subgraph![node]
++                    for adjacent in payload.adjacent {
++                        #expect(adjacent < subgraph!.count)
++                    }
+                 }
+             }
+-        }
+ 
+-        @Test
+-        func `Induced subgraph remaps to sequential IDs`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++            @Test
++            func `Induced subgraph remaps to sequential IDs`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-            let d = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            let c = builder.allocate(Graph.Adjacency.List(adjacent: [d]))
+-            let b = builder.allocate(Graph.Adjacency.List(adjacent: [c, d]))
+-            _ = builder.allocate(Graph.Adjacency.List(adjacent: [b]))
++                let d = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let c = builder.allocate(Graph.Adjacency.List(adjacent: [d]))
++                let b = builder.allocate(Graph.Adjacency.List(adjacent: [c, d]))
++                _ = builder.allocate(Graph.Adjacency.List(adjacent: [b]))
+ 
+-            let graph = builder.build()
++                let graph = builder.build()
+ 
+-            let subgraph = graph.transform.subgraph(inducedBy: orderedSet(b, c, d))
++                let subgraph = graph.transform.subgraph(inducedBy: orderedSet(b, c, d))
+ 
+-            #expect(subgraph != nil)
+-            #expect(subgraph!.count == 3)
++                #expect(subgraph != nil)
++                #expect(subgraph!.count == 3)
+ 
+-            for node in subgraph!.nodes {
+-                let payload = subgraph![node]
+-                for adjacent in payload.adjacent {
+-                    #expect(adjacent < 3)
++                for node in subgraph!.nodes {
++                    let payload = subgraph![node]
++                    for adjacent in payload.adjacent {
++                        #expect(adjacent < 3)
++                    }
+                 }
+             }
+-        }
+ 
+-        @Test
+-        func `Induced subgraph returns nil for invalid nodes`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++            @Test
++            func `Induced subgraph returns nil for invalid nodes`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-            let a = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            _ = builder.allocate(Graph.Adjacency.List(adjacent: [a]))
++                let a = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                _ = builder.allocate(Graph.Adjacency.List(adjacent: [a]))
+ 
+-            let graph = builder.build()
++                let graph = builder.build()
+ 
+-            let invalidNode = Graph.Node<TestTag>(_unchecked: Ordinal(999))
++                let invalidNode = Graph.Node<TestTag>(_unchecked: Ordinal(999))
+ 
+-            let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, invalidNode))
++                let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, invalidNode))
+ 
+-            #expect(subgraph == nil)
+-        }
++                #expect(subgraph == nil)
++            }
+ 
+-        @Test
+-        func `Induced subgraph on all nodes returns equivalent graph`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++            @Test
++            func `Induced subgraph on all nodes returns equivalent graph`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-            let b = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            let a = builder.allocate(Graph.Adjacency.List(adjacent: [b]))
++                let b = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let a = builder.allocate(Graph.Adjacency.List(adjacent: [b]))
+ 
+-            let graph = builder.build()
++                let graph = builder.build()
+ 
+-            let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, b))
++                let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, b))
+ 
+-            #expect(subgraph != nil)
+-            #expect(subgraph!.count == graph.count)
++                #expect(subgraph != nil)
++                #expect(subgraph!.count == graph.count)
+ 
+-            var originalEdges = 0
+-            var subgraphEdges = 0
++                var originalEdges = 0
++                var subgraphEdges = 0
+ 
+-            for node in graph.nodes {
+-                originalEdges += graph[node].adjacent.count
+-            }
+-            for node in subgraph!.nodes {
+-                subgraphEdges += subgraph![node].adjacent.count
++                for node in graph.nodes {
++                    originalEdges += graph[node].adjacent.count
++                }
++                for node in subgraph!.nodes {
++                    subgraphEdges += subgraph![node].adjacent.count
++                }
++
++                #expect(subgraphEdges == originalEdges)
+             }
+ 
+-            #expect(subgraphEdges == originalEdges)
+-        }
++            @Test
++            func `Induced subgraph on empty set returns empty graph`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-        @Test
+-        func `Induced subgraph on empty set returns empty graph`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++                _ = builder.allocate(Graph.Adjacency.List(adjacent: []))
+ 
+-            _ = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let graph = builder.build()
+ 
+-            let graph = builder.build()
++                let subgraph = graph.transform.subgraph(inducedBy: orderedSet())
+ 
+-            let subgraph = graph.transform.subgraph(inducedBy: orderedSet())
++                #expect(subgraph != nil)
++                #expect(subgraph!.count == 0)
++                #expect(subgraph!.isEmpty)
++            }
+ 
+-            #expect(subgraph != nil)
+-            #expect(subgraph!.count == 0)
+-            #expect(subgraph!.isEmpty)
+-        }
++            @Test
++            func `Induced subgraph preserves edges within subgraph`() {
++                var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
+ 
+-        @Test
+-        func `Induced subgraph preserves edges within subgraph`() {
+-            var builder = Graph.Sequential<TestTag, Graph.Adjacency.List<TestTag>>.Builder()
++                let c = builder.allocate(Graph.Adjacency.List(adjacent: []))
++                let b = builder.allocate(Graph.Adjacency.List(adjacent: [c]))
++                let a = builder.allocate(Graph.Adjacency.List(adjacent: [b]))
+ 
+-            let c = builder.allocate(Graph.Adjacency.List(adjacent: []))
+-            let b = builder.allocate(Graph.Adjacency.List(adjacent: [c]))
+-            let a = builder.allocate(Graph.Adjacency.List(adjacent: [b]))
++                let graph = builder.build()
+ 
+-            let graph = builder.build()
++                let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, b))
+ 
+-            let subgraph = graph.transform.subgraph(inducedBy: orderedSet(a, b))
++                #expect(subgraph != nil)
++                #expect(subgraph!.count == 2)
+ 
+-            #expect(subgraph != nil)
+-            #expect(subgraph!.count == 2)
++                var totalEdges = 0
++                for node in subgraph!.nodes {
++                    totalEdges += subgraph![node].adjacent.count
++                }
+ 
+-            var totalEdges = 0
+-            for node in subgraph!.nodes {
+-                totalEdges += subgraph![node].adjacent.count
++                #expect(totalEdges == 1)
+             }
+-
+-            #expect(totalEdges == 1)
+         }
+-    }
++}
+ #endif
+diff --git a/Tests/Graph Tests/Traversal Tests.swift b/Tests/Graph Tests/Traversal Tests.swift
+index 5c8a033..7d7a5ca 100644
+--- a/Tests/Graph Tests/Traversal Tests.swift	
++++ b/Tests/Graph Tests/Traversal Tests.swift	
+@@ -84,258 +84,264 @@
+         return (graph, extract, a, b, c)
+     }
+ 
+-    @Suite
+-    struct `Graph Traversal First Depth Tests` {
+-        @Test
+-        func `DFS on linear graph`() {
+-            let (graph, a, _, _) = buildLinearGraph()
+-
+-            var iter = graph.traverse.first(using: TestPayload.extract).depth(from: a)
+-            var visited: [String] = []
+-            while let element = iter.next() {
+-                visited.append(element.payload.name)
++extension Traversal {
++        @Suite
++        struct `Graph Traversal First Depth Tests` {
++            @Test
++            func `DFS on linear graph`() {
++                let (graph, a, _, _) = buildLinearGraph()
++
++                var iter = graph.traverse.first(using: TestPayload.extract).depth(from: a)
++                var visited: [String] = []
++                while let element = iter.next() {
++                    visited.append(element.payload.name)
++                }
++                #expect(visited == ["A", "B", "C"])
+             }
+-            #expect(visited == ["A", "B", "C"])
+-        }
+-
+-        @Test
+-        func `DFS on diamond graph visits each node once`() {
+-            let (graph, a, _, _, _) = buildDiamondGraph()
+ 
+-            var iter = graph.traverse.first(using: TestPayload.extract).depth(from: a)
+-            var visited: [String] = []
+-            while let element = iter.next() {
+-                visited.append(element.payload.name)
++            @Test
++            func `DFS on diamond graph visits each node once`() {
++                let (graph, a, _, _, _) = buildDiamondGraph()
++
++                var iter = graph.traverse.first(using: TestPayload.extract).depth(from: a)
++                var visited: [String] = []
++                while let element = iter.next() {
++                    visited.append(element.payload.name)
++                }
++
++                #expect(visited.count == 4)
++                #expect(visited.first == "A")
++                #expect(visited.contains("B"))
++                #expect(visited.contains("C"))
++                #expect(visited.contains("D"))
+             }
+ 
+-            #expect(visited.count == 4)
+-            #expect(visited.first == "A")
+-            #expect(visited.contains("B"))
+-            #expect(visited.contains("C"))
+-            #expect(visited.contains("D"))
+-        }
++            @Test
++            func `DFS from multiple roots`() {
++                let (graph, _, b, c, _) = buildDiamondGraph()
+ 
+-        @Test
+-        func `DFS from multiple roots`() {
+-            let (graph, _, b, c, _) = buildDiamondGraph()
++                var iter = graph.traverse.first(using: TestPayload.extract).depth(from: [b, c])
++                var visited: [String] = []
++                while let element = iter.next() {
++                    visited.append(element.payload.name)
++                }
+ 
+-            var iter = graph.traverse.first(using: TestPayload.extract).depth(from: [b, c])
+-            var visited: [String] = []
+-            while let element = iter.next() {
+-                visited.append(element.payload.name)
++                #expect(visited.count == 3)
++                #expect(visited.contains("B"))
++                #expect(visited.contains("C"))
++                #expect(visited.contains("D"))
+             }
+ 
+-            #expect(visited.count == 3)
+-            #expect(visited.contains("B"))
+-            #expect(visited.contains("C"))
+-            #expect(visited.contains("D"))
+-        }
+-
+-        @Test
+-        func `DFS on empty roots`() {
+-            let (graph, _, _, _) = buildLinearGraph()
++            @Test
++            func `DFS on empty roots`() {
++                let (graph, _, _, _) = buildLinearGraph()
+ 
+-            var iter = graph.traverse.first(using: TestPayload.extract).depth(
+-                from: [] as [Graph.Node<TestTag>]
+-            )
+-            var hasElements = false
+-            while iter.next() != nil { hasElements = true }
+-            #expect(!hasElements)
+-        }
+-
+-        @Test
+-        func `Chunked next(maximumCount:) matches scalar next() across full traversal`() {
+-            let (graph, extract, a, _, _) = buildChunkProbeGraph()
+-
+-            var reference: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
+-            var refIter = graph.traverse.first(using: extract).depth(from: a)
+-            while let element = refIter.next() {
+-                reference.append(
+-                    (element.node, element.payload.a, element.payload.b, element.payload.id)
++                var iter = graph.traverse.first(using: TestPayload.extract).depth(
++                    from: [] as [Graph.Node<TestTag>]
+                 )
++                var hasElements = false
++                while iter.next() != nil { hasElements = true }
++                #expect(!hasElements)
+             }
+ 
+-            var chunked: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
+-            var chunkIter = graph.traverse.first(using: extract).depth(from: a)
+-            while true {
+-                let span = chunkIter.next(maximumCount: Cardinal(UInt(1)))
+-                if span.isEmpty { break }
+-                let element = span[0]
+-                chunked.append((element.node, element.payload.a, element.payload.b, element.payload.id))
++            @Test
++            func `Chunked next(maximumCount:) matches scalar next() across full traversal`() {
++                let (graph, extract, a, _, _) = buildChunkProbeGraph()
++
++                var reference: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
++                var refIter = graph.traverse.first(using: extract).depth(from: a)
++                while let element = refIter.next() {
++                    reference.append(
++                        (element.node, element.payload.a, element.payload.b, element.payload.id)
++                    )
++                }
++
++                var chunked: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
++                var chunkIter = graph.traverse.first(using: extract).depth(from: a)
++                while true {
++                    let span = chunkIter.next(maximumCount: Cardinal(UInt(1)))
++                    if span.isEmpty { break }
++                    let element = span[0]
++                    chunked.append((element.node, element.payload.a, element.payload.b, element.payload.id))
++                }
++
++                #expect(chunked.count == 3)
++                #expect(chunked.count == reference.count)
++                for (lhs, rhs) in zip(chunked, reference) {
++                    #expect(lhs.node == rhs.node)
++                    #expect(lhs.a == rhs.a)
++                    #expect(lhs.b == rhs.b)
++                    #expect(lhs.id == rhs.id)
++                }
+             }
+ 
+-            #expect(chunked.count == 3)
+-            #expect(chunked.count == reference.count)
+-            for (lhs, rhs) in zip(chunked, reference) {
+-                #expect(lhs.node == rhs.node)
+-                #expect(lhs.a == rhs.a)
+-                #expect(lhs.b == rhs.b)
+-                #expect(lhs.id == rhs.id)
+-            }
+-        }
+-
+-        @Test
+-        func `Chunked next(maximumCount: 0) yields an empty span without consuming`() {
+-            let (graph, extract, a, _, _) = buildChunkProbeGraph()
+-
+-            var iter = graph.traverse.first(using: extract).depth(from: a)
+-
+-            let zeroSpanIsEmpty = iter.next(maximumCount: Cardinal(UInt(0))).isEmpty
+-            #expect(zeroSpanIsEmpty)
+-
+-            let span = iter.next(maximumCount: Cardinal(UInt(1)))
+-            let count = span.count
+-            let firstNode = span[0].node
+-            #expect(count == 1)
+-            #expect(firstNode == a)
+-        }
+-    }
+-
+-    @Suite
+-    struct `Graph Traversal First Breadth Tests` {
+-        @Test
+-        func `BFS on linear graph`() {
+-            let (graph, a, _, _) = buildLinearGraph()
++            @Test
++            func `Chunked next(maximumCount: 0) yields an empty span without consuming`() {
++                let (graph, extract, a, _, _) = buildChunkProbeGraph()
+ 
+-            var iter = graph.traverse.first(using: TestPayload.extract).breadth(from: a)
+-            var visited: [String] = []
+-            while let element = iter.next() {
+-                visited.append(element.payload.name)
+-            }
+-            #expect(visited == ["A", "B", "C"])
+-        }
++                var iter = graph.traverse.first(using: extract).depth(from: a)
+ 
+-        @Test
+-        func `BFS on diamond graph visits each node once`() {
+-            let (graph, a, _, _, _) = buildDiamondGraph()
++                let zeroSpanIsEmpty = iter.next(maximumCount: Cardinal(UInt(0))).isEmpty
++                #expect(zeroSpanIsEmpty)
+ 
+-            var iter = graph.traverse.first(using: TestPayload.extract).breadth(from: a)
+-            var visited: [String] = []
+-            while let element = iter.next() {
+-                visited.append(element.payload.name)
++                let span = iter.next(maximumCount: Cardinal(UInt(1)))
++                let count = span.count
++                let firstNode = span[0].node
++                #expect(count == 1)
++                #expect(firstNode == a)
+             }
+-
+-            #expect(visited.count == 4)
+-            #expect(visited.first == "A")
+-            #expect(visited.last == "D")
+         }
+-
+-        @Test
+-        func `BFS visits in level order`() {
+-            let (graph, a, _, _, _) = buildDiamondGraph()
+-
+-            var iter = graph.traverse.first(using: TestPayload.extract).breadth(from: a)
+-            var visited: [String] = []
+-            while let element = iter.next() {
+-                visited.append(element.payload.name)
++}
++
++extension Traversal {
++        @Suite
++        struct `Graph Traversal First Breadth Tests` {
++            @Test
++            func `BFS on linear graph`() {
++                let (graph, a, _, _) = buildLinearGraph()
++
++                var iter = graph.traverse.first(using: TestPayload.extract).breadth(from: a)
++                var visited: [String] = []
++                while let element = iter.next() {
++                    visited.append(element.payload.name)
++                }
++                #expect(visited == ["A", "B", "C"])
+             }
+ 
+-            let aIndex = visited.firstIndex(of: "A")!
+-            let bIndex = visited.firstIndex(of: "B")!
+-            let cIndex = visited.firstIndex(of: "C")!
+-            let dIndex = visited.firstIndex(of: "D")!
++            @Test
++            func `BFS on diamond graph visits each node once`() {
++                let (graph, a, _, _, _) = buildDiamondGraph()
+ 
+-            #expect(aIndex < bIndex)
+-            #expect(aIndex < cIndex)
+-            #expect(bIndex < dIndex)
+-            #expect(cIndex < dIndex)
+-        }
+-
+-        @Test
+-        func `Chunked next(maximumCount:) matches scalar next() across full traversal`() {
+-            let (graph, extract, a, _, _) = buildChunkProbeGraph()
++                var iter = graph.traverse.first(using: TestPayload.extract).breadth(from: a)
++                var visited: [String] = []
++                while let element = iter.next() {
++                    visited.append(element.payload.name)
++                }
+ 
+-            var reference: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
+-            var refIter = graph.traverse.first(using: extract).breadth(from: a)
+-            while let element = refIter.next() {
+-                reference.append(
+-                    (element.node, element.payload.a, element.payload.b, element.payload.id)
+-                )
++                #expect(visited.count == 4)
++                #expect(visited.first == "A")
++                #expect(visited.last == "D")
+             }
+ 
+-            var chunked: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
+-            var chunkIter = graph.traverse.first(using: extract).breadth(from: a)
+-            while true {
+-                let span = chunkIter.next(maximumCount: Cardinal(UInt(1)))
+-                if span.isEmpty { break }
+-                let element = span[0]
+-                chunked.append((element.node, element.payload.a, element.payload.b, element.payload.id))
++            @Test
++            func `BFS visits in level order`() {
++                let (graph, a, _, _, _) = buildDiamondGraph()
++
++                var iter = graph.traverse.first(using: TestPayload.extract).breadth(from: a)
++                var visited: [String] = []
++                while let element = iter.next() {
++                    visited.append(element.payload.name)
++                }
++
++                let aIndex = visited.firstIndex(of: "A")!
++                let bIndex = visited.firstIndex(of: "B")!
++                let cIndex = visited.firstIndex(of: "C")!
++                let dIndex = visited.firstIndex(of: "D")!
++
++                #expect(aIndex < bIndex)
++                #expect(aIndex < cIndex)
++                #expect(bIndex < dIndex)
++                #expect(cIndex < dIndex)
+             }
+ 
+-            #expect(chunked.count == 3)
+-            #expect(chunked.count == reference.count)
+-            for (lhs, rhs) in zip(chunked, reference) {
+-                #expect(lhs.node == rhs.node)
+-                #expect(lhs.a == rhs.a)
+-                #expect(lhs.b == rhs.b)
+-                #expect(lhs.id == rhs.id)
++            @Test
++            func `Chunked next(maximumCount:) matches scalar next() across full traversal`() {
++                let (graph, extract, a, _, _) = buildChunkProbeGraph()
++
++                var reference: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
++                var refIter = graph.traverse.first(using: extract).breadth(from: a)
++                while let element = refIter.next() {
++                    reference.append(
++                        (element.node, element.payload.a, element.payload.b, element.payload.id)
++                    )
++                }
++
++                var chunked: [(node: Graph.Node<TestTag>, a: UInt64, b: UInt64, id: Int)] = []
++                var chunkIter = graph.traverse.first(using: extract).breadth(from: a)
++                while true {
++                    let span = chunkIter.next(maximumCount: Cardinal(UInt(1)))
++                    if span.isEmpty { break }
++                    let element = span[0]
++                    chunked.append((element.node, element.payload.a, element.payload.b, element.payload.id))
++                }
++
++                #expect(chunked.count == 3)
++                #expect(chunked.count == reference.count)
++                for (lhs, rhs) in zip(chunked, reference) {
++                    #expect(lhs.node == rhs.node)
++                    #expect(lhs.a == rhs.a)
++                    #expect(lhs.b == rhs.b)
++                    #expect(lhs.id == rhs.id)
++                }
+             }
+-        }
+ 
+-        @Test
+-        func `Chunked next(maximumCount: 0) yields an empty span without consuming`() {
+-            let (graph, extract, a, _, _) = buildChunkProbeGraph()
++            @Test
++            func `Chunked next(maximumCount: 0) yields an empty span without consuming`() {
++                let (graph, extract, a, _, _) = buildChunkProbeGraph()
+ 
+-            var iter = graph.traverse.first(using: extract).breadth(from: a)
++                var iter = graph.traverse.first(using: extract).breadth(from: a)
+ 
+-            let zeroSpanIsEmpty = iter.next(maximumCount: Cardinal(UInt(0))).isEmpty
+-            #expect(zeroSpanIsEmpty)
++                let zeroSpanIsEmpty = iter.next(maximumCount: Cardinal(UInt(0))).isEmpty
++                #expect(zeroSpanIsEmpty)
+ 
+-            let span = iter.next(maximumCount: Cardinal(UInt(1)))
+-            let count = span.count
+-            let firstNode = span[0].node
+-            #expect(count == 1)
+-            #expect(firstNode == a)
++                let span = iter.next(maximumCount: Cardinal(UInt(1)))
++                let count = span.count
++                let firstNode = span[0].node
++                #expect(count == 1)
++                #expect(firstNode == a)
++            }
+         }
+-    }
++}
+ 
+-    @Suite
+-    struct `Graph Traversal Topological Tests` {
+-        @Test
+-        func `Topological order on DAG`() {
+-            let (graph, a, b, c, d) = buildDiamondGraph()
++extension Traversal {
++        @Suite
++        struct `Graph Traversal Topological Tests` {
++            @Test
++            func `Topological order on DAG`() {
++                let (graph, a, b, c, d) = buildDiamondGraph()
+ 
+-            let order = graph.traverse.topological(from: a, using: TestPayload.extract)
+-            #expect(!order.hasCycles)
++                let order = graph.traverse.topological(from: a, using: TestPayload.extract)
++                #expect(!order.hasCycles)
+ 
+-            let nodes = order.map { $0.node }
++                let nodes = order.map { $0.node }
+ 
+-            let aIndex = nodes.firstIndex(of: a)!
+-            let bIndex = nodes.firstIndex(of: b)!
+-            let cIndex = nodes.firstIndex(of: c)!
+-            let dIndex = nodes.firstIndex(of: d)!
++                let aIndex = nodes.firstIndex(of: a)!
++                let bIndex = nodes.firstIndex(of: b)!
++                let cIndex = nodes.firstIndex(of: c)!
++                let dIndex = nodes.firstIndex(of: d)!
+ 
+-            #expect(aIndex < bIndex)
+-            #expect(aIndex < cIndex)
+-            #expect(bIndex < dIndex)
+-            #expect(cIndex < dIndex)
+-        }
++                #expect(aIndex < bIndex)
++                #expect(aIndex < cIndex)
++                #expect(bIndex < dIndex)
++                #expect(cIndex < dIndex)
++            }
+ 
+-        @Test
+-        func `Topological order detects cycles`() {
+-            var builder = Graph.Sequential<TestTag, TestPayload>.Builder()
++            @Test
++            func `Topological order detects cycles`() {
++                var builder = Graph.Sequential<TestTag, TestPayload>.Builder()
+ 
+-            let a = builder.allocate(TestPayload(name: "A", successors: []))
+-            let b = builder.allocate(TestPayload(name: "B", successors: []))
+-            let c = builder.allocate(TestPayload(name: "C", successors: [a]))
+-            builder[a] = TestPayload(name: "A", successors: [b])
+-            builder[b] = TestPayload(name: "B", successors: [c])
++                let a = builder.allocate(TestPayload(name: "A", successors: []))
++                let b = builder.allocate(TestPayload(name: "B", successors: []))
++                let c = builder.allocate(TestPayload(name: "C", successors: [a]))
++                builder[a] = TestPayload(name: "A", successors: [b])
++                builder[b] = TestPayload(name: "B", successors: [c])
+ 
+-            let cyclicGraph = builder.build()
++                let cyclicGraph = builder.build()
+ 
+-            let order = cyclicGraph.traverse.topological(from: a, using: TestPayload.extract)
+-            #expect(order.hasCycles)
+-        }
++                let order = cyclicGraph.traverse.topological(from: a, using: TestPayload.extract)
++                #expect(order.hasCycles)
++            }
+ 
+-        @Test
+-        func `Topological order on linear graph`() {
+-            let (graph, a, _, _) = buildLinearGraph()
++            @Test
++            func `Topological order on linear graph`() {
++                let (graph, a, _, _) = buildLinearGraph()
+ 
+-            let order = graph.traverse.topological(from: a, using: TestPayload.extract)
+-            #expect(!order.hasCycles)
++                let order = graph.traverse.topological(from: a, using: TestPayload.extract)
++                #expect(!order.hasCycles)
+ 
+-            let names = order.map { $0.payload.name }
+-            #expect(names == ["A", "B", "C"])
++                let names = order.map { $0.payload.name }
++                #expect(names == ["A", "B", "C"])
++            }
+         }
+-    }
++}
+ #endif
+-- 
+2.43.0
+

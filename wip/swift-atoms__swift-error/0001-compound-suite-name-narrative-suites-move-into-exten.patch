@@ -1,0 +1,220 @@
+From 79a7c88b69647055f8f1d25a0f68eaa50d49985d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:48:52 +0000
+Subject: [PATCH] compound suite name: narrative suites move into extension
+ <Type> named after their test file, nested suites into extension
+ <Type>.<Parent> (overnight/compound-suites.py); parse-checked; builds pending
+ (coenttb/work#242)
+
+---
+ Tests/Error Tests/Error Tests.swift         | 126 ++++++++++----------
+ Tests/Error Tests/Error.Code Tests.swift    |  13 +-
+ Tests/Error Tests/Error.Context Tests.swift |  13 +-
+ 3 files changed, 84 insertions(+), 68 deletions(-)
+
+diff --git a/Tests/Error Tests/Error Tests.swift b/Tests/Error Tests/Error Tests.swift
+index 45b5a03..5c6b258 100644
+--- a/Tests/Error Tests/Error Tests.swift	
++++ b/Tests/Error Tests/Error Tests.swift	
+@@ -1,76 +1,78 @@
+ import Error
+ import Testing
+ 
+-@Suite
+-struct `Errors capture their call site and describe themselves` {
++extension Error {
++    @Suite
++    struct `Errors capture their call site and describe themselves` {
+ 
+-    @Test
+-    func `capturing records the operation, calling function and line`() {
+-        let line: UInt32 = #line + 1
+-        let error = Error.capturing(.posix(2), operation: "open")
+-        #expect(error.code == .posix(2))
+-        #expect(error.context?.operation == "open")
+-        #expect(error.context?.function == "capturing records the operation, calling function and line()")
+-        #expect(error.context?.line == line)
+-    }
++        @Test
++        func `capturing records the operation, calling function and line`() {
++            let line: UInt32 = #line + 1
++            let error = Error.capturing(.posix(2), operation: "open")
++            #expect(error.code == .posix(2))
++            #expect(error.context?.operation == "open")
++            #expect(error.context?.function == "capturing records the operation, calling function and line()")
++            #expect(error.context?.line == line)
++        }
+ 
+-    static func capturedOneLevelDown() -> Error {
+-        Error.capturing(.posix(9), operation: "nested")
+-    }
++        static func capturedOneLevelDown() -> Error {
++            Error.capturing(.posix(9), operation: "nested")
++        }
+ 
+-    @Test
+-    func `capturing records the calling file, function and line`() {
+-        let line: UInt32 = #line + 1
+-        let error = Error.capturing(.posix(2), operation: "open")
+-        #expect(error.context?.file == Error.File(id: #fileID))
+-        #expect(error.context?.file.id.hasSuffix("/Error Tests.swift") == true)
+-        #expect(error.context?.function == "capturing records the calling file, function and line()")
+-        #expect(error.context?.line == line)
+-    }
++        @Test
++        func `capturing records the calling file, function and line`() {
++            let line: UInt32 = #line + 1
++            let error = Error.capturing(.posix(2), operation: "open")
++            #expect(error.context?.file == Error.File(id: #fileID))
++            #expect(error.context?.file.id.hasSuffix("/Error Tests.swift") == true)
++            #expect(error.context?.function == "capturing records the calling file, function and line()")
++            #expect(error.context?.line == line)
++        }
+ 
+-    @Test
+-    func `a helper's call site is the helper, not the library`() {
+-        let error = Self.capturedOneLevelDown()
+-        #expect(error.context?.file == Error.File(id: #fileID))
+-        #expect(error.context?.function == "capturedOneLevelDown()")
+-    }
++        @Test
++        func `a helper's call site is the helper, not the library`() {
++            let error = Self.capturedOneLevelDown()
++            #expect(error.context?.file == Error.File(id: #fileID))
++            #expect(error.context?.function == "capturedOneLevelDown()")
++        }
+ 
+-    @Test
+-    func `an explicit file overrides the call site`() {
+-        let fromLiteral = Error.capturing(.posix(1), operation: "x", file: "Custom/Path.swift", line: 7)
+-        let fromValue = Error.capturing(.posix(1), operation: "x", file: Error.File(id: "Other/File.swift"))
+-        #expect(fromLiteral.context?.file.id == "Custom/Path.swift")
+-        #expect(fromLiteral.context?.line == 7)
+-        #expect(fromValue.context?.file.id == "Other/File.swift")
+-    }
++        @Test
++        func `an explicit file overrides the call site`() {
++            let fromLiteral = Error.capturing(.posix(1), operation: "x", file: "Custom/Path.swift", line: 7)
++            let fromValue = Error.capturing(.posix(1), operation: "x", file: Error.File(id: "Other/File.swift"))
++            #expect(fromLiteral.context?.file.id == "Custom/Path.swift")
++            #expect(fromLiteral.context?.line == 7)
++            #expect(fromValue.context?.file.id == "Other/File.swift")
++        }
+ 
+-    @Test
+-    func `an error without context describes only its code`() {
+-        #expect(Error(code: .win32(5)).description == "win32(5)")
+-    }
++        @Test
++        func `an error without context describes only its code`() {
++            #expect(Error(code: .win32(5)).description == "win32(5)")
++        }
+ 
+-    @Test
+-    func `an error with context describes operation, code and location`() {
+-        let error = Error(
+-            code: .posix(13),
+-            context: .init(operation: "read", function: "load()", file: .init(id: "Module/File.swift"), line: 42)
+-        )
+-        #expect(error.description == "read: posix(13) at load() (Module/File.swift:42)")
+-    }
++        @Test
++        func `an error with context describes operation, code and location`() {
++            let error = Error(
++                code: .posix(13),
++                context: .init(operation: "read", function: "load()", file: .init(id: "Module/File.swift"), line: 42)
++            )
++            #expect(error.description == "read: posix(13) at load() (Module/File.swift:42)")
++        }
+ 
+-    @Test
+-    func `extreme code values keep their platform and value`() {
+-        #expect(Error.Code.posix(.min).posix == .min)
+-        #expect(Error.Code.posix(.max).win32 == nil)
+-        #expect(Error.Code.win32(.max).win32 == .max)
+-        #expect(Error.Code.win32(0) != Error.Code.posix(0))
+-    }
++        @Test
++        func `extreme code values keep their platform and value`() {
++            #expect(Error.Code.posix(.min).posix == .min)
++            #expect(Error.Code.posix(.max).win32 == nil)
++            #expect(Error.Code.win32(.max).win32 == .max)
++            #expect(Error.Code.win32(0) != Error.Code.posix(0))
++        }
+ 
+-    @Test
+-    func `errors with the same code but different context are distinct`() {
+-        let a = Error(code: .posix(1))
+-        let b = Error.capturing(.posix(1), operation: "close")
+-        #expect(a != b)
+-        #expect(a == Error(code: .posix(1)))
++        @Test
++        func `errors with the same code but different context are distinct`() {
++            let a = Error(code: .posix(1))
++            let b = Error.capturing(.posix(1), operation: "close")
++            #expect(a != b)
++            #expect(a == Error(code: .posix(1)))
++        }
+     }
+ }
+diff --git a/Tests/Error Tests/Error.Code Tests.swift b/Tests/Error Tests/Error.Code Tests.swift
+index 6e2564b..b384e8c 100644
+--- a/Tests/Error Tests/Error.Code Tests.swift	
++++ b/Tests/Error Tests/Error.Code Tests.swift	
+@@ -1,14 +1,21 @@
+ import Error
+ import Testing
+ 
+-@Suite
+-struct `Error codes preserve platform identity value equality and descriptions` {
++extension Error.Code {
++    @Suite
++    struct `Error codes preserve platform identity value equality and descriptions` {
++    }
++}
++
++extension Error.Code.`Error codes preserve platform identity value equality and descriptions` {
+     @Suite struct `Error code predicates equality and descriptions distinguish cases and values` {}
++
+     @Suite struct `No error code boundary cases are defined` {}
++
+     @Suite struct `No error code integration cases are defined` {}
+ }
+ 
+-extension `Error codes preserve platform identity value equality and descriptions`.`Error code predicates equality and descriptions distinguish cases and values` {
++extension Error.Code.`Error codes preserve platform identity value equality and descriptions`.`Error code predicates equality and descriptions distinguish cases and values` {
+ 
+     @Test
+     func `POSIX error codes identify their platform case`() {
+diff --git a/Tests/Error Tests/Error.Context Tests.swift b/Tests/Error Tests/Error.Context Tests.swift
+index 6b12849..be739a2 100644
+--- a/Tests/Error Tests/Error.Context Tests.swift	
++++ b/Tests/Error Tests/Error.Context Tests.swift	
+@@ -1,14 +1,21 @@
+ import Error
+ import Testing
+ 
+-@Suite
+-struct `Error contexts preserve operation and source location details` {
++extension Error.Context {
++    @Suite
++    struct `Error contexts preserve operation and source location details` {
++    }
++}
++
++extension Error.Context.`Error contexts preserve operation and source location details` {
+     @Suite struct `Error context storage and descriptions retain every supplied field` {}
++
+     @Suite struct `No error context boundary cases are defined` {}
++
+     @Suite struct `No error context integration cases are defined` {}
+ }
+ 
+-extension `Error contexts preserve operation and source location details`.`Error context storage and descriptions retain every supplied field` {
++extension Error.Context.`Error contexts preserve operation and source location details`.`Error context storage and descriptions retain every supplied field` {
+ 
+     @Test
+     func `Error contexts retain the supplied operation function file and line`() {
+-- 
+2.43.0
+
