@@ -1,0 +1,427 @@
+From 03a7acc16a9824a778fae79abfc37a45151acf95 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:46:01 +0000
+Subject: [PATCH 3/3] Revert the extension-file merges and type splits in
+ directories where a merged file brought its conditional imports mid-file
+ (coenttb/work#242)
+
+---
+ Sources/Text/Byte/Text.Line.Map+Byte.swift    | 36 +++++++++++++++
+ Sources/Text/Casing/Text+Casing.swift         | 24 ++++++++++
+ Sources/Text/Text.Count.swift                 |  7 +++
+ Sources/Text/Text.Line.Column.swift           |  6 +++
+ Sources/Text/Text.Line.Map.swift              | 37 ---------------
+ ...Number+Swift.CustomStringConvertible.swift |  7 +++
+ ...er+Swift.ExpressibleByIntegerLiteral.swift |  8 ++++
+ Sources/Text/Text.Line.Number.swift           | 17 -------
+ Sources/Text/Text.Line.swift                  |  7 ---
+ .../Text/Text.Location+Swift.Comparable.swift | 11 +++++
+ ...cation+Swift.CustomStringConvertible.swift | 10 +++++
+ Sources/Text/Text.Location.swift              | 17 -------
+ Sources/Text/Text.Offset.swift                |  7 +++
+ Sources/Text/Text.Position.swift              |  7 +++
+ ....Range+Swift.CustomStringConvertible.swift | 11 +++++
+ Sources/Text/Text.Range.swift                 |  9 ----
+ Sources/Text/Text.swift                       | 45 -------------------
+ 17 files changed, 134 insertions(+), 132 deletions(-)
+ create mode 100644 Sources/Text/Byte/Text.Line.Map+Byte.swift
+ create mode 100644 Sources/Text/Casing/Text+Casing.swift
+ create mode 100644 Sources/Text/Text.Count.swift
+ create mode 100644 Sources/Text/Text.Line.Column.swift
+ create mode 100644 Sources/Text/Text.Line.Number+Swift.CustomStringConvertible.swift
+ create mode 100644 Sources/Text/Text.Line.Number+Swift.ExpressibleByIntegerLiteral.swift
+ create mode 100644 Sources/Text/Text.Location+Swift.Comparable.swift
+ create mode 100644 Sources/Text/Text.Location+Swift.CustomStringConvertible.swift
+ create mode 100644 Sources/Text/Text.Offset.swift
+ create mode 100644 Sources/Text/Text.Position.swift
+ create mode 100644 Sources/Text/Text.Range+Swift.CustomStringConvertible.swift
+
+diff --git a/Sources/Text/Byte/Text.Line.Map+Byte.swift b/Sources/Text/Byte/Text.Line.Map+Byte.swift
+new file mode 100644
+index 0000000..8b08381
+--- /dev/null
++++ b/Sources/Text/Byte/Text.Line.Map+Byte.swift
+@@ -0,0 +1,36 @@
++#if Byte
++    public import Byte
++    public import Ordinal
++    public import Tagged
++
++    extension Text.Line.Map {
++
++        @inlinable
++        public init(scanning content: [Byte]) {
++            var starts: [Text.Position] = [.zero]
++            var index = 0
++            let count = content.count
++            while index < count {
++                let byte = content[index]
++                if byte.bitPattern == 0x0A {
++
++                    starts.append(Text.Position(_unchecked: Ordinal(UInt(index + 1))))
++                } else if byte.bitPattern == 0x0D {
++
++                    if content.indices.contains(index + 1)
++                        && content[index + 1].bitPattern == 0x0A
++                    {
++
++                        index += 1
++                    }
++                    starts.append(Text.Position(_unchecked: Ordinal(UInt(index + 1))))
++                }
++                index += 1
++            }
++            guard let map = Self(validatingLineStarts: starts) else {
++                preconditionFailure("The byte scanner produced invalid line starts")
++            }
++            self = map
++        }
++    }
++#endif
+diff --git a/Sources/Text/Casing/Text+Casing.swift b/Sources/Text/Casing/Text+Casing.swift
+new file mode 100644
+index 0000000..c9d6230
+--- /dev/null
++++ b/Sources/Text/Casing/Text+Casing.swift
+@@ -0,0 +1,24 @@
++#if Casing
++    extension Text {
++        public static func titlecased<S: StringProtocol>(_ text: S) -> String {
++            var output = ""
++            var startsWord = true
++            for character in text {
++                if character.isWhitespace {
++                    output.append(character)
++                    startsWord = true
++                } else {
++                    let value = String(character)
++                    output += startsWord ? value.uppercased() : value.lowercased()
++                    startsWord = false
++                }
++            }
++            return output
++        }
++
++        public static func sentencecased<S: StringProtocol>(_ text: S) -> String {
++            guard let first = text.first else { return "" }
++            return String(first).uppercased() + text.dropFirst().lowercased()
++        }
++    }
++#endif
+diff --git a/Sources/Text/Text.Count.swift b/Sources/Text/Text.Count.swift
+new file mode 100644
+index 0000000..575b146
+--- /dev/null
++++ b/Sources/Text/Text.Count.swift
+@@ -0,0 +1,7 @@
++public import Cardinal
++public import Tagged
++
++extension Text {
++
++    public typealias Count = Tagged<Text, Cardinal>
++}
+diff --git a/Sources/Text/Text.Line.Column.swift b/Sources/Text/Text.Line.Column.swift
+new file mode 100644
+index 0000000..cf0c7b7
+--- /dev/null
++++ b/Sources/Text/Text.Line.Column.swift
+@@ -0,0 +1,6 @@
++public import Tagged
++
++extension Text.Line {
++
++    public typealias Column = Text.Count
++}
+diff --git a/Sources/Text/Text.Line.Map.swift b/Sources/Text/Text.Line.Map.swift
+index d7261f7..93b05b3 100644
+--- a/Sources/Text/Text.Line.Map.swift
++++ b/Sources/Text/Text.Line.Map.swift
+@@ -91,40 +91,3 @@ extension Text.Line.Map {
+         return lineStarts[index]
+     }
+ }
+-
+-#if Byte
+-    public import Byte
+-    public import Ordinal
+-    public import Tagged
+-
+-    extension Text.Line.Map {
+-
+-        @inlinable
+-        public init(scanning content: [Byte]) {
+-            var starts: [Text.Position] = [.zero]
+-            var index = 0
+-            let count = content.count
+-            while index < count {
+-                let byte = content[index]
+-                if byte.bitPattern == 0x0A {
+-
+-                    starts.append(Text.Position(_unchecked: Ordinal(UInt(index + 1))))
+-                } else if byte.bitPattern == 0x0D {
+-
+-                    if content.indices.contains(index + 1)
+-                        && content[index + 1].bitPattern == 0x0A
+-                    {
+-
+-                        index += 1
+-                    }
+-                    starts.append(Text.Position(_unchecked: Ordinal(UInt(index + 1))))
+-                }
+-                index += 1
+-            }
+-            guard let map = Self(validatingLineStarts: starts) else {
+-                preconditionFailure("The byte scanner produced invalid line starts")
+-            }
+-            self = map
+-        }
+-    }
+-#endif
+diff --git a/Sources/Text/Text.Line.Number+Swift.CustomStringConvertible.swift b/Sources/Text/Text.Line.Number+Swift.CustomStringConvertible.swift
+new file mode 100644
+index 0000000..b2b1d2e
+--- /dev/null
++++ b/Sources/Text/Text.Line.Number+Swift.CustomStringConvertible.swift
+@@ -0,0 +1,7 @@
++extension Text.Line.Number: Swift::CustomStringConvertible {
++
++    @inlinable
++    public var description: Swift::String {
++        "\(underlying)"
++    }
++}
+diff --git a/Sources/Text/Text.Line.Number+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Text/Text.Line.Number+Swift.ExpressibleByIntegerLiteral.swift
+new file mode 100644
+index 0000000..ad6a019
+--- /dev/null
++++ b/Sources/Text/Text.Line.Number+Swift.ExpressibleByIntegerLiteral.swift
+@@ -0,0 +1,8 @@
++extension Text.Line.Number: Swift::ExpressibleByIntegerLiteral {
++
++    @_disfavoredOverload
++    @inlinable
++    public init(integerLiteral value: UInt) {
++        self.init(value)
++    }
++}
+diff --git a/Sources/Text/Text.Line.Number.swift b/Sources/Text/Text.Line.Number.swift
+index fa53fa2..1a993db 100644
+--- a/Sources/Text/Text.Line.Number.swift
++++ b/Sources/Text/Text.Line.Number.swift
+@@ -39,20 +39,3 @@ extension Text.Line.Number {
+         lhs.underlying < rhs.underlying
+     }
+ }
+-
+-extension Text.Line.Number: Swift::CustomStringConvertible {
+-
+-    @inlinable
+-    public var description: Swift::String {
+-        "\(underlying)"
+-    }
+-}
+-
+-extension Text.Line.Number: Swift::ExpressibleByIntegerLiteral {
+-
+-    @_disfavoredOverload
+-    @inlinable
+-    public init(integerLiteral value: UInt) {
+-        self.init(value)
+-    }
+-}
+diff --git a/Sources/Text/Text.Line.swift b/Sources/Text/Text.Line.swift
+index 3a6bdfa..132e2a0 100644
+--- a/Sources/Text/Text.Line.swift
++++ b/Sources/Text/Text.Line.swift
+@@ -1,11 +1,4 @@
+-public import Tagged
+-
+ extension Text {
+ 
+     public enum Line {}
+ }
+-
+-extension Text.Line {
+-
+-    public typealias Column = Text.Count
+-}
+diff --git a/Sources/Text/Text.Location+Swift.Comparable.swift b/Sources/Text/Text.Location+Swift.Comparable.swift
+new file mode 100644
+index 0000000..8fb5b41
+--- /dev/null
++++ b/Sources/Text/Text.Location+Swift.Comparable.swift
+@@ -0,0 +1,11 @@
++public import Cardinal
++public import Tagged
++
++extension Text.Location: Swift::Comparable {
++
++    @inlinable
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        if lhs.line != rhs.line { return lhs.line < rhs.line }
++        return lhs.column < rhs.column
++    }
++}
+diff --git a/Sources/Text/Text.Location+Swift.CustomStringConvertible.swift b/Sources/Text/Text.Location+Swift.CustomStringConvertible.swift
+new file mode 100644
+index 0000000..0590cb5
+--- /dev/null
++++ b/Sources/Text/Text.Location+Swift.CustomStringConvertible.swift
+@@ -0,0 +1,10 @@
++public import Cardinal
++public import Tagged
++
++extension Text.Location: Swift::CustomStringConvertible {
++
++    @inlinable
++    public var description: Swift::String {
++        "\(line):\(column)"
++    }
++}
+diff --git a/Sources/Text/Text.Location.swift b/Sources/Text/Text.Location.swift
+index b1bcb5b..2049b82 100644
+--- a/Sources/Text/Text.Location.swift
++++ b/Sources/Text/Text.Location.swift
+@@ -16,20 +16,3 @@ extension Text {
+         }
+     }
+ }
+-
+-extension Text.Location: Swift::Comparable {
+-
+-    @inlinable
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        if lhs.line != rhs.line { return lhs.line < rhs.line }
+-        return lhs.column < rhs.column
+-    }
+-}
+-
+-extension Text.Location: Swift::CustomStringConvertible {
+-
+-    @inlinable
+-    public var description: Swift::String {
+-        "\(line):\(column)"
+-    }
+-}
+diff --git a/Sources/Text/Text.Offset.swift b/Sources/Text/Text.Offset.swift
+new file mode 100644
+index 0000000..e99e39e
+--- /dev/null
++++ b/Sources/Text/Text.Offset.swift
+@@ -0,0 +1,7 @@
++public import Difference
++public import Tagged
++
++extension Text {
++
++    public typealias Offset = Tagged<Text, Difference>
++}
+diff --git a/Sources/Text/Text.Position.swift b/Sources/Text/Text.Position.swift
+new file mode 100644
+index 0000000..4e9fb6a
+--- /dev/null
++++ b/Sources/Text/Text.Position.swift
+@@ -0,0 +1,7 @@
++public import Ordinal
++public import Tagged
++
++extension Text {
++
++    public typealias Position = Tagged<Text, Ordinal>
++}
+diff --git a/Sources/Text/Text.Range+Swift.CustomStringConvertible.swift b/Sources/Text/Text.Range+Swift.CustomStringConvertible.swift
+new file mode 100644
+index 0000000..c2faa95
+--- /dev/null
++++ b/Sources/Text/Text.Range+Swift.CustomStringConvertible.swift
+@@ -0,0 +1,11 @@
++import Difference
++public import Ordinal
++public import Tagged
++
++extension Text.Range: Swift::CustomStringConvertible {
++
++    @inlinable
++    public var description: Swift::String {
++        "\(start)..<\(end)"
++    }
++}
+diff --git a/Sources/Text/Text.Range.swift b/Sources/Text/Text.Range.swift
+index a02c2c0..3c8489c 100644
+--- a/Sources/Text/Text.Range.swift
++++ b/Sources/Text/Text.Range.swift
+@@ -1,7 +1,6 @@
+ public import Interval
+ public import Ordinal
+ public import Tagged
+-import Difference
+ 
+ extension Text {
+ 
+@@ -57,11 +56,3 @@ extension Text.Range {
+         interval.contains(position)
+     }
+ }
+-
+-extension Text.Range: Swift::CustomStringConvertible {
+-
+-    @inlinable
+-    public var description: Swift::String {
+-        "\(start)..<\(end)"
+-    }
+-}
+diff --git a/Sources/Text/Text.swift b/Sources/Text/Text.swift
+index 5b4fa4a..a74fd4d 100644
+--- a/Sources/Text/Text.swift
++++ b/Sources/Text/Text.swift
+@@ -1,46 +1 @@
+-public import Cardinal
+-public import Tagged
+-public import Difference
+-public import Ordinal
+-
+ public enum Text {}
+-
+-#if Casing
+-    extension Text {
+-        public static func titlecased<S: StringProtocol>(_ text: S) -> String {
+-            var output = ""
+-            var startsWord = true
+-            for character in text {
+-                if character.isWhitespace {
+-                    output.append(character)
+-                    startsWord = true
+-                } else {
+-                    let value = String(character)
+-                    output += startsWord ? value.uppercased() : value.lowercased()
+-                    startsWord = false
+-                }
+-            }
+-            return output
+-        }
+-
+-        public static func sentencecased<S: StringProtocol>(_ text: S) -> String {
+-            guard let first = text.first else { return "" }
+-            return String(first).uppercased() + text.dropFirst().lowercased()
+-        }
+-    }
+-#endif
+-
+-extension Text {
+-
+-    public typealias Count = Tagged<Text, Cardinal>
+-}
+-
+-extension Text {
+-
+-    public typealias Offset = Tagged<Text, Difference>
+-}
+-
+-extension Text {
+-
+-    public typealias Position = Tagged<Text, Ordinal>
+-}
+-- 
+2.43.0
+

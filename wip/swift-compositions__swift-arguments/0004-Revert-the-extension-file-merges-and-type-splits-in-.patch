@@ -1,0 +1,209 @@
+From 52e2fff0fee44dcfc11e642dc429a53c65224fd5 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:52 +0000
+Subject: [PATCH 4/4] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ .../Command Help/Command.Help.Default.swift   |  4 +++
+ .../Command Help/_OptionalConvertible.swift   |  4 ---
+ .../Command.Flag.Inverted+Names.swift         | 24 ++++++++++++++++++
+ .../Command.Flag.Inverted.swift               | 25 -------------------
+ Sources/Command Schema/Command.Protocol.swift |  8 ------
+ ...chema.ParseVisitor.EnvironmentReader.swift |  9 +++++++
+ .../Command.Schema.ParseVisitor.swift         |  9 -------
+ .../Command.Subcommand.HelpDefault.swift      |  4 +++
+ Sources/Command Schema/Command.Validate.swift |  7 ++++++
+ .../_SubcommandOptionalConvertible.swift      |  4 ---
+ 10 files changed, 48 insertions(+), 50 deletions(-)
+ delete mode 100644 Sources/Command Help/_OptionalConvertible.swift
+ create mode 100644 Sources/Command Schema/Command.Flag.Inverted+Names.swift
+ create mode 100644 Sources/Command Schema/Command.Schema.ParseVisitor.EnvironmentReader.swift
+ create mode 100644 Sources/Command Schema/Command.Validate.swift
+ delete mode 100644 Sources/Command Schema/_SubcommandOptionalConvertible.swift
+
+diff --git a/Sources/Command Help/Command.Help.Default.swift b/Sources/Command Help/Command.Help.Default.swift
+index 51824ee..d6ee370 100644
+--- a/Sources/Command Help/Command.Help.Default.swift	
++++ b/Sources/Command Help/Command.Help.Default.swift	
+@@ -46,6 +46,10 @@ extension Command.HelpDefault {
+     }
+ }
+ 
++@usableFromInline
++internal protocol _OptionalConvertible {
++    var _unwrapped: Any? { get }
++}
+ 
+ extension Optional: _OptionalConvertible {
+     @usableFromInline
+diff --git a/Sources/Command Help/_OptionalConvertible.swift b/Sources/Command Help/_OptionalConvertible.swift
+deleted file mode 100644
+index 291d0c8..0000000
+--- a/Sources/Command Help/_OptionalConvertible.swift	
++++ /dev/null
+@@ -1,4 +0,0 @@
+-@usableFromInline
+-internal protocol _OptionalConvertible {
+-    var _unwrapped: Any? { get }
+-}
+diff --git a/Sources/Command Schema/Command.Flag.Inverted+Names.swift b/Sources/Command Schema/Command.Flag.Inverted+Names.swift
+new file mode 100644
+index 0000000..a3bbcbe
+--- /dev/null
++++ b/Sources/Command Schema/Command.Flag.Inverted+Names.swift	
+@@ -0,0 +1,24 @@
++extension Command.Flag.Inverted {
++
++    @inlinable
++    public var trueName: String {
++        switch inversion {
++        case .prefixedNo:
++            return base.string
++
++        case .prefixedEnableDisable:
++            return "enable-" + base.string
++        }
++    }
++
++    @inlinable
++    public var falseName: String {
++        switch inversion {
++        case .prefixedNo:
++            return "no-" + base.string
++
++        case .prefixedEnableDisable:
++            return "disable-" + base.string
++        }
++    }
++}
+diff --git a/Sources/Command Schema/Command.Flag.Inverted.swift b/Sources/Command Schema/Command.Flag.Inverted.swift
+index 622eb1a..659ebb8 100644
+--- a/Sources/Command Schema/Command.Flag.Inverted.swift	
++++ b/Sources/Command Schema/Command.Flag.Inverted.swift	
+@@ -28,28 +28,3 @@ extension Command.Flag {
+         }
+     }
+ }
+-
+-extension Command.Flag.Inverted {
+-
+-    @inlinable
+-    public var trueName: String {
+-        switch inversion {
+-        case .prefixedNo:
+-            return base.string
+-
+-        case .prefixedEnableDisable:
+-            return "enable-" + base.string
+-        }
+-    }
+-
+-    @inlinable
+-    public var falseName: String {
+-        switch inversion {
+-        case .prefixedNo:
+-            return "no-" + base.string
+-
+-        case .prefixedEnableDisable:
+-            return "disable-" + base.string
+-        }
+-    }
+-}
+diff --git a/Sources/Command Schema/Command.Protocol.swift b/Sources/Command Schema/Command.Protocol.swift
+index e8f65b8..b52e470 100644
+--- a/Sources/Command Schema/Command.Protocol.swift	
++++ b/Sources/Command Schema/Command.Protocol.swift	
+@@ -13,11 +13,3 @@ extension Command {
+         mutating func run() async throws(Failure)
+     }
+ }
+-
+-extension Command.`Protocol` {
+-
+-    @inlinable
+-    public mutating func validate() throws(Command.Error) {
+-
+-    }
+-}
+diff --git a/Sources/Command Schema/Command.Schema.ParseVisitor.EnvironmentReader.swift b/Sources/Command Schema/Command.Schema.ParseVisitor.EnvironmentReader.swift
+new file mode 100644
+index 0000000..4834410
+--- /dev/null
++++ b/Sources/Command Schema/Command.Schema.ParseVisitor.EnvironmentReader.swift	
+@@ -0,0 +1,9 @@
++internal import Environment
++
++extension Command.Schema.ParseVisitor {
++
++    @usableFromInline
++    internal static func readEnvironmentVariable(_ name: Swift.String) -> Swift.String? {
++        Environment.task.read(name)
++    }
++}
+diff --git a/Sources/Command Schema/Command.Schema.ParseVisitor.swift b/Sources/Command Schema/Command.Schema.ParseVisitor.swift
+index 544859d..ab21822 100644
+--- a/Sources/Command Schema/Command.Schema.ParseVisitor.swift	
++++ b/Sources/Command Schema/Command.Schema.ParseVisitor.swift	
+@@ -2,7 +2,6 @@ internal import Index
+ internal import Ordinal
+ public import Tagged
+ internal import Text
+-internal import Environment
+ 
+ extension Command.Schema {
+ 
+@@ -1218,11 +1217,3 @@ extension Command.Schema.ParseVisitor {
+         return value
+     }
+ }
+-
+-extension Command.Schema.ParseVisitor {
+-
+-    @usableFromInline
+-    internal static func readEnvironmentVariable(_ name: Swift.String) -> Swift.String? {
+-        Environment.task.read(name)
+-    }
+-}
+diff --git a/Sources/Command Schema/Command.Subcommand.HelpDefault.swift b/Sources/Command Schema/Command.Subcommand.HelpDefault.swift
+index 3e292e1..b397f1b 100644
+--- a/Sources/Command Schema/Command.Subcommand.HelpDefault.swift	
++++ b/Sources/Command Schema/Command.Subcommand.HelpDefault.swift	
+@@ -42,6 +42,10 @@ extension Command.Subcommand.HelpDefault {
+     }
+ }
+ 
++@usableFromInline
++internal protocol _SubcommandOptionalConvertible {
++    var _unwrapped: Any? { get }
++}
+ 
+ extension Optional: _SubcommandOptionalConvertible {
+     @usableFromInline
+diff --git a/Sources/Command Schema/Command.Validate.swift b/Sources/Command Schema/Command.Validate.swift
+new file mode 100644
+index 0000000..e4582a1
+--- /dev/null
++++ b/Sources/Command Schema/Command.Validate.swift	
+@@ -0,0 +1,7 @@
++extension Command.`Protocol` {
++
++    @inlinable
++    public mutating func validate() throws(Command.Error) {
++
++    }
++}
+diff --git a/Sources/Command Schema/_SubcommandOptionalConvertible.swift b/Sources/Command Schema/_SubcommandOptionalConvertible.swift
+deleted file mode 100644
+index 714a09f..0000000
+--- a/Sources/Command Schema/_SubcommandOptionalConvertible.swift	
++++ /dev/null
+@@ -1,4 +0,0 @@
+-@usableFromInline
+-internal protocol _SubcommandOptionalConvertible {
+-    var _unwrapped: Any? { get }
+-}
+-- 
+2.43.0
+

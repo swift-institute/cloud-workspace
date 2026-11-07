@@ -1,0 +1,277 @@
+From e8923cdab32a22c8eee8e1158626d9cb9415d1c5 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:53 +0000
+Subject: [PATCH 3/3] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ .../Linter Rule Scope/Lint.Scope.Record.swift | 26 ++++++
+ Sources/Linter Rule Scope/Lint.Scope.swift    | 25 ------
+ .../Lint.License.Header+recognize.swift       | 62 ++++++++++++++
+ .../Lint.License.Header+removing.swift        | 24 ++++++
+ .../Lint.License.Header.swift                 | 82 -------------------
+ 5 files changed, 112 insertions(+), 107 deletions(-)
+ create mode 100644 Sources/Linter Rule Scope/Lint.Scope.Record.swift
+ create mode 100644 Sources/Linter Rule Structure/Lint.License.Header+recognize.swift
+ create mode 100644 Sources/Linter Rule Structure/Lint.License.Header+removing.swift
+
+diff --git a/Sources/Linter Rule Scope/Lint.Scope.Record.swift b/Sources/Linter Rule Scope/Lint.Scope.Record.swift
+new file mode 100644
+index 0000000..870694a
+--- /dev/null
++++ b/Sources/Linter Rule Scope/Lint.Scope.Record.swift	
+@@ -0,0 +1,26 @@
++public import Lint
++public import SwiftSyntax
++
++extension Lint.Scope {
++
++    public static func record(
++        at node: some SyntaxProtocol,
++        in source: borrowing Lint.Source.Parsed,
++        severity: Diagnostic.Severity,
++        identifier: Swift::String,
++        message: Swift::String
++    ) -> Diagnostic.Record {
++        let location = source.converter.location(for: node.positionAfterSkippingLeadingTrivia)
++        return Diagnostic.Record(
++            location: Source.Location(
++                fileID: source.file.fileID,
++                filePath: source.file.filePath,
++                line: location.line,
++                column: location.column
++            ),
++            severity: severity,
++            identifier: identifier,
++            message: message
++        )
++    }
++}
+diff --git a/Sources/Linter Rule Scope/Lint.Scope.swift b/Sources/Linter Rule Scope/Lint.Scope.swift
+index 3ddf9d4..6775742 100644
+--- a/Sources/Linter Rule Scope/Lint.Scope.swift	
++++ b/Sources/Linter Rule Scope/Lint.Scope.swift	
+@@ -1,31 +1,6 @@
+ public import Lint
+-public import SwiftSyntax
+ 
+ extension Lint {
+ 
+     public enum Scope {}
+ }
+-
+-extension Lint.Scope {
+-
+-    public static func record(
+-        at node: some SyntaxProtocol,
+-        in source: borrowing Lint.Source.Parsed,
+-        severity: Diagnostic.Severity,
+-        identifier: Swift::String,
+-        message: Swift::String
+-    ) -> Diagnostic.Record {
+-        let location = source.converter.location(for: node.positionAfterSkippingLeadingTrivia)
+-        return Diagnostic.Record(
+-            location: Source.Location(
+-                fileID: source.file.fileID,
+-                filePath: source.file.filePath,
+-                line: location.line,
+-                column: location.column
+-            ),
+-            severity: severity,
+-            identifier: identifier,
+-            message: message
+-        )
+-    }
+-}
+diff --git a/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift b/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift
+new file mode 100644
+index 0000000..07e630f
+--- /dev/null
++++ b/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift	
+@@ -0,0 +1,62 @@
++internal import Cardinal
++public import Lint
++
++extension Lint.License.Header {
++
++    public static func recognize(in source: Swift::String) -> Recognition {
++        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
++        var blocks: [(start: Swift::Int, lines: [Swift::Substring])] = []
++        var current: (start: Swift::Int, lines: [Swift::Substring])?
++        var reachedCode = false
++        var laterLicenseMarker = false
++
++        for (index, line) in lines.enumerated() {
++            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
++            if !reachedCode, trimmed.hasPrefix("//") {
++                if current == nil { current = (index, []) }
++                current?.lines.append(line)
++                continue
++            }
++            if !reachedCode, trimmed.isEmpty {
++                if let block = current {
++                    blocks.append(block)
++                    current = nil
++                }
++                continue
++            }
++            if let block = current { blocks.append(block) }
++            current = nil
++            reachedCode = true
++            if trimmed.hasPrefix("//") {
++                let normalized = trimmed.lowercased()
++                if normalized.contains("licensed under") || normalized.contains("copyright") {
++                    laterLicenseMarker = true
++                }
++            }
++        }
++        if let block = current { blocks.append(block) }
++
++        var recognized: Lint.License.Header?
++        for block in blocks {
++            let text = block.lines.joined(separator: "\n")
++            let normalized = text.lowercased()
++            let mentionsCopyright = normalized.contains("copyright")
++            let mentionsGrant = normalized.contains("licensed under")
++            let mentionsLicense =
++                mentionsCopyright || mentionsGrant || normalized.contains("license")
++            guard mentionsLicense else { continue }
++            guard mentionsCopyright else { return .refused(.missingCopyright) }
++            guard mentionsGrant else { return .refused(.missingLicenseGrant) }
++            guard recognized == nil else { return .refused(.interleaved) }
++            recognized = Lint.License.Header(
++                start: Cardinal(UInt(block.start)),
++                count: Cardinal(UInt(block.lines.count)),
++                text: text
++            )
++        }
++
++        guard !laterLicenseMarker else { return .refused(.interleaved) }
++        if let recognized { return .complete(recognized) }
++        return .absent
++    }
++}
+diff --git a/Sources/Linter Rule Structure/Lint.License.Header+removing.swift b/Sources/Linter Rule Structure/Lint.License.Header+removing.swift
+new file mode 100644
+index 0000000..860e2a4
+--- /dev/null
++++ b/Sources/Linter Rule Structure/Lint.License.Header+removing.swift	
+@@ -0,0 +1,24 @@
++internal import Cardinal
++public import Lint
++
++extension Lint.License.Header {
++
++    public func removing(from source: Swift::String) -> Swift::String? {
++        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
++        guard start + count <= Cardinal(UInt(lines.count)) else {
++            return nil
++        }
++        var result = Swift::Array(lines.prefix(start))
++        var suffix = lines.dropFirst(start + count)
++        while suffix.first?.drop(while: { $0 == " " || $0 == "\t" }).isEmpty == true {
++            suffix = suffix.dropFirst()
++        }
++        if !result.isEmpty, !suffix.isEmpty,
++            result.last?.drop(while: { $0 == " " || $0 == "\t" }).isEmpty == false
++        {
++            result.append("")
++        }
++        result.append(contentsOf: suffix)
++        return result.joined(separator: "\n")
++    }
++}
+diff --git a/Sources/Linter Rule Structure/Lint.License.Header.swift b/Sources/Linter Rule Structure/Lint.License.Header.swift
+index 6e1ed7b..881d0fd 100644
+--- a/Sources/Linter Rule Structure/Lint.License.Header.swift	
++++ b/Sources/Linter Rule Structure/Lint.License.Header.swift	
+@@ -19,85 +19,3 @@ extension Lint.License {
+         }
+     }
+ }
+-
+-extension Lint.License.Header {
+-
+-    public static func recognize(in source: Swift::String) -> Recognition {
+-        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+-        var blocks: [(start: Swift::Int, lines: [Swift::Substring])] = []
+-        var current: (start: Swift::Int, lines: [Swift::Substring])?
+-        var reachedCode = false
+-        var laterLicenseMarker = false
+-
+-        for (index, line) in lines.enumerated() {
+-            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+-            if !reachedCode, trimmed.hasPrefix("//") {
+-                if current == nil { current = (index, []) }
+-                current?.lines.append(line)
+-                continue
+-            }
+-            if !reachedCode, trimmed.isEmpty {
+-                if let block = current {
+-                    blocks.append(block)
+-                    current = nil
+-                }
+-                continue
+-            }
+-            if let block = current { blocks.append(block) }
+-            current = nil
+-            reachedCode = true
+-            if trimmed.hasPrefix("//") {
+-                let normalized = trimmed.lowercased()
+-                if normalized.contains("licensed under") || normalized.contains("copyright") {
+-                    laterLicenseMarker = true
+-                }
+-            }
+-        }
+-        if let block = current { blocks.append(block) }
+-
+-        var recognized: Lint.License.Header?
+-        for block in blocks {
+-            let text = block.lines.joined(separator: "\n")
+-            let normalized = text.lowercased()
+-            let mentionsCopyright = normalized.contains("copyright")
+-            let mentionsGrant = normalized.contains("licensed under")
+-            let mentionsLicense =
+-                mentionsCopyright || mentionsGrant || normalized.contains("license")
+-            guard mentionsLicense else { continue }
+-            guard mentionsCopyright else { return .refused(.missingCopyright) }
+-            guard mentionsGrant else { return .refused(.missingLicenseGrant) }
+-            guard recognized == nil else { return .refused(.interleaved) }
+-            recognized = Lint.License.Header(
+-                start: Cardinal(UInt(block.start)),
+-                count: Cardinal(UInt(block.lines.count)),
+-                text: text
+-            )
+-        }
+-
+-        guard !laterLicenseMarker else { return .refused(.interleaved) }
+-        if let recognized { return .complete(recognized) }
+-        return .absent
+-    }
+-}
+-
+-extension Lint.License.Header {
+-
+-    public func removing(from source: Swift::String) -> Swift::String? {
+-        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+-        guard start + count <= Cardinal(UInt(lines.count)) else {
+-            return nil
+-        }
+-        var result = Swift::Array(lines.prefix(start))
+-        var suffix = lines.dropFirst(start + count)
+-        while suffix.first?.drop(while: { $0 == " " || $0 == "\t" }).isEmpty == true {
+-            suffix = suffix.dropFirst()
+-        }
+-        if !result.isEmpty, !suffix.isEmpty,
+-            result.last?.drop(while: { $0 == " " || $0 == "\t" }).isEmpty == false
+-        {
+-            result.append("")
+-        }
+-        result.append(contentsOf: suffix)
+-        return result.joined(separator: "\n")
+-    }
+-}
+-- 
+2.43.0
+

@@ -1,0 +1,340 @@
+From 9f73f594637c29a9437c0fe266db73313d207bf4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:46:02 +0000
+Subject: [PATCH 4/4] Revert the extension-file merges and type splits in
+ directories where a merged file brought its conditional imports mid-file
+ (coenttb/work#242)
+
+---
+ .../Memory.Aligned+Convenience.swift          |  83 ++++++++++++
+ .../Memory.Aligned+Subscript.swift            |  39 ++++++
+ .../Memory.Aligned.swift                      | 124 ------------------
+ .../Memory.Small ~Copyable.swift              |  19 +++
+ .../Memory.Small.swift                        |  20 ---
+ 5 files changed, 141 insertions(+), 144 deletions(-)
+ create mode 100644 Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Convenience.swift
+ create mode 100644 Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Subscript.swift
+ create mode 100644 Sources/Memory Small/Absorbed swift-memory-small/Memory.Small ~Copyable.swift
+
+diff --git a/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Convenience.swift b/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Convenience.swift
+new file mode 100644
+index 0000000..5f687f0
+--- /dev/null
++++ b/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Convenience.swift	
+@@ -0,0 +1,83 @@
++#if MemoryAligned
++    public import Index
++    import Ordinal
++
++    extension Memory.Aligned {
++
++        @inlinable
++        public subscript(index: Int) -> Byte {
++            get {
++                precondition(index >= 0 && index < Int(bitPattern: count), "index out of bounds")
++                return unsafe bytePointer[index]
++            }
++            set {
++                precondition(index >= 0 && index < Int(bitPattern: count), "index out of bounds")
++                unsafe bytePointer[index] = newValue
++            }
++        }
++    }
++
++    extension Memory.Aligned {
++
++        @inlinable
++        public mutating func copy(
++            from source: Swift.Span<Byte>,
++            at offset: Int = 0
++        ) {
++            precondition(offset >= 0 && offset + source.count <= Int(bitPattern: count))
++            unsafe withUnsafeMutableBufferPointer { dest in
++                source.withUnsafeBufferPointer { src in
++                    guard let destBase = dest.baseAddress else { return }
++                    guard let srcBase = src.baseAddress else { return }
++                    unsafe destBase.advanced(by: offset)
++                        .update(from: srcBase, count: src.count)
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func copy(
++            from source: UnsafeRawBufferPointer,
++            at offset: Int = 0
++        ) {
++            precondition(offset >= 0 && offset + source.count <= Int(bitPattern: count))
++            unsafe withUnsafeMutableBytes { dest in
++                guard let destBase = dest.baseAddress else { return }
++                guard let srcBase = source.baseAddress else { return }
++                unsafe destBase.advanced(by: offset)
++                    .copyMemory(from: srcBase, byteCount: source.count)
++            }
++        }
++    }
++
++    extension Memory.Aligned {
++
++        @inlinable
++        public mutating func zero() {
++            unsafe withUnsafeMutableBytes { buffer in
++                _ = unsafe buffer.baseAddress?.initializeMemory(
++                    as: Byte.self,
++                    repeating: Byte(bitPattern: 0),
++                    count: buffer.count
++                )
++            }
++        }
++
++        @inlinable
++        public mutating func zero(range: Swift.Range<Int>) {
++            precondition(range.lowerBound >= 0 && range.upperBound <= Int(bitPattern: count))
++            unsafe withUnsafeMutableBytes { buffer in
++                guard let base = buffer.baseAddress else { return }
++                let start = unsafe base.advanced(by: range.lowerBound)
++                unsafe start.initializeMemory(as: Byte.self, repeating: Byte(bitPattern: 0), count: range.count)
++            }
++        }
++
++        @inlinable
++        public mutating func zero(from offset: Int) {
++            let size = Int(bitPattern: count)
++            precondition(offset >= 0 && offset <= size)
++            zero(range: offset..<size)
++        }
++    }
++#endif
+diff --git a/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Subscript.swift b/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Subscript.swift
+new file mode 100644
+index 0000000..5a951f5
+--- /dev/null
++++ b/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned+Subscript.swift	
+@@ -0,0 +1,39 @@
++#if MemoryAligned
++    public import Index
++    import Ordinal
++
++    extension Memory.Aligned {
++
++        @inlinable
++        public subscript(range: Swift.Range<Int>) -> Swift.Span<Byte> {
++            @_lifetime(borrow self)
++            borrowing get {
++                bytes.extracting(range)
++            }
++        }
++
++        @inlinable
++        public subscript(range: PartialRangeFrom<Int>) -> Swift.Span<Byte> {
++            @_lifetime(borrow self)
++            borrowing get {
++                bytes.extracting(range.lowerBound..<Int(bitPattern: count))
++            }
++        }
++
++        @inlinable
++        public subscript(range: PartialRangeUpTo<Int>) -> Swift.Span<Byte> {
++            @_lifetime(borrow self)
++            borrowing get {
++                bytes.extracting(0..<range.upperBound)
++            }
++        }
++
++        @inlinable
++        public subscript(range: PartialRangeThrough<Int>) -> Swift.Span<Byte> {
++            @_lifetime(borrow self)
++            borrowing get {
++                bytes.extracting(0...range.upperBound)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned.swift b/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned.swift
+index 259cbd9..a3d490c 100644
+--- a/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned.swift	
++++ b/Sources/Memory Aligned/Absorbed swift-memory-aligned/Memory.Aligned.swift	
+@@ -189,127 +189,3 @@
+         }
+     }
+ #endif
+-
+-#if MemoryAligned
+-    public import Index
+-    import Ordinal
+-
+-    extension Memory.Aligned {
+-
+-        @inlinable
+-        public subscript(index: Int) -> Byte {
+-            get {
+-                precondition(index >= 0 && index < Int(bitPattern: count), "index out of bounds")
+-                return unsafe bytePointer[index]
+-            }
+-            set {
+-                precondition(index >= 0 && index < Int(bitPattern: count), "index out of bounds")
+-                unsafe bytePointer[index] = newValue
+-            }
+-        }
+-    }
+-
+-    extension Memory.Aligned {
+-
+-        @inlinable
+-        public mutating func copy(
+-            from source: Swift.Span<Byte>,
+-            at offset: Int = 0
+-        ) {
+-            precondition(offset >= 0 && offset + source.count <= Int(bitPattern: count))
+-            unsafe withUnsafeMutableBufferPointer { dest in
+-                source.withUnsafeBufferPointer { src in
+-                    guard let destBase = dest.baseAddress else { return }
+-                    guard let srcBase = src.baseAddress else { return }
+-                    unsafe destBase.advanced(by: offset)
+-                        .update(from: srcBase, count: src.count)
+-                }
+-            }
+-        }
+-
+-        @inlinable
+-        public mutating func copy(
+-            from source: UnsafeRawBufferPointer,
+-            at offset: Int = 0
+-        ) {
+-            precondition(offset >= 0 && offset + source.count <= Int(bitPattern: count))
+-            unsafe withUnsafeMutableBytes { dest in
+-                guard let destBase = dest.baseAddress else { return }
+-                guard let srcBase = source.baseAddress else { return }
+-                unsafe destBase.advanced(by: offset)
+-                    .copyMemory(from: srcBase, byteCount: source.count)
+-            }
+-        }
+-    }
+-
+-    extension Memory.Aligned {
+-
+-        @inlinable
+-        public mutating func zero() {
+-            unsafe withUnsafeMutableBytes { buffer in
+-                _ = unsafe buffer.baseAddress?.initializeMemory(
+-                    as: Byte.self,
+-                    repeating: Byte(bitPattern: 0),
+-                    count: buffer.count
+-                )
+-            }
+-        }
+-
+-        @inlinable
+-        public mutating func zero(range: Swift.Range<Int>) {
+-            precondition(range.lowerBound >= 0 && range.upperBound <= Int(bitPattern: count))
+-            unsafe withUnsafeMutableBytes { buffer in
+-                guard let base = buffer.baseAddress else { return }
+-                let start = unsafe base.advanced(by: range.lowerBound)
+-                unsafe start.initializeMemory(as: Byte.self, repeating: Byte(bitPattern: 0), count: range.count)
+-            }
+-        }
+-
+-        @inlinable
+-        public mutating func zero(from offset: Int) {
+-            let size = Int(bitPattern: count)
+-            precondition(offset >= 0 && offset <= size)
+-            zero(range: offset..<size)
+-        }
+-    }
+-#endif
+-
+-#if MemoryAligned
+-    public import Index
+-    import Ordinal
+-
+-    extension Memory.Aligned {
+-
+-        @inlinable
+-        public subscript(range: Swift.Range<Int>) -> Swift.Span<Byte> {
+-            @_lifetime(borrow self)
+-            borrowing get {
+-                bytes.extracting(range)
+-            }
+-        }
+-
+-        @inlinable
+-        public subscript(range: PartialRangeFrom<Int>) -> Swift.Span<Byte> {
+-            @_lifetime(borrow self)
+-            borrowing get {
+-                bytes.extracting(range.lowerBound..<Int(bitPattern: count))
+-            }
+-        }
+-
+-        @inlinable
+-        public subscript(range: PartialRangeUpTo<Int>) -> Swift.Span<Byte> {
+-            @_lifetime(borrow self)
+-            borrowing get {
+-                bytes.extracting(0..<range.upperBound)
+-            }
+-        }
+-
+-        @inlinable
+-        public subscript(range: PartialRangeThrough<Int>) -> Swift.Span<Byte> {
+-            @_lifetime(borrow self)
+-            borrowing get {
+-                bytes.extracting(0...range.upperBound)
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small ~Copyable.swift b/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small ~Copyable.swift
+new file mode 100644
+index 0000000..8f78c09
+--- /dev/null
++++ b/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small ~Copyable.swift	
+@@ -0,0 +1,19 @@
++#if MemorySmall
++    public import Memory
++
++    extension Memory.Small {
++
++        @inlinable
++        package init(_storage: consuming _Representation) {
++            self._storage = _storage
++        }
++
++        @inlinable
++        public var isSpilled: Bool {
++            switch _storage {
++            case .inline: false
++            case .heap: true
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small.swift b/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small.swift
+index 994f3e4..ecf2f07 100644
+--- a/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small.swift	
++++ b/Sources/Memory Small/Absorbed swift-memory-small/Memory.Small.swift	
+@@ -17,23 +17,3 @@
+ 
+     extension Memory.Small: Sendable {}
+ #endif
+-
+-#if MemorySmall
+-    public import Memory
+-
+-    extension Memory.Small {
+-
+-        @inlinable
+-        package init(_storage: consuming _Representation) {
+-            self._storage = _storage
+-        }
+-
+-        @inlinable
+-        public var isSpilled: Bool {
+-            switch _storage {
+-            case .inline: false
+-            case .heap: true
+-            }
+-        }
+-    }
+-#endif
+-- 
+2.43.0
+

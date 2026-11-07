@@ -1,0 +1,188 @@
+From 0988f46e72cf4975755dbd11d324eb920dd360d1 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:53 +0000
+Subject: [PATCH 3/3] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ .../Lint.Driver.Dispatch.Prebuilt.Error.swift | 10 -----
+ .../Lint.Driver.Dispatch.Prebuilt.swift       |  4 ++
+ .../Lint.File.Single.Runner+Inventory.swift   | 42 +++++++++++++++++++
+ .../Linter Core/Lint.File.Single.Runner.swift | 41 ------------------
+ Sources/Linter/Lint.Run.Command.Error.swift   |  9 ----
+ Sources/Linter/Lint.Run.Command.swift         |  5 ++-
+ 6 files changed, 50 insertions(+), 61 deletions(-)
+ delete mode 100644 Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.Error.swift
+ create mode 100644 Sources/Linter Core/Lint.File.Single.Runner+Inventory.swift
+ delete mode 100644 Sources/Linter/Lint.Run.Command.Error.swift
+
+diff --git a/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.Error.swift b/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.Error.swift
+deleted file mode 100644
+index 8d089ea..0000000
+--- a/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.Error.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-internal import Environment
+-internal import Process
+-
+-
+-extension Lint.Driver.Dispatch.Prebuilt {
+-    public enum Error: Swift.Error, Swift.Sendable {
+-
+-        case spawnFailed(executable: Swift.String, description: Swift.String)
+-    }
+-}
+diff --git a/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.swift b/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.swift
+index ace790f..2b7a3fc 100644
+--- a/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.swift	
++++ b/Sources/Linter Core/Lint.Driver.Dispatch.Prebuilt.swift	
+@@ -10,6 +10,10 @@ extension Lint.Driver.Dispatch.Prebuilt {
+ 
+     public static let variable: Swift.String = "SWIFT_LINTER_TEST_DISPATCH_EXECUTABLE"
+ 
++    public enum Error: Swift.Error, Swift.Sendable {
++
++        case spawnFailed(executable: Swift.String, description: Swift.String)
++    }
+ 
+     internal static func executable() -> Swift.String? {
+         Environment.read(Self.variable)
+diff --git a/Sources/Linter Core/Lint.File.Single.Runner+Inventory.swift b/Sources/Linter Core/Lint.File.Single.Runner+Inventory.swift
+new file mode 100644
+index 0000000..0d230fb
+--- /dev/null
++++ b/Sources/Linter Core/Lint.File.Single.Runner+Inventory.swift	
+@@ -0,0 +1,42 @@
++internal import JSON
++internal import Process
++
++extension Lint.File.Single.Runner {
++
++    internal static func inventory(
++        binary: Swift.String
++    ) throws(Lint.File.Single.Error) -> Swift.Set<Lint.Rule.Bundle.Baked> {
++        let output: Process.Output
++        do throws(Process.Error) {
++            output = try Process.Spawn.run(
++                .init(
++                    executable: "/usr/bin/env",
++                    arguments: Self.invocation(binary: binary, arguments: ["--inventory"]),
++                    stdout: .pipe,
++                    stderr: .inherit
++                )
++            )
++        } catch {
++            throw .inventoryFailed(binary: binary, description: "spawn failed: \(error)")
++        }
++        guard output.status == .exited(code: 0) else {
++            throw .inventoryFailed(binary: binary, description: "exited with \(output.status)")
++        }
++        let text = Swift.String(decoding: output.stdout ?? [], as: Swift.UTF8.self)
++        do throws(JSON.Error) {
++            guard let bundles = try JSON.parse(text).dictionary?["bundles"] else {
++                throw JSON.Error.typeMismatch(expected: "inventory object", got: "no bundles")
++            }
++            var baked: Swift.Set<Lint.Rule.Bundle.Baked> = []
++            for entry in try [JSON](json: bundles) {
++                guard let token = entry.dictionary?["bundle"] else {
++                    throw JSON.Error.typeMismatch(expected: "bundle entry", got: "no bundle")
++                }
++                baked.insert(Lint.Rule.Bundle.Baked(try Swift.String(json: token)))
++            }
++            return baked
++        } catch {
++            throw .inventoryFailed(binary: binary, description: "malformed inventory: \(error)")
++        }
++    }
++}
+diff --git a/Sources/Linter Core/Lint.File.Single.Runner.swift b/Sources/Linter Core/Lint.File.Single.Runner.swift
+index f49c26e..7d46363 100644
+--- a/Sources/Linter Core/Lint.File.Single.Runner.swift	
++++ b/Sources/Linter Core/Lint.File.Single.Runner.swift	
+@@ -1,7 +1,6 @@
+ internal import Environment
+ internal import File_System
+ internal import Process
+-internal import JSON
+ 
+ extension Lint.File.Single {
+ 
+@@ -83,43 +82,3 @@ extension Lint.File.Single.Runner {
+         [binary] + arguments
+     }
+ }
+-
+-extension Lint.File.Single.Runner {
+-
+-    internal static func inventory(
+-        binary: Swift.String
+-    ) throws(Lint.File.Single.Error) -> Swift.Set<Lint.Rule.Bundle.Baked> {
+-        let output: Process.Output
+-        do throws(Process.Error) {
+-            output = try Process.Spawn.run(
+-                .init(
+-                    executable: "/usr/bin/env",
+-                    arguments: Self.invocation(binary: binary, arguments: ["--inventory"]),
+-                    stdout: .pipe,
+-                    stderr: .inherit
+-                )
+-            )
+-        } catch {
+-            throw .inventoryFailed(binary: binary, description: "spawn failed: \(error)")
+-        }
+-        guard output.status == .exited(code: 0) else {
+-            throw .inventoryFailed(binary: binary, description: "exited with \(output.status)")
+-        }
+-        let text = Swift.String(decoding: output.stdout ?? [], as: Swift.UTF8.self)
+-        do throws(JSON.Error) {
+-            guard let bundles = try JSON.parse(text).dictionary?["bundles"] else {
+-                throw JSON.Error.typeMismatch(expected: "inventory object", got: "no bundles")
+-            }
+-            var baked: Swift.Set<Lint.Rule.Bundle.Baked> = []
+-            for entry in try [JSON](json: bundles) {
+-                guard let token = entry.dictionary?["bundle"] else {
+-                    throw JSON.Error.typeMismatch(expected: "bundle entry", got: "no bundle")
+-                }
+-                baked.insert(Lint.Rule.Bundle.Baked(try Swift.String(json: token)))
+-            }
+-            return baked
+-        } catch {
+-            throw .inventoryFailed(binary: binary, description: "malformed inventory: \(error)")
+-        }
+-    }
+-}
+diff --git a/Sources/Linter/Lint.Run.Command.Error.swift b/Sources/Linter/Lint.Run.Command.Error.swift
+deleted file mode 100644
+index 38abf68..0000000
+--- a/Sources/Linter/Lint.Run.Command.Error.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-public import Linter_Core
+-
+-
+-extension Lint.Run.Command {
+-    public enum Error: Swift.Error, Swift.Equatable, Swift.Sendable {
+-        case unknownOption(Swift.String)
+-        case usage(Swift.String)
+-    }
+-}
+diff --git a/Sources/Linter/Lint.Run.Command.swift b/Sources/Linter/Lint.Run.Command.swift
+index f364bf8..bbe1286 100644
+--- a/Sources/Linter/Lint.Run.Command.swift
++++ b/Sources/Linter/Lint.Run.Command.swift
+@@ -9,7 +9,10 @@ extension Lint.Run {
+ }
+ 
+ extension Lint.Run.Command {
+-
++    public enum Error: Swift.Error, Swift.Equatable, Swift.Sendable {
++        case unknownOption(Swift.String)
++        case usage(Swift.String)
++    }
+ 
+     public static let usage: Swift.String =
+         "usage: --inventory | --profile <profile.json> <path> ... | [<path> ...]; "
+-- 
+2.43.0
+

@@ -1,0 +1,235 @@
+From f9a14a40b3a664533d1bb73dd0c53e9d13428eb8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:52 +0000
+Subject: [PATCH 5/5] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ .../EPUB.Chapter.Document.swift               | 57 -------------------
+ Sources/EPUB Rendering/EPUB.Chapter.swift     | 50 ++++++++++++++++
+ .../EPUB.Rendering.Context.swift              | 24 --------
+ .../EPUB.Rendering.Output.swift               | 14 -----
+ Sources/EPUB Rendering/EPUBRenderable.swift   | 28 +++++++++
+ 5 files changed, 78 insertions(+), 95 deletions(-)
+ delete mode 100644 Sources/EPUB Rendering/EPUB.Chapter.Document.swift
+ delete mode 100644 Sources/EPUB Rendering/EPUB.Rendering.Context.swift
+ delete mode 100644 Sources/EPUB Rendering/EPUB.Rendering.Output.swift
+
+diff --git a/Sources/EPUB Rendering/EPUB.Chapter.Document.swift b/Sources/EPUB Rendering/EPUB.Chapter.Document.swift
+deleted file mode 100644
+index 302ec75..0000000
+--- a/Sources/EPUB Rendering/EPUB.Chapter.Document.swift	
++++ /dev/null
+@@ -1,57 +0,0 @@
+-public import BCP_47
+-import Byte
+-public import HTML
+-public import HTML_Rendering_Core
+-
+-
+-extension EPUB.Chapter {
+-    public struct Document<Content: HTML.View>: Sendable where Content: Sendable {
+-
+-        public let title: String
+-
+-        public let language: BCP47.LanguageTag
+-
+-        public let stylesheets: [String]
+-
+-        public let content: Content
+-
+-        public init(
+-            title: String,
+-            language: BCP47.LanguageTag,
+-            stylesheets: [String] = [],
+-            @HTML.Builder content: () -> Content
+-        ) {
+-            self.title = title
+-            self.language = language
+-            self.stylesheets = stylesheets
+-            self.content = content()
+-        }
+-
+-        public func xhtml() -> String {
+-
+-            let bodyBytes: [Byte] = [Byte](content)
+-            let bodyHTML = String(decoding: bodyBytes, as: UTF8.self)
+-
+-            var stylesheetLinks = ""
+-            for stylesheet in stylesheets {
+-                stylesheetLinks +=
+-                    "  <link rel=\"stylesheet\" type=\"text/css\" href=\"\(escapeXML(stylesheet))\"/>\n"
+-            }
+-
+-            return """
+-                <?xml version="1.0" encoding="UTF-8"?>
+-                <!DOCTYPE html>
+-                <html xmlns="http://www.w3.org/1999/xhtml" lang="\(escapeXML(language.value))">
+-                <head>
+-                  <meta charset="UTF-8"/>
+-                  <title>\(escapeXML(title))</title>
+-                \(stylesheetLinks)</head>
+-                <body>
+-                \(bodyHTML)
+-                </body>
+-                </html>
+-
+-                """
+-        }
+-    }
+-}
+diff --git a/Sources/EPUB Rendering/EPUB.Chapter.swift b/Sources/EPUB Rendering/EPUB.Chapter.swift
+index eee5084..5829266 100644
+--- a/Sources/EPUB Rendering/EPUB.Chapter.swift	
++++ b/Sources/EPUB Rendering/EPUB.Chapter.swift	
+@@ -9,6 +9,56 @@ extension EPUB {
+ }
+ 
+ extension EPUB.Chapter {
++
++    public struct Document<Content: HTML.View>: Sendable where Content: Sendable {
++
++        public let title: String
++
++        public let language: BCP47.LanguageTag
++
++        public let stylesheets: [String]
++
++        public let content: Content
++
++        public init(
++            title: String,
++            language: BCP47.LanguageTag,
++            stylesheets: [String] = [],
++            @HTML.Builder content: () -> Content
++        ) {
++            self.title = title
++            self.language = language
++            self.stylesheets = stylesheets
++            self.content = content()
++        }
++
++        public func xhtml() -> String {
++
++            let bodyBytes: [Byte] = [Byte](content)
++            let bodyHTML = String(decoding: bodyBytes, as: UTF8.self)
++
++            var stylesheetLinks = ""
++            for stylesheet in stylesheets {
++                stylesheetLinks +=
++                    "  <link rel=\"stylesheet\" type=\"text/css\" href=\"\(escapeXML(stylesheet))\"/>\n"
++            }
++
++            return """
++                <?xml version="1.0" encoding="UTF-8"?>
++                <!DOCTYPE html>
++                <html xmlns="http://www.w3.org/1999/xhtml" lang="\(escapeXML(language.value))">
++                <head>
++                  <meta charset="UTF-8"/>
++                  <title>\(escapeXML(title))</title>
++                \(stylesheetLinks)</head>
++                <body>
++                \(bodyHTML)
++                </body>
++                </html>
++
++                """
++        }
++    }
+ }
+ 
+ extension EPUB.Chapter {
+diff --git a/Sources/EPUB Rendering/EPUB.Rendering.Context.swift b/Sources/EPUB Rendering/EPUB.Rendering.Context.swift
+deleted file mode 100644
+index 0d30d00..0000000
+--- a/Sources/EPUB Rendering/EPUB.Rendering.Context.swift	
++++ /dev/null
+@@ -1,24 +0,0 @@
+-public import Byte
+-public import EPUB_Standard
+-
+-
+-extension EPUB.Rendering {
+-    public struct Context: Sendable {
+-
+-        public var version: W3C_EPUB.Version
+-
+-        public var ncx: Bool
+-
+-        public var compression: Int
+-
+-        public init(
+-            version: W3C_EPUB.Version = .v3_3,
+-            ncx: Bool = false,
+-            compression: Int = 6
+-        ) {
+-            self.version = version
+-            self.ncx = ncx
+-            self.compression = compression
+-        }
+-    }
+-}
+diff --git a/Sources/EPUB Rendering/EPUB.Rendering.Output.swift b/Sources/EPUB Rendering/EPUB.Rendering.Output.swift
+deleted file mode 100644
+index d3387b5..0000000
+--- a/Sources/EPUB Rendering/EPUB.Rendering.Output.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-public import Byte
+-public import EPUB_Standard
+-
+-
+-extension EPUB.Rendering {
+-    public struct Output: Sendable, Hashable {
+-
+-        public var data: [Byte]
+-
+-        public init(data: [Byte]) {
+-            self.data = data
+-        }
+-    }
+-}
+diff --git a/Sources/EPUB Rendering/EPUBRenderable.swift b/Sources/EPUB Rendering/EPUBRenderable.swift
+index 26d975b..4b90285 100644
+--- a/Sources/EPUB Rendering/EPUBRenderable.swift	
++++ b/Sources/EPUB Rendering/EPUBRenderable.swift	
+@@ -7,7 +7,35 @@ extension EPUB {
+ }
+ 
+ extension EPUB.Rendering {
++
++    public struct Output: Sendable, Hashable {
++
++        public var data: [Byte]
++
++        public init(data: [Byte]) {
++            self.data = data
++        }
++    }
+ }
+ 
+ extension EPUB.Rendering {
++
++    public struct Context: Sendable {
++
++        public var version: W3C_EPUB.Version
++
++        public var ncx: Bool
++
++        public var compression: Int
++
++        public init(
++            version: W3C_EPUB.Version = .v3_3,
++            ncx: Bool = false,
++            compression: Int = 6
++        ) {
++            self.version = version
++            self.ncx = ncx
++            self.compression = compression
++        }
++    }
+ }
+-- 
+2.43.0
+

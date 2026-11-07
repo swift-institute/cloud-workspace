@@ -1,0 +1,202 @@
+From 15a31461364c648d451a4fb949e55e45bcf7a3ac Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:01:56 +0000
+Subject: [PATCH 4/5] Revert the extension-file merges and type splits in
+ Sources/Binary Parse: they don't type-check (coenttb/work#242)
+
+---
+ .../Binary.Parse.Access+prefix.swift          | 19 ++++++++++
+ .../Binary.Parse.Access+whole.swift           | 26 +++++++++++++
+ .../Binary Parse/Binary.Parse.Access.swift    | 38 -------------------
+ .../Binary.Parse.Converting.Error.swift       | 11 ------
+ .../Binary.Parse.Converting.swift             |  7 ++++
+ .../Binary.Parse.Validated.Error.swift        | 11 ------
+ .../Binary Parse/Binary.Parse.Validated.swift |  7 ++++
+ 7 files changed, 59 insertions(+), 60 deletions(-)
+ create mode 100644 Sources/Binary Parse/Binary.Parse.Access+prefix.swift
+ create mode 100644 Sources/Binary Parse/Binary.Parse.Access+whole.swift
+ delete mode 100644 Sources/Binary Parse/Binary.Parse.Converting.Error.swift
+ delete mode 100644 Sources/Binary Parse/Binary.Parse.Validated.Error.swift
+
+diff --git a/Sources/Binary Parse/Binary.Parse.Access+prefix.swift b/Sources/Binary Parse/Binary.Parse.Access+prefix.swift
+new file mode 100644
+index 0000000..a41dbf6
+--- /dev/null
++++ b/Sources/Binary Parse/Binary.Parse.Access+prefix.swift	
+@@ -0,0 +1,19 @@
++public import Binary
++public import Cardinal
++public import Index
++public import Ordinal
++import Parser
++
++extension Binary.Parse.Access {
++
++    @inlinable
++    public func prefix<Bytes: Swift::Collection>(
++        _ bytes: Bytes
++    ) throws(P.Failure) -> (value: P.Output, count: Index<Byte>.Count)
++    where Bytes.Element == Byte {
++        var input = Swift::Array(bytes)[...]
++        let value = try parser.parse(&input)
++        let consumed = Index<Byte>.Count(Cardinal(UInt(input.startIndex)))
++        return (value: value, count: consumed)
++    }
++}
+diff --git a/Sources/Binary Parse/Binary.Parse.Access+whole.swift b/Sources/Binary Parse/Binary.Parse.Access+whole.swift
+new file mode 100644
+index 0000000..57a1fce
+--- /dev/null
++++ b/Sources/Binary Parse/Binary.Parse.Access+whole.swift	
+@@ -0,0 +1,26 @@
++public import Binary
++public import Cardinal
++public import Index
++public import Ordinal
++import Parser
++
++extension Binary.Parse.Access {
++
++    @inlinable
++    public func whole<Bytes: Swift::Collection>(
++        _ bytes: Bytes
++    ) throws(Either<P.Failure, Binary.Parse.Error>) -> P.Output
++    where Bytes.Element == Byte {
++        var input = Swift::Array(bytes)[...]
++        let value: P.Output
++        do throws(P.Failure) {
++            value = try parser.parse(&input)
++        } catch {
++            throw .left(error)
++        }
++        guard input.isEmpty else {
++            throw .right(.end(remaining: Index<Byte>.Count(Cardinal(UInt(input.count)))))
++        }
++        return value
++    }
++}
+diff --git a/Sources/Binary Parse/Binary.Parse.Access.swift b/Sources/Binary Parse/Binary.Parse.Access.swift
+index 62a1fee..ec8dcca 100644
+--- a/Sources/Binary Parse/Binary.Parse.Access.swift	
++++ b/Sources/Binary Parse/Binary.Parse.Access.swift	
+@@ -1,8 +1,5 @@
+ public import Binary
+ import Parser
+-public import Cardinal
+-public import Index
+-public import Ordinal
+ 
+ extension Binary.Parse {
+ 
+@@ -17,38 +14,3 @@ extension Binary.Parse {
+         }
+     }
+ }
+-
+-extension Binary.Parse.Access {
+-
+-    @inlinable
+-    public func prefix<Bytes: Swift::Collection>(
+-        _ bytes: Bytes
+-    ) throws(P.Failure) -> (value: P.Output, count: Index<Byte>.Count)
+-    where Bytes.Element == Byte {
+-        var input = Swift::Array(bytes)[...]
+-        let value = try parser.parse(&input)
+-        let consumed = Index<Byte>.Count(Cardinal(UInt(input.startIndex)))
+-        return (value: value, count: consumed)
+-    }
+-}
+-
+-extension Binary.Parse.Access {
+-
+-    @inlinable
+-    public func whole<Bytes: Swift::Collection>(
+-        _ bytes: Bytes
+-    ) throws(Either<P.Failure, Binary.Parse.Error>) -> P.Output
+-    where Bytes.Element == Byte {
+-        var input = Swift::Array(bytes)[...]
+-        let value: P.Output
+-        do throws(P.Failure) {
+-            value = try parser.parse(&input)
+-        } catch {
+-            throw .left(error)
+-        }
+-        guard input.isEmpty else {
+-            throw .right(.end(remaining: Index<Byte>.Count(Cardinal(UInt(input.count)))))
+-        }
+-        return value
+-    }
+-}
+diff --git a/Sources/Binary Parse/Binary.Parse.Converting.Error.swift b/Sources/Binary Parse/Binary.Parse.Converting.Error.swift
+deleted file mode 100644
+index 7810898..0000000
+--- a/Sources/Binary Parse/Binary.Parse.Converting.Error.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-public import Binary
+-
+-
+-extension Binary.Parse.Converting {
+-    public enum Error: Swift::Error {
+-
+-        case endOfInput(expected: String)
+-
+-        case overflow(source: Source)
+-    }
+-}
+diff --git a/Sources/Binary Parse/Binary.Parse.Converting.swift b/Sources/Binary Parse/Binary.Parse.Converting.swift
+index cc74040..e95e660 100644
+--- a/Sources/Binary Parse/Binary.Parse.Converting.swift	
++++ b/Sources/Binary Parse/Binary.Parse.Converting.swift	
+@@ -15,6 +15,13 @@ extension Binary.Parse {
+ }
+ 
+ extension Binary.Parse.Converting {
++
++    public enum Error: Swift::Error {
++
++        case endOfInput(expected: String)
++
++        case overflow(source: Source)
++    }
+ }
+ 
+ extension Binary.Parse.Converting.Error: Sendable where Source: Sendable {}
+diff --git a/Sources/Binary Parse/Binary.Parse.Validated.Error.swift b/Sources/Binary Parse/Binary.Parse.Validated.Error.swift
+deleted file mode 100644
+index 09c7985..0000000
+--- a/Sources/Binary Parse/Binary.Parse.Validated.Error.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-public import Binary
+-
+-
+-extension Binary.Parse.Validated {
+-    public enum Error: Swift::Error {
+-
+-        case endOfInput(expected: String)
+-
+-        case invalid(rawValue: T.RawValue)
+-    }
+-}
+diff --git a/Sources/Binary Parse/Binary.Parse.Validated.swift b/Sources/Binary Parse/Binary.Parse.Validated.swift
+index 0859a68..4323ab7 100644
+--- a/Sources/Binary Parse/Binary.Parse.Validated.swift	
++++ b/Sources/Binary Parse/Binary.Parse.Validated.swift	
+@@ -15,6 +15,13 @@ extension Binary.Parse {
+ }
+ 
+ extension Binary.Parse.Validated {
++
++    public enum Error: Swift::Error {
++
++        case endOfInput(expected: String)
++
++        case invalid(rawValue: T.RawValue)
++    }
+ }
+ 
+ extension Binary.Parse.Validated.Error: Sendable where T.RawValue: Sendable {}
+-- 
+2.43.0
+

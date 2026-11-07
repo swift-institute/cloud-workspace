@@ -1,0 +1,665 @@
+From 6fcb231ab1f8ac6120cd3ec318778ead5eb865fa Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:46:01 +0000
+Subject: [PATCH 3/3] Revert the extension-file merges and type splits in
+ directories where a merged file brought its conditional imports mid-file
+ (coenttb/work#242)
+
+---
+ .../Predicate/Always/Predicate+Always.swift   |  16 +
+ .../Contramap/Predicate+Contramap.swift       |  46 +++
+ .../Logic/Predicate+TernaryLogic.swift        |  20 ++
+ Sources/Predicate/Optic/Predicate+Optic.swift |  40 +++
+ Sources/Predicate/Predicate+Boolean.swift     | 118 +++++++
+ Sources/Predicate/Predicate+Optional.swift    |  15 +
+ Sources/Predicate/Predicate+Sequence.swift    |  35 +++
+ Sources/Predicate/Predicate.swift             | 297 ------------------
+ 8 files changed, 290 insertions(+), 297 deletions(-)
+ create mode 100644 Sources/Predicate/Always/Predicate+Always.swift
+ create mode 100644 Sources/Predicate/Contramap/Predicate+Contramap.swift
+ create mode 100644 Sources/Predicate/Logic/Predicate+TernaryLogic.swift
+ create mode 100644 Sources/Predicate/Optic/Predicate+Optic.swift
+ create mode 100644 Sources/Predicate/Predicate+Boolean.swift
+ create mode 100644 Sources/Predicate/Predicate+Optional.swift
+ create mode 100644 Sources/Predicate/Predicate+Sequence.swift
+
+diff --git a/Sources/Predicate/Always/Predicate+Always.swift b/Sources/Predicate/Always/Predicate+Always.swift
+new file mode 100644
+index 0000000..0d17e23
+--- /dev/null
++++ b/Sources/Predicate/Always/Predicate+Always.swift
+@@ -0,0 +1,16 @@
++#if Always
++    public import Always
++
++    extension Predicate where T: ~Copyable & ~Escapable {
++        @inlinable
++        public init(_ constant: Always<Bool>) {
++            self.init { _ in constant.value }
++        }
++
++        @inlinable
++        public static var always: Predicate { .init(Always(true)) }
++
++        @inlinable
++        public static var never: Predicate { .init(Always(false)) }
++    }
++#endif
+diff --git a/Sources/Predicate/Contramap/Predicate+Contramap.swift b/Sources/Predicate/Contramap/Predicate+Contramap.swift
+new file mode 100644
+index 0000000..b5f0d65
+--- /dev/null
++++ b/Sources/Predicate/Contramap/Predicate+Contramap.swift
+@@ -0,0 +1,46 @@
++#if Contramap
++    public import Contramap
++
++    extension Predicate where T: ~Copyable & ~Escapable {
++
++        @inlinable
++        public init<Focus: ~Copyable>(
++            _ projection: Contramap<T, Focus, Never>,
++            satisfying predicate: Predicate<Focus>
++        ) {
++            self.init { source in
++                let projected = projection(source)
++                return predicate(projected)
++            }
++        }
++    }
++
++    extension Predicate where T: ~Copyable {
++        @inlinable
++        public static func pullback<U: ~Copyable & ~Escapable>(
++            _ predicate: Predicate,
++            _ project: @escaping (borrowing U) -> T
++        ) -> Predicate<U> {
++            Predicate<U>(Contramap<U, T, Never>(project), satisfying: predicate)
++        }
++
++        @inlinable
++        public func pullback<U: ~Copyable & ~Escapable>(
++            _ project: @escaping (borrowing U) -> T
++        ) -> Predicate<U> {
++            Self.pullback(self, project)
++        }
++    }
++
++    extension Predicate {
++        @inlinable
++        public static func pullback<U>(_ predicate: Predicate, _ keyPath: KeyPath<U, T>) -> Predicate<U> {
++            Self.pullback(predicate) { $0[keyPath: keyPath] }
++        }
++
++        @inlinable
++        public func pullback<U>(_ keyPath: KeyPath<U, T>) -> Predicate<U> {
++            Self.pullback(self, keyPath)
++        }
++    }
++#endif
+diff --git a/Sources/Predicate/Logic/Predicate+TernaryLogic.swift b/Sources/Predicate/Logic/Predicate+TernaryLogic.swift
+new file mode 100644
+index 0000000..73850c4
+--- /dev/null
++++ b/Sources/Predicate/Logic/Predicate+TernaryLogic.swift
+@@ -0,0 +1,20 @@
++#if Logic
++    public import Logic
++
++    extension Predicate {
++
++        @inlinable
++        public static func callAsFunction<L: Logic.Ternary.`Protocol`>(
++            _ predicate: Predicate,
++            _ value: T?
++        ) -> L {
++            guard let value else { return .unknown }
++            return predicate.evaluate(value) ? .true : .false
++        }
++
++        @inlinable
++        public func callAsFunction<L: Logic.Ternary.`Protocol`>(_ value: T?) -> L {
++            Self.callAsFunction(self, value)
++        }
++    }
++#endif
+diff --git a/Sources/Predicate/Optic/Predicate+Optic.swift b/Sources/Predicate/Optic/Predicate+Optic.swift
+new file mode 100644
+index 0000000..12c2932
+--- /dev/null
++++ b/Sources/Predicate/Optic/Predicate+Optic.swift
+@@ -0,0 +1,40 @@
++#if Optic
++    public import Optic
++
++    extension Predicate where T: ~Copyable & ~Escapable {
++
++        public init<
++            Target: ~Copyable & ~Escapable,
++            Focus: ~Copyable & ~Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            allSatisfying predicate: Predicate<Focus>,
++            in fold: Optic<T, Target, Focus, Replacement>.Fold
++        ) {
++            self.init { source in
++                var accepted = true
++                _ = fold(source) { focus in
++                    if accepted { accepted = predicate(focus) }
++                }
++                return accepted
++            }
++        }
++
++        public init<
++            Target: ~Copyable & ~Escapable,
++            Focus: ~Copyable & ~Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            anySatisfying predicate: Predicate<Focus>,
++            in fold: Optic<T, Target, Focus, Replacement>.Fold
++        ) {
++            self.init { source in
++                var accepted = false
++                _ = fold(source) { focus in
++                    if !accepted { accepted = predicate(focus) }
++                }
++                return accepted
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Predicate/Predicate+Boolean.swift b/Sources/Predicate/Predicate+Boolean.swift
+new file mode 100644
+index 0000000..474034d
+--- /dev/null
++++ b/Sources/Predicate/Predicate+Boolean.swift
+@@ -0,0 +1,118 @@
++extension Predicate where T: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func negated(_ predicate: Predicate) -> Predicate {
++        Predicate { !predicate.evaluate($0) }
++    }
++
++    @inlinable
++    public var negated: Predicate {
++        Self.negated(self)
++    }
++
++    @inlinable
++    public static prefix func ! (predicate: Predicate) -> Predicate {
++        Self.negated(predicate)
++    }
++}
++
++extension Predicate where T: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func and(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Predicate { lhs.evaluate($0) && rhs.evaluate($0) }
++    }
++
++    @inlinable
++    public func and(_ other: Predicate) -> Predicate {
++        Self.and(self, other)
++    }
++
++    @inlinable
++    public static func && (lhs: Predicate, rhs: Predicate) -> Predicate {
++        Self.and(lhs, rhs)
++    }
++}
++
++extension Predicate where T: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func or(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Predicate { lhs.evaluate($0) || rhs.evaluate($0) }
++    }
++
++    @inlinable
++    public func or(_ other: Predicate) -> Predicate {
++        Self.or(self, other)
++    }
++
++    @inlinable
++    public static func || (lhs: Predicate, rhs: Predicate) -> Predicate {
++        Self.or(lhs, rhs)
++    }
++}
++
++extension Predicate where T: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func xor(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Predicate { lhs.evaluate($0) != rhs.evaluate($0) }
++    }
++
++    @inlinable
++    public func xor(_ other: Predicate) -> Predicate {
++        Self.xor(self, other)
++    }
++
++    @inlinable
++    public static func ^ (lhs: Predicate, rhs: Predicate) -> Predicate {
++        Self.xor(lhs, rhs)
++    }
++}
++
++extension Predicate where T: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func nand(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Predicate { !lhs.evaluate($0) || !rhs.evaluate($0) }
++    }
++
++    @inlinable
++    public static func nor(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Predicate { !lhs.evaluate($0) && !rhs.evaluate($0) }
++    }
++
++    @inlinable
++    public func nand(_ other: Predicate) -> Predicate {
++        Self.nand(self, other)
++    }
++
++    @inlinable
++    public func nor(_ other: Predicate) -> Predicate {
++        Self.nor(self, other)
++    }
++}
++
++extension Predicate where T: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func implies(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Self.or(Self.negated(lhs), rhs)
++    }
++
++    @inlinable
++    public static func iff(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
++        Self.negated(Self.xor(lhs, rhs))
++    }
++
++    @inlinable
++    public func implies(_ other: Predicate) -> Predicate {
++        Self.implies(self, other)
++    }
++
++    @inlinable
++    public func iff(_ other: Predicate) -> Predicate {
++        Self.iff(self, other)
++    }
++
++}
+diff --git a/Sources/Predicate/Predicate+Optional.swift b/Sources/Predicate/Predicate+Optional.swift
+new file mode 100644
+index 0000000..16c2fcf
+--- /dev/null
++++ b/Sources/Predicate/Predicate+Optional.swift
+@@ -0,0 +1,15 @@
++extension Predicate {
++
++    @inlinable
++    public static func optional(_ predicate: Predicate, default defaultValue: Bool) -> Predicate<T?> {
++        Predicate<T?> { value in
++            guard let value else { return defaultValue }
++            return predicate.evaluate(value)
++        }
++    }
++
++    @inlinable
++    public func optional(default defaultValue: Bool) -> Predicate<T?> {
++        Self.optional(self, default: defaultValue)
++    }
++}
+diff --git a/Sources/Predicate/Predicate+Sequence.swift b/Sources/Predicate/Predicate+Sequence.swift
+new file mode 100644
+index 0000000..5556335
+--- /dev/null
++++ b/Sources/Predicate/Predicate+Sequence.swift
+@@ -0,0 +1,35 @@
++extension Predicate {
++
++    @inlinable
++    public static func forAll<S: Swift::Sequence>(_ predicate: Predicate) -> Predicate<S>
++    where S.Element == T {
++        Predicate<S> { $0.allSatisfy(predicate) }
++    }
++
++    @inlinable
++    public static func forAny<S: Swift::Sequence>(_ predicate: Predicate) -> Predicate<S>
++    where S.Element == T {
++        Predicate<S> { $0.contains(where: predicate) }
++    }
++
++    @inlinable
++    public static func forNone<S: Swift::Sequence>(_ predicate: Predicate) -> Predicate<S>
++    where S.Element == T {
++        Predicate<S> { !$0.contains(where: predicate) }
++    }
++
++    @inlinable
++    public func forAll<S: Swift::Sequence>() -> Predicate<S> where S.Element == T {
++        Self.forAll(self)
++    }
++
++    @inlinable
++    public func forAny<S: Swift::Sequence>() -> Predicate<S> where S.Element == T {
++        Self.forAny(self)
++    }
++
++    @inlinable
++    public func forNone<S: Swift::Sequence>() -> Predicate<S> where S.Element == T {
++        Self.forNone(self)
++    }
++}
+diff --git a/Sources/Predicate/Predicate.swift b/Sources/Predicate/Predicate.swift
+index 7f8aa8d..1fec649 100644
+--- a/Sources/Predicate/Predicate.swift
++++ b/Sources/Predicate/Predicate.swift
+@@ -15,300 +15,3 @@ extension Predicate where T: ~Copyable & ~Escapable {
+         evaluate(value)
+     }
+ }
+-
+-#if Always
+-    public import Always
+-
+-    extension Predicate where T: ~Copyable & ~Escapable {
+-        @inlinable
+-        public init(_ constant: Always<Bool>) {
+-            self.init { _ in constant.value }
+-        }
+-
+-        @inlinable
+-        public static var always: Predicate { .init(Always(true)) }
+-
+-        @inlinable
+-        public static var never: Predicate { .init(Always(false)) }
+-    }
+-#endif
+-
+-#if Contramap
+-    public import Contramap
+-
+-    extension Predicate where T: ~Copyable & ~Escapable {
+-
+-        @inlinable
+-        public init<Focus: ~Copyable>(
+-            _ projection: Contramap<T, Focus, Never>,
+-            satisfying predicate: Predicate<Focus>
+-        ) {
+-            self.init { source in
+-                let projected = projection(source)
+-                return predicate(projected)
+-            }
+-        }
+-    }
+-
+-    extension Predicate where T: ~Copyable {
+-        @inlinable
+-        public static func pullback<U: ~Copyable & ~Escapable>(
+-            _ predicate: Predicate,
+-            _ project: @escaping (borrowing U) -> T
+-        ) -> Predicate<U> {
+-            Predicate<U>(Contramap<U, T, Never>(project), satisfying: predicate)
+-        }
+-
+-        @inlinable
+-        public func pullback<U: ~Copyable & ~Escapable>(
+-            _ project: @escaping (borrowing U) -> T
+-        ) -> Predicate<U> {
+-            Self.pullback(self, project)
+-        }
+-    }
+-
+-    extension Predicate {
+-        @inlinable
+-        public static func pullback<U>(_ predicate: Predicate, _ keyPath: KeyPath<U, T>) -> Predicate<U> {
+-            Self.pullback(predicate) { $0[keyPath: keyPath] }
+-        }
+-
+-        @inlinable
+-        public func pullback<U>(_ keyPath: KeyPath<U, T>) -> Predicate<U> {
+-            Self.pullback(self, keyPath)
+-        }
+-    }
+-#endif
+-
+-#if Logic
+-    public import Logic
+-
+-    extension Predicate {
+-
+-        @inlinable
+-        public static func callAsFunction<L: Logic.Ternary.`Protocol`>(
+-            _ predicate: Predicate,
+-            _ value: T?
+-        ) -> L {
+-            guard let value else { return .unknown }
+-            return predicate.evaluate(value) ? .true : .false
+-        }
+-
+-        @inlinable
+-        public func callAsFunction<L: Logic.Ternary.`Protocol`>(_ value: T?) -> L {
+-            Self.callAsFunction(self, value)
+-        }
+-    }
+-#endif
+-
+-#if Optic
+-    public import Optic
+-
+-    extension Predicate where T: ~Copyable & ~Escapable {
+-
+-        public init<
+-            Target: ~Copyable & ~Escapable,
+-            Focus: ~Copyable & ~Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            allSatisfying predicate: Predicate<Focus>,
+-            in fold: Optic<T, Target, Focus, Replacement>.Fold
+-        ) {
+-            self.init { source in
+-                var accepted = true
+-                _ = fold(source) { focus in
+-                    if accepted { accepted = predicate(focus) }
+-                }
+-                return accepted
+-            }
+-        }
+-
+-        public init<
+-            Target: ~Copyable & ~Escapable,
+-            Focus: ~Copyable & ~Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            anySatisfying predicate: Predicate<Focus>,
+-            in fold: Optic<T, Target, Focus, Replacement>.Fold
+-        ) {
+-            self.init { source in
+-                var accepted = false
+-                _ = fold(source) { focus in
+-                    if !accepted { accepted = predicate(focus) }
+-                }
+-                return accepted
+-            }
+-        }
+-    }
+-#endif
+-
+-extension Predicate where T: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func negated(_ predicate: Predicate) -> Predicate {
+-        Predicate { !predicate.evaluate($0) }
+-    }
+-
+-    @inlinable
+-    public var negated: Predicate {
+-        Self.negated(self)
+-    }
+-
+-    @inlinable
+-    public static prefix func ! (predicate: Predicate) -> Predicate {
+-        Self.negated(predicate)
+-    }
+-}
+-
+-extension Predicate where T: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func and(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Predicate { lhs.evaluate($0) && rhs.evaluate($0) }
+-    }
+-
+-    @inlinable
+-    public func and(_ other: Predicate) -> Predicate {
+-        Self.and(self, other)
+-    }
+-
+-    @inlinable
+-    public static func && (lhs: Predicate, rhs: Predicate) -> Predicate {
+-        Self.and(lhs, rhs)
+-    }
+-}
+-
+-extension Predicate where T: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func or(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Predicate { lhs.evaluate($0) || rhs.evaluate($0) }
+-    }
+-
+-    @inlinable
+-    public func or(_ other: Predicate) -> Predicate {
+-        Self.or(self, other)
+-    }
+-
+-    @inlinable
+-    public static func || (lhs: Predicate, rhs: Predicate) -> Predicate {
+-        Self.or(lhs, rhs)
+-    }
+-}
+-
+-extension Predicate where T: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func xor(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Predicate { lhs.evaluate($0) != rhs.evaluate($0) }
+-    }
+-
+-    @inlinable
+-    public func xor(_ other: Predicate) -> Predicate {
+-        Self.xor(self, other)
+-    }
+-
+-    @inlinable
+-    public static func ^ (lhs: Predicate, rhs: Predicate) -> Predicate {
+-        Self.xor(lhs, rhs)
+-    }
+-}
+-
+-extension Predicate where T: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func nand(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Predicate { !lhs.evaluate($0) || !rhs.evaluate($0) }
+-    }
+-
+-    @inlinable
+-    public static func nor(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Predicate { !lhs.evaluate($0) && !rhs.evaluate($0) }
+-    }
+-
+-    @inlinable
+-    public func nand(_ other: Predicate) -> Predicate {
+-        Self.nand(self, other)
+-    }
+-
+-    @inlinable
+-    public func nor(_ other: Predicate) -> Predicate {
+-        Self.nor(self, other)
+-    }
+-}
+-
+-extension Predicate where T: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func implies(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Self.or(Self.negated(lhs), rhs)
+-    }
+-
+-    @inlinable
+-    public static func iff(_ lhs: Predicate, _ rhs: Predicate) -> Predicate {
+-        Self.negated(Self.xor(lhs, rhs))
+-    }
+-
+-    @inlinable
+-    public func implies(_ other: Predicate) -> Predicate {
+-        Self.implies(self, other)
+-    }
+-
+-    @inlinable
+-    public func iff(_ other: Predicate) -> Predicate {
+-        Self.iff(self, other)
+-    }
+-
+-}
+-
+-extension Predicate {
+-
+-    @inlinable
+-    public static func optional(_ predicate: Predicate, default defaultValue: Bool) -> Predicate<T?> {
+-        Predicate<T?> { value in
+-            guard let value else { return defaultValue }
+-            return predicate.evaluate(value)
+-        }
+-    }
+-
+-    @inlinable
+-    public func optional(default defaultValue: Bool) -> Predicate<T?> {
+-        Self.optional(self, default: defaultValue)
+-    }
+-}
+-
+-extension Predicate {
+-
+-    @inlinable
+-    public static func forAll<S: Swift::Sequence>(_ predicate: Predicate) -> Predicate<S>
+-    where S.Element == T {
+-        Predicate<S> { $0.allSatisfy(predicate) }
+-    }
+-
+-    @inlinable
+-    public static func forAny<S: Swift::Sequence>(_ predicate: Predicate) -> Predicate<S>
+-    where S.Element == T {
+-        Predicate<S> { $0.contains(where: predicate) }
+-    }
+-
+-    @inlinable
+-    public static func forNone<S: Swift::Sequence>(_ predicate: Predicate) -> Predicate<S>
+-    where S.Element == T {
+-        Predicate<S> { !$0.contains(where: predicate) }
+-    }
+-
+-    @inlinable
+-    public func forAll<S: Swift::Sequence>() -> Predicate<S> where S.Element == T {
+-        Self.forAll(self)
+-    }
+-
+-    @inlinable
+-    public func forAny<S: Swift::Sequence>() -> Predicate<S> where S.Element == T {
+-        Self.forAny(self)
+-    }
+-
+-    @inlinable
+-    public func forNone<S: Swift::Sequence>() -> Predicate<S> where S.Element == T {
+-        Self.forNone(self)
+-    }
+-}
+-- 
+2.43.0
+

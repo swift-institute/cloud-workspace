@@ -1,0 +1,187 @@
+From 9c2f57f7a129e22c48f3d05b64ccf52d3c315036 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:46:00 +0000
+Subject: [PATCH 3/3] Revert the extension-file merges and type splits in
+ directories where a merged file brought its conditional imports mid-file
+ (coenttb/work#242)
+
+---
+ .../Manifest.Parent.scan.swift                | 78 ++++++++++++++++++
+ Sources/Manifest/Manifest.Parent.swift        | 79 -------------------
+ 2 files changed, 78 insertions(+), 79 deletions(-)
+ create mode 100644 Sources/Manifest/Absorbed/swift-manifest-byte-parser/Manifest Byte Parser/Manifest.Parent.scan.swift
+
+diff --git a/Sources/Manifest/Absorbed/swift-manifest-byte-parser/Manifest Byte Parser/Manifest.Parent.scan.swift b/Sources/Manifest/Absorbed/swift-manifest-byte-parser/Manifest Byte Parser/Manifest.Parent.scan.swift
+new file mode 100644
+index 0000000..37a7898
+--- /dev/null
++++ b/Sources/Manifest/Absorbed/swift-manifest-byte-parser/Manifest Byte Parser/Manifest.Parent.scan.swift	
+@@ -0,0 +1,78 @@
++#if Parser
++    internal import ASCII
++    internal import Cursor
++    internal import Parser
++
++    extension Manifest.Parent {
++
++        public static func scan(
++            in source: borrowing Swift::String
++        ) -> [Swift::UInt8]? {
++            var lineBuffer: [Swift::UInt8] = []
++            lineBuffer.reserveCapacity(128)
++            var lineCount = 0
++            for byte in source.utf8 {
++                if byte == 0x0A {
++                    if let urlBytes = parse(lineBuffer[...]) {
++                        return urlBytes
++                    }
++                    lineCount += 1
++                    if lineCount >= 30 { return nil }
++                    lineBuffer.removeAll(keepingCapacity: true)
++                } else {
++                    lineBuffer.append(byte)
++                }
++            }
++            if lineCount < 30 {
++                return parse(lineBuffer[...])
++            }
++            return nil
++        }
++
++        @inline(__always)
++        private static func parse(
++            _ line: Swift::ArraySlice<Swift::UInt8>
++        ) -> [Swift::UInt8]? {
++            var input = Array(line)[...]
++
++            while let first = input.first,
++                first == 0x20
++                    || first == 0x09
++            {
++
++                _ = input.next()
++            }
++
++            do {
++                try [Swift::UInt8].Parser<Swift::ArraySlice<Swift::UInt8>>(
++                    Swift::Array("// parent:".utf8)
++                ).parse(&input)
++            } catch {
++                return nil
++            }
++
++            while let first = input.first,
++                first == 0x20
++                    || first == 0x09
++            {
++
++                _ = input.next()
++            }
++
++            var urlBytes: [Swift::UInt8] = []
++            urlBytes.reserveCapacity(64)
++            while let first = input.first {
++                if first == 0x20
++                    || first == 0x09
++                    || first == 0x0D
++                {
++                    break
++                }
++                urlBytes.append(first)
++
++                _ = input.next()
++            }
++            return urlBytes.isEmpty ? nil : urlBytes
++        }
++    }
++#endif
+diff --git a/Sources/Manifest/Manifest.Parent.swift b/Sources/Manifest/Manifest.Parent.swift
+index 9edd341..6a6eebd 100644
+--- a/Sources/Manifest/Manifest.Parent.swift
++++ b/Sources/Manifest/Manifest.Parent.swift
+@@ -2,82 +2,3 @@ extension Manifest {
+ 
+     public enum Parent: Swift::Sendable {}
+ }
+-
+-#if Parser
+-    internal import ASCII
+-    internal import Cursor
+-    internal import Parser
+-
+-    extension Manifest.Parent {
+-
+-        public static func scan(
+-            in source: borrowing Swift::String
+-        ) -> [Swift::UInt8]? {
+-            var lineBuffer: [Swift::UInt8] = []
+-            lineBuffer.reserveCapacity(128)
+-            var lineCount = 0
+-            for byte in source.utf8 {
+-                if byte == 0x0A {
+-                    if let urlBytes = parse(lineBuffer[...]) {
+-                        return urlBytes
+-                    }
+-                    lineCount += 1
+-                    if lineCount >= 30 { return nil }
+-                    lineBuffer.removeAll(keepingCapacity: true)
+-                } else {
+-                    lineBuffer.append(byte)
+-                }
+-            }
+-            if lineCount < 30 {
+-                return parse(lineBuffer[...])
+-            }
+-            return nil
+-        }
+-
+-        @inline(__always)
+-        private static func parse(
+-            _ line: Swift::ArraySlice<Swift::UInt8>
+-        ) -> [Swift::UInt8]? {
+-            var input = Array(line)[...]
+-
+-            while let first = input.first,
+-                first == 0x20
+-                    || first == 0x09
+-            {
+-
+-                _ = input.next()
+-            }
+-
+-            do {
+-                try [Swift::UInt8].Parser<Swift::ArraySlice<Swift::UInt8>>(
+-                    Swift::Array("// parent:".utf8)
+-                ).parse(&input)
+-            } catch {
+-                return nil
+-            }
+-
+-            while let first = input.first,
+-                first == 0x20
+-                    || first == 0x09
+-            {
+-
+-                _ = input.next()
+-            }
+-
+-            var urlBytes: [Swift::UInt8] = []
+-            urlBytes.reserveCapacity(64)
+-            while let first = input.first {
+-                if first == 0x20
+-                    || first == 0x09
+-                    || first == 0x0D
+-                {
+-                    break
+-                }
+-                urlBytes.append(first)
+-
+-                _ = input.next()
+-            }
+-            return urlBytes.isEmpty ? nil : urlBytes
+-        }
+-    }
+-#endif
+-- 
+2.43.0
+

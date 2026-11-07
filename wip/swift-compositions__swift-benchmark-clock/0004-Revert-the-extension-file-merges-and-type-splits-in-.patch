@@ -1,0 +1,227 @@
+From a45e76ca8a799de70485d9b13f79008ab60ccae9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:52 +0000
+Subject: [PATCH 4/4] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ .../Benchmark.Clock+Calibration.swift         | 23 +++++
+ .../Benchmark.Clock+Continuous.swift          | 15 ++++
+ .../Benchmark.Clock+Evaluation.swift          | 26 ++++++
+ .../Benchmark.Clock+Probe.swift               | 24 ++++++
+ Sources/Benchmark Clock/Benchmark.Clock.swift | 83 -------------------
+ 5 files changed, 88 insertions(+), 83 deletions(-)
+ create mode 100644 Sources/Benchmark Clock/Benchmark.Clock+Calibration.swift
+ create mode 100644 Sources/Benchmark Clock/Benchmark.Clock+Continuous.swift
+ create mode 100644 Sources/Benchmark Clock/Benchmark.Clock+Evaluation.swift
+ create mode 100644 Sources/Benchmark Clock/Benchmark.Clock+Probe.swift
+
+diff --git a/Sources/Benchmark Clock/Benchmark.Clock+Calibration.swift b/Sources/Benchmark Clock/Benchmark.Clock+Calibration.swift
+new file mode 100644
+index 0000000..a26341e
+--- /dev/null
++++ b/Sources/Benchmark Clock/Benchmark.Clock+Calibration.swift	
+@@ -0,0 +1,23 @@
++public import Benchmark
++import Clock
++
++extension Benchmark.Clock {
++    public static func calibrate<C: _Concurrency.Clock & Sendable>(
++        _ clock: C
++    ) -> Calibration
++    where C.Duration == Swift::Duration, C.Instant: Sendable {
++        var observations: [Duration] = []
++        observations.reserveCapacity(32)
++        for _ in 0..<32 {
++            let start = clock.now
++            observations.append(start.duration(to: clock.now))
++        }
++        let positive = observations.filter { $0 > .zero }
++        let observed = positive.min()
++        let overhead = observations.sorted()[observations.count / 2]
++        return .init(
++            resolution: .init(declared: clock.minimumResolution, observed: observed),
++            overhead: overhead
++        )
++    }
++}
+diff --git a/Sources/Benchmark Clock/Benchmark.Clock+Continuous.swift b/Sources/Benchmark Clock/Benchmark.Clock+Continuous.swift
+new file mode 100644
+index 0000000..901c353
+--- /dev/null
++++ b/Sources/Benchmark Clock/Benchmark.Clock+Continuous.swift	
+@@ -0,0 +1,15 @@
++public import Benchmark
++
++extension Benchmark.Clock {
++    public static func continuous(
++        calibration: Calibration? = nil,
++        condition: Condition = .clean
++    ) -> Benchmark.Probe<ContinuousClock.Instant, Observation, Never> {
++        let clock = ContinuousClock()
++        return probe(
++            clock,
++            calibration: calibration ?? calibrate(clock),
++            condition: condition
++        )
++    }
++}
+diff --git a/Sources/Benchmark Clock/Benchmark.Clock+Evaluation.swift b/Sources/Benchmark Clock/Benchmark.Clock+Evaluation.swift
+new file mode 100644
+index 0000000..d73b6b0
+--- /dev/null
++++ b/Sources/Benchmark Clock/Benchmark.Clock+Evaluation.swift	
+@@ -0,0 +1,26 @@
++public import Benchmark
++
++extension Benchmark.Clock {
++    public static func maximum(
++        _ duration: Duration
++    ) -> Benchmark.Evaluation<Observation> {
++        .init { current, _ in
++            current.adjusted > duration ? .regressed : .unchanged
++        }
++    }
++
++    public static func regression(
++        tolerance: Duration = .zero
++    ) -> Benchmark.Evaluation<Observation> {
++        .init { current, baseline in
++            let difference = current.adjusted - baseline.adjusted
++            if difference > tolerance {
++                return .regressed
++            } else if difference < .zero - tolerance {
++                return .improved
++            } else {
++                return .unchanged
++            }
++        }
++    }
++}
+diff --git a/Sources/Benchmark Clock/Benchmark.Clock+Probe.swift b/Sources/Benchmark Clock/Benchmark.Clock+Probe.swift
+new file mode 100644
+index 0000000..4d8268d
+--- /dev/null
++++ b/Sources/Benchmark Clock/Benchmark.Clock+Probe.swift	
+@@ -0,0 +1,24 @@
++public import Benchmark
++import Clock
++
++extension Benchmark.Clock {
++    public static func probe<C: _Concurrency.Clock & Sendable>(
++        _ clock: C,
++        calibration: Calibration = .zero,
++        condition: Condition = .clean
++    ) -> Benchmark.Probe<C.Instant, Observation, Never>
++    where C.Duration == Swift::Duration, C.Instant: Sendable {
++        .init(
++            start: { .success(clock.now) },
++            stop: { start in
++                .success(
++                    Observation(
++                        raw: start.duration(to: clock.now),
++                        calibration: calibration,
++                        condition: condition
++                    )
++                )
++            }
++        )
++    }
++}
+diff --git a/Sources/Benchmark Clock/Benchmark.Clock.swift b/Sources/Benchmark Clock/Benchmark.Clock.swift
+index 1166112..b3986cb 100644
+--- a/Sources/Benchmark Clock/Benchmark.Clock.swift	
++++ b/Sources/Benchmark Clock/Benchmark.Clock.swift	
+@@ -1,88 +1,5 @@
+ public import Benchmark
+-import Clock
+ 
+ extension Benchmark {
+     public enum Clock {}
+ }
+-
+-extension Benchmark.Clock {
+-    public static func calibrate<C: _Concurrency.Clock & Sendable>(
+-        _ clock: C
+-    ) -> Calibration
+-    where C.Duration == Swift::Duration, C.Instant: Sendable {
+-        var observations: [Duration] = []
+-        observations.reserveCapacity(32)
+-        for _ in 0..<32 {
+-            let start = clock.now
+-            observations.append(start.duration(to: clock.now))
+-        }
+-        let positive = observations.filter { $0 > .zero }
+-        let observed = positive.min()
+-        let overhead = observations.sorted()[observations.count / 2]
+-        return .init(
+-            resolution: .init(declared: clock.minimumResolution, observed: observed),
+-            overhead: overhead
+-        )
+-    }
+-}
+-
+-extension Benchmark.Clock {
+-    public static func continuous(
+-        calibration: Calibration? = nil,
+-        condition: Condition = .clean
+-    ) -> Benchmark.Probe<ContinuousClock.Instant, Observation, Never> {
+-        let clock = ContinuousClock()
+-        return probe(
+-            clock,
+-            calibration: calibration ?? calibrate(clock),
+-            condition: condition
+-        )
+-    }
+-}
+-
+-extension Benchmark.Clock {
+-    public static func maximum(
+-        _ duration: Duration
+-    ) -> Benchmark.Evaluation<Observation> {
+-        .init { current, _ in
+-            current.adjusted > duration ? .regressed : .unchanged
+-        }
+-    }
+-
+-    public static func regression(
+-        tolerance: Duration = .zero
+-    ) -> Benchmark.Evaluation<Observation> {
+-        .init { current, baseline in
+-            let difference = current.adjusted - baseline.adjusted
+-            if difference > tolerance {
+-                return .regressed
+-            } else if difference < .zero - tolerance {
+-                return .improved
+-            } else {
+-                return .unchanged
+-            }
+-        }
+-    }
+-}
+-
+-extension Benchmark.Clock {
+-    public static func probe<C: _Concurrency.Clock & Sendable>(
+-        _ clock: C,
+-        calibration: Calibration = .zero,
+-        condition: Condition = .clean
+-    ) -> Benchmark.Probe<C.Instant, Observation, Never>
+-    where C.Duration == Swift::Duration, C.Instant: Sendable {
+-        .init(
+-            start: { .success(clock.now) },
+-            stop: { start in
+-                .success(
+-                    Observation(
+-                        raw: start.duration(to: clock.now),
+-                        calibration: calibration,
+-                        condition: condition
+-                    )
+-                )
+-            }
+-        )
+-    }
+-}
+-- 
+2.43.0
+

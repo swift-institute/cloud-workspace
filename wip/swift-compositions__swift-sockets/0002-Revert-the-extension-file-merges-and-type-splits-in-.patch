@@ -1,0 +1,354 @@
+From cf36f5b02c9550ac849b923fd5e3249b775ce11e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:54 +0000
+Subject: [PATCH 2/2] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ Sources/Sockets/Sockets.Error+Event.swift     | 45 +++++++++++
+ Sources/Sockets/Sockets.Error+Kernel.swift    | 34 ++++++++
+ Sources/Sockets/Sockets.Error.swift           | 77 -------------------
+ .../Sockets.TCP.Connection+Connect.swift      | 70 +++++++++++++++++
+ Sources/Sockets/Sockets.TCP.Connection.swift  | 68 ----------------
+ 5 files changed, 149 insertions(+), 145 deletions(-)
+ create mode 100644 Sources/Sockets/Sockets.Error+Event.swift
+ create mode 100644 Sources/Sockets/Sockets.Error+Kernel.swift
+ create mode 100644 Sources/Sockets/Sockets.TCP.Connection+Connect.swift
+
+diff --git a/Sources/Sockets/Sockets.Error+Event.swift b/Sources/Sockets/Sockets.Error+Event.swift
+new file mode 100644
+index 0000000..60b6009
+--- /dev/null
++++ b/Sources/Sockets/Sockets.Error+Event.swift
+@@ -0,0 +1,45 @@
++internal import IO_Kernel
++internal import Kernel
++
++extension Sockets.Error {
++
++    internal init(_ failure: Kernel.Event.Failure) {
++        switch failure {
++        case .left(.cancelled):
++            self = .cancelled
++
++        case .left(.shutdown):
++            self = .ioShutdown
++
++        case .left(.timeout):
++            self = .timeout
++
++        case .right(let error):
++            switch error {
++            case .platform(let code):
++                self.init(code: code)
++
++            case .invalidDescriptor:
++                self = .descriptor(.invalid)
++
++            case .alreadyRegistered:
++                self = .registration(.duplicate)
++
++            case .notRegistered:
++                self = .registration(.missing)
++
++            case .deregistered:
++                self = .registration(.removed)
++
++            case .readClosed:
++                self = .closed(.read)
++
++            case .writeClosed:
++                self = .closed(.write)
++
++            case .notConnected:
++                self = .notConnected
++            }
++        }
++    }
++}
+diff --git a/Sources/Sockets/Sockets.Error+Kernel.swift b/Sources/Sockets/Sockets.Error+Kernel.swift
+new file mode 100644
+index 0000000..ee4f4e2
+--- /dev/null
++++ b/Sources/Sockets/Sockets.Error+Kernel.swift
+@@ -0,0 +1,34 @@
++internal import Kernel
++
++extension Sockets.Error {
++
++    internal init(_ error: Kernel.IO.Read.Error) {
++        self.init(code: error.code)
++    }
++
++    internal init(_ error: Kernel.IO.Write.Error) {
++        self.init(code: error.code)
++    }
++
++    internal init(_ error: Kernel.Socket.Error) {
++        self.init(code: error.code)
++    }
++
++    internal init(_ error: Kernel.File.Control.Error) {
++        switch error {
++        case .handle(let error):
++            self = .descriptor(error)
++
++        case .platform(let error):
++            self.init(code: error.code)
++        }
++    }
++
++    internal init(code: Error::Error.Code) {
++        if code == .ECONNRESET {
++            self = .connectionReset
++        } else {
++            self = .platform(code)
++        }
++    }
++}
+diff --git a/Sources/Sockets/Sockets.Error.swift b/Sources/Sockets/Sockets.Error.swift
+index 294c7fc..95334e5 100644
+--- a/Sources/Sockets/Sockets.Error.swift
++++ b/Sources/Sockets/Sockets.Error.swift
+@@ -1,5 +1,4 @@
+ public import Kernel
+-internal import IO_Kernel
+ 
+ extension Sockets {
+ 
+@@ -24,79 +23,3 @@ extension Sockets {
+         case platform(Error::Error.Code)
+     }
+ }
+-
+-extension Sockets.Error {
+-
+-    internal init(_ failure: Kernel.Event.Failure) {
+-        switch failure {
+-        case .left(.cancelled):
+-            self = .cancelled
+-
+-        case .left(.shutdown):
+-            self = .ioShutdown
+-
+-        case .left(.timeout):
+-            self = .timeout
+-
+-        case .right(let error):
+-            switch error {
+-            case .platform(let code):
+-                self.init(code: code)
+-
+-            case .invalidDescriptor:
+-                self = .descriptor(.invalid)
+-
+-            case .alreadyRegistered:
+-                self = .registration(.duplicate)
+-
+-            case .notRegistered:
+-                self = .registration(.missing)
+-
+-            case .deregistered:
+-                self = .registration(.removed)
+-
+-            case .readClosed:
+-                self = .closed(.read)
+-
+-            case .writeClosed:
+-                self = .closed(.write)
+-
+-            case .notConnected:
+-                self = .notConnected
+-            }
+-        }
+-    }
+-}
+-
+-extension Sockets.Error {
+-
+-    internal init(_ error: Kernel.IO.Read.Error) {
+-        self.init(code: error.code)
+-    }
+-
+-    internal init(_ error: Kernel.IO.Write.Error) {
+-        self.init(code: error.code)
+-    }
+-
+-    internal init(_ error: Kernel.Socket.Error) {
+-        self.init(code: error.code)
+-    }
+-
+-    internal init(_ error: Kernel.File.Control.Error) {
+-        switch error {
+-        case .handle(let error):
+-            self = .descriptor(error)
+-
+-        case .platform(let error):
+-            self.init(code: error.code)
+-        }
+-    }
+-
+-    internal init(code: Error::Error.Code) {
+-        if code == .ECONNRESET {
+-            self = .connectionReset
+-        } else {
+-            self = .platform(code)
+-        }
+-    }
+-}
+diff --git a/Sources/Sockets/Sockets.TCP.Connection+Connect.swift b/Sources/Sockets/Sockets.TCP.Connection+Connect.swift
+new file mode 100644
+index 0000000..752c752
+--- /dev/null
++++ b/Sources/Sockets/Sockets.TCP.Connection+Connect.swift
+@@ -0,0 +1,70 @@
++public import IO_Kernel
++public import Kernel
++
++extension Sockets.TCP.Connection {
++
++    public static func connect(
++        to address: Kernel.Socket.Address.IPv4,
++        io: IO<Sockets.Capabilities>
++    ) async throws(Sockets.Error) -> sending Sockets.TCP.Connection {
++        let socket: Kernel.Descriptor
++        do throws(Kernel.Socket.Error) {
++            socket = try Kernel.Socket.Create.create(domain: .inet, kind: .stream)
++        } catch {
++            throw Sockets.Error(error)
++        }
++        try io.prepare(socket)
++        try await io.connect(socket, to: address.storage, length: Kernel.Socket.Address.IPv4.size)
++        return Sockets.TCP.Connection(descriptor: consume socket, peer: address.storage, io: io)
++    }
++
++    public static func connect(
++        to address: Kernel.Socket.Address.IPv6,
++        io: IO<Sockets.Capabilities>
++    ) async throws(Sockets.Error) -> sending Sockets.TCP.Connection {
++        let socket: Kernel.Descriptor
++        do throws(Kernel.Socket.Error) {
++            socket = try Kernel.Socket.Create.create(domain: .inet6, kind: .stream)
++        } catch {
++            throw Sockets.Error(error)
++        }
++        try io.prepare(socket)
++        try await io.connect(socket, to: address.storage, length: Kernel.Socket.Address.IPv6.size)
++        return Sockets.TCP.Connection(descriptor: consume socket, peer: address.storage, io: io)
++    }
++}
++
++extension Sockets.TCP.Connection {
++
++    package static func connectReactively(
++        _ descriptor: borrowing Kernel.Descriptor,
++        to address: Kernel.Socket.Address.Storage,
++        length: Kernel.Socket.Address.Length,
++        ready: (borrowing Kernel.Descriptor, Kernel.Event.Interest) async throws(Sockets.Error) ->
++            Void
++    ) async throws(Sockets.Error) {
++
++        do throws(Kernel.Socket.Error) {
++            try ISO_9945.Kernel.Socket.Connect.connect(descriptor, address: address, length: length)
++            return
++        } catch {
++            let code = error.code
++            guard code.isInterrupted || code.isInProgress else {
++                throw Sockets.Error(error)
++            }
++        }
++
++        try await ready(descriptor, .write)
++
++        let pending: Error::Error.Code
++        do throws(Kernel.Socket.Error) {
++            pending = try ISO_9945.Kernel.Socket.getError(descriptor)
++        } catch {
++            throw Sockets.Error(error)
++        }
++        guard pending == .posix(0) else {
++            throw .platform(pending)
++        }
++    }
++
++}
+diff --git a/Sources/Sockets/Sockets.TCP.Connection.swift b/Sources/Sockets/Sockets.TCP.Connection.swift
+index a7cee79..628a65b 100644
+--- a/Sources/Sockets/Sockets.TCP.Connection.swift
++++ b/Sources/Sockets/Sockets.TCP.Connection.swift
+@@ -57,71 +57,3 @@ extension Sockets.TCP.Connection {
+         }
+     }
+ }
+-
+-extension Sockets.TCP.Connection {
+-
+-    public static func connect(
+-        to address: Kernel.Socket.Address.IPv4,
+-        io: IO<Sockets.Capabilities>
+-    ) async throws(Sockets.Error) -> sending Sockets.TCP.Connection {
+-        let socket: Kernel.Descriptor
+-        do throws(Kernel.Socket.Error) {
+-            socket = try Kernel.Socket.Create.create(domain: .inet, kind: .stream)
+-        } catch {
+-            throw Sockets.Error(error)
+-        }
+-        try io.prepare(socket)
+-        try await io.connect(socket, to: address.storage, length: Kernel.Socket.Address.IPv4.size)
+-        return Sockets.TCP.Connection(descriptor: consume socket, peer: address.storage, io: io)
+-    }
+-
+-    public static func connect(
+-        to address: Kernel.Socket.Address.IPv6,
+-        io: IO<Sockets.Capabilities>
+-    ) async throws(Sockets.Error) -> sending Sockets.TCP.Connection {
+-        let socket: Kernel.Descriptor
+-        do throws(Kernel.Socket.Error) {
+-            socket = try Kernel.Socket.Create.create(domain: .inet6, kind: .stream)
+-        } catch {
+-            throw Sockets.Error(error)
+-        }
+-        try io.prepare(socket)
+-        try await io.connect(socket, to: address.storage, length: Kernel.Socket.Address.IPv6.size)
+-        return Sockets.TCP.Connection(descriptor: consume socket, peer: address.storage, io: io)
+-    }
+-}
+-
+-extension Sockets.TCP.Connection {
+-
+-    package static func connectReactively(
+-        _ descriptor: borrowing Kernel.Descriptor,
+-        to address: Kernel.Socket.Address.Storage,
+-        length: Kernel.Socket.Address.Length,
+-        ready: (borrowing Kernel.Descriptor, Kernel.Event.Interest) async throws(Sockets.Error) ->
+-            Void
+-    ) async throws(Sockets.Error) {
+-
+-        do throws(Kernel.Socket.Error) {
+-            try ISO_9945.Kernel.Socket.Connect.connect(descriptor, address: address, length: length)
+-            return
+-        } catch {
+-            let code = error.code
+-            guard code.isInterrupted || code.isInProgress else {
+-                throw Sockets.Error(error)
+-            }
+-        }
+-
+-        try await ready(descriptor, .write)
+-
+-        let pending: Error::Error.Code
+-        do throws(Kernel.Socket.Error) {
+-            pending = try ISO_9945.Kernel.Socket.getError(descriptor)
+-        } catch {
+-            throw Sockets.Error(error)
+-        }
+-        guard pending == .posix(0) else {
+-            throw .platform(pending)
+-        }
+-    }
+-
+-}
+-- 
+2.43.0
+

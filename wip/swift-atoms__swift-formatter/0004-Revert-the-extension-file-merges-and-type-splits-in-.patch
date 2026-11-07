@@ -1,0 +1,400 @@
+From d8c30acb8eb67e3eb3b7b2b77498ba8fb0b86392 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:46:00 +0000
+Subject: [PATCH 4/4] Revert the extension-file merges and type splits in
+ directories where a merged file brought its conditional imports mid-file
+ (coenttb/work#242)
+
+---
+ .../Radix.Formatter+Chaining.swift            |  39 +++++
+ .../Radix.Formatter+Formatting.swift          |  51 +++++++
+ .../Radix.Formatter+Initialization.swift      |  16 ++
+ .../Radix.Formatter+Standard.swift            |  32 ++++
+ ...adix.Formatter.Sign.Display+Standard.swift |  24 +++
+ .../Radix.Formatter.Sign.Display.swift        |  25 ---
+ .../Radix Formatter/Radix.Formatter.swift     | 142 ------------------
+ 7 files changed, 162 insertions(+), 167 deletions(-)
+ create mode 100644 Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Chaining.swift
+ create mode 100644 Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Formatting.swift
+ create mode 100644 Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Initialization.swift
+ create mode 100644 Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Standard.swift
+ create mode 100644 Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display+Standard.swift
+
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Chaining.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Chaining.swift
+new file mode 100644
+index 0000000..b5b0ea7
+--- /dev/null
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Chaining.swift	
+@@ -0,0 +1,39 @@
++#if Radix
++    public import Radix
++
++    extension Radix.Formatter {
++
++        @inlinable
++        public var prefix: Self {
++            .init(
++                radix: radix,
++                prefix: prefixString,
++                showPrefix: true,
++                signStrategy: signStrategy,
++                minWidth: minWidth
++            )
++        }
++
++        @inlinable
++        public func sign(_ strategy: Sign.Display) -> Self {
++            .init(
++                radix: radix,
++                prefix: prefixString,
++                showPrefix: showPrefix,
++                signStrategy: strategy,
++                minWidth: minWidth
++            )
++        }
++
++        @inlinable
++        public func zeroPadded(width: Int) -> Self {
++            .init(
++                radix: radix,
++                prefix: prefixString,
++                showPrefix: showPrefix,
++                signStrategy: signStrategy,
++                minWidth: width
++            )
++        }
++    }
++#endif
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Formatting.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Formatting.swift
+new file mode 100644
+index 0000000..82d0e13
+--- /dev/null
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Formatting.swift	
+@@ -0,0 +1,51 @@
++#if Radix
++    public import Radix
++
++    extension Radix.Formatter {
++
++        @inlinable
++        public func format<T: Swift::BinaryInteger>(_ value: T) -> String {
++            render(value)
++        }
++    }
++
++    extension Radix.Formatter {
++
++        @usableFromInline
++        func render<T: Swift::BinaryInteger>(_ value: T) -> String {
++            let base = T.Magnitude(radix.base)
++            var magnitude = value.magnitude
++
++            var scalars: [Unicode.Scalar] = []
++            if magnitude == 0 {
++                scalars.append(radix.digit(for: 0) ?? "0")
++            } else {
++                while magnitude > 0 {
++                    let remainder = Int(magnitude % base)
++                    scalars.append(radix.digit(for: remainder) ?? "0")
++                    magnitude /= base
++                }
++                scalars.reverse()
++            }
++
++            var result = String(String.UnicodeScalarView(scalars))
++
++            if let minWidth {
++                let padding = max(0, minWidth - result.count)
++                result = String(repeating: "0", count: padding) + result
++            }
++
++            if showPrefix {
++                result = prefixString + result
++            }
++
++            if value < 0 {
++                result = "-" + result
++            } else if signStrategy.shouldAlwaysShowSign {
++                result = "+" + result
++            }
++
++            return result
++        }
++    }
++#endif
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Initialization.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Initialization.swift
+new file mode 100644
+index 0000000..e2a07f2
+--- /dev/null
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Initialization.swift	
+@@ -0,0 +1,16 @@
++#if Radix
++    public import Radix
++
++    extension Radix.Formatter {
++
++        public init(signStrategy: Sign.Display = .automatic, minWidth: Int? = nil) {
++            self.init(
++                radix: .decimal,
++                prefix: "",
++                showPrefix: false,
++                signStrategy: signStrategy,
++                minWidth: minWidth
++            )
++        }
++    }
++#endif
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Standard.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Standard.swift
+new file mode 100644
+index 0000000..c3ec834
+--- /dev/null
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter+Standard.swift	
+@@ -0,0 +1,32 @@
++#if Radix
++    public import Radix
++
++    extension Radix.Formatter {
++
++        @inlinable
++        public static var decimal: Self {
++            .init(radix: .decimal, prefix: "")
++        }
++
++        @inlinable
++        public static var number: Self { .decimal }
++
++        @inlinable
++        public static var base2: Self {
++            .init(radix: .binary, prefix: "0b")
++        }
++
++        @inlinable
++        public static var bits: Self { .base2 }
++
++        @inlinable
++        public static var octal: Self {
++            .init(radix: .octal, prefix: "0o")
++        }
++
++        @inlinable
++        public static var hex: Self {
++            .init(radix: .hexadecimal, prefix: "0x")
++        }
++    }
++#endif
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display+Standard.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display+Standard.swift
+new file mode 100644
+index 0000000..a837791
+--- /dev/null
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display+Standard.swift	
+@@ -0,0 +1,24 @@
++#if Radix
++    public import Radix
++
++    extension Radix.Formatter.Sign.Display {
++
++        @usableFromInline
++        var shouldAlwaysShowSign: Bool {
++            _shouldAlwaysShowSign()
++        }
++    }
++
++    extension Radix.Formatter.Sign.Display {
++
++        @inlinable
++        public static var automatic: Self {
++            .init { false }
++        }
++
++        @inlinable
++        public static var always: Self {
++            .init { true }
++        }
++    }
++#endif
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display.swift
+index 8201493..5c3288a 100644
+--- a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display.swift	
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.Sign.Display.swift	
+@@ -16,28 +16,3 @@
+ 
+     extension Radix.Formatter.Sign.Display: Sendable {}
+ #endif
+-
+-#if Radix
+-    public import Radix
+-
+-    extension Radix.Formatter.Sign.Display {
+-
+-        @usableFromInline
+-        var shouldAlwaysShowSign: Bool {
+-            _shouldAlwaysShowSign()
+-        }
+-    }
+-
+-    extension Radix.Formatter.Sign.Display {
+-
+-        @inlinable
+-        public static var automatic: Self {
+-            .init { false }
+-        }
+-
+-        @inlinable
+-        public static var always: Self {
+-            .init { true }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.swift b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.swift
+index 33aa447..c2706fc 100644
+--- a/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.swift	
++++ b/Sources/Formatter/Absorbed/swift-radix-formatter/Radix Formatter/Radix.Formatter.swift	
+@@ -37,145 +37,3 @@
+ 
+     extension Radix.Formatter: Sendable {}
+ #endif
+-
+-#if Radix
+-    public import Radix
+-
+-    extension Radix.Formatter {
+-
+-        @inlinable
+-        public var prefix: Self {
+-            .init(
+-                radix: radix,
+-                prefix: prefixString,
+-                showPrefix: true,
+-                signStrategy: signStrategy,
+-                minWidth: minWidth
+-            )
+-        }
+-
+-        @inlinable
+-        public func sign(_ strategy: Sign.Display) -> Self {
+-            .init(
+-                radix: radix,
+-                prefix: prefixString,
+-                showPrefix: showPrefix,
+-                signStrategy: strategy,
+-                minWidth: minWidth
+-            )
+-        }
+-
+-        @inlinable
+-        public func zeroPadded(width: Int) -> Self {
+-            .init(
+-                radix: radix,
+-                prefix: prefixString,
+-                showPrefix: showPrefix,
+-                signStrategy: signStrategy,
+-                minWidth: width
+-            )
+-        }
+-    }
+-#endif
+-
+-#if Radix
+-    public import Radix
+-
+-    extension Radix.Formatter {
+-
+-        @inlinable
+-        public func format<T: Swift::BinaryInteger>(_ value: T) -> String {
+-            render(value)
+-        }
+-    }
+-
+-    extension Radix.Formatter {
+-
+-        @usableFromInline
+-        func render<T: Swift::BinaryInteger>(_ value: T) -> String {
+-            let base = T.Magnitude(radix.base)
+-            var magnitude = value.magnitude
+-
+-            var scalars: [Unicode.Scalar] = []
+-            if magnitude == 0 {
+-                scalars.append(radix.digit(for: 0) ?? "0")
+-            } else {
+-                while magnitude > 0 {
+-                    let remainder = Int(magnitude % base)
+-                    scalars.append(radix.digit(for: remainder) ?? "0")
+-                    magnitude /= base
+-                }
+-                scalars.reverse()
+-            }
+-
+-            var result = String(String.UnicodeScalarView(scalars))
+-
+-            if let minWidth {
+-                let padding = max(0, minWidth - result.count)
+-                result = String(repeating: "0", count: padding) + result
+-            }
+-
+-            if showPrefix {
+-                result = prefixString + result
+-            }
+-
+-            if value < 0 {
+-                result = "-" + result
+-            } else if signStrategy.shouldAlwaysShowSign {
+-                result = "+" + result
+-            }
+-
+-            return result
+-        }
+-    }
+-#endif
+-
+-#if Radix
+-    public import Radix
+-
+-    extension Radix.Formatter {
+-
+-        public init(signStrategy: Sign.Display = .automatic, minWidth: Int? = nil) {
+-            self.init(
+-                radix: .decimal,
+-                prefix: "",
+-                showPrefix: false,
+-                signStrategy: signStrategy,
+-                minWidth: minWidth
+-            )
+-        }
+-    }
+-#endif
+-
+-#if Radix
+-    public import Radix
+-
+-    extension Radix.Formatter {
+-
+-        @inlinable
+-        public static var decimal: Self {
+-            .init(radix: .decimal, prefix: "")
+-        }
+-
+-        @inlinable
+-        public static var number: Self { .decimal }
+-
+-        @inlinable
+-        public static var base2: Self {
+-            .init(radix: .binary, prefix: "0b")
+-        }
+-
+-        @inlinable
+-        public static var bits: Self { .base2 }
+-
+-        @inlinable
+-        public static var octal: Self {
+-            .init(radix: .octal, prefix: "0o")
+-        }
+-
+-        @inlinable
+-        public static var hex: Self {
+-            .init(radix: .hexadecimal, prefix: "0x")
+-        }
+-    }
+-#endif
+-- 
+2.43.0
+

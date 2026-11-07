@@ -1,0 +1,177 @@
+From 9853b9e426b3447e2276c8433caa4ca3f983eda2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 21:32:55 +0000
+Subject: [PATCH 2/2] Revert the extension-file merges and type splits in
+ directories the type-check can't verify (C shims, macros); institute's
+ generated Ratchet+limits.swift stays its own file (coenttb/work#242)
+
+---
+ .../Synchronizer.Blocking.Wait.swift          | 73 ++++++++++++++++++
+ .../Synchronizer.Blocking.swift               | 74 -------------------
+ 2 files changed, 73 insertions(+), 74 deletions(-)
+ create mode 100644 Sources/Synchronizer Blocking/Synchronizer.Blocking.Wait.swift
+
+diff --git a/Sources/Synchronizer Blocking/Synchronizer.Blocking.Wait.swift b/Sources/Synchronizer Blocking/Synchronizer.Blocking.Wait.swift
+new file mode 100644
+index 0000000..b5bf01e
+--- /dev/null
++++ b/Sources/Synchronizer Blocking/Synchronizer.Blocking.Wait.swift	
+@@ -0,0 +1,73 @@
++extension Synchronizer.Blocking {
++
++    public func wait(condition index: Int = 0) {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        conditions[index].wait(mutex: mutex)
++    }
++
++    public func wait(condition index: Int = 0, timeout: Duration) -> Bool {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        return conditions[index].wait(mutex: mutex, timeout: timeout)
++    }
++
++    public func signal(condition index: Int = 0) {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        conditions[index].signal()
++    }
++
++    public func broadcast(condition index: Int = 0) {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        conditions[index].broadcast()
++    }
++
++    public func broadcastAll() {
++        for i in 0..<N {
++            conditions[i].broadcast()
++        }
++    }
++}
++
++extension Synchronizer.Blocking {
++
++    public func waiters(condition: Int = 0) -> Int {
++        precondition(
++            condition >= 0 && condition < N,
++            "Condition index \(condition) out of bounds (0..<\(N))"
++        )
++        return waiterCounts[condition]
++    }
++
++    public func waitTracked(condition index: Int = 0) {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        waiterCounts[index] += 1
++        defer {
++            waiterCounts[index] -= 1
++            assert(waiterCounts[index] >= 0, "Waiter count underflow")
++        }
++        conditions[index].wait(mutex: mutex)
++    }
++
++    public func waitTracked(condition index: Int = 0, timeout: Duration) -> Bool {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        waiterCounts[index] += 1
++        defer {
++            waiterCounts[index] -= 1
++            assert(waiterCounts[index] >= 0, "Waiter count underflow")
++        }
++        return conditions[index].wait(mutex: mutex, timeout: timeout)
++    }
++
++    public func signalIfWaiters(condition index: Int = 0) -> Bool {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        guard waiterCounts[index] > 0 else { return false }
++        conditions[index].signal()
++        return true
++    }
++
++    public func broadcastIfWaiters(condition index: Int = 0) -> Bool {
++        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
++        guard waiterCounts[index] > 0 else { return false }
++        conditions[index].broadcast()
++        return true
++    }
++}
+diff --git a/Sources/Synchronizer Blocking/Synchronizer.Blocking.swift b/Sources/Synchronizer Blocking/Synchronizer.Blocking.swift
+index 6b3d181..3f311e1 100644
+--- a/Sources/Synchronizer Blocking/Synchronizer.Blocking.swift	
++++ b/Sources/Synchronizer Blocking/Synchronizer.Blocking.swift	
+@@ -42,77 +42,3 @@ extension Synchronizer.Blocking {
+         mutex.unlock()
+     }
+ }
+-
+-extension Synchronizer.Blocking {
+-
+-    public func wait(condition index: Int = 0) {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        conditions[index].wait(mutex: mutex)
+-    }
+-
+-    public func wait(condition index: Int = 0, timeout: Duration) -> Bool {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        return conditions[index].wait(mutex: mutex, timeout: timeout)
+-    }
+-
+-    public func signal(condition index: Int = 0) {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        conditions[index].signal()
+-    }
+-
+-    public func broadcast(condition index: Int = 0) {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        conditions[index].broadcast()
+-    }
+-
+-    public func broadcastAll() {
+-        for i in 0..<N {
+-            conditions[i].broadcast()
+-        }
+-    }
+-}
+-
+-extension Synchronizer.Blocking {
+-
+-    public func waiters(condition: Int = 0) -> Int {
+-        precondition(
+-            condition >= 0 && condition < N,
+-            "Condition index \(condition) out of bounds (0..<\(N))"
+-        )
+-        return waiterCounts[condition]
+-    }
+-
+-    public func waitTracked(condition index: Int = 0) {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        waiterCounts[index] += 1
+-        defer {
+-            waiterCounts[index] -= 1
+-            assert(waiterCounts[index] >= 0, "Waiter count underflow")
+-        }
+-        conditions[index].wait(mutex: mutex)
+-    }
+-
+-    public func waitTracked(condition index: Int = 0, timeout: Duration) -> Bool {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        waiterCounts[index] += 1
+-        defer {
+-            waiterCounts[index] -= 1
+-            assert(waiterCounts[index] >= 0, "Waiter count underflow")
+-        }
+-        return conditions[index].wait(mutex: mutex, timeout: timeout)
+-    }
+-
+-    public func signalIfWaiters(condition index: Int = 0) -> Bool {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        guard waiterCounts[index] > 0 else { return false }
+-        conditions[index].signal()
+-        return true
+-    }
+-
+-    public func broadcastIfWaiters(condition index: Int = 0) -> Bool {
+-        precondition(index >= 0 && index < N, "Condition index \(index) out of bounds (0..<\(N))")
+-        guard waiterCounts[index] > 0 else { return false }
+-        conditions[index].broadcast()
+-        return true
+-    }
+-}
+-- 
+2.43.0
+
