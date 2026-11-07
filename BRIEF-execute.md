@@ -4,6 +4,10 @@ Coen approved all six checkpoint decisions on 7 Nov (coenttb/work#242, read its 
 
 Already done by the coordinator: the 9 molecules are archived (axis-dimension, complex-dimension, geometry-boundary, geometry-pair, module, symmetry-finite, symmetry-linear, symmetry-pair, version-carrier). Remove them from `repos.txt` and from anything that names them. The ratchet is in `institute` (`Institute.CI.Command.Source.Ratchet`); limits regenerate with `./ratchet.py`, which refuses a rise in a rule's total unless the rule changed in the same commit (`--allow-rise`). The coordinator publishes runners and adopts them on the Mac: push institute commits and write in `status-execute.md` when a publish is wanted.
 
+## Continuing
+
+A first session stopped when its context ran out: read `status-execute.md` (its `## Closing` lists what remains, in order) and continue from there. Keep each session's context small: work in batches, write to `status-execute.md` after each, and don't read whole logs into context.
+
 ## Order
 
 1. **Rule fixes** (institute and swift-linter-rules): the 60 faulty rules, removing the 5, `compound suite name` accepting #239's layout, removing `fully qualified error in typed throws`, `blocking call in async`'s `wait(...)` case. Each fix has a test shown to fail without it. Then add the new rules from the checkpoint in its order, each as: write, count, sweep to zero, make an error. Regenerate the ratchet after rule changes.
