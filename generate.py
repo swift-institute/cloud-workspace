@@ -6,6 +6,10 @@ import concurrent.futures, glob, json, os, subprocess, sys
 here = os.path.dirname(os.path.abspath(__file__))
 os.chdir(here)
 packages = sorted(p for p in glob.glob("repos/*/*") if os.path.exists(p + "/Package.swift"))
+# Traits a package's own manifest asks of another, unconditionally. The root's path dependency must ask for them too:
+# otherwise resolution follows the root's (default traits only), leaves out what the trait needs, and fails, as it did
+# for footprint's swift-sqlite with GRDB ("exhausted attempts to resolve ... 'grdb.swift'").
+requested = {}
 
 
 def dump(path):
@@ -15,13 +19,27 @@ def dump(path):
         return path, None, []
     m = json.loads(r.stdout)
     libs = [p["name"] for p in m["products"] if "library" in p["type"]]
+    for d in m["dependencies"]:
+        for v in next(iter(d.values())):
+            for t in v.get("traits") or []:
+                if t["name"] != "default" and not t.get("condition"):
+                    requested.setdefault(v["identity"].lower(), set()).add(t["name"])
     return path, m["name"], libs
 
 
 with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
     dumped = list(pool.map(dump, packages))
 
-deps = "".join(f'        .package(path: "{p}"),\n' for p, _, _ in dumped)
+
+
+def dependency(p):
+    traits = sorted(requested.get(os.path.basename(p).lower(), ()))
+    if not traits:
+        return f'        .package(path: "{p}"),\n'
+    return f'        .package(path: "{p}", traits: [.defaults, {", ".join(chr(34) + t + chr(34) for t in traits)}]),\n'
+
+
+deps = "".join(dependency(p) for p, _, _ in dumped)
 products = "".join(
     f'                .product(name: "{l}", package: "{os.path.basename(p)}"),\n' for p, n, libs in dumped for l in libs
 )
