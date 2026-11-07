@@ -1,0 +1,391 @@
+From c307e62a0bd4f4ee52e6700adb9bc18c17a39f64 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:24:17 +0000
+Subject: [PATCH] minimal type body: the runner's repair moves non-stored
+ members out of type bodies into extensions; repair applied; root and test
+ builds not yet run (coenttb/work#242)
+
+---
+ ...Lint.Rule.Idiom.ExistentialParameter.swift |  39 ++--
+ .../Lint.Rule.Manifest.TraitConsistency.swift |  43 ++--
+ .../Institute.Linter.Runner.swift             |   3 +
+ .../Institute.Planner.Evidence.swift          |   5 +-
+ ...stitute.Repository.Policy.Capability.swift | 205 +++++++++---------
+ 5 files changed, 155 insertions(+), 140 deletions(-)
+
+diff --git a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift
+index 92a99b3..aa56be4 100644
+--- a/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift	
++++ b/Sources/Institute Linter Rule Idiom/Lint.Rule.Idiom.ExistentialParameter.swift	
+@@ -133,6 +133,27 @@ internal func idiomExistentialParameterUnwrapped(_ type: TypeSyntax) -> TypeSynt
+ }
+ 
+ internal enum IdiomExistentialParameterCodableWitness {
++}
++
++internal final class IdiomExistentialParameterFinder: SyntaxVisitor {
++    var positions: [AbsolutePosition] = []
++
++    override func visit(_ node: SomeOrAnyTypeSyntax) -> SyntaxVisitorContinueKind {
++        let constraint = node.constraint.trimmedDescription
++        if node.someOrAnySpecifier.tokenKind == .keyword(.any),
++            constraint != "Error", constraint != "Swift.Error", constraint != "Swift::Error"
++        {
++            positions.append(node.positionAfterSkippingLeadingTrivia)
++        }
++        return .visitChildren
++    }
++
++    override func visit(_ node: FunctionTypeSyntax) -> SyntaxVisitorContinueKind {
++        .skipChildren
++    }
++}
++
++extension IdiomExistentialParameterCodableWitness {
+     static func matches(_ parameter: FunctionParameterSyntax) -> Bool {
+         guard let list = parameter.parent?.as(FunctionParameterListSyntax.self), list.count == 1,
+             let signature = list.parent?.parent?.as(FunctionSignatureSyntax.self),
+@@ -174,21 +195,3 @@ internal enum IdiomExistentialParameterCodableWitness {
+         } ?? false
+     }
+ }
+-
+-internal final class IdiomExistentialParameterFinder: SyntaxVisitor {
+-    var positions: [AbsolutePosition] = []
+-
+-    override func visit(_ node: SomeOrAnyTypeSyntax) -> SyntaxVisitorContinueKind {
+-        let constraint = node.constraint.trimmedDescription
+-        if node.someOrAnySpecifier.tokenKind == .keyword(.any),
+-            constraint != "Error", constraint != "Swift.Error", constraint != "Swift::Error"
+-        {
+-            positions.append(node.positionAfterSkippingLeadingTrivia)
+-        }
+-        return .visitChildren
+-    }
+-
+-    override func visit(_ node: FunctionTypeSyntax) -> SyntaxVisitorContinueKind {
+-        .skipChildren
+-    }
+-}
+diff --git a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift b/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift
+index 5da0cf0..9adbffe 100644
+--- a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift	
++++ b/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.TraitConsistency.swift	
+@@ -118,12 +118,6 @@ internal func manifestTraitConsistencyFixture(condition: Swift::String) -> Swift
+ /// walked; a module the product vends under a name other than the product's is not seen.
+ internal struct ManifestTraitConsistency {
+ 
+-    struct Issue {
+-        let position: AbsolutePosition
+-        let message: Swift::String
+-        let insertion: (offset: Swift::Int, text: Swift::String)?
+-    }
+-
+     private(set) var issues: [Issue] = []
+ 
+     private(set) var unhandledSourceShape: Swift::String?
+@@ -183,20 +177,6 @@ internal struct ManifestTraitConsistency {
+             }
+         }
+     }
+-
+-    private static func closure(of trait: Swift::String, in traits: [Swift::String: [Swift::String]]) -> Swift::Set<Swift::String> {
+-        var pending = [trait]
+-        var seen: Swift::Set<Swift::String> = []
+-        while let next = pending.popLast() {
+-            guard seen.insert(next).inserted else { continue }
+-            pending.append(contentsOf: traits[next] ?? [])
+-        }
+-        return seen
+-    }
+-
+-    private static func list(_ traits: Swift::Set<Swift::String>) -> Swift::String {
+-        "[" + traits.sorted().map { "\"\($0)\"" }.joined(separator: ", ") + "]"
+-    }
+ }
+ 
+ internal final class ManifestTraitConsistencyCollector: SyntaxVisitor {
+@@ -330,3 +310,26 @@ private final class ManifestTraitConsistencyDefineCollector: SyntaxVisitor {
+         return .visitChildren
+     }
+ }
++
++extension ManifestTraitConsistency {
++
++    struct Issue {
++        let position: AbsolutePosition
++        let message: Swift::String
++        let insertion: (offset: Swift::Int, text: Swift::String)?
++    }
++
++    private static func closure(of trait: Swift::String, in traits: [Swift::String: [Swift::String]]) -> Swift::Set<Swift::String> {
++        var pending = [trait]
++        var seen: Swift::Set<Swift::String> = []
++        while let next = pending.popLast() {
++            guard seen.insert(next).inserted else { continue }
++            pending.append(contentsOf: traits[next] ?? [])
++        }
++        return seen
++    }
++
++    private static func list(_ traits: Swift::Set<Swift::String>) -> Swift::String {
++        "[" + traits.sorted().map { "\"\($0)\"" }.joined(separator: ", ") + "]"
++    }
++}
+diff --git a/Sources/Institute Linter Runner/Institute.Linter.Runner.swift b/Sources/Institute Linter Runner/Institute.Linter.Runner.swift
+index 7ab385e..69f6754 100644
+--- a/Sources/Institute Linter Runner/Institute.Linter.Runner.swift	
++++ b/Sources/Institute Linter Runner/Institute.Linter.Runner.swift	
+@@ -8,6 +8,9 @@ import Linter_Standards_Rules
+ 
+ @main
+ enum Runner {
++}
++
++extension Runner {
+     static func main() {
+         let repository = Environment.read(Institute.Repository.Coordinate.variable)
+             .flatMap { GitHub.Repository.Slug($0) }
+diff --git a/Sources/Institute Planner/Institute.Planner.Evidence.swift b/Sources/Institute Planner/Institute.Planner.Evidence.swift
+index 14971b4..94a860e 100644
+--- a/Sources/Institute Planner/Institute.Planner.Evidence.swift	
++++ b/Sources/Institute Planner/Institute.Planner.Evidence.swift	
+@@ -6,7 +6,6 @@ extension Institute.Planner {
+     /// two binaries it ran, every canary comparison, and the verdict.
+     /// `adopt` admits only an adoptable record for its own publish run.
+     public struct Evidence: Sendable, Equatable {
+-        public static let schema = 2
+ 
+         public let verdict: Canary.Verdict
+         public let run: Swift.String
+@@ -145,3 +144,7 @@ extension Institute.Planner.Evidence: JSON.Serializable {
+         )
+     }
+ }
++
++extension Institute.Planner.Evidence {
++    public static let schema = 2
++}
+diff --git a/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift b/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift
+index d3f0170..0b988d7 100644
+--- a/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift	
++++ b/Sources/Institute Repository Policy/Institute.Repository.Policy.Capability.swift	
+@@ -28,107 +28,6 @@ extension Institute.Repository.Policy {
+             self.forbiddenDuplicate = forbiddenDuplicate
+         }
+ 
+-        public static let records: [Capability] = [
+-            Capability(
+-                id: "D-01",
+-                concept:
+-                    "package identity, effective inventory, layer, dependency graph, SwiftPM and package operations",
+-                domainOwner: "Workspace",
+-                target: "Workspace targets",
+-                namespace: "Workspace.*",
+-                forbiddenDuplicate: "raw SwiftPM or local manifest/layer parsers in Institute CI"
+-            ),
+-            Capability(
+-                id: "D-02",
+-                concept: "Swift syntax/AST rules and diagnostics",
+-                domainOwner: "swift-linter",
+-                target: "swift-linter targets",
+-                namespace: "swift-linter typed diagnostics",
+-                forbiddenDuplicate: "Python/regex source rules"
+-            ),
+-            Capability(
+-                id: "D-03",
+-                concept: "repository, routing row and workflow/action projection policy",
+-                domainOwner: "Institute.Repository.Policy",
+-                target: "Repository Policy",
+-                namespace: "Institute.Repository.Policy.*",
+-                forbiddenDuplicate: "handwritten semantic YAML or wrapper-owned layer policy"
+-            ),
+-            Capability(
+-                id: "D-04",
+-                concept: "subject, event, platform, plan, aggregate and required check",
+-                domainOwner: "CI.Contract",
+-                target: "CI Contract",
+-                namespace: "CI.Contract.*",
+-                forbiddenDuplicate: "workflow matrix or shell aggregate semantics"
+-            ),
+-            Capability(
+-                id: "D-05",
+-                concept: "canonical evidence, measurement, provenance, receipt and readiness",
+-                domainOwner: "Institute.Receipt",
+-                target: "Institute Receipt",
+-                namespace: "Institute.Receipt.*",
+-                forbiddenDuplicate: "Python receipt producers/validators"
+-            ),
+-            Capability(
+-                id: "D-06",
+-                concept: "GitHub REST/GraphQL/App authentication/pagination/retry relation",
+-                domainOwner: "GitHub.Control",
+-                target: "GitHub Control",
+-                namespace: "GitHub.Control.*",
+-                forbiddenDuplicate: "gh/curl/jq policy clients"
+-            ),
+-            Capability(
+-                id: "D-07",
+-                concept: "fleet census and durable convergence",
+-                domainOwner: "Fleet.Inventory and Fleet.Convergence",
+-                target: "Fleet Inventory + Fleet Convergence",
+-                namespace: "Fleet.Inventory.* + Fleet.Convergence.*",
+-                forbiddenDuplicate: "workflow-owned sweep/convergence"
+-            ),
+-            Capability(
+-                id: "D-08",
+-                concept:
+-                    "private request, lease, exact-head verification, redaction and safe publication",
+-                domainOwner: "Private.Verification",
+-                target: "Private Verification",
+-                namespace: "Private.Verification.*",
+-                forbiddenDuplicate: "credential-bearing subject jobs"
+-            ),
+-            Capability(
+-                id: "D-09",
+-                concept: "pull-request transaction",
+-                domainOwner: "PullRequest.Transaction",
+-                target: "PullRequest Transaction",
+-                namespace: "PullRequest.Transaction.*",
+-                forbiddenDuplicate: "workflow GraphQL transaction logic"
+-            ),
+-            Capability(
+-                id: "D-10",
+-                concept: "programme work-item governance",
+-                domainOwner: "Programme.Policy",
+-                target: "Programme Policy",
+-                namespace: "Programme.Policy.*",
+-                forbiddenDuplicate: "issue-specific shell"
+-            ),
+-            Capability(
+-                id: "D-11",
+-                concept: "credential-free command orchestration",
+-                domainOwner: "Institute CI Application",
+-                target: "Institute CI Application",
+-                namespace: "Institute.CI.Application.*",
+-                forbiddenDuplicate: "predicate ownership in CLI/UI"
+-            ),
+-            Capability(
+-                id: "D-12",
+-                concept: "credentialed command orchestration",
+-                domainOwner: "Institute CI Control Application",
+-                target: "Institute CI Control Application",
+-                namespace: "Institute.CI.Control.Application.*",
+-                forbiddenDuplicate: "control libraries in ordinary/fork closure"
+-            ),
+-        ]
+-
+     }
+ }
+ 
+@@ -155,3 +54,107 @@ extension Institute.Repository.Policy.Capability: JSON.Serializable {
+         )
+     }
+ }
++
++extension Institute.Repository.Policy.Capability {
++
++    public static let records: [Capability] = [
++        Capability(
++            id: "D-01",
++            concept:
++                "package identity, effective inventory, layer, dependency graph, SwiftPM and package operations",
++            domainOwner: "Workspace",
++            target: "Workspace targets",
++            namespace: "Workspace.*",
++            forbiddenDuplicate: "raw SwiftPM or local manifest/layer parsers in Institute CI"
++        ),
++        Capability(
++            id: "D-02",
++            concept: "Swift syntax/AST rules and diagnostics",
++            domainOwner: "swift-linter",
++            target: "swift-linter targets",
++            namespace: "swift-linter typed diagnostics",
++            forbiddenDuplicate: "Python/regex source rules"
++        ),
++        Capability(
++            id: "D-03",
++            concept: "repository, routing row and workflow/action projection policy",
++            domainOwner: "Institute.Repository.Policy",
++            target: "Repository Policy",
++            namespace: "Institute.Repository.Policy.*",
++            forbiddenDuplicate: "handwritten semantic YAML or wrapper-owned layer policy"
++        ),
++        Capability(
++            id: "D-04",
++            concept: "subject, event, platform, plan, aggregate and required check",
++            domainOwner: "CI.Contract",
++            target: "CI Contract",
++            namespace: "CI.Contract.*",
++            forbiddenDuplicate: "workflow matrix or shell aggregate semantics"
++        ),
++        Capability(
++            id: "D-05",
++            concept: "canonical evidence, measurement, provenance, receipt and readiness",
++            domainOwner: "Institute.Receipt",
++            target: "Institute Receipt",
++            namespace: "Institute.Receipt.*",
++            forbiddenDuplicate: "Python receipt producers/validators"
++        ),
++        Capability(
++            id: "D-06",
++            concept: "GitHub REST/GraphQL/App authentication/pagination/retry relation",
++            domainOwner: "GitHub.Control",
++            target: "GitHub Control",
++            namespace: "GitHub.Control.*",
++            forbiddenDuplicate: "gh/curl/jq policy clients"
++        ),
++        Capability(
++            id: "D-07",
++            concept: "fleet census and durable convergence",
++            domainOwner: "Fleet.Inventory and Fleet.Convergence",
++            target: "Fleet Inventory + Fleet Convergence",
++            namespace: "Fleet.Inventory.* + Fleet.Convergence.*",
++            forbiddenDuplicate: "workflow-owned sweep/convergence"
++        ),
++        Capability(
++            id: "D-08",
++            concept:
++                "private request, lease, exact-head verification, redaction and safe publication",
++            domainOwner: "Private.Verification",
++            target: "Private Verification",
++            namespace: "Private.Verification.*",
++            forbiddenDuplicate: "credential-bearing subject jobs"
++        ),
++        Capability(
++            id: "D-09",
++            concept: "pull-request transaction",
++            domainOwner: "PullRequest.Transaction",
++            target: "PullRequest Transaction",
++            namespace: "PullRequest.Transaction.*",
++            forbiddenDuplicate: "workflow GraphQL transaction logic"
++        ),
++        Capability(
++            id: "D-10",
++            concept: "programme work-item governance",
++            domainOwner: "Programme.Policy",
++            target: "Programme Policy",
++            namespace: "Programme.Policy.*",
++            forbiddenDuplicate: "issue-specific shell"
++        ),
++        Capability(
++            id: "D-11",
++            concept: "credential-free command orchestration",
++            domainOwner: "Institute CI Application",
++            target: "Institute CI Application",
++            namespace: "Institute.CI.Application.*",
++            forbiddenDuplicate: "predicate ownership in CLI/UI"
++        ),
++        Capability(
++            id: "D-12",
++            concept: "credentialed command orchestration",
++            domainOwner: "Institute CI Control Application",
++            target: "Institute CI Control Application",
++            namespace: "Institute.CI.Control.Application.*",
++            forbiddenDuplicate: "control libraries in ordinary/fork closure"
++        ),
++    ]
++}
+-- 
+2.43.0
+

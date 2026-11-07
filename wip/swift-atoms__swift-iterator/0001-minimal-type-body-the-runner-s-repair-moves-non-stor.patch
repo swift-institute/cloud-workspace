@@ -1,0 +1,107 @@
+From f5dd3d9dab61f7870559e03280ee93f67d1ed0c8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:24:14 +0000
+Subject: [PATCH] minimal type body: the runner's repair moves non-stored
+ members out of type bodies into extensions; repair applied; root and test
+ builds not yet run (coenttb/work#242)
+
+---
+ Sources/Iterator/Iterator.Buffered.swift  | 51 ++++++++++++-----------
+ Sources/Iterator/Iterator.Flattened.swift |  9 ++--
+ 2 files changed, 33 insertions(+), 27 deletions(-)
+
+diff --git a/Sources/Iterator/Iterator.Buffered.swift b/Sources/Iterator/Iterator.Buffered.swift
+index ee543c8..f0abd77 100644
+--- a/Sources/Iterator/Iterator.Buffered.swift
++++ b/Sources/Iterator/Iterator.Buffered.swift
+@@ -2,41 +2,44 @@ extension Iterator {
+ 
+     public struct Buffered<Base: Iterating & ~Copyable & ~Escapable, SourceFailure: Swift::Error>: Iterating, ~Copyable, ~Escapable
+     where Base.Element: ~Copyable & Escapable, Base.Failure == SourceFailure {
+-        public typealias Element = Base.Element
+-        public typealias Failure = Base.Failure
+         private var base: Base
+         private var pending: Node?
+ 
+-        private final class Node {
+-            var element: Element?
+-            let next: Node?
+-            init(_ element: consuming Element, next: Node?) {
+-                self.element = .some(consume element)
+-                self.next = next
+-            }
+-        }
+-
+         @_lifetime(copy base)
+         public init(_ base: consuming Base) {
+             self.base = base
+             self.pending = nil
+         }
++    }
++}
++
++extension Iterator::Iterator.Buffered: Escapable
++where Base: ~Copyable & Escapable, Base.Element: ~Copyable & Escapable {}
+ 
+-        public mutating func next() throws(Failure) -> Element? {
+-            if let node = pending {
+-                pending = node.next
+-                var result: Element? = nil
+-                swap(&result, &node.element)
+-                return result
+-            }
+-            return try base.next()
++extension Iterator.Buffered where Base: ~Copyable & ~Escapable, Base.Element: ~Copyable {
++    public typealias Element = Base.Element
++    public typealias Failure = Base.Failure
++
++    private final class Node {
++        var element: Element?
++        let next: Node?
++        init(_ element: consuming Element, next: Node?) {
++            self.element = .some(consume element)
++            self.next = next
+         }
++    }
+ 
+-        public mutating func unread(_ element: consuming Element) {
+-            pending = Node(element, next: pending)
++    public mutating func next() throws(Failure) -> Element? {
++        if let node = pending {
++            pending = node.next
++            var result: Element? = nil
++            swap(&result, &node.element)
++            return result
+         }
++        return try base.next()
+     }
+-}
+ 
+-extension Iterator::Iterator.Buffered: Escapable
+-where Base: ~Copyable & Escapable, Base.Element: ~Copyable & Escapable {}
++    public mutating func unread(_ element: consuming Element) {
++        pending = Node(element, next: pending)
++    }
++}
+diff --git a/Sources/Iterator/Iterator.Flattened.swift b/Sources/Iterator/Iterator.Flattened.swift
+index 38d9e72..e3164c0 100644
+--- a/Sources/Iterator/Iterator.Flattened.swift
++++ b/Sources/Iterator/Iterator.Flattened.swift
+@@ -5,8 +5,11 @@ extension Iterator {
+         private var source: Source
+         @_lifetime(copy source)
+         public init(_ source: consuming Source) { self.source = source }
+-        public mutating func next() throws(Source.Failure) -> Source.Element? {
+-            try source.next()
+-        }
++    }
++}
++
++extension Iterator.Flattened where Source: ~Copyable & ~Escapable {
++    public mutating func next() throws(Source.Failure) -> Source.Element? {
++        try source.next()
+     }
+ }
+-- 
+2.43.0
+

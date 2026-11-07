@@ -1,0 +1,739 @@
+From 9fe2486511a3e13df26689b407c0cda95950c716 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 18:24:17 +0000
+Subject: [PATCH] minimal type body: the runner's repair moves non-stored
+ members out of type bodies into extensions; repair applied; root and test
+ builds not yet run (coenttb/work#242)
+
+---
+ Sources/SQLite SQL/Cast.swift                |  22 +-
+ Sources/SQLite SQL/DatabaseFunction.swift    |   3 +
+ Sources/SQLite SQL/DateFunctions.swift       |  80 ++---
+ Sources/SQLite SQL/JSONBRepresentation.swift |  11 +-
+ Sources/SQLite SQL/JSONEach.swift            |  50 +--
+ Sources/SQLite SQL/JSONFunctions.swift       | 318 ++++++++++---------
+ Sources/SQLite SQL/JSONRepresentation.swift  |  11 +-
+ Sources/SQLite SQL/SQLite.swift              |   3 +
+ Sources/SQLite SQL/Triggers.swift            |  25 +-
+ Sources/SQLite SQL/Views.swift               |   7 +-
+ 10 files changed, 286 insertions(+), 244 deletions(-)
+
+diff --git a/Sources/SQLite SQL/Cast.swift b/Sources/SQLite SQL/Cast.swift
+index 344ee2c..76da4a2 100644
+--- a/Sources/SQLite SQL/Cast.swift	
++++ b/Sources/SQLite SQL/Cast.swift	
+@@ -44,11 +44,6 @@ public protocol SQLiteType: QueryBindable {
+ }
+ 
+ public struct SQLiteTypeAffinity: RawRepresentable, Sendable {
+-    public static let blob = Self(rawValue: "BLOB")
+-    public static let integer = Self(rawValue: "INTEGER")
+-    public static let numeric = Self(rawValue: "NUMERIC")
+-    public static let real = Self(rawValue: "REAL")
+-    public static let text = Self(rawValue: "TEXT")
+ 
+     public let rawValue: ISO_9075.Fragment
+ 
+@@ -96,9 +91,6 @@ extension Optional: SQLiteType where Wrapped: SQLiteType {
+ 
+ private struct Cast<QueryValue: SQLiteType, Base: QueryExpression>: QueryExpression {
+     let base: Base
+-    var queryFragment: ISO_9075.Fragment {
+-        "CAST(\(base.queryFragment) AS \(QueryValue.typeAffinity.rawValue))"
+-    }
+ }
+ 
+ extension RawRepresentable where RawValue: SQLiteType {
+@@ -120,3 +112,17 @@ extension JSONRepresentation: SQLiteType {
+         }
+     }
+ #endif
++
++extension SQLiteTypeAffinity {
++    public static let blob = Self(rawValue: "BLOB")
++    public static let integer = Self(rawValue: "INTEGER")
++    public static let numeric = Self(rawValue: "NUMERIC")
++    public static let real = Self(rawValue: "REAL")
++    public static let text = Self(rawValue: "TEXT")
++}
++
++extension Cast {
++    var queryFragment: ISO_9075.Fragment {
++        "CAST(\(base.queryFragment) AS \(QueryValue.typeAffinity.rawValue))"
++    }
++}
+diff --git a/Sources/SQLite SQL/DatabaseFunction.swift b/Sources/SQLite SQL/DatabaseFunction.swift
+index 4b45b17..60365c2 100644
+--- a/Sources/SQLite SQL/DatabaseFunction.swift	
++++ b/Sources/SQLite SQL/DatabaseFunction.swift	
+@@ -110,6 +110,9 @@ public struct _DatabaseFunctionDeallocated: Swift.Error, CustomStringConvertible
+     public init(_ message: String) {
+         self.message = message
+     }
++}
++
++extension _DatabaseFunctionDeallocated {
+     public var description: String {
+         message
+     }
+diff --git a/Sources/SQLite SQL/DateFunctions.swift b/Sources/SQLite SQL/DateFunctions.swift
+index 8d56339..1a8b45b 100644
+--- a/Sources/SQLite SQL/DateFunctions.swift	
++++ b/Sources/SQLite SQL/DateFunctions.swift	
+@@ -86,6 +86,48 @@ public struct DateTimeModifier: Sendable {
+             }
+         }
+     }
++}
++
++public protocol _SQLiteDateRepresentation: QueryRepresentable where QueryOutput == Time.Instant {
++    static var _timeValueModifiers: [ISO_9075.Fragment] { get }
++    static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment
++}
++
++private protocol TimeValue {
++    var timeValueArguments: [ISO_9075.Fragment] { get }
++}
++
++public struct _ModifiedDate<QueryValue: _SQLiteDateRepresentation>: QueryExpression, TimeValue {
++    fileprivate var base: [ISO_9075.Fragment] = ["'now'"]
++    fileprivate var modifier = DateTimeModifier()
++}
++
++extension Time.Instant: _SQLiteDateRepresentation {
++    public static var _timeValueModifiers: [ISO_9075.Fragment] { [] }
++    public static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment {
++        subsecDateTime(arguments)
++    }
++}
++
++func subsecDateTime(_ arguments: [ISO_9075.Fragment] = []) -> ISO_9075.Fragment {
++    return "datetime(\((arguments + ["'subsec'"]).joined(separator: ", ")))"
++}
++
++extension Time.Instant.UnixTimeRepresentation: _SQLiteDateRepresentation {
++    public static var _timeValueModifiers: [ISO_9075.Fragment] { ["'unixepoch'"] }
++    public static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment {
++        "unixepoch(\(arguments.joined(separator: ", ")))"
++    }
++}
++
++extension Time.Instant.JulianDayRepresentation: _SQLiteDateRepresentation {
++    public static var _timeValueModifiers: [ISO_9075.Fragment] { [] }
++    public static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment {
++        "julianday(\(arguments.joined(separator: ", ")))"
++    }
++}
++
++extension DateTimeModifier {
+ 
+     public static func years(_ count: Int) -> Self { Self().years(count) }
+ 
+@@ -163,18 +205,7 @@ public struct DateTimeModifier: Sendable {
+     }
+ }
+ 
+-public protocol _SQLiteDateRepresentation: QueryRepresentable where QueryOutput == Time.Instant {
+-    static var _timeValueModifiers: [ISO_9075.Fragment] { get }
+-    static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment
+-}
+-
+-private protocol TimeValue {
+-    var timeValueArguments: [ISO_9075.Fragment] { get }
+-}
+-
+-public struct _ModifiedDate<QueryValue: _SQLiteDateRepresentation>: QueryExpression, TimeValue {
+-    fileprivate var base: [ISO_9075.Fragment] = ["'now'"]
+-    fileprivate var modifier = DateTimeModifier()
++extension _ModifiedDate {
+ 
+     fileprivate var timeValueArguments: [ISO_9075.Fragment] {
+         base + modifier.fragments
+@@ -184,28 +215,3 @@ public struct _ModifiedDate<QueryValue: _SQLiteDateRepresentation>: QueryExpress
+         QueryValue._dateStorage(timeValueArguments)
+     }
+ }
+-
+-extension Time.Instant: _SQLiteDateRepresentation {
+-    public static var _timeValueModifiers: [ISO_9075.Fragment] { [] }
+-    public static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment {
+-        subsecDateTime(arguments)
+-    }
+-}
+-
+-func subsecDateTime(_ arguments: [ISO_9075.Fragment] = []) -> ISO_9075.Fragment {
+-    return "datetime(\((arguments + ["'subsec'"]).joined(separator: ", ")))"
+-}
+-
+-extension Time.Instant.UnixTimeRepresentation: _SQLiteDateRepresentation {
+-    public static var _timeValueModifiers: [ISO_9075.Fragment] { ["'unixepoch'"] }
+-    public static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment {
+-        "unixepoch(\(arguments.joined(separator: ", ")))"
+-    }
+-}
+-
+-extension Time.Instant.JulianDayRepresentation: _SQLiteDateRepresentation {
+-    public static var _timeValueModifiers: [ISO_9075.Fragment] { [] }
+-    public static func _dateStorage(_ arguments: [ISO_9075.Fragment]) -> ISO_9075.Fragment {
+-        "julianday(\(arguments.joined(separator: ", ")))"
+-    }
+-}
+diff --git a/Sources/SQLite SQL/JSONBRepresentation.swift b/Sources/SQLite SQL/JSONBRepresentation.swift
+index 3041568..4b459f2 100644
+--- a/Sources/SQLite SQL/JSONBRepresentation.swift	
++++ b/Sources/SQLite SQL/JSONBRepresentation.swift	
+@@ -7,10 +7,6 @@ public struct JSONBRepresentation<QueryOutput: Codable>: Codable, QueryRepresent
+     public init(queryOutput: QueryOutput) {
+         self.queryOutput = queryOutput
+     }
+-
+-    public static func queryFragment(decoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-        "json(\(queryFragment))"
+-    }
+ }
+ 
+ extension JSONBRepresentation: Equatable where QueryOutput: Equatable {}
+@@ -36,3 +32,10 @@ extension JSONBRepresentation: QueryDecodable {
+ extension JSONBRepresentation: SQLiteType {
+     public static var typeAffinity: SQLiteTypeAffinity { .blob }
+ }
++
++extension JSONBRepresentation {
++
++    public static func queryFragment(decoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "json(\(queryFragment))"
++    }
++}
+diff --git a/Sources/SQLite SQL/JSONEach.swift b/Sources/SQLite SQL/JSONEach.swift
+index a4bdaa5..922f4d4 100644
+--- a/Sources/SQLite SQL/JSONEach.swift	
++++ b/Sources/SQLite SQL/JSONEach.swift	
+@@ -213,22 +213,11 @@ public struct JSONEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
+-    public static var tableName: String { "json_each" }
+-
+-    public static var columns: TableColumns { TableColumns() }
+-
+-    public static var _columnWidth: Int { 2 }
+ 
+     public let key: Key.QueryOutput
+ 
+     public let value: Value.QueryOutput
+ 
+-    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONEach> {
+-        var select = all.asSelect()
+-        select.tableReference = tableReference
+-        return select
+-    }
+-
+     public struct TableColumns: TableDefinition, Sendable {
+         public typealias QueryValue = JSONEach
+ 
+@@ -277,22 +266,11 @@ public struct JSONBEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
+-    public static var tableName: String { "jsonb_each" }
+-
+-    public static var columns: TableColumns { TableColumns() }
+-
+-    public static var _columnWidth: Int { 2 }
+ 
+     public let key: Key.QueryOutput
+ 
+     public let value: Value.QueryOutput
+ 
+-    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONBEach> {
+-        var select = all.asSelect()
+-        select.tableReference = tableReference
+-        return select
+-    }
+-
+     public struct TableColumns: TableDefinition, Sendable {
+         public typealias QueryValue = JSONBEach
+ 
+@@ -366,3 +344,31 @@ extension QueryExpression {
+         """
+     }
+ }
++
++extension JSONEach {
++    public static var tableName: String { "json_each" }
++
++    public static var columns: TableColumns { TableColumns() }
++
++    public static var _columnWidth: Int { 2 }
++
++    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONEach> {
++        var select = all.asSelect()
++        select.tableReference = tableReference
++        return select
++    }
++}
++
++extension JSONBEach {
++    public static var tableName: String { "jsonb_each" }
++
++    public static var columns: TableColumns { TableColumns() }
++
++    public static var _columnWidth: Int { 2 }
++
++    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONBEach> {
++        var select = all.asSelect()
++        select.tableReference = tableReference
++        return select
++    }
++}
+diff --git a/Sources/SQLite SQL/JSONFunctions.swift b/Sources/SQLite SQL/JSONFunctions.swift
+index 17f24bd..851eb12 100644
+--- a/Sources/SQLite SQL/JSONFunctions.swift	
++++ b/Sources/SQLite SQL/JSONFunctions.swift	
+@@ -951,158 +951,6 @@ public struct JSONPath<Context, QueryValue> {
+     var components: [String] = []
+     var caseName: String?
+ 
+-    var pathString: String {
+-        "$\(components.joined())"
+-    }
+-
+-    public subscript<Member>(
+-        dynamicMember keyPath: KeyPath<
+-            QueryValue._Object.TableColumns, TableColumn<QueryValue._Object, Member>
+-        >
+-    ) -> JSONPath<Context._Member, Member>
+-    where Context: _JSONPathContext, QueryValue: _JSONObjectRepresentation {
+-        JSONPath<Context._Member, Member>(
+-            components: components + [.member(QueryValue._Object.columns[keyPath: keyPath].name)]
+-        )
+-    }
+-
+-    public subscript<Member>(
+-        dynamicMember keyPath: KeyPath<
+-            QueryValue._Object.TableColumns, TableColumn<QueryValue._Object, Member>
+-        >
+-    ) -> JSONPath<Context._Member, Member.QueryOutput>
+-    where
+-        Context: _JSONPathContext,
+-        QueryValue: _JSONObjectRepresentation,
+-        Member.QueryOutput: QueryBindable
+-    {
+-        JSONPath<Context._Member, Member.QueryOutput>(
+-            components: components + [.member(QueryValue._Object.columns[keyPath: keyPath].name)]
+-        )
+-    }
+-
+-    public subscript<Member>(
+-        dynamicMember keyPath: KeyPath<
+-            QueryValue.Wrapped._Object.TableColumns, TableColumn<QueryValue.Wrapped._Object, Member>
+-        >
+-    ) -> JSONPath<_JSONPathMember?, Member>
+-    where
+-        QueryValue: SQL::_OptionalProtocol,
+-        QueryValue.Wrapped: _JSONObjectRepresentation
+-    {
+-        JSONPath<_JSONPathMember?, Member>(
+-            components: components + [.member(QueryValue.Wrapped._Object.columns[keyPath: keyPath].name)]
+-        )
+-    }
+-
+-    public subscript<Member>(
+-        dynamicMember keyPath: KeyPath<
+-            QueryValue.Wrapped._Object.TableColumns, TableColumn<QueryValue.Wrapped._Object, Member>
+-        >
+-    ) -> JSONPath<_JSONPathMember?, Member.QueryOutput>
+-    where
+-        QueryValue: SQL::_OptionalProtocol,
+-        QueryValue.Wrapped: _JSONObjectRepresentation,
+-        Member.QueryOutput: QueryBindable
+-    {
+-        JSONPath<_JSONPathMember?, Member.QueryOutput>(
+-            components: components + [.member(QueryValue.Wrapped._Object.columns[keyPath: keyPath].name)]
+-        )
+-    }
+-
+-    public subscript(_ index: Int) -> JSONPath<Context._Element, QueryValue._ElementRepresentation>
+-    where Context: _JSONPathContext, QueryValue: _JSONArrayRepresentation {
+-        JSONPath<Context._Element, QueryValue._ElementRepresentation>(
+-            components: components + [.index(index)]
+-        )
+-    }
+-
+-    public subscript(_ index: Int) -> JSONPath<Context._Element, QueryValue._Element>
+-    where
+-        Context: _JSONPathContext,
+-        QueryValue: _JSONArrayRepresentation,
+-        QueryValue._Element: QueryBindable
+-    {
+-        JSONPath<Context._Element, QueryValue._Element>(components: components + [.index(index)])
+-    }
+-
+-    public subscript(
+-        _ index: Int
+-    ) -> JSONPath<_JSONPathElement?, QueryValue.Wrapped._ElementRepresentation>
+-    where
+-        QueryValue: SQL::_OptionalProtocol,
+-        QueryValue.Wrapped: _JSONArrayRepresentation
+-    {
+-        JSONPath<_JSONPathElement?, QueryValue.Wrapped._ElementRepresentation>(
+-            components: components + [.index(index)]
+-        )
+-    }
+-
+-    public subscript(_ index: Int) -> JSONPath<_JSONPathElement?, QueryValue.Wrapped._Element>
+-    where
+-        QueryValue: SQL::_OptionalProtocol,
+-        QueryValue.Wrapped: _JSONArrayRepresentation,
+-        QueryValue.Wrapped._Element: QueryBindable
+-    {
+-        JSONPath<_JSONPathElement?, QueryValue.Wrapped._Element>(
+-            components: components + [.index(index)]
+-        )
+-    }
+-
+-    public subscript<Object: Table & Codable, Member: Table & Codable>(
+-        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member>>
+-    ) -> JSONPath<Context._Member, JSONRepresentation<Member>>
+-    where
+-        Context: _JSONPathContext,
+-        QueryValue == JSONRepresentation<Object>,
+-        Member.QueryOutput == Member,
+-        Member._Optionalized == Member?
+-    {
+-        JSONPath<Context._Member, JSONRepresentation<Member>>(
+-            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
+-        )
+-    }
+-
+-    public subscript<Object: Table & Codable, Member: Table & Codable>(
+-        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member?>>
+-    ) -> JSONPath<Context._Member, JSONRepresentation<Member>?>
+-    where
+-        Context: _JSONPathContext,
+-        QueryValue == JSONRepresentation<Object>,
+-        Member.QueryOutput == Member
+-    {
+-        JSONPath<Context._Member, JSONRepresentation<Member>?>(
+-            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
+-        )
+-    }
+-
+-    public subscript<Object: Table & Codable, Member: Table & Codable>(
+-        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member>>
+-    ) -> JSONPath<Context._Member, JSONBRepresentation<Member>>
+-    where
+-        Context: _JSONPathContext,
+-        QueryValue == JSONBRepresentation<Object>,
+-        Member.QueryOutput == Member,
+-        Member._Optionalized == Member?
+-    {
+-        JSONPath<Context._Member, JSONBRepresentation<Member>>(
+-            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
+-        )
+-    }
+-
+-    public subscript<Object: Table & Codable, Member: Table & Codable>(
+-        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member?>>
+-    ) -> JSONPath<Context._Member, JSONBRepresentation<Member>?>
+-    where
+-        Context: _JSONPathContext,
+-        QueryValue == JSONBRepresentation<Object>,
+-        Member.QueryOutput == Member
+-    {
+-        JSONPath<Context._Member, JSONBRepresentation<Member>?>(
+-            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
+-        )
+-    }
+-
+     #if CasePaths
+         public subscript<Member>(
+             dynamicMember keyPath: KeyPath<
+@@ -1202,10 +1050,6 @@ public struct JSONPath<Context, QueryValue> {
+ private struct JSONFunctionExpression<QueryValue>: QueryExpression {
+     let base: ISO_9075.Fragment
+     let decode: (ISO_9075.Fragment) -> ISO_9075.Fragment
+-
+-    var queryFragment: ISO_9075.Fragment {
+-        _isSelecting ? decode(base) : base
+-    }
+ }
+ 
+ private protocol _JSONMutationExpression: QueryExpression
+@@ -1686,3 +1530,165 @@ extension String {
+         index < 0 ? "[#\(index)]" : "[\(index)]"
+     }
+ }
++
++extension JSONPath {
++
++    var pathString: String {
++        "$\(components.joined())"
++    }
++
++    public subscript<Member>(
++        dynamicMember keyPath: KeyPath<
++            QueryValue._Object.TableColumns, TableColumn<QueryValue._Object, Member>
++        >
++    ) -> JSONPath<Context._Member, Member>
++    where Context: _JSONPathContext, QueryValue: _JSONObjectRepresentation {
++        JSONPath<Context._Member, Member>(
++            components: components + [.member(QueryValue._Object.columns[keyPath: keyPath].name)]
++        )
++    }
++
++    public subscript<Member>(
++        dynamicMember keyPath: KeyPath<
++            QueryValue._Object.TableColumns, TableColumn<QueryValue._Object, Member>
++        >
++    ) -> JSONPath<Context._Member, Member.QueryOutput>
++    where
++        Context: _JSONPathContext,
++        QueryValue: _JSONObjectRepresentation,
++        Member.QueryOutput: QueryBindable
++    {
++        JSONPath<Context._Member, Member.QueryOutput>(
++            components: components + [.member(QueryValue._Object.columns[keyPath: keyPath].name)]
++        )
++    }
++
++    public subscript<Member>(
++        dynamicMember keyPath: KeyPath<
++            QueryValue.Wrapped._Object.TableColumns, TableColumn<QueryValue.Wrapped._Object, Member>
++        >
++    ) -> JSONPath<_JSONPathMember?, Member>
++    where
++        QueryValue: SQL::_OptionalProtocol,
++        QueryValue.Wrapped: _JSONObjectRepresentation
++    {
++        JSONPath<_JSONPathMember?, Member>(
++            components: components + [.member(QueryValue.Wrapped._Object.columns[keyPath: keyPath].name)]
++        )
++    }
++
++    public subscript<Member>(
++        dynamicMember keyPath: KeyPath<
++            QueryValue.Wrapped._Object.TableColumns, TableColumn<QueryValue.Wrapped._Object, Member>
++        >
++    ) -> JSONPath<_JSONPathMember?, Member.QueryOutput>
++    where
++        QueryValue: SQL::_OptionalProtocol,
++        QueryValue.Wrapped: _JSONObjectRepresentation,
++        Member.QueryOutput: QueryBindable
++    {
++        JSONPath<_JSONPathMember?, Member.QueryOutput>(
++            components: components + [.member(QueryValue.Wrapped._Object.columns[keyPath: keyPath].name)]
++        )
++    }
++
++    public subscript(_ index: Int) -> JSONPath<Context._Element, QueryValue._ElementRepresentation>
++    where Context: _JSONPathContext, QueryValue: _JSONArrayRepresentation {
++        JSONPath<Context._Element, QueryValue._ElementRepresentation>(
++            components: components + [.index(index)]
++        )
++    }
++
++    public subscript(_ index: Int) -> JSONPath<Context._Element, QueryValue._Element>
++    where
++        Context: _JSONPathContext,
++        QueryValue: _JSONArrayRepresentation,
++        QueryValue._Element: QueryBindable
++    {
++        JSONPath<Context._Element, QueryValue._Element>(components: components + [.index(index)])
++    }
++
++    public subscript(
++        _ index: Int
++    ) -> JSONPath<_JSONPathElement?, QueryValue.Wrapped._ElementRepresentation>
++    where
++        QueryValue: SQL::_OptionalProtocol,
++        QueryValue.Wrapped: _JSONArrayRepresentation
++    {
++        JSONPath<_JSONPathElement?, QueryValue.Wrapped._ElementRepresentation>(
++            components: components + [.index(index)]
++        )
++    }
++
++    public subscript(_ index: Int) -> JSONPath<_JSONPathElement?, QueryValue.Wrapped._Element>
++    where
++        QueryValue: SQL::_OptionalProtocol,
++        QueryValue.Wrapped: _JSONArrayRepresentation,
++        QueryValue.Wrapped._Element: QueryBindable
++    {
++        JSONPath<_JSONPathElement?, QueryValue.Wrapped._Element>(
++            components: components + [.index(index)]
++        )
++    }
++
++    public subscript<Object: Table & Codable, Member: Table & Codable>(
++        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member>>
++    ) -> JSONPath<Context._Member, JSONRepresentation<Member>>
++    where
++        Context: _JSONPathContext,
++        QueryValue == JSONRepresentation<Object>,
++        Member.QueryOutput == Member,
++        Member._Optionalized == Member?
++    {
++        JSONPath<Context._Member, JSONRepresentation<Member>>(
++            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
++        )
++    }
++
++    public subscript<Object: Table & Codable, Member: Table & Codable>(
++        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member?>>
++    ) -> JSONPath<Context._Member, JSONRepresentation<Member>?>
++    where
++        Context: _JSONPathContext,
++        QueryValue == JSONRepresentation<Object>,
++        Member.QueryOutput == Member
++    {
++        JSONPath<Context._Member, JSONRepresentation<Member>?>(
++            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
++        )
++    }
++
++    public subscript<Object: Table & Codable, Member: Table & Codable>(
++        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member>>
++    ) -> JSONPath<Context._Member, JSONBRepresentation<Member>>
++    where
++        Context: _JSONPathContext,
++        QueryValue == JSONBRepresentation<Object>,
++        Member.QueryOutput == Member,
++        Member._Optionalized == Member?
++    {
++        JSONPath<Context._Member, JSONBRepresentation<Member>>(
++            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
++        )
++    }
++
++    public subscript<Object: Table & Codable, Member: Table & Codable>(
++        dynamicMember keyPath: KeyPath<Object.TableColumns, ColumnGroup<Object, Member?>>
++    ) -> JSONPath<Context._Member, JSONBRepresentation<Member>?>
++    where
++        Context: _JSONPathContext,
++        QueryValue == JSONBRepresentation<Object>,
++        Member.QueryOutput == Member
++    {
++        JSONPath<Context._Member, JSONBRepresentation<Member>?>(
++            components: components + [.member(Object.columns[keyPath: keyPath].groupName)]
++        )
++    }
++}
++
++extension JSONFunctionExpression {
++
++    var queryFragment: ISO_9075.Fragment {
++        _isSelecting ? decode(base) : base
++    }
++}
+diff --git a/Sources/SQLite SQL/JSONRepresentation.swift b/Sources/SQLite SQL/JSONRepresentation.swift
+index 50b0c81..44d63ba 100644
+--- a/Sources/SQLite SQL/JSONRepresentation.swift	
++++ b/Sources/SQLite SQL/JSONRepresentation.swift	
+@@ -8,10 +8,6 @@ public struct JSONRepresentation<QueryOutput: Codable>: Codable, QueryRepresenta
+     public init(queryOutput: QueryOutput) {
+         self.queryOutput = queryOutput
+     }
+-
+-    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-        "json(\(queryFragment))"
+-    }
+ }
+ 
+ extension JSONRepresentation: Equatable where QueryOutput: Equatable {}
+@@ -48,3 +44,10 @@ extension JSONRepresentation {
+ 
+     static var decoder: JSONDecoder { JSONDecoder() }
+ }
++
++extension JSONRepresentation {
++
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "json(\(queryFragment))"
++    }
++}
+diff --git a/Sources/SQLite SQL/SQLite.swift b/Sources/SQLite SQL/SQLite.swift
+index 507f045..b3e75c2 100644
+--- a/Sources/SQLite SQL/SQLite.swift	
++++ b/Sources/SQLite SQL/SQLite.swift	
+@@ -2,6 +2,9 @@ public import ISO_9075_Foundation
+ 
+ public struct SQLite: ISO_9075.Dialect {
+     public init() {}
++}
++
++extension SQLite {
+ 
+     public func placeholder(_ offset: Int) -> String { "?" }
+ 
+diff --git a/Sources/SQLite SQL/Triggers.swift b/Sources/SQLite SQL/Triggers.swift
+index df3de7f..c1c0a5b 100644
+--- a/Sources/SQLite SQL/Triggers.swift	
++++ b/Sources/SQLite SQL/Triggers.swift	
+@@ -62,15 +62,6 @@ extension Table {
+ }
+ 
+ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
+-    public typealias From = Never
+-    public typealias Joins = ()
+-    public typealias QueryValue = ()
+-
+-    fileprivate enum When: ISO_9075.Fragment {
+-        case before = "BEFORE"
+-        case after = "AFTER"
+-        case insteadOf = "INSTEAD OF"
+-    }
+ 
+     public struct Operation: Sendable, QueryExpression {
+         public typealias QueryValue = ()
+@@ -326,6 +317,20 @@ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
+     fileprivate let fileID: StaticString
+     fileprivate let line: UInt
+     fileprivate let column: UInt
++}
++
++@TaskLocal public var _isCreatingTemporaryTrigger = false
++
++extension TemporaryTrigger {
++    public typealias From = Never
++    public typealias Joins = ()
++    public typealias QueryValue = ()
++
++    fileprivate enum When: ISO_9075.Fragment {
++        case before = "BEFORE"
++        case after = "AFTER"
++        case insteadOf = "INSTEAD OF"
++    }
+ 
+     public func drop(ifExists: Bool = false) -> some Statement<()> {
+         var query: ISO_9075.Fragment = "DROP TRIGGER"
+@@ -350,5 +355,3 @@ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
+         "\(quote: name ?? "\(operation.description)_on_\(On.tableName)@\(fileID):\(line):\(column)")"
+     }
+ }
+-
+-@TaskLocal public var _isCreatingTemporaryTrigger = false
+diff --git a/Sources/SQLite SQL/Views.swift b/Sources/SQLite SQL/Views.swift
+index 875f33c..4cab4b7 100644
+--- a/Sources/SQLite SQL/Views.swift	
++++ b/Sources/SQLite SQL/Views.swift	
+@@ -13,11 +13,14 @@ extension Table {
+ 
+ public struct TemporaryView<View: Table, Selection: PartialSelectStatement>: Statement
+ where Selection.QueryValue == View {
+-    public typealias QueryValue = ()
+-    public typealias From = Never
+ 
+     fileprivate let ifNotExists: Bool
+     fileprivate let select: Selection
++}
++
++extension TemporaryView {
++    public typealias QueryValue = ()
++    public typealias From = Never
+ 
+     public func drop(ifExists: Bool = false) -> some Statement<()> {
+         var query: ISO_9075.Fragment = "DROP VIEW"
+-- 
+2.43.0
+
