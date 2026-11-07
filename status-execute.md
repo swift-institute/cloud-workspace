@@ -18,6 +18,7 @@ Linux x86_64, Swift 6.4.2, 7 Nov. Brief: `BRIEF-execute.md`. Counts: `overnight/
 | 1 rules | institute | b50d560 | `do throws for typed catch` skips pattern catches and catches that never read `error`; `hoisted error in public throws` reports only public/open declarations (incl. `public extension` members), not `do`, closures or non-public API. Second session. |
 | 1 rules | institute | 574f43b, 7d18cd8, c7f4dfc | `unknown default` only over enums declared in the file; `closure typed throws annotation` only for callees taking `throws(E)` closures (in-file or map/flatMap/compactMap); `bool public parameter` skips memberwise parameters stored as the same-named property; `extension file naming` ignores suppression-only where clauses. Narrowing only: no policy list or runner change needed. |
 | 1 rules | institute | c1c5781, c5194d4, 0b143d9, 93f047e, e7af0b9 | `path name grammar` leaves a file's declared leaf type name to `compound type name`; `counter loop iteration` skips triangular and span loops (detect and repair); `untyped throws` admits Codable container, Decoder and macro witnesses; `fatal error outside tests` skips unavailable declarations and `* Test Support` targets; `file name nested path` strips backticks and skips `__`-hoisted types. Narrowing only. |
+| 1 rules | institute | 3b05b34, f574265, 80335c3, 658dd56 | `count minus one` no longer reports ordering lookahead guards (`i + 1 < n`; `==` still reported); `trait consistency` treats `.define(X, .when(traits:))` as that trait's guard; `test target naming` admits Integration/Conformance/Performance suites; `module selector spelling`'s repair writes `M::M.Name` when the file shows a same-named type. Narrowing only. |
 | 2 pilot | swift-algebra | bc520ef, fa2521f | absorbs swift-symmetry-algebra behind trait `Symmetry` |
 | 2 pilot | swift-symmetry-dimension | e26e210, e4d8542 | uses swift-algebra with `Symmetry` |
 
@@ -29,7 +30,7 @@ Every rule fix has a control or test that fails on the old rule (shown by revert
 
 Pilot CI was red on README-162 and import order (macOS-only checks); fixed in fa2521f and e4d8542. Before each push: README check and swift-format with the Institute's rules.
 
-Not changed, by decision: `exported import` / `architecture import boundary` (their tests pin the exact `exports.swift` name: rename files instead), `throwing wrapper init` (its test pins `self.init` delegation as a forward).
+Not changed, by decision: `existential parameter` (its tests deliberately flag `[any P]` with a parameter-pack suggestion and witness shapes without a visible conformance); `exported import` / `architecture import boundary` (their tests pin the exact `exports.swift` name: rename files instead), `throwing wrapper init` (its test pins `self.init` delegation as a forward).
 
 ## Findings by rule, before (40,371, institute 2ac3965) → now (32,421)
 
