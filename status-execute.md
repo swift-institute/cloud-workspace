@@ -75,17 +75,18 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 
 Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as the baseline). Backed up to `findings-wip`.
 
-**Verified at 22:20 UTC by re-lint of the 367 changed packages (29,417 → 24,399): 5,018 net fixed; ecosystem 30,436 → 25,418 (16.5%).** Batch 4 (extension-file merges, type splits) added 359 net after its reverts.
+**Verified at 22:55 UTC by a lint of all 438 packages: 30,436 → 25,357, 5,079 fixed (16.7%).**
 
-| Rule | Before → after (changed packages) |
+| Rule | Baseline → now (all packages) |
 |---|---|
-| compound suite name | 4,707 → 418 (−4,289) |
-| extension file naming | 2,491 → 2,091 (−400) |
-| minimal type body | 3,413 → 3,053 (−360) |
-| single type per file | 1,502 → 1,352 (−150) |
-| test display name string | 509 → 364 (−145) |
-| target import edge | 5 → 324 (+319): split files carry their original's transitive imports, and upstream commits; to fix with `add-import-edges.py` before any push |
+| compound suite name | 4,730 → about 441 |
+| extension file naming | 2,531 → about 2,131 |
+| minimal type body | 3,463 → about 3,103 |
+| single type per file | 1,518 → about 1,368 |
+| test display name string | 541 → about 396 |
 
+- **Ratchet gate** (`overnight/ratchet-check.py`, institute's limits): no repository over any limit from this session's changes. 63 targets whose changes raised a rule over its limit were reverted to origin/main. Three items are over the limit already on origin/main, not from this session: swift-linter-rules `comment in source` 1>0 and `path name grammar` 17>16, institute `comment in source` 21>0.
+- **Lint fix:** `lint-all.sh` mirrors each package alone, as CI checks it out. Sibling mirrors made the runner report about 450 false `target import edge` findings; with isolated mirrors the rule is back at its baseline.
 - **Batch 4:** `merge-extension-files.py` (798 merges) and `split-types.py` (855 moves), then reverted where they broke: directories failing the type-check only after the batch, directories the type-check can't verify (C shims, macros), 33 directories where a merged file brought conditional imports mid-file; 45+ unused `public import`s made internal. Institute's generated `Ratchet+limits.swift` kept separate.
 - **Pre-push gate:** `overnight/ratchet-check.py` lists every repository rule count over institute's ratchet limit; run before every push.
 - **Build:** root build with 682 test targets in one plan (`generate.py` on main): libraries green; test targets type-checked with `overnight/typecheck-tests.py` (2 s per target, shown to fail on a deliberate error); targets failing only through this session's changes reverted to origin/main (svg-render, rfc-8446 Extension tests, 2 more). Fallback list `overnight/tests-fallback.txt`: swift-slab `Slab Tests` (trait-gated `Slab.Inline`), swift-rfc-8446 `Standard Library Integration Tests` (fails on origin/main). 136 targets the root can't take are in `tests-skipped.json` (macro plugins, Apple-only, non-product deps, `package` access). The last root test build stopped on the rfc-8446 target, now on the fallback list; the next batch's build confirms green.

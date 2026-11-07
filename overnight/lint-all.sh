@@ -9,7 +9,7 @@ mkdir -p "$OUT"
 list=("$@"); [ ${#list[@]} -eq 0 ] && mapfile -t list < <(overnight/packages.sh)
 for p in "${list[@]}"; do
   case "$(overnight/tier.sh "$p")" in atoms|molecules) b=primitives;; standards) b=standards;; *) b=institute;; esac
-  m="$MIRROR/$p"; rm -rf "$m"; mkdir -p "$m"
+  m="$MIRROR/${p/\//__}/$(basename "$p")"; rm -rf "$m"; mkdir -p "$m"  # one package per directory, no siblings: as CI checks it out
   tar -C "repos/$p" --exclude=./.git --exclude=./.build --exclude=./.swiftpm -cf - . | tar -C "$m" -xf -
   git -C "repos/$p" show :Package.swift > "$m/Package.swift"
   (cd "$m" && SWIFT_LINTER_BUNDLE=$b INSTITUTE_REPOSITORY=$p SWIFT_LINTER_FORMAT=structured "$R" . \
