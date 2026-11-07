@@ -1,0 +1,436 @@
+From a2fe999582eaff783ea49282bba59cdf148a0c55 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:51 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Lint/Lint.Rule+Composition.swift     | 89 ------------------
+ Sources/Lint/Lint.Rule+ID.swift              |  4 -
+ Sources/Lint/Lint.Rule.Control.ID.swift      |  3 -
+ Sources/Lint/Lint.Rule.Control.swift         |  4 +
+ Sources/Lint/Lint.Rule.swift                 | 95 ++++++++++++++++++++
+ Sources/Lint/Lint.Visibility+Effective.swift | 81 -----------------
+ Sources/Lint/Lint.Visibility.swift           | 82 +++++++++++++++++
+ 7 files changed, 181 insertions(+), 177 deletions(-)
+ delete mode 100644 Sources/Lint/Lint.Rule+Composition.swift
+ delete mode 100644 Sources/Lint/Lint.Rule+ID.swift
+ delete mode 100644 Sources/Lint/Lint.Rule.Control.ID.swift
+ delete mode 100644 Sources/Lint/Lint.Visibility+Effective.swift
+
+diff --git a/Sources/Lint/Lint.Rule+Composition.swift b/Sources/Lint/Lint.Rule+Composition.swift
+deleted file mode 100644
+index 9470a82..0000000
+--- a/Sources/Lint/Lint.Rule+Composition.swift
++++ /dev/null
+@@ -1,89 +0,0 @@
+-extension Lint.Rule {
+-
+-    @inlinable
+-    public func filtered(toPaths filter: Lint.Filter) -> Lint.Rule {
+-        Lint.Rule(
+-            id: self.id,
+-            default: self.severity.default,
+-            suppression: self.suppression,
+-            controls: self.controls,
+-            observe: { (source: borrowing Lint.Source.Parsed, severity) in
+-                guard filter.matches(sourcePath: source.path) else {
+-                    return Lint.Rule.Observation(
+-                        findings: [],
+-                        coverage: .measured,
+-                        applicability: .inapplicable
+-                    )
+-                }
+-                return self.observe(source, severity)
+-            },
+-            repair: { (source: borrowing Lint.Source.Parsed) in
+-                guard filter.matches(sourcePath: source.path) else { return .unchanged }
+-                return self.repair(source)
+-            }
+-        )
+-    }
+-
+-    @inlinable
+-    public func with(default severity: Diagnostic.Severity) -> Lint.Rule {
+-        Lint.Rule(
+-            id: self.id,
+-            default: severity,
+-            suppression: self.suppression,
+-            controls: self.controls,
+-            observe: self.observe,
+-            repair: self.repair
+-        )
+-    }
+-
+-    @inlinable
+-    public func pinned(to severity: Diagnostic.Severity) -> Lint.Rule {
+-        Lint.Rule(
+-            id: self.id,
+-            default: severity,
+-            suppression: self.suppression,
+-            controls: self.controls,
+-            observe: { (source: borrowing Lint.Source.Parsed, _) in
+-                self.observe(source, severity)
+-            },
+-            repair: self.repair
+-        )
+-    }
+-
+-    @inlinable
+-    public static func combining(
+-        id: Lint.Rule.ID,
+-        default severity: Diagnostic.Severity,
+-        suppression: Lint.Rule.Suppression = .none,
+-        controls: [Lint.Rule.Control] = [],
+-        _ rules: [Lint.Rule]
+-    ) -> Lint.Rule {
+-        Lint.Rule(
+-            id: id,
+-            default: severity,
+-            suppression: suppression,
+-            controls: controls,
+-            observe: { (source: borrowing Lint.Source.Parsed, severity) in
+-                var out: [Diagnostic.Record] = []
+-                var applicable = false
+-                for rule in rules {
+-                    let observation = rule.observe(source, severity)
+-                    applicable = applicable || observation.applicability.isApplicable
+-                    out.append(contentsOf: observation.findings)
+-                    if case .unmeasured(let reason) = observation.coverage {
+-                        return Lint.Rule.Observation(
+-                            findings: out,
+-                            coverage: .unmeasured(reason),
+-                            applicability: applicable ? .applicable : .inapplicable
+-                        )
+-                    }
+-                }
+-                return Lint.Rule.Observation(
+-                    findings: out,
+-                    coverage: .measured,
+-                    applicability: applicable ? .applicable : .inapplicable
+-                )
+-            }
+-        )
+-    }
+-}
+diff --git a/Sources/Lint/Lint.Rule+ID.swift b/Sources/Lint/Lint.Rule+ID.swift
+deleted file mode 100644
+index bf73396..0000000
+--- a/Sources/Lint/Lint.Rule+ID.swift
++++ /dev/null
+@@ -1,4 +0,0 @@
+-extension Lint.Rule {
+-
+-    public typealias ID = Tagged<Lint.Rule, Swift::String>
+-}
+diff --git a/Sources/Lint/Lint.Rule.Control.ID.swift b/Sources/Lint/Lint.Rule.Control.ID.swift
+deleted file mode 100644
+index 6175acc..0000000
+--- a/Sources/Lint/Lint.Rule.Control.ID.swift
++++ /dev/null
+@@ -1,3 +0,0 @@
+-extension Lint.Rule.Control {
+-    public typealias ID = Tagged<Lint.Rule.Control, Swift::String>
+-}
+diff --git a/Sources/Lint/Lint.Rule.Control.swift b/Sources/Lint/Lint.Rule.Control.swift
+index 4a26cae..d7e7aae 100644
+--- a/Sources/Lint/Lint.Rule.Control.swift
++++ b/Sources/Lint/Lint.Rule.Control.swift
+@@ -34,3 +34,7 @@ extension Lint.Rule {
+         }
+     }
+ }
++
++extension Lint.Rule.Control {
++    public typealias ID = Tagged<Lint.Rule.Control, Swift::String>
++}
+diff --git a/Sources/Lint/Lint.Rule.swift b/Sources/Lint/Lint.Rule.swift
+index ce051a3..ff75156 100644
+--- a/Sources/Lint/Lint.Rule.swift
++++ b/Sources/Lint/Lint.Rule.swift
+@@ -50,3 +50,98 @@ extension Lint.Rule {
+         }
+     }
+ }
++
++extension Lint.Rule {
++
++    @inlinable
++    public func filtered(toPaths filter: Lint.Filter) -> Lint.Rule {
++        Lint.Rule(
++            id: self.id,
++            default: self.severity.default,
++            suppression: self.suppression,
++            controls: self.controls,
++            observe: { (source: borrowing Lint.Source.Parsed, severity) in
++                guard filter.matches(sourcePath: source.path) else {
++                    return Lint.Rule.Observation(
++                        findings: [],
++                        coverage: .measured,
++                        applicability: .inapplicable
++                    )
++                }
++                return self.observe(source, severity)
++            },
++            repair: { (source: borrowing Lint.Source.Parsed) in
++                guard filter.matches(sourcePath: source.path) else { return .unchanged }
++                return self.repair(source)
++            }
++        )
++    }
++
++    @inlinable
++    public func with(default severity: Diagnostic.Severity) -> Lint.Rule {
++        Lint.Rule(
++            id: self.id,
++            default: severity,
++            suppression: self.suppression,
++            controls: self.controls,
++            observe: self.observe,
++            repair: self.repair
++        )
++    }
++
++    @inlinable
++    public func pinned(to severity: Diagnostic.Severity) -> Lint.Rule {
++        Lint.Rule(
++            id: self.id,
++            default: severity,
++            suppression: self.suppression,
++            controls: self.controls,
++            observe: { (source: borrowing Lint.Source.Parsed, _) in
++                self.observe(source, severity)
++            },
++            repair: self.repair
++        )
++    }
++
++    @inlinable
++    public static func combining(
++        id: Lint.Rule.ID,
++        default severity: Diagnostic.Severity,
++        suppression: Lint.Rule.Suppression = .none,
++        controls: [Lint.Rule.Control] = [],
++        _ rules: [Lint.Rule]
++    ) -> Lint.Rule {
++        Lint.Rule(
++            id: id,
++            default: severity,
++            suppression: suppression,
++            controls: controls,
++            observe: { (source: borrowing Lint.Source.Parsed, severity) in
++                var out: [Diagnostic.Record] = []
++                var applicable = false
++                for rule in rules {
++                    let observation = rule.observe(source, severity)
++                    applicable = applicable || observation.applicability.isApplicable
++                    out.append(contentsOf: observation.findings)
++                    if case .unmeasured(let reason) = observation.coverage {
++                        return Lint.Rule.Observation(
++                            findings: out,
++                            coverage: .unmeasured(reason),
++                            applicability: applicable ? .applicable : .inapplicable
++                        )
++                    }
++                }
++                return Lint.Rule.Observation(
++                    findings: out,
++                    coverage: .measured,
++                    applicability: applicable ? .applicable : .inapplicable
++                )
++            }
++        )
++    }
++}
++
++extension Lint.Rule {
++
++    public typealias ID = Tagged<Lint.Rule, Swift::String>
++}
+diff --git a/Sources/Lint/Lint.Visibility+Effective.swift b/Sources/Lint/Lint.Visibility+Effective.swift
+deleted file mode 100644
+index af60caa..0000000
+--- a/Sources/Lint/Lint.Visibility+Effective.swift
++++ /dev/null
+@@ -1,81 +0,0 @@
+-public import SwiftSyntax
+-
+-extension Lint.Visibility {
+-
+-    @inlinable
+-    public static func declared(in modifiers: DeclModifierListSyntax) -> Lint.Visibility? {
+-        for modifier in modifiers {
+-            switch modifier.name.tokenKind {
+-            case .keyword(.public), .keyword(.open):
+-                return .public
+-
+-            case .keyword(.package):
+-                return .package
+-
+-            case .keyword(.internal):
+-                return .internal
+-
+-            case .keyword(.fileprivate):
+-                return .fileprivate
+-
+-            case .keyword(.private):
+-                return .private
+-
+-            default:
+-                continue
+-            }
+-        }
+-        return nil
+-    }
+-
+-    @inlinable
+-    public static func effective(of node: Syntax) -> Lint.Visibility {
+-        guard let modifiers = modifiers(of: node) else {
+-            return enclosingDeclaration(of: node).map(effective(of:)) ?? .internal
+-        }
+-        if node.is(ExtensionDeclSyntax.self) {
+-            return declared(in: modifiers) ?? .public
+-        }
+-        let container = enclosingDeclaration(of: node)
+-        let own = declared(in: modifiers) ?? defaultVisibility(in: container)
+-        return container.map { Swift::min(own, effective(of: $0)) } ?? own
+-    }
+-
+-    @usableFromInline
+-    static func enclosingDeclaration(of node: Syntax) -> Syntax? {
+-        var cursor = node.parent
+-        while let candidate = cursor {
+-            if modifiers(of: candidate) != nil { return candidate }
+-            cursor = candidate.parent
+-        }
+-        return nil
+-    }
+-
+-    @usableFromInline
+-    static func defaultVisibility(in container: Syntax?) -> Lint.Visibility {
+-        if let decl = container?.as(ExtensionDeclSyntax.self) {
+-            declared(in: decl.modifiers) ?? .internal
+-        } else if let decl = container?.as(ProtocolDeclSyntax.self) {
+-            declared(in: decl.modifiers) ?? .internal
+-        } else {
+-            .internal
+-        }
+-    }
+-
+-    @usableFromInline
+-    static func modifiers(of node: Syntax) -> DeclModifierListSyntax? {
+-        if let decl = node.as(StructDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(ClassDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(EnumDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(ActorDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(ExtensionDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(ProtocolDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(FunctionDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(InitializerDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(SubscriptDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(VariableDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(TypeAliasDeclSyntax.self) { return decl.modifiers }
+-        if let decl = node.as(AssociatedTypeDeclSyntax.self) { return decl.modifiers }
+-        return nil
+-    }
+-}
+diff --git a/Sources/Lint/Lint.Visibility.swift b/Sources/Lint/Lint.Visibility.swift
+index b75e899..663e826 100644
+--- a/Sources/Lint/Lint.Visibility.swift
++++ b/Sources/Lint/Lint.Visibility.swift
+@@ -1,3 +1,5 @@
++public import SwiftSyntax
++
+ extension Lint {
+ 
+     public enum Visibility: Swift::String, Sendable, Hashable, Codable, Comparable, CaseIterable {
+@@ -38,3 +40,83 @@ extension Lint.Visibility {
+         }
+     }
+ }
++
++extension Lint.Visibility {
++
++    @inlinable
++    public static func declared(in modifiers: DeclModifierListSyntax) -> Lint.Visibility? {
++        for modifier in modifiers {
++            switch modifier.name.tokenKind {
++            case .keyword(.public), .keyword(.open):
++                return .public
++
++            case .keyword(.package):
++                return .package
++
++            case .keyword(.internal):
++                return .internal
++
++            case .keyword(.fileprivate):
++                return .fileprivate
++
++            case .keyword(.private):
++                return .private
++
++            default:
++                continue
++            }
++        }
++        return nil
++    }
++
++    @inlinable
++    public static func effective(of node: Syntax) -> Lint.Visibility {
++        guard let modifiers = modifiers(of: node) else {
++            return enclosingDeclaration(of: node).map(effective(of:)) ?? .internal
++        }
++        if node.is(ExtensionDeclSyntax.self) {
++            return declared(in: modifiers) ?? .public
++        }
++        let container = enclosingDeclaration(of: node)
++        let own = declared(in: modifiers) ?? defaultVisibility(in: container)
++        return container.map { Swift::min(own, effective(of: $0)) } ?? own
++    }
++
++    @usableFromInline
++    static func enclosingDeclaration(of node: Syntax) -> Syntax? {
++        var cursor = node.parent
++        while let candidate = cursor {
++            if modifiers(of: candidate) != nil { return candidate }
++            cursor = candidate.parent
++        }
++        return nil
++    }
++
++    @usableFromInline
++    static func defaultVisibility(in container: Syntax?) -> Lint.Visibility {
++        if let decl = container?.as(ExtensionDeclSyntax.self) {
++            declared(in: decl.modifiers) ?? .internal
++        } else if let decl = container?.as(ProtocolDeclSyntax.self) {
++            declared(in: decl.modifiers) ?? .internal
++        } else {
++            .internal
++        }
++    }
++
++    @usableFromInline
++    static func modifiers(of node: Syntax) -> DeclModifierListSyntax? {
++        if let decl = node.as(StructDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(ClassDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(EnumDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(ActorDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(ExtensionDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(ProtocolDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(FunctionDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(InitializerDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(SubscriptDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(VariableDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(TypeAliasDeclSyntax.self) { return decl.modifiers }
++        if let decl = node.as(AssociatedTypeDeclSyntax.self) { return decl.modifiers }
++        return nil
++    }
++}
+-- 
+2.43.0
+

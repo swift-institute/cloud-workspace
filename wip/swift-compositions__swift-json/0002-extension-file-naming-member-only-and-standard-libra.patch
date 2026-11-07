@@ -1,0 +1,798 @@
+From 432fa7c3ecfcd964fdbf247fe331e7e60df3a123 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:56 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/JSON/JSON+Decoder.swift               |   8 --
+ Sources/JSON/JSON+Encoder.swift               |  10 --
+ Sources/JSON/JSON.Decoder+Value.swift         | 130 ------------------
+ Sources/JSON/JSON.Decoder.swift               | 129 +++++++++++++++++
+ Sources/JSON/JSON.Encode.Error.swift          |   9 ++
+ Sources/JSON/JSON.Encode.swift                |   5 -
+ Sources/JSON/JSON.Encoder+Value.swift         |  54 --------
+ Sources/JSON/JSON.Encoder.Node.Elements.swift |   8 ++
+ Sources/JSON/JSON.Encoder.Node.Members.swift  |  17 +++
+ Sources/JSON/JSON.Encoder.Node.State.swift    |  11 ++
+ Sources/JSON/JSON.Encoder.Node.swift          |  24 ----
+ Sources/JSON/JSON.Encoder.swift               |  53 +++++++
+ Sources/JSON/JSON.Literals.swift              |  50 -------
+ Sources/JSON/JSON.Located.swift               |  14 ++
+ Sources/JSON/JSON.Parse.swift                 |  20 ---
+ Sources/JSON/JSON.Prepared.swift              |  14 ++
+ Sources/JSON/JSON.swift                       |  69 ++++++++++
+ 17 files changed, 324 insertions(+), 301 deletions(-)
+ delete mode 100644 Sources/JSON/JSON+Decoder.swift
+ delete mode 100644 Sources/JSON/JSON+Encoder.swift
+ delete mode 100644 Sources/JSON/JSON.Decoder+Value.swift
+ create mode 100644 Sources/JSON/JSON.Encode.Error.swift
+ delete mode 100644 Sources/JSON/JSON.Encoder+Value.swift
+ create mode 100644 Sources/JSON/JSON.Encoder.Node.Elements.swift
+ create mode 100644 Sources/JSON/JSON.Encoder.Node.Members.swift
+ create mode 100644 Sources/JSON/JSON.Encoder.Node.State.swift
+ delete mode 100644 Sources/JSON/JSON.Literals.swift
+ create mode 100644 Sources/JSON/JSON.Located.swift
+ create mode 100644 Sources/JSON/JSON.Prepared.swift
+
+diff --git a/Sources/JSON/JSON+Decoder.swift b/Sources/JSON/JSON+Decoder.swift
+deleted file mode 100644
+index 9fd02f2..0000000
+--- a/Sources/JSON/JSON+Decoder.swift
++++ /dev/null
+@@ -1,8 +0,0 @@
+-extension JSON {
+-
+-    public func decode<T: Swift.Decodable>(
+-        _ type: T.Type = T.self
+-    ) throws(Swift.DecodingError) -> T {
+-        try JSON.Decoder(source: .value(raw), codingPath: []).decoded(type)
+-    }
+-}
+diff --git a/Sources/JSON/JSON+Encoder.swift b/Sources/JSON/JSON+Encoder.swift
+deleted file mode 100644
+index f11df42..0000000
+--- a/Sources/JSON/JSON+Encoder.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension JSON {
+-
+-    public init<T: Swift.Encodable>(
+-        encoding value: T
+-    ) throws(Swift.EncodingError) {
+-        let node = JSON.Encoder.Node()
+-        try JSON.Encoder(node: node, codingPath: []).encoded(value)
+-        self.init(node.value)
+-    }
+-}
+diff --git a/Sources/JSON/JSON.Decoder+Value.swift b/Sources/JSON/JSON.Decoder+Value.swift
+deleted file mode 100644
+index e4f3499..0000000
+--- a/Sources/JSON/JSON.Decoder+Value.swift
++++ /dev/null
+@@ -1,130 +0,0 @@
+-import RFC_8259
+-
+-extension JSON.Decoder {
+-
+-    internal var kind: String {
+-        switch source {
+-        case .value(.null): "null"
+-        case .value(.bool): "a boolean"
+-        case .value(.number): "a number"
+-        case .value(.string): "a string"
+-        case .value(.array): "an array"
+-        case .value(.object): "an object"
+-
+-        case .text(let document, let range):
+-            switch document.first(range) {
+-            case 0x6E: "null"
+-            case 0x74, 0x66: "a boolean"
+-            case 0x22: "a string"
+-            case 0x5B: "an array"
+-            case 0x7B: "an object"
+-            default: "a number"
+-            }
+-        }
+-    }
+-
+-    internal func mismatch<T>(_ type: T.Type) -> DecodingError {
+-        let context = DecodingError.Context(
+-            codingPath: codingPath,
+-            debugDescription: "Expected to decode \(type) but found \(kind) instead."
+-        )
+-        if isNull {
+-            return .valueNotFound(type, context)
+-        }
+-        return .typeMismatch(type, context)
+-    }
+-
+-    internal func corrupt(_ description: String) -> DecodingError {
+-        .dataCorrupted(
+-            DecodingError.Context(
+-                codingPath: codingPath,
+-                debugDescription: description
+-            )
+-        )
+-    }
+-}
+-
+-extension JSON.Decoder {
+-    internal func string() throws(DecodingError) -> String {
+-        guard case .string(let string) = try value() else { throw mismatch(String.self) }
+-        return string
+-    }
+-
+-    internal func bool() throws(DecodingError) -> Bool {
+-        guard case .bool(let bool) = try value() else { throw mismatch(Bool.self) }
+-        return bool
+-    }
+-}
+-
+-extension JSON.Decoder {
+-
+-    internal func integer<T: FixedWidthInteger>(
+-        _ type: T.Type
+-    ) throws(DecodingError) -> T {
+-        guard case .number(let number) = try value() else { throw mismatch(type) }
+-        switch number.parsed {
+-        case .integer(let signed):
+-            guard let exact = T(exactly: signed) else { throw overflow(number, type) }
+-            return exact
+-
+-        case .unsigned(let unsigned):
+-            guard let exact = T(exactly: unsigned) else { throw overflow(number, type) }
+-            return exact
+-
+-        case .float(let float):
+-            guard float.isFinite, float == float.rounded() else {
+-                throw corrupt(
+-                    "JSON number \(number) is not representable as \(type) "
+-                        + "without discarding its fractional part."
+-                )
+-            }
+-            guard let exact = T(exactly: float) else { throw overflow(number, type) }
+-            return exact
+-        }
+-    }
+-
+-    internal func floating<T: BinaryFloatingPoint>(
+-        _ type: T.Type
+-    ) throws(DecodingError) -> T {
+-        guard case .number(let number) = try value() else { throw mismatch(type) }
+-        let converted: T
+-        switch number.parsed {
+-        case .integer(let signed): converted = T(signed)
+-        case .unsigned(let unsigned): converted = T(unsigned)
+-        case .float(let float): converted = T(float)
+-        }
+-        guard converted.isFinite else { throw overflow(number, type) }
+-        return converted
+-    }
+-
+-    internal func overflow<T>(
+-        _ number: RFC_8259.Number,
+-        _ type: T.Type
+-    ) -> DecodingError {
+-        corrupt("JSON number \(number) does not fit in \(type).")
+-    }
+-}
+-
+-extension JSON.Decoder {
+-
+-    internal func decoded<T: Swift.Decodable>(
+-        _ type: T.Type
+-    ) throws(DecodingError) -> T {
+-
+-        do {
+-            return try T(from: self)
+-        } catch let error as DecodingError {
+-            throw error
+-        } catch {
+-            throw .dataCorrupted(
+-                DecodingError.Context(
+-                    codingPath: codingPath,
+-                    debugDescription:
+-                        "\(type) threw an error that was not a DecodingError; "
+-                        + "it is preserved as the underlying error.",
+-                    underlyingError: error
+-                )
+-            )
+-        }
+-    }
+-}
+diff --git a/Sources/JSON/JSON.Decoder.swift b/Sources/JSON/JSON.Decoder.swift
+index e8ef106..0aa5ea4 100644
+--- a/Sources/JSON/JSON.Decoder.swift
++++ b/Sources/JSON/JSON.Decoder.swift
+@@ -123,3 +123,132 @@ extension JSON {
+         return try JSON.Decoder(source: .text(document, document.all), codingPath: []).decoded(type)
+     }
+ }
++
++extension JSON.Decoder {
++
++    internal var kind: String {
++        switch source {
++        case .value(.null): "null"
++        case .value(.bool): "a boolean"
++        case .value(.number): "a number"
++        case .value(.string): "a string"
++        case .value(.array): "an array"
++        case .value(.object): "an object"
++
++        case .text(let document, let range):
++            switch document.first(range) {
++            case 0x6E: "null"
++            case 0x74, 0x66: "a boolean"
++            case 0x22: "a string"
++            case 0x5B: "an array"
++            case 0x7B: "an object"
++            default: "a number"
++            }
++        }
++    }
++
++    internal func mismatch<T>(_ type: T.Type) -> DecodingError {
++        let context = DecodingError.Context(
++            codingPath: codingPath,
++            debugDescription: "Expected to decode \(type) but found \(kind) instead."
++        )
++        if isNull {
++            return .valueNotFound(type, context)
++        }
++        return .typeMismatch(type, context)
++    }
++
++    internal func corrupt(_ description: String) -> DecodingError {
++        .dataCorrupted(
++            DecodingError.Context(
++                codingPath: codingPath,
++                debugDescription: description
++            )
++        )
++    }
++}
++
++extension JSON.Decoder {
++    internal func string() throws(DecodingError) -> String {
++        guard case .string(let string) = try value() else { throw mismatch(String.self) }
++        return string
++    }
++
++    internal func bool() throws(DecodingError) -> Bool {
++        guard case .bool(let bool) = try value() else { throw mismatch(Bool.self) }
++        return bool
++    }
++}
++
++extension JSON.Decoder {
++
++    internal func integer<T: FixedWidthInteger>(
++        _ type: T.Type
++    ) throws(DecodingError) -> T {
++        guard case .number(let number) = try value() else { throw mismatch(type) }
++        switch number.parsed {
++        case .integer(let signed):
++            guard let exact = T(exactly: signed) else { throw overflow(number, type) }
++            return exact
++
++        case .unsigned(let unsigned):
++            guard let exact = T(exactly: unsigned) else { throw overflow(number, type) }
++            return exact
++
++        case .float(let float):
++            guard float.isFinite, float == float.rounded() else {
++                throw corrupt(
++                    "JSON number \(number) is not representable as \(type) "
++                        + "without discarding its fractional part."
++                )
++            }
++            guard let exact = T(exactly: float) else { throw overflow(number, type) }
++            return exact
++        }
++    }
++
++    internal func floating<T: BinaryFloatingPoint>(
++        _ type: T.Type
++    ) throws(DecodingError) -> T {
++        guard case .number(let number) = try value() else { throw mismatch(type) }
++        let converted: T
++        switch number.parsed {
++        case .integer(let signed): converted = T(signed)
++        case .unsigned(let unsigned): converted = T(unsigned)
++        case .float(let float): converted = T(float)
++        }
++        guard converted.isFinite else { throw overflow(number, type) }
++        return converted
++    }
++
++    internal func overflow<T>(
++        _ number: RFC_8259.Number,
++        _ type: T.Type
++    ) -> DecodingError {
++        corrupt("JSON number \(number) does not fit in \(type).")
++    }
++}
++
++extension JSON.Decoder {
++
++    internal func decoded<T: Swift.Decodable>(
++        _ type: T.Type
++    ) throws(DecodingError) -> T {
++
++        do {
++            return try T(from: self)
++        } catch let error as DecodingError {
++            throw error
++        } catch {
++            throw .dataCorrupted(
++                DecodingError.Context(
++                    codingPath: codingPath,
++                    debugDescription:
++                        "\(type) threw an error that was not a DecodingError; "
++                        + "it is preserved as the underlying error.",
++                    underlyingError: error
++                )
++            )
++        }
++    }
++}
+diff --git a/Sources/JSON/JSON.Encode.Error.swift b/Sources/JSON/JSON.Encode.Error.swift
+new file mode 100644
+index 0000000..76a381c
+--- /dev/null
++++ b/Sources/JSON/JSON.Encode.Error.swift
+@@ -0,0 +1,9 @@
++public import RFC_8259
++
++
++extension JSON.Encode {
++    public enum Error: Swift.Error, Sendable, Hashable {
++
++        case depthExceeded(maxDepth: Int)
++    }
++}
+diff --git a/Sources/JSON/JSON.Encode.swift b/Sources/JSON/JSON.Encode.swift
+index 273c66b..8edb6ce 100644
+--- a/Sources/JSON/JSON.Encode.swift
++++ b/Sources/JSON/JSON.Encode.swift
+@@ -6,11 +6,6 @@ extension JSON {
+ }
+ 
+ extension JSON.Encode {
+-
+-    public enum Error: Swift.Error, Sendable, Hashable {
+-
+-        case depthExceeded(maxDepth: Int)
+-    }
+ }
+ 
+ extension JSON.Encode.Error: CustomStringConvertible {
+diff --git a/Sources/JSON/JSON.Encoder+Value.swift b/Sources/JSON/JSON.Encoder+Value.swift
+deleted file mode 100644
+index dfae5c3..0000000
+--- a/Sources/JSON/JSON.Encoder+Value.swift
++++ /dev/null
+@@ -1,54 +0,0 @@
+-import RFC_8259
+-
+-extension JSON.Encoder {
+-
+-    internal func set(_ value: RFC_8259.Value) {
+-        node.state = .value(value)
+-    }
+-
+-    internal func integer<T: FixedWidthInteger>(_ value: T) -> RFC_8259.Value {
+-        if let signed = Int64(exactly: value) {
+-            return .number(RFC_8259.Number(signed, original: .init(String(signed).utf8.map(Byte.init(bitPattern:)))))
+-        }
+-        let unsigned = UInt64(value)
+-        return .number(RFC_8259.Number(unsigned, original: .init(String(unsigned).utf8.map(Byte.init(bitPattern:)))))
+-    }
+-
+-    internal func floating<T: BinaryFloatingPoint & LosslessStringConvertible>(
+-        _ value: T
+-    ) throws(EncodingError) -> RFC_8259.Value {
+-        guard value.isFinite else {
+-            throw .invalidValue(
+-                value,
+-                EncodingError.Context(
+-                    codingPath: codingPath,
+-                    debugDescription: "JSON has no representation for the non-finite number \(value)."
+-                )
+-            )
+-        }
+-        let text = String(value)
+-        return .number(RFC_8259.Number(Double(text) ?? Double(value), original: .init(text.utf8.map(Byte.init(bitPattern:)))))
+-    }
+-}
+-
+-extension JSON.Encoder {
+-
+-    internal func encoded<T: Swift.Encodable>(_ value: T) throws(EncodingError) {
+-        do {
+-            try value.encode(to: self)
+-        } catch let error as EncodingError {
+-            throw error
+-        } catch {
+-            throw .invalidValue(
+-                value,
+-                EncodingError.Context(
+-                    codingPath: codingPath,
+-                    debugDescription:
+-                        "\(T.self) threw an error that was not an EncodingError; "
+-                        + "it is preserved as the underlying error.",
+-                    underlyingError: error
+-                )
+-            )
+-        }
+-    }
+-}
+diff --git a/Sources/JSON/JSON.Encoder.Node.Elements.swift b/Sources/JSON/JSON.Encoder.Node.Elements.swift
+new file mode 100644
+index 0000000..029d287
+--- /dev/null
++++ b/Sources/JSON/JSON.Encoder.Node.Elements.swift
+@@ -0,0 +1,8 @@
++import RFC_8259
++
++
++extension JSON.Encoder.Node {
++    internal final class Elements {
++        internal var nodes: [JSON.Encoder.Node] = []
++    }
++}
+diff --git a/Sources/JSON/JSON.Encoder.Node.Members.swift b/Sources/JSON/JSON.Encoder.Node.Members.swift
+new file mode 100644
+index 0000000..164f62b
+--- /dev/null
++++ b/Sources/JSON/JSON.Encoder.Node.Members.swift
+@@ -0,0 +1,17 @@
++import RFC_8259
++
++
++extension JSON.Encoder.Node {
++    internal final class Members {
++        internal var nodes: [(key: String, node: JSON.Encoder.Node)] = []
++
++        internal func node(for key: String) -> JSON.Encoder.Node {
++            if let existing = nodes.first(where: { $0.key == key }) {
++                return existing.node
++            }
++            let node = JSON.Encoder.Node()
++            nodes.append((key, node))
++            return node
++        }
++    }
++}
+diff --git a/Sources/JSON/JSON.Encoder.Node.State.swift b/Sources/JSON/JSON.Encoder.Node.State.swift
+new file mode 100644
+index 0000000..3140810
+--- /dev/null
++++ b/Sources/JSON/JSON.Encoder.Node.State.swift
+@@ -0,0 +1,11 @@
++import RFC_8259
++
++
++extension JSON.Encoder.Node {
++    internal enum State {
++        case empty
++        case value(RFC_8259.Value)
++        case array(Elements)
++        case object(Members)
++    }
++}
+diff --git a/Sources/JSON/JSON.Encoder.Node.swift b/Sources/JSON/JSON.Encoder.Node.swift
+index 15dfdf1..90e5fed 100644
+--- a/Sources/JSON/JSON.Encoder.Node.swift
++++ b/Sources/JSON/JSON.Encoder.Node.swift
+@@ -11,30 +11,6 @@ extension JSON.Encoder {
+ }
+ 
+ extension JSON.Encoder.Node {
+-
+-    internal enum State {
+-        case empty
+-        case value(RFC_8259.Value)
+-        case array(Elements)
+-        case object(Members)
+-    }
+-
+-    internal final class Elements {
+-        internal var nodes: [JSON.Encoder.Node] = []
+-    }
+-
+-    internal final class Members {
+-        internal var nodes: [(key: String, node: JSON.Encoder.Node)] = []
+-
+-        internal func node(for key: String) -> JSON.Encoder.Node {
+-            if let existing = nodes.first(where: { $0.key == key }) {
+-                return existing.node
+-            }
+-            let node = JSON.Encoder.Node()
+-            nodes.append((key, node))
+-            return node
+-        }
+-    }
+ }
+ 
+ extension JSON.Encoder.Node {
+diff --git a/Sources/JSON/JSON.Encoder.swift b/Sources/JSON/JSON.Encoder.swift
+index 58ea68a..854039f 100644
+--- a/Sources/JSON/JSON.Encoder.swift
++++ b/Sources/JSON/JSON.Encoder.swift
+@@ -31,3 +31,56 @@ extension JSON.Encoder: Swift.Encoder {
+         JSON.Encoder.Single(encoder: self)
+     }
+ }
++
++extension JSON.Encoder {
++
++    internal func set(_ value: RFC_8259.Value) {
++        node.state = .value(value)
++    }
++
++    internal func integer<T: FixedWidthInteger>(_ value: T) -> RFC_8259.Value {
++        if let signed = Int64(exactly: value) {
++            return .number(RFC_8259.Number(signed, original: .init(String(signed).utf8.map(Byte.init(bitPattern:)))))
++        }
++        let unsigned = UInt64(value)
++        return .number(RFC_8259.Number(unsigned, original: .init(String(unsigned).utf8.map(Byte.init(bitPattern:)))))
++    }
++
++    internal func floating<T: BinaryFloatingPoint & LosslessStringConvertible>(
++        _ value: T
++    ) throws(EncodingError) -> RFC_8259.Value {
++        guard value.isFinite else {
++            throw .invalidValue(
++                value,
++                EncodingError.Context(
++                    codingPath: codingPath,
++                    debugDescription: "JSON has no representation for the non-finite number \(value)."
++                )
++            )
++        }
++        let text = String(value)
++        return .number(RFC_8259.Number(Double(text) ?? Double(value), original: .init(text.utf8.map(Byte.init(bitPattern:)))))
++    }
++}
++
++extension JSON.Encoder {
++
++    internal func encoded<T: Swift.Encodable>(_ value: T) throws(EncodingError) {
++        do {
++            try value.encode(to: self)
++        } catch let error as EncodingError {
++            throw error
++        } catch {
++            throw .invalidValue(
++                value,
++                EncodingError.Context(
++                    codingPath: codingPath,
++                    debugDescription:
++                        "\(T.self) threw an error that was not an EncodingError; "
++                        + "it is preserved as the underlying error.",
++                    underlyingError: error
++                )
++            )
++        }
++    }
++}
+diff --git a/Sources/JSON/JSON.Literals.swift b/Sources/JSON/JSON.Literals.swift
+deleted file mode 100644
+index 1d94b42..0000000
+--- a/Sources/JSON/JSON.Literals.swift
++++ /dev/null
+@@ -1,50 +0,0 @@
+-import RFC_8259
+-
+-extension JSON: ExpressibleByNilLiteral {
+-    @inlinable
+-    public init(nilLiteral: ()) {
+-        self = .null
+-    }
+-}
+-
+-extension JSON: ExpressibleByBooleanLiteral {
+-    @inlinable
+-    public init(booleanLiteral value: Bool) {
+-        self.raw = .bool(value)
+-    }
+-}
+-
+-extension JSON: ExpressibleByIntegerLiteral {
+-    @inlinable
+-    public init(integerLiteral value: Int) {
+-        self.raw = .number(RFC_8259.Number(value))
+-    }
+-}
+-
+-extension JSON: ExpressibleByFloatLiteral {
+-    @inlinable
+-    public init(floatLiteral value: Double) {
+-        self.raw = .number(RFC_8259.Number(value))
+-    }
+-}
+-
+-extension JSON: ExpressibleByStringLiteral {
+-    @inlinable
+-    public init(stringLiteral value: String) {
+-        self.raw = .string(value)
+-    }
+-}
+-
+-extension JSON: ExpressibleByArrayLiteral {
+-    @inlinable
+-    public init(arrayLiteral elements: JSON...) {
+-        self.raw = .array(RFC_8259.Array(elements.map { $0.raw }))
+-    }
+-}
+-
+-extension JSON: ExpressibleByDictionaryLiteral {
+-    @inlinable
+-    public init(dictionaryLiteral elements: (String, JSON)...) {
+-        self.raw = .object(RFC_8259.Object(elements.map { ($0.0, $0.1.raw) }))
+-    }
+-}
+diff --git a/Sources/JSON/JSON.Located.swift b/Sources/JSON/JSON.Located.swift
+new file mode 100644
+index 0000000..625ac22
+--- /dev/null
++++ b/Sources/JSON/JSON.Located.swift
+@@ -0,0 +1,14 @@
++import RFC_8259
++
++
++extension JSON {
++    public struct Located: Sendable {
++
++        public let maxDepth: Int
++
++        @usableFromInline
++        internal init(maxDepth: Int) {
++            self.maxDepth = maxDepth
++        }
++    }
++}
+diff --git a/Sources/JSON/JSON.Parse.swift b/Sources/JSON/JSON.Parse.swift
+index 81dcbf4..404f504 100644
+--- a/Sources/JSON/JSON.Parse.swift
++++ b/Sources/JSON/JSON.Parse.swift
+@@ -54,16 +54,6 @@ extension JSON.Parse {
+ }
+ 
+ extension JSON {
+-
+-    public struct Prepared: Sendable {
+-
+-        public let maxDepth: Int
+-
+-        @usableFromInline
+-        internal init(maxDepth: Int) {
+-            self.maxDepth = maxDepth
+-        }
+-    }
+ }
+ 
+ extension JSON.Prepared {
+@@ -91,16 +81,6 @@ extension JSON.Prepared {
+ }
+ 
+ extension JSON {
+-
+-    public struct Located: Sendable {
+-
+-        public let maxDepth: Int
+-
+-        @usableFromInline
+-        internal init(maxDepth: Int) {
+-            self.maxDepth = maxDepth
+-        }
+-    }
+ }
+ 
+ extension JSON.Located {
+diff --git a/Sources/JSON/JSON.Prepared.swift b/Sources/JSON/JSON.Prepared.swift
+new file mode 100644
+index 0000000..adcf647
+--- /dev/null
++++ b/Sources/JSON/JSON.Prepared.swift
+@@ -0,0 +1,14 @@
++import RFC_8259
++
++
++extension JSON {
++    public struct Prepared: Sendable {
++
++        public let maxDepth: Int
++
++        @usableFromInline
++        internal init(maxDepth: Int) {
++            self.maxDepth = maxDepth
++        }
++    }
++}
+diff --git a/Sources/JSON/JSON.swift b/Sources/JSON/JSON.swift
+index 471455b..cd5e925 100644
+--- a/Sources/JSON/JSON.swift
++++ b/Sources/JSON/JSON.swift
+@@ -224,3 +224,72 @@ extension JSON {
+         JSON.Encode.encode(RFC_8259.Value(try JSON(encoding: value)), options: options).map { Byte($0) }
+     }
+ }
++
++extension JSON {
++
++    public func decode<T: Swift.Decodable>(
++        _ type: T.Type = T.self
++    ) throws(Swift.DecodingError) -> T {
++        try JSON.Decoder(source: .value(raw), codingPath: []).decoded(type)
++    }
++}
++
++extension JSON {
++
++    public init<T: Swift.Encodable>(
++        encoding value: T
++    ) throws(Swift.EncodingError) {
++        let node = JSON.Encoder.Node()
++        try JSON.Encoder(node: node, codingPath: []).encoded(value)
++        self.init(node.value)
++    }
++}
++
++extension JSON: ExpressibleByNilLiteral {
++    @inlinable
++    public init(nilLiteral: ()) {
++        self = .null
++    }
++}
++
++extension JSON: ExpressibleByBooleanLiteral {
++    @inlinable
++    public init(booleanLiteral value: Bool) {
++        self.raw = .bool(value)
++    }
++}
++
++extension JSON: ExpressibleByIntegerLiteral {
++    @inlinable
++    public init(integerLiteral value: Int) {
++        self.raw = .number(RFC_8259.Number(value))
++    }
++}
++
++extension JSON: ExpressibleByFloatLiteral {
++    @inlinable
++    public init(floatLiteral value: Double) {
++        self.raw = .number(RFC_8259.Number(value))
++    }
++}
++
++extension JSON: ExpressibleByStringLiteral {
++    @inlinable
++    public init(stringLiteral value: String) {
++        self.raw = .string(value)
++    }
++}
++
++extension JSON: ExpressibleByArrayLiteral {
++    @inlinable
++    public init(arrayLiteral elements: JSON...) {
++        self.raw = .array(RFC_8259.Array(elements.map { $0.raw }))
++    }
++}
++
++extension JSON: ExpressibleByDictionaryLiteral {
++    @inlinable
++    public init(dictionaryLiteral elements: (String, JSON)...) {
++        self.raw = .object(RFC_8259.Object(elements.map { ($0.0, $0.1.raw) }))
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,207 @@
+From 5a7659bb920bb1fd9ef3e6b05821313278bedd3c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:55 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Console/Console.Capability+Detect.swift   | 87 ------------------
+ Sources/Console/Console.Capability.swift      | 88 +++++++++++++++++++
+ 2 files changed, 88 insertions(+), 87 deletions(-)
+ delete mode 100644 Sources/Console/Console.Capability+Detect.swift
+
+diff --git a/Sources/Console/Console.Capability+Detect.swift b/Sources/Console/Console.Capability+Detect.swift
+deleted file mode 100644
+index d63b289..0000000
+--- a/Sources/Console/Console.Capability+Detect.swift
++++ /dev/null
+@@ -1,87 +0,0 @@
+-#if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || os(Linux)
+-    public import Kernel
+-#endif
+-
+-#if canImport(Darwin)
+-    import Darwin
+-#elseif canImport(Glibc)
+-    import Glibc
+-#elseif os(Windows)
+-    import CRT
+-#endif
+-
+-extension Console.Capability {
+-
+-    public static func detect(stream: Terminal.Stream = .stdout) -> Self {
+-
+-        if getEnvironment("NO_COLOR") != nil {
+-            return .none
+-        }
+-
+-        let forceColor = getEnvironment("FORCE_COLOR") != nil
+-
+-        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || os(Linux)
+-            let interactive = stream.interactive()
+-        #else
+-
+-            let interactive = false
+-        #endif
+-        guard forceColor || interactive else {
+-            return .none
+-        }
+-
+-        let isCI =
+-            getEnvironment("CI") != nil
+-            || getEnvironment("GITHUB_ACTIONS") != nil
+-            || getEnvironment("GITLAB_CI") != nil
+-
+-        if let colorterm = getEnvironment("COLORTERM") {
+-            let value = colorterm.lowercased()
+-            if value == "truecolor" || value == "24bit" {
+-                return .full
+-            }
+-        }
+-
+-        guard let term = getEnvironment("TERM"), !term.isEmpty else {
+-
+-            if isCI || forceColor {
+-                return .basic
+-            }
+-            return .none
+-        }
+-
+-        if term == "dumb" {
+-            return .none
+-        }
+-
+-        if term.contains("256color") || term.contains("256-color") {
+-            return Console.Capability(
+-                color: .palette8,
+-                cursorControl: true,
+-                alternateScreen: true
+-            )
+-        }
+-
+-        let trueColorTerminals = [
+-            "xterm-direct",
+-            "iterm2",
+-            "vte",
+-        ]
+-
+-        for known in trueColorTerminals {
+-            if term.lowercased().contains(known) {
+-                return .full
+-            }
+-        }
+-
+-        return .basic
+-    }
+-}
+-
+-extension Console.Capability {
+-
+-    private static func getEnvironment(_ name: Swift.String) -> Swift.String? {
+-        guard let ptr = unsafe getenv(name) else { return nil }
+-        return unsafe Swift.String(cString: ptr)
+-    }
+-}
+diff --git a/Sources/Console/Console.Capability.swift b/Sources/Console/Console.Capability.swift
+index 6cb6816..18aecc8 100644
+--- a/Sources/Console/Console.Capability.swift
++++ b/Sources/Console/Console.Capability.swift
+@@ -40,3 +40,91 @@ extension Console.Capability {
+         alternateScreen: true
+     )
+ }
++
++#if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || os(Linux)
++    public import Kernel
++#endif
++
++#if canImport(Darwin)
++    import Darwin
++#elseif canImport(Glibc)
++    import Glibc
++#elseif os(Windows)
++    import CRT
++#endif
++
++extension Console.Capability {
++
++    public static func detect(stream: Terminal.Stream = .stdout) -> Self {
++
++        if getEnvironment("NO_COLOR") != nil {
++            return .none
++        }
++
++        let forceColor = getEnvironment("FORCE_COLOR") != nil
++
++        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || os(Linux)
++            let interactive = stream.interactive()
++        #else
++
++            let interactive = false
++        #endif
++        guard forceColor || interactive else {
++            return .none
++        }
++
++        let isCI =
++            getEnvironment("CI") != nil
++            || getEnvironment("GITHUB_ACTIONS") != nil
++            || getEnvironment("GITLAB_CI") != nil
++
++        if let colorterm = getEnvironment("COLORTERM") {
++            let value = colorterm.lowercased()
++            if value == "truecolor" || value == "24bit" {
++                return .full
++            }
++        }
++
++        guard let term = getEnvironment("TERM"), !term.isEmpty else {
++
++            if isCI || forceColor {
++                return .basic
++            }
++            return .none
++        }
++
++        if term == "dumb" {
++            return .none
++        }
++
++        if term.contains("256color") || term.contains("256-color") {
++            return Console.Capability(
++                color: .palette8,
++                cursorControl: true,
++                alternateScreen: true
++            )
++        }
++
++        let trueColorTerminals = [
++            "xterm-direct",
++            "iterm2",
++            "vte",
++        ]
++
++        for known in trueColorTerminals {
++            if term.lowercased().contains(known) {
++                return .full
++            }
++        }
++
++        return .basic
++    }
++}
++
++extension Console.Capability {
++
++    private static func getEnvironment(_ name: Swift.String) -> Swift.String? {
++        guard let ptr = unsafe getenv(name) else { return nil }
++        return unsafe Swift.String(cString: ptr)
++    }
++}
+-- 
+2.43.0
+

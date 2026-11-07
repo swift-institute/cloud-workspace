@@ -1,0 +1,163 @@
+From ff876128ad9ad9077ba960aa1e811b9620bb0b1d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:47 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Radical/Radical+Arithmetic.swift | 66 ------------------------
+ Sources/Radical/Radical.swift            | 65 +++++++++++++++++++++++
+ 2 files changed, 65 insertions(+), 66 deletions(-)
+ delete mode 100644 Sources/Radical/Radical+Arithmetic.swift
+
+diff --git a/Sources/Radical/Radical+Arithmetic.swift b/Sources/Radical/Radical+Arithmetic.swift
+deleted file mode 100644
+index b18e218..0000000
+--- a/Sources/Radical/Radical+Arithmetic.swift
++++ /dev/null
+@@ -1,66 +0,0 @@
+-public import Rational
+-
+-extension Radical {
+-    public func raised(to exponent: Rational) throws(Rational.Error) -> Self {
+-        guard let numerator = exponent.numerator.absolute.exactly(Int.self),
+-            let denominator = exponent.denominator.exactly(Int.self)
+-        else { throw .overflow }
+-        guard !isNegative || denominator % 2 == 1 else { throw .unrepresentable }
+-        let degree = degree.multipliedReportingOverflow(by: denominator)
+-        guard !degree.overflow else { throw .overflow }
+-        let power = exponent < .zero ? -numerator : numerator
+-        return Self(
+-            positive: try radicand.raised(to: power),
+-            degree: degree.partialValue,
+-            negative: isNegative && numerator % 2 != 0
+-        )
+-    }
+-
+-    public func multiplied(by other: Self) throws(Rational.Error) -> Self {
+-        var left = degree
+-        var right = other.degree
+-        while right != 0 { (left, right) = (right, left % right) }
+-        let product = (degree / left).multipliedReportingOverflow(by: other.degree)
+-        guard !product.overflow else { throw .overflow }
+-        let degree = product.partialValue
+-        let value = try radicand.raised(to: degree / self.degree) * other.radicand.raised(to: degree / other.degree)
+-        return Self(positive: value, degree: degree, negative: isNegative != other.isNegative)
+-    }
+-
+-    public func scaled(by value: Rational) -> Self {
+-        let absolute = value < .zero ? -value : value
+-        do {
+-            return Self(
+-                positive: try radicand * absolute.raised(to: degree),
+-                degree: degree,
+-                negative: isNegative != (value < .zero)
+-            )
+-        } catch { preconditionFailure("A nonnegative integer power is defined") }
+-    }
+-
+-    public var approximation: Double {
+-        let value = Self.root(radicand.approximation, degree: degree)
+-        return isNegative ? -value : value
+-    }
+-
+-    public static func root(_ value: Double, degree: Int) -> Double {
+-        precondition(degree > 0 && value >= 0)
+-        if value == 0 || value == 1 || degree == 1 || !value.isFinite { return value }
+-        var low = min(1, value)
+-        var high = max(1, value)
+-        while true {
+-            let middle = low + (high - low) / 2
+-            if middle == low || middle == high { return middle }
+-            var power = degree
+-            var factor = middle
+-            var product = 1.0
+-            while power != 0 {
+-                if power & 1 != 0 { product *= factor }
+-                power >>= 1
+-                if power != 0 { factor *= factor }
+-            }
+-            if product == value { return middle }
+-            if product < value { low = middle } else { high = middle }
+-        }
+-    }
+-}
+diff --git a/Sources/Radical/Radical.swift b/Sources/Radical/Radical.swift
+index 9805422..9fb09b2 100644
+--- a/Sources/Radical/Radical.swift
++++ b/Sources/Radical/Radical.swift
+@@ -53,3 +53,68 @@ extension Radical {
+         return isNegative ? -radicand : radicand
+     }
+ }
++
++extension Radical {
++    public func raised(to exponent: Rational) throws(Rational.Error) -> Self {
++        guard let numerator = exponent.numerator.absolute.exactly(Int.self),
++            let denominator = exponent.denominator.exactly(Int.self)
++        else { throw .overflow }
++        guard !isNegative || denominator % 2 == 1 else { throw .unrepresentable }
++        let degree = degree.multipliedReportingOverflow(by: denominator)
++        guard !degree.overflow else { throw .overflow }
++        let power = exponent < .zero ? -numerator : numerator
++        return Self(
++            positive: try radicand.raised(to: power),
++            degree: degree.partialValue,
++            negative: isNegative && numerator % 2 != 0
++        )
++    }
++
++    public func multiplied(by other: Self) throws(Rational.Error) -> Self {
++        var left = degree
++        var right = other.degree
++        while right != 0 { (left, right) = (right, left % right) }
++        let product = (degree / left).multipliedReportingOverflow(by: other.degree)
++        guard !product.overflow else { throw .overflow }
++        let degree = product.partialValue
++        let value = try radicand.raised(to: degree / self.degree) * other.radicand.raised(to: degree / other.degree)
++        return Self(positive: value, degree: degree, negative: isNegative != other.isNegative)
++    }
++
++    public func scaled(by value: Rational) -> Self {
++        let absolute = value < .zero ? -value : value
++        do {
++            return Self(
++                positive: try radicand * absolute.raised(to: degree),
++                degree: degree,
++                negative: isNegative != (value < .zero)
++            )
++        } catch { preconditionFailure("A nonnegative integer power is defined") }
++    }
++
++    public var approximation: Double {
++        let value = Self.root(radicand.approximation, degree: degree)
++        return isNegative ? -value : value
++    }
++
++    public static func root(_ value: Double, degree: Int) -> Double {
++        precondition(degree > 0 && value >= 0)
++        if value == 0 || value == 1 || degree == 1 || !value.isFinite { return value }
++        var low = min(1, value)
++        var high = max(1, value)
++        while true {
++            let middle = low + (high - low) / 2
++            if middle == low || middle == high { return middle }
++            var power = degree
++            var factor = middle
++            var product = 1.0
++            while power != 0 {
++                if power & 1 != 0 { product *= factor }
++                power >>= 1
++                if power != 0 { factor *= factor }
++            }
++            if product == value { return middle }
++            if product < value { low = middle } else { high = middle }
++        }
++    }
++}
+-- 
+2.43.0
+

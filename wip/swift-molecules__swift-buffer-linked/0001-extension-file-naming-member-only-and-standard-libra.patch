@@ -1,0 +1,307 @@
+From eb6e708bd1955ae35480d9f2c381eee097af130b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:50 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Buffer.Linked+Columns.swift               | 107 ---------------
+ .../Buffer.Linked+Sequence.swift              |  25 ----
+ .../Buffer.Linked.swift                       | 128 ++++++++++++++++++
+ 3 files changed, 128 insertions(+), 132 deletions(-)
+ delete mode 100644 Sources/Buffer Linked Primitive/Buffer.Linked+Columns.swift
+ delete mode 100644 Sources/Buffer Linked Primitive/Buffer.Linked+Sequence.swift
+
+diff --git a/Sources/Buffer Linked Primitive/Buffer.Linked+Columns.swift b/Sources/Buffer Linked Primitive/Buffer.Linked+Columns.swift
+deleted file mode 100644
+index d370891..0000000
+--- a/Sources/Buffer Linked Primitive/Buffer.Linked+Columns.swift	
++++ /dev/null
+@@ -1,107 +0,0 @@
+-public import Buffer
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Pool
+-public import Ownership_Shared_Primitive
+-public import Storage
+-
+-extension Buffer.Linked where S: ~Copyable {
+-
+-    @inlinable
+-    public init<E: ~Copyable>(minimumCapacity: Index<E>.Count)
+-    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
+-        precondition(minimumCapacity > .zero, "capacity must be positive")
+-        let count = Int(bitPattern: minimumCapacity)
+-        self.init(
+-            storage: S.create(slotCapacity: Index<Node<E, N>>.Count(UInt(count))),
+-            capacity: count
+-        )
+-    }
+-
+-    @inlinable
+-    package mutating func _growTo<E: ~Copyable>(_ minimumCapacity: Int)
+-    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
+-        guard _capacity < minimumCapacity else { return }
+-        let newCapacity = Swift::max(minimumCapacity, Swift::max(_capacity * 2, 4))
+-        storage.grow(to: Index<Node<E, N>>.Count(UInt(newCapacity)))
+-        _capacity = newCapacity
+-    }
+-
+-    @inlinable
+-    public mutating func ensureCapacity<E: ~Copyable>(_ minimumCapacity: Int)
+-    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
+-        _growTo(minimumCapacity)
+-    }
+-
+-    @inlinable
+-    public mutating func reserveAdditionalCapacity<E: ~Copyable>(_ additional: Int)
+-    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
+-        _growTo(_count + additional)
+-    }
+-}
+-
+-extension Buffer.Linked where S: ~Copyable {
+-
+-    @inlinable
+-    public init<E>(minimumCapacity: Index<E>.Count)
+-    where
+-        S == Ownership.Shared<
+-            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
+-        >
+-    {
+-        precondition(minimumCapacity > .zero, "capacity must be positive")
+-        let count = Int(bitPattern: minimumCapacity)
+-        let store = Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>.create(
+-            slotCapacity: Index<Node<E, N>>.Count(UInt(count))
+-        )
+-        self.init(storage: Ownership.Shared(store), capacity: count)
+-    }
+-
+-    @inlinable
+-    public init<E: ~Copyable>(minimumCapacity: Index<E>.Count)
+-    where
+-        S == Ownership.Shared<
+-            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
+-        >
+-    {
+-        precondition(minimumCapacity > .zero, "capacity must be positive")
+-        let count = Int(bitPattern: minimumCapacity)
+-        let store = Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>.create(
+-            slotCapacity: Index<Node<E, N>>.Count(UInt(count))
+-        )
+-        self.init(storage: Ownership.Shared(store), capacity: count)
+-    }
+-
+-    @inlinable
+-    package mutating func _growTo<E: ~Copyable>(_ minimumCapacity: Int)
+-    where
+-        S == Ownership.Shared<
+-            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
+-        >
+-    {
+-        guard _capacity < minimumCapacity else { return }
+-        let newCapacity = Swift::max(minimumCapacity, Swift::max(_capacity * 2, 4))
+-        storage.grow(to: Index<Node<E, N>>.Count(UInt(newCapacity)))
+-        _capacity = newCapacity
+-    }
+-
+-    @inlinable
+-    public mutating func ensureCapacity<E: ~Copyable>(_ minimumCapacity: Int)
+-    where
+-        S == Ownership.Shared<
+-            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
+-        >
+-    {
+-        _growTo(minimumCapacity)
+-    }
+-
+-    @inlinable
+-    public mutating func reserveAdditionalCapacity<E: ~Copyable>(_ additional: Int)
+-    where
+-        S == Ownership.Shared<
+-            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
+-        >
+-    {
+-        _growTo(_count + additional)
+-    }
+-}
+diff --git a/Sources/Buffer Linked Primitive/Buffer.Linked+Sequence.swift b/Sources/Buffer Linked Primitive/Buffer.Linked+Sequence.swift
+deleted file mode 100644
+index f51a46a..0000000
+--- a/Sources/Buffer Linked Primitive/Buffer.Linked+Sequence.swift	
++++ /dev/null
+@@ -1,25 +0,0 @@
+-public import Buffer
+-internal import Storage
+-
+-extension Buffer.Linked where S: ~Copyable {
+-
+-    @inlinable
+-    public func makeIterator<E: Copyable>() -> [E].Iterator
+-    where S: Store.Generational.`Protocol`, S.Element == Node<E, N> {
+-        var elements: [E] = []
+-        forEach { (element: borrowing E) in elements.append(copy element) }
+-        return elements.makeIterator()
+-    }
+-
+-    @inlinable
+-    public func first<E: Copyable>() -> E?
+-    where S: Store.Generational.`Protocol`, S.Element == Node<E, N> {
+-        peekFront { (element: borrowing E) in copy element }
+-    }
+-
+-    @inlinable
+-    public func last<E: Copyable>() -> E?
+-    where S: Store.Generational.`Protocol`, S.Element == Node<E, N> {
+-        peekBack { (element: borrowing E) in copy element }
+-    }
+-}
+diff --git a/Sources/Buffer Linked Primitive/Buffer.Linked.swift b/Sources/Buffer Linked Primitive/Buffer.Linked.swift
+index dc3455a..b74bd7d 100644
+--- a/Sources/Buffer Linked Primitive/Buffer.Linked.swift	
++++ b/Sources/Buffer Linked Primitive/Buffer.Linked.swift	
+@@ -1,6 +1,10 @@
+ public import Buffer
+ internal import Storage
+ public import Store
++public import Memory
++public import Memory_Allocator
++public import Memory_Allocator_Pool
++public import Ownership_Shared_Primitive
+ 
+ extension Buffer where S: ~Copyable {
+ 
+@@ -51,3 +55,127 @@ extension Buffer.Linked where S: ~Copyable {
+ extension Buffer.Linked: Copyable where S: Copyable {}
+ 
+ extension Buffer.Linked: @unchecked Sendable where S: Sendable {}
++
++extension Buffer.Linked where S: ~Copyable {
++
++    @inlinable
++    public init<E: ~Copyable>(minimumCapacity: Index<E>.Count)
++    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
++        precondition(minimumCapacity > .zero, "capacity must be positive")
++        let count = Int(bitPattern: minimumCapacity)
++        self.init(
++            storage: S.create(slotCapacity: Index<Node<E, N>>.Count(UInt(count))),
++            capacity: count
++        )
++    }
++
++    @inlinable
++    package mutating func _growTo<E: ~Copyable>(_ minimumCapacity: Int)
++    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
++        guard _capacity < minimumCapacity else { return }
++        let newCapacity = Swift::max(minimumCapacity, Swift::max(_capacity * 2, 4))
++        storage.grow(to: Index<Node<E, N>>.Count(UInt(newCapacity)))
++        _capacity = newCapacity
++    }
++
++    @inlinable
++    public mutating func ensureCapacity<E: ~Copyable>(_ minimumCapacity: Int)
++    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
++        _growTo(minimumCapacity)
++    }
++
++    @inlinable
++    public mutating func reserveAdditionalCapacity<E: ~Copyable>(_ additional: Int)
++    where S == Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>> {
++        _growTo(_count + additional)
++    }
++}
++
++extension Buffer.Linked where S: ~Copyable {
++
++    @inlinable
++    public init<E>(minimumCapacity: Index<E>.Count)
++    where
++        S == Ownership.Shared<
++            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
++        >
++    {
++        precondition(minimumCapacity > .zero, "capacity must be positive")
++        let count = Int(bitPattern: minimumCapacity)
++        let store = Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>.create(
++            slotCapacity: Index<Node<E, N>>.Count(UInt(count))
++        )
++        self.init(storage: Ownership.Shared(store), capacity: count)
++    }
++
++    @inlinable
++    public init<E: ~Copyable>(minimumCapacity: Index<E>.Count)
++    where
++        S == Ownership.Shared<
++            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
++        >
++    {
++        precondition(minimumCapacity > .zero, "capacity must be positive")
++        let count = Int(bitPattern: minimumCapacity)
++        let store = Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>.create(
++            slotCapacity: Index<Node<E, N>>.Count(UInt(count))
++        )
++        self.init(storage: Ownership.Shared(store), capacity: count)
++    }
++
++    @inlinable
++    package mutating func _growTo<E: ~Copyable>(_ minimumCapacity: Int)
++    where
++        S == Ownership.Shared<
++            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
++        >
++    {
++        guard _capacity < minimumCapacity else { return }
++        let newCapacity = Swift::max(minimumCapacity, Swift::max(_capacity * 2, 4))
++        storage.grow(to: Index<Node<E, N>>.Count(UInt(newCapacity)))
++        _capacity = newCapacity
++    }
++
++    @inlinable
++    public mutating func ensureCapacity<E: ~Copyable>(_ minimumCapacity: Int)
++    where
++        S == Ownership.Shared<
++            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
++        >
++    {
++        _growTo(minimumCapacity)
++    }
++
++    @inlinable
++    public mutating func reserveAdditionalCapacity<E: ~Copyable>(_ additional: Int)
++    where
++        S == Ownership.Shared<
++            Node<E, N>, Storage<Memory.Allocator<Memory.Heap>.Pool>.Generational<Node<E, N>>
++        >
++    {
++        _growTo(_count + additional)
++    }
++}
++
++extension Buffer.Linked where S: ~Copyable {
++
++    @inlinable
++    public func makeIterator<E: Copyable>() -> [E].Iterator
++    where S: Store.Generational.`Protocol`, S.Element == Node<E, N> {
++        var elements: [E] = []
++        forEach { (element: borrowing E) in elements.append(copy element) }
++        return elements.makeIterator()
++    }
++
++    @inlinable
++    public func first<E: Copyable>() -> E?
++    where S: Store.Generational.`Protocol`, S.Element == Node<E, N> {
++        peekFront { (element: borrowing E) in copy element }
++    }
++
++    @inlinable
++    public func last<E: Copyable>() -> E?
++    where S: Store.Generational.`Protocol`, S.Element == Node<E, N> {
++        peekBack { (element: borrowing E) in copy element }
++    }
++}
+-- 
+2.43.0
+

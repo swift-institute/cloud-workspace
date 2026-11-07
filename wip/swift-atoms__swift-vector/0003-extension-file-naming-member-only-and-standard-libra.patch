@@ -1,0 +1,168 @@
+From c6adad956a2f117869d855d9b84a2a1cda10ff36 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:49 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Vector/Vector+Codable.swift           | 34 -----------
+ .../Vector+Swift.AdditiveArithmetic.swift     |  9 ---
+ Sources/Vector/Vector+Swift.Equatable.swift   |  6 --
+ Sources/Vector/Vector+Swift.Hashable.swift    |  5 --
+ Sources/Vector/Vector.swift                   | 58 +++++++++++++++++++
+ 5 files changed, 58 insertions(+), 54 deletions(-)
+ delete mode 100644 Sources/Vector/Vector+Codable.swift
+ delete mode 100644 Sources/Vector/Vector+Swift.AdditiveArithmetic.swift
+ delete mode 100644 Sources/Vector/Vector+Swift.Equatable.swift
+ delete mode 100644 Sources/Vector/Vector+Swift.Hashable.swift
+
+diff --git a/Sources/Vector/Vector+Codable.swift b/Sources/Vector/Vector+Codable.swift
+deleted file mode 100644
+index f09e113..0000000
+--- a/Sources/Vector/Vector+Codable.swift
++++ /dev/null
+@@ -1,34 +0,0 @@
+-#if !hasFeature(Embedded)
+-    extension Vector: Encodable where Scalar: Encodable {
+-
+-        public func encode(to encoder: any Encoder) throws {
+-            var container = encoder.unkeyedContainer()
+-            for index in 0..<N {
+-                try container.encode(components[index])
+-            }
+-        }
+-    }
+-
+-    extension Vector: Decodable where Scalar: Decodable {
+-
+-        public init(from decoder: any Decoder) throws {
+-            var container = try decoder.unkeyedContainer()
+-            if let count = container.count, count != N {
+-                throw DecodingError.dataCorruptedError(
+-                    in: container,
+-                    debugDescription: "Expected exactly \(N) vector components"
+-                )
+-            }
+-            let components: InlineArray<N, Scalar> = try InlineArray { _ in
+-                try container.decode(Scalar.self)
+-            }
+-            guard container.isAtEnd else {
+-                throw DecodingError.dataCorruptedError(
+-                    in: container,
+-                    debugDescription: "Expected exactly \(N) vector components"
+-                )
+-            }
+-            self.init(components)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Vector/Vector+Swift.AdditiveArithmetic.swift b/Sources/Vector/Vector+Swift.AdditiveArithmetic.swift
+deleted file mode 100644
+index 4974425..0000000
+--- a/Sources/Vector/Vector+Swift.AdditiveArithmetic.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Vector: Swift::AdditiveArithmetic where Scalar: Swift::AdditiveArithmetic {
+-    public static var zero: Self { Self(repeating: .zero) }
+-    public static func + (lhs: Self, rhs: Self) -> Self {
+-        Self(InlineArray { lhs[$0] + rhs[$0] })
+-    }
+-    public static func - (lhs: Self, rhs: Self) -> Self {
+-        Self(InlineArray { lhs[$0] - rhs[$0] })
+-    }
+-}
+diff --git a/Sources/Vector/Vector+Swift.Equatable.swift b/Sources/Vector/Vector+Swift.Equatable.swift
+deleted file mode 100644
+index 89782aa..0000000
+--- a/Sources/Vector/Vector+Swift.Equatable.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-extension Vector: Swift::Equatable where Scalar: Swift::Equatable {
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        for i in 0..<N where lhs[i] != rhs[i] { return false }
+-        return true
+-    }
+-}
+diff --git a/Sources/Vector/Vector+Swift.Hashable.swift b/Sources/Vector/Vector+Swift.Hashable.swift
+deleted file mode 100644
+index 56e9b09..0000000
+--- a/Sources/Vector/Vector+Swift.Hashable.swift
++++ /dev/null
+@@ -1,5 +0,0 @@
+-extension Vector: Swift::Hashable where Scalar: Swift::Hashable {
+-    public func hash(into hasher: inout Hasher) {
+-        (0..<N).forEach { i in hasher.combine(self[i]) }
+-    }
+-}
+diff --git a/Sources/Vector/Vector.swift b/Sources/Vector/Vector.swift
+index 17e0482..0845422 100644
+--- a/Sources/Vector/Vector.swift
++++ b/Sources/Vector/Vector.swift
+@@ -32,3 +32,61 @@ extension Vector where Scalar: Numeric {
+         return result
+     }
+ }
++
++#if !hasFeature(Embedded)
++    extension Vector: Encodable where Scalar: Encodable {
++
++        public func encode(to encoder: any Encoder) throws {
++            var container = encoder.unkeyedContainer()
++            for index in 0..<N {
++                try container.encode(components[index])
++            }
++        }
++    }
++
++    extension Vector: Decodable where Scalar: Decodable {
++
++        public init(from decoder: any Decoder) throws {
++            var container = try decoder.unkeyedContainer()
++            if let count = container.count, count != N {
++                throw DecodingError.dataCorruptedError(
++                    in: container,
++                    debugDescription: "Expected exactly \(N) vector components"
++                )
++            }
++            let components: InlineArray<N, Scalar> = try InlineArray { _ in
++                try container.decode(Scalar.self)
++            }
++            guard container.isAtEnd else {
++                throw DecodingError.dataCorruptedError(
++                    in: container,
++                    debugDescription: "Expected exactly \(N) vector components"
++                )
++            }
++            self.init(components)
++        }
++    }
++#endif
++
++extension Vector: Swift::AdditiveArithmetic where Scalar: Swift::AdditiveArithmetic {
++    public static var zero: Self { Self(repeating: .zero) }
++    public static func + (lhs: Self, rhs: Self) -> Self {
++        Self(InlineArray { lhs[$0] + rhs[$0] })
++    }
++    public static func - (lhs: Self, rhs: Self) -> Self {
++        Self(InlineArray { lhs[$0] - rhs[$0] })
++    }
++}
++
++extension Vector: Swift::Equatable where Scalar: Swift::Equatable {
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        for i in 0..<N where lhs[i] != rhs[i] { return false }
++        return true
++    }
++}
++
++extension Vector: Swift::Hashable where Scalar: Swift::Hashable {
++    public func hash(into hasher: inout Hasher) {
++        (0..<N).forEach { i in hasher.combine(self[i]) }
++    }
++}
+-- 
+2.43.0
+

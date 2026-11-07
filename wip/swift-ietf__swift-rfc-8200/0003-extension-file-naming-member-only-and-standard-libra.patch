@@ -1,0 +1,180 @@
+From aa6ac89c943120a3332ff766ee4e0e207dedc796 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:53 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../RFC_8200.Extension.Fragment.swift         | 49 +++++++++++++++
+ .../RFC 8200/RFC_8200.Extension.Header.swift  | 24 ++++++++
+ Sources/RFC 8200/RFC_8200.Extension.swift     | 61 -------------------
+ 3 files changed, 73 insertions(+), 61 deletions(-)
+ create mode 100644 Sources/RFC 8200/RFC_8200.Extension.Fragment.swift
+ create mode 100644 Sources/RFC 8200/RFC_8200.Extension.Header.swift
+
+diff --git a/Sources/RFC 8200/RFC_8200.Extension.Fragment.swift b/Sources/RFC 8200/RFC_8200.Extension.Fragment.swift
+new file mode 100644
+index 0000000..4dc774f
+--- /dev/null
++++ b/Sources/RFC 8200/RFC_8200.Extension.Fragment.swift	
+@@ -0,0 +1,49 @@
++public import Binary
++public import Byte
++
++
++extension RFC_8200.Extension {
++    /// Fragment Header (RFC 8200 Section 4.5)
++    ///
++    /// Used when a packet is too large to fit in the path MTU.
++    /// Unlike other extension headers, the Fragment header has a fixed
++    /// 8-byte format.
++    ///
++    /// ## Wire Format
++    ///
++    /// ```
++    ///  0                   1                   2                   3
++    ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++    /// |  Next Header  |   Reserved    |      Fragment Offset    |Res|M|
++    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++    /// |                         Identification                        |
++    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++    /// ```
++    public struct Fragment: Sendable, Hashable {
++        /// Next header type
++        public let nextHeader: RFC_8200.NextHeader
++
++        /// Fragment offset in 8-octet units
++        public let fragmentOffset: UInt16
++
++        /// More fragments flag
++        public let moreFragments: Bool
++
++        /// Fragment identification
++        public let identification: UInt32
++
++        /// Creates a Fragment header
++        public init(
++            nextHeader: RFC_8200.NextHeader,
++            fragmentOffset: UInt16,
++            moreFragments: Bool,
++            identification: UInt32
++        ) {
++            self.nextHeader = nextHeader
++            self.fragmentOffset = fragmentOffset & 0x1FFF
++            self.moreFragments = moreFragments
++            self.identification = identification
++        }
++    }
++}
+diff --git a/Sources/RFC 8200/RFC_8200.Extension.Header.swift b/Sources/RFC 8200/RFC_8200.Extension.Header.swift
+new file mode 100644
+index 0000000..4f17331
+--- /dev/null
++++ b/Sources/RFC 8200/RFC_8200.Extension.Header.swift	
+@@ -0,0 +1,24 @@
++public import Binary
++public import Byte
++
++
++extension RFC_8200.Extension {
++    /// Generic extension header format
++    ///
++    /// Most extension headers (except Fragment) follow this format:
++    /// - Next Header (8 bits)
++    /// - Header Extension Length (8 bits, in 8-octet units, excluding first 8)
++    /// - Type-specific data
++    public struct Header: Sendable, Hashable {
++        /// Next header type
++        public let nextHeader: RFC_8200.NextHeader
++
++        /// Header length in 8-octet units (excluding first 8 octets)
++        public let headerLength: UInt8
++
++        /// The full length of the header in bytes
++        public var lengthInBytes: Int {
++            (Int(headerLength) + 1) * 8
++        }
++    }
++}
+diff --git a/Sources/RFC 8200/RFC_8200.Extension.swift b/Sources/RFC 8200/RFC_8200.Extension.swift
+index ec16aac..be5d4a3 100644
+--- a/Sources/RFC 8200/RFC_8200.Extension.swift	
++++ b/Sources/RFC 8200/RFC_8200.Extension.swift	
+@@ -23,70 +23,9 @@ extension RFC_8200 {
+ }
+ 
+ extension RFC_8200.Extension {
+-    /// Generic extension header format
+-    ///
+-    /// Most extension headers (except Fragment) follow this format:
+-    /// - Next Header (8 bits)
+-    /// - Header Extension Length (8 bits, in 8-octet units, excluding first 8)
+-    /// - Type-specific data
+-    public struct Header: Sendable, Hashable {
+-        /// Next header type
+-        public let nextHeader: RFC_8200.NextHeader
+-
+-        /// Header length in 8-octet units (excluding first 8 octets)
+-        public let headerLength: UInt8
+-
+-        /// The full length of the header in bytes
+-        public var lengthInBytes: Int {
+-            (Int(headerLength) + 1) * 8
+-        }
+-    }
+ }
+ 
+ extension RFC_8200.Extension {
+-    /// Fragment Header (RFC 8200 Section 4.5)
+-    ///
+-    /// Used when a packet is too large to fit in the path MTU.
+-    /// Unlike other extension headers, the Fragment header has a fixed
+-    /// 8-byte format.
+-    ///
+-    /// ## Wire Format
+-    ///
+-    /// ```
+-    ///  0                   1                   2                   3
+-    ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-    /// |  Next Header  |   Reserved    |      Fragment Offset    |Res|M|
+-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-    /// |                         Identification                        |
+-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-    /// ```
+-    public struct Fragment: Sendable, Hashable {
+-        /// Next header type
+-        public let nextHeader: RFC_8200.NextHeader
+-
+-        /// Fragment offset in 8-octet units
+-        public let fragmentOffset: UInt16
+-
+-        /// More fragments flag
+-        public let moreFragments: Bool
+-
+-        /// Fragment identification
+-        public let identification: UInt32
+-
+-        /// Creates a Fragment header
+-        public init(
+-            nextHeader: RFC_8200.NextHeader,
+-            fragmentOffset: UInt16,
+-            moreFragments: Bool,
+-            identification: UInt32
+-        ) {
+-            self.nextHeader = nextHeader
+-            self.fragmentOffset = fragmentOffset & 0x1FFF
+-            self.moreFragments = moreFragments
+-            self.identification = identification
+-        }
+-    }
+ }
+ 
+ extension RFC_8200.Extension.Fragment: Binary.Serializable {
+-- 
+2.43.0
+

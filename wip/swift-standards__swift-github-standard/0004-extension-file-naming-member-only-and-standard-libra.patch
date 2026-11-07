@@ -1,0 +1,506 @@
+From f3a41f06c6f35a355d040b8602f3fc01dbd6dbce Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:54 +0000
+Subject: [PATCH 4/4] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../GitHub.Collaborators.API.Router.swift     | 198 ++++++++++++++++++
+ .../GitHub.Collaborators.API.swift            | 193 -----------------
+ Sources/GitHub Types/GitHub.API.Router.swift  |  37 ++++
+ Sources/GitHub Types/GitHub.API.swift         |  27 ---
+ 4 files changed, 235 insertions(+), 220 deletions(-)
+ create mode 100644 Sources/GitHub Collaborators Types/GitHub.Collaborators.API.Router.swift
+ create mode 100644 Sources/GitHub Types/GitHub.API.Router.swift
+
+diff --git a/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.Router.swift b/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.Router.swift
+new file mode 100644
+index 0000000..70ef883
+--- /dev/null
++++ b/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.Router.swift	
+@@ -0,0 +1,198 @@
++import GitHub_Types_Shared
++
++
++extension GitHub.Collaborators.API {
++    public struct Router: ParserPrinter, Sendable {
++        public init() {}
++
++        public var body: some URLRouting.Router<GitHub.Collaborators.API> {
++            OneOf {
++
++                URLRouting.Route(
++                    .convert(
++                        apply: { (owner: $0.0.0, repo: $0.0.1, request: $0.1) },
++                        unapply: { (($0.owner, $0.repo), $0.request) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.list))
++                ) {
++                    Method.get
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "collaborators" }
++                    Optionally {
++                        Parse(
++                            .convert(
++                                apply: { ($0.0.0.0, $0.0.0.1, $0.0.1, $0.1) },
++                                unapply: { ((($0.0, $0.1), $0.2), $0.3) }
++                            )
++                            .map(
++                                .memberwise(
++                                    GitHub.Collaborators.List.Request.init,
++                                    { ($0.affiliation, $0.permission, $0.perPage, $0.page) }
++                                )
++                            )
++                        ) {
++                            URLRouting.Query {
++                                Optionally {
++                                    Field("affiliation") {
++                                        Parse(
++                                            .string.representing(
++                                                GitHub.Collaborators.List.Request.Affiliation.self
++                                            )
++                                        )
++                                    }
++                                }
++                                Optionally {
++                                    Field("permission") {
++                                        Parse(
++                                            .string.representing(
++                                                GitHub.Collaborators.Permission.self
++                                            )
++                                        )
++                                    }
++                                }
++                                Optionally {
++                                    Field("per_page") { Int.parser() }
++                                }
++                                Optionally {
++                                    Field("page") { Int.parser() }
++                                }
++                            }
++                        }
++                    }
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: { (owner: $0.0.0, repo: $0.0.1, username: $0.1) },
++                        unapply: { (($0.owner, $0.repo), $0.username) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.check))
++                ) {
++                    Method.get
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "collaborators" }
++                    Path { Parse(.string) }
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: {
++                            (owner: $0.0.0.0, repo: $0.0.0.1, username: $0.0.1, request: $0.1)
++                        },
++                        unapply: { ((($0.owner, $0.repo), $0.username), $0.request) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.add))
++                ) {
++                    Method.put
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "collaborators" }
++                    Path { Parse(.string) }
++                    Optionally {
++                        URLRouting.Body(.json(GitHub.Collaborators.Add.Request.self))
++                    }
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: { (owner: $0.0.0, repo: $0.0.1, username: $0.1) },
++                        unapply: { (($0.owner, $0.repo), $0.username) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.remove))
++                ) {
++                    Method.delete
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "collaborators" }
++                    Path { Parse(.string) }
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: { (owner: $0.0.0, repo: $0.0.1, username: $0.1) },
++                        unapply: { (($0.owner, $0.repo), $0.username) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.getPermission))
++                ) {
++                    Method.get
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "collaborators" }
++                    Path { Parse(.string) }
++                    Path { "permission" }
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: { (owner: $0.0.0, repo: $0.0.1, request: $0.1) },
++                        unapply: { (($0.owner, $0.repo), $0.request) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.listInvitations))
++                ) {
++                    Method.get
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "invitations" }
++                    Optionally {
++                        Parse(
++                            .memberwise(
++                                GitHub.Collaborators.Invitations.List.Request.init,
++                                { ($0.perPage, $0.page) }
++                            )
++                        ) {
++                            URLRouting.Query {
++                                Optionally {
++                                    Field("per_page") { Int.parser() }
++                                }
++                                Optionally {
++                                    Field("page") { Int.parser() }
++                                }
++                            }
++                        }
++                    }
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: {
++                            (owner: $0.0.0.0, repo: $0.0.0.1, invitationId: $0.0.1, request: $0.1)
++                        },
++                        unapply: { ((($0.owner, $0.repo), $0.invitationId), $0.request) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.updateInvitation))
++                ) {
++                    Method.patch
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "invitations" }
++                    Path { Int.parser() }
++                    URLRouting.Body(.json(GitHub.Collaborators.Invitations.Update.Request.self))
++                }
++
++                URLRouting.Route(
++                    .convert(
++                        apply: { (owner: $0.0.0, repo: $0.0.1, invitationId: $0.1) },
++                        unapply: { (($0.owner, $0.repo), $0.invitationId) }
++                    )
++                    .map(.case(GitHub.Collaborators.API.cases.deleteInvitation))
++                ) {
++                    Method.delete
++                    Path { "repos" }
++                    Path { Parse(.string) }
++                    Path { Parse(.string) }
++                    Path { "invitations" }
++                    Path { Int.parser() }
++                }
++            }
++        }
++    }
++}
+diff --git a/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.swift b/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.swift
+index b205c35..f14d6aa 100644
+--- a/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.swift	
++++ b/Sources/GitHub Collaborators Types/GitHub.Collaborators.API.swift	
+@@ -37,197 +37,4 @@ extension GitHub.Collaborators {
+ }
+ 
+ extension GitHub.Collaborators.API {
+-    public struct Router: ParserPrinter, Sendable {
+-        public init() {}
+-
+-        public var body: some URLRouting.Router<GitHub.Collaborators.API> {
+-            OneOf {
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: { (owner: $0.0.0, repo: $0.0.1, request: $0.1) },
+-                        unapply: { (($0.owner, $0.repo), $0.request) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.list))
+-                ) {
+-                    Method.get
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "collaborators" }
+-                    Optionally {
+-                        Parse(
+-                            .convert(
+-                                apply: { ($0.0.0.0, $0.0.0.1, $0.0.1, $0.1) },
+-                                unapply: { ((($0.0, $0.1), $0.2), $0.3) }
+-                            )
+-                            .map(
+-                                .memberwise(
+-                                    GitHub.Collaborators.List.Request.init,
+-                                    { ($0.affiliation, $0.permission, $0.perPage, $0.page) }
+-                                )
+-                            )
+-                        ) {
+-                            URLRouting.Query {
+-                                Optionally {
+-                                    Field("affiliation") {
+-                                        Parse(
+-                                            .string.representing(
+-                                                GitHub.Collaborators.List.Request.Affiliation.self
+-                                            )
+-                                        )
+-                                    }
+-                                }
+-                                Optionally {
+-                                    Field("permission") {
+-                                        Parse(
+-                                            .string.representing(
+-                                                GitHub.Collaborators.Permission.self
+-                                            )
+-                                        )
+-                                    }
+-                                }
+-                                Optionally {
+-                                    Field("per_page") { Int.parser() }
+-                                }
+-                                Optionally {
+-                                    Field("page") { Int.parser() }
+-                                }
+-                            }
+-                        }
+-                    }
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: { (owner: $0.0.0, repo: $0.0.1, username: $0.1) },
+-                        unapply: { (($0.owner, $0.repo), $0.username) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.check))
+-                ) {
+-                    Method.get
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "collaborators" }
+-                    Path { Parse(.string) }
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: {
+-                            (owner: $0.0.0.0, repo: $0.0.0.1, username: $0.0.1, request: $0.1)
+-                        },
+-                        unapply: { ((($0.owner, $0.repo), $0.username), $0.request) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.add))
+-                ) {
+-                    Method.put
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "collaborators" }
+-                    Path { Parse(.string) }
+-                    Optionally {
+-                        URLRouting.Body(.json(GitHub.Collaborators.Add.Request.self))
+-                    }
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: { (owner: $0.0.0, repo: $0.0.1, username: $0.1) },
+-                        unapply: { (($0.owner, $0.repo), $0.username) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.remove))
+-                ) {
+-                    Method.delete
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "collaborators" }
+-                    Path { Parse(.string) }
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: { (owner: $0.0.0, repo: $0.0.1, username: $0.1) },
+-                        unapply: { (($0.owner, $0.repo), $0.username) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.getPermission))
+-                ) {
+-                    Method.get
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "collaborators" }
+-                    Path { Parse(.string) }
+-                    Path { "permission" }
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: { (owner: $0.0.0, repo: $0.0.1, request: $0.1) },
+-                        unapply: { (($0.owner, $0.repo), $0.request) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.listInvitations))
+-                ) {
+-                    Method.get
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "invitations" }
+-                    Optionally {
+-                        Parse(
+-                            .memberwise(
+-                                GitHub.Collaborators.Invitations.List.Request.init,
+-                                { ($0.perPage, $0.page) }
+-                            )
+-                        ) {
+-                            URLRouting.Query {
+-                                Optionally {
+-                                    Field("per_page") { Int.parser() }
+-                                }
+-                                Optionally {
+-                                    Field("page") { Int.parser() }
+-                                }
+-                            }
+-                        }
+-                    }
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: {
+-                            (owner: $0.0.0.0, repo: $0.0.0.1, invitationId: $0.0.1, request: $0.1)
+-                        },
+-                        unapply: { ((($0.owner, $0.repo), $0.invitationId), $0.request) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.updateInvitation))
+-                ) {
+-                    Method.patch
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "invitations" }
+-                    Path { Int.parser() }
+-                    URLRouting.Body(.json(GitHub.Collaborators.Invitations.Update.Request.self))
+-                }
+-
+-                URLRouting.Route(
+-                    .convert(
+-                        apply: { (owner: $0.0.0, repo: $0.0.1, invitationId: $0.1) },
+-                        unapply: { (($0.owner, $0.repo), $0.invitationId) }
+-                    )
+-                    .map(.case(GitHub.Collaborators.API.cases.deleteInvitation))
+-                ) {
+-                    Method.delete
+-                    Path { "repos" }
+-                    Path { Parse(.string) }
+-                    Path { Parse(.string) }
+-                    Path { "invitations" }
+-                    Path { Int.parser() }
+-                }
+-            }
+-        }
+-    }
+ }
+diff --git a/Sources/GitHub Types/GitHub.API.Router.swift b/Sources/GitHub Types/GitHub.API.Router.swift
+new file mode 100644
+index 0000000..7a9f0ed
+--- /dev/null
++++ b/Sources/GitHub Types/GitHub.API.Router.swift	
+@@ -0,0 +1,37 @@
++import GitHub_Collaborators_Types
++import GitHub_OAuth_Types
++import GitHub_Repositories_Types
++import GitHub_Stargazers_Types
++import GitHub_Traffic_Types
++import GitHub_Types_Shared
++
++
++extension GitHub.API {
++    public struct Router: ParserPrinter, Sendable {
++        public init() {}
++
++        public var body: some URLRouting.Router<GitHub.API> {
++            OneOf {
++                URLRouting.Route(.case(GitHub.API.cases.traffic)) {
++                    GitHub.Traffic.API.Router()
++                }
++
++                URLRouting.Route(.case(GitHub.API.cases.repositories)) {
++                    GitHub.Repositories.API.Router()
++                }
++
++                URLRouting.Route(.case(GitHub.API.cases.stargazers)) {
++                    GitHub.Stargazers.API.Router()
++                }
++
++                URLRouting.Route(.case(GitHub.API.cases.oauth)) {
++                    GitHub.OAuth.API.Router()
++                }
++
++                URLRouting.Route(.case(GitHub.API.cases.collaborators)) {
++                    GitHub.Collaborators.API.Router()
++                }
++            }
++        }
++    }
++}
+diff --git a/Sources/GitHub Types/GitHub.API.swift b/Sources/GitHub Types/GitHub.API.swift
+index 010f2a8..637f4a1 100644
+--- a/Sources/GitHub Types/GitHub.API.swift	
++++ b/Sources/GitHub Types/GitHub.API.swift	
+@@ -17,31 +17,4 @@ extension GitHub {
+ }
+ 
+ extension GitHub.API {
+-    public struct Router: ParserPrinter, Sendable {
+-        public init() {}
+-
+-        public var body: some URLRouting.Router<GitHub.API> {
+-            OneOf {
+-                URLRouting.Route(.case(GitHub.API.cases.traffic)) {
+-                    GitHub.Traffic.API.Router()
+-                }
+-
+-                URLRouting.Route(.case(GitHub.API.cases.repositories)) {
+-                    GitHub.Repositories.API.Router()
+-                }
+-
+-                URLRouting.Route(.case(GitHub.API.cases.stargazers)) {
+-                    GitHub.Stargazers.API.Router()
+-                }
+-
+-                URLRouting.Route(.case(GitHub.API.cases.oauth)) {
+-                    GitHub.OAuth.API.Router()
+-                }
+-
+-                URLRouting.Route(.case(GitHub.API.cases.collaborators)) {
+-                    GitHub.Collaborators.API.Router()
+-                }
+-            }
+-        }
+-    }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,441 @@
+From 82b2a83c2fb6fef1b27b437ed1e6c9c78ed751ac Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:47 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Rational/Rational+Arithmetic.swift    |  58 -------
+ .../Rational+Swift.BinaryFloatingPoint.swift  |  19 --
+ .../Rational+Swift.BinaryInteger.swift        |  49 ------
+ .../Rational/Rational+Swift.Comparable.swift  |   5 -
+ ...tional+Swift.CustomStringConvertible.swift |   5 -
+ Sources/Rational/Rational+Swift.Double.swift  |   3 -
+ ...al+Swift.ExpressibleByIntegerLiteral.swift |   7 -
+ ...onal+Swift.LosslessStringConvertible.swift |  12 --
+ Sources/Rational/Rational.Error.swift         |  15 ++
+ Sources/Rational/Rational.swift               | 164 +++++++++++++++++-
+ 10 files changed, 172 insertions(+), 165 deletions(-)
+ delete mode 100644 Sources/Rational/Rational+Arithmetic.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.BinaryFloatingPoint.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.BinaryInteger.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.Comparable.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.Double.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.ExpressibleByIntegerLiteral.swift
+ delete mode 100644 Sources/Rational/Rational+Swift.LosslessStringConvertible.swift
+ create mode 100644 Sources/Rational/Rational.Error.swift
+
+diff --git a/Sources/Rational/Rational+Arithmetic.swift b/Sources/Rational/Rational+Arithmetic.swift
+deleted file mode 100644
+index d7428b1..0000000
+--- a/Sources/Rational/Rational+Arithmetic.swift
++++ /dev/null
+@@ -1,58 +0,0 @@
+-public import Integer
+-
+-extension Rational {
+-    public func inverted() throws(Error) -> Self {
+-        guard !numerator.isZero else { throw .zero }
+-        return Self(reducing: denominator, denominator: numerator)
+-    }
+-
+-    public func adding(_ other: Self) -> Self {
+-        let common = Integer.gcd(denominator, other.denominator)
+-        let left = Self.trapping { try denominator.quotientAndRemainder(dividingBy: common).quotient }
+-        let right = Self.trapping { try other.denominator.quotientAndRemainder(dividingBy: common).quotient }
+-        return Self(reducing: numerator * right + other.numerator * left, denominator: left * other.denominator)
+-    }
+-
+-    public func subtracting(_ other: Self) -> Self { adding(-other) }
+-
+-    public func multiplied(by other: Self) -> Self {
+-        if numerator.isZero || other.numerator.isZero { return .zero }
+-        let a = Integer.gcd(numerator, other.denominator)
+-        let b = Integer.gcd(other.numerator, denominator)
+-        let n = Self.trapping {
+-            try numerator.quotientAndRemainder(dividingBy: a).quotient
+-                * other.numerator.quotientAndRemainder(dividingBy: b).quotient
+-        }
+-        let d = Self.trapping {
+-            try denominator.quotientAndRemainder(dividingBy: b).quotient
+-                * other.denominator.quotientAndRemainder(dividingBy: a).quotient
+-        }
+-        return Self(reducing: n, denominator: d)
+-    }
+-
+-    public func divided(by other: Self) throws(Error) -> Self { multiplied(by: try other.inverted()) }
+-
+-    public func raised(to exponent: Integer) throws(Error) -> Self {
+-        var factor = exponent.isNegative ? try inverted() : self
+-        var count = exponent.absolute
+-        var result = Self.one
+-        while !count.isZero {
+-            if count.isOdd { result *= factor }
+-            count = Self.trapping { try count.quotientAndRemainder(dividingBy: 2).quotient }
+-            if !count.isZero { factor *= factor }
+-        }
+-        return result
+-    }
+-
+-    public func root(_ degree: Int) -> Self? {
+-        guard let n = numerator.root(degree), let d = denominator.root(degree) else { return nil }
+-        return Self(reducing: n, denominator: d)
+-    }
+-
+-    public static func + (lhs: Self, rhs: Self) -> Self { lhs.adding(rhs) }
+-    public static func - (lhs: Self, rhs: Self) -> Self { lhs.subtracting(rhs) }
+-    public static func * (lhs: Self, rhs: Self) -> Self { lhs.multiplied(by: rhs) }
+-    public static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
+-    public static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
+-    public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
+-}
+diff --git a/Sources/Rational/Rational+Swift.BinaryFloatingPoint.swift b/Sources/Rational/Rational+Swift.BinaryFloatingPoint.swift
+deleted file mode 100644
+index b4dd92f..0000000
+--- a/Sources/Rational/Rational+Swift.BinaryFloatingPoint.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-extension Rational {
+-
+-    public func approximation<Scalar: BinaryFloatingPoint>(as type: Scalar.Type) -> Scalar {
+-        let value = scaledApproximation(as: type)
+-        return Scalar(
+-            sign: numerator.isNegative ? .minus : .plus,
+-            exponent: Scalar.Exponent(clamping: value.exponent),
+-            significand: value.significand.magnitude
+-        )
+-    }
+-
+-    public func scaledApproximation<Scalar: BinaryFloatingPoint>(
+-        as type: Scalar.Type
+-    ) -> (significand: Scalar, exponent: Int) {
+-        let n = numerator.scaledApproximation(as: type)
+-        let d = denominator.scaledApproximation(as: type)
+-        return (n.significand / d.significand, n.exponent - d.exponent)
+-    }
+-}
+diff --git a/Sources/Rational/Rational+Swift.BinaryInteger.swift b/Sources/Rational/Rational+Swift.BinaryInteger.swift
+deleted file mode 100644
+index 8ec9710..0000000
+--- a/Sources/Rational/Rational+Swift.BinaryInteger.swift
++++ /dev/null
+@@ -1,49 +0,0 @@
+-import Integer
+-public import Polarity
+-
+-extension Rational {
+-    public init<T: Swift::BinaryInteger>(_ value: T) { self.init(Integer(value)) }
+-
+-    @_disfavoredOverload
+-    public init<N: Swift::BinaryInteger, D: Swift::BinaryInteger>(
+-        numerator: N,
+-        denominator: D,
+-        polarity: Polarity = .positive
+-    ) throws(Error) {
+-        try self.init(numerator: Integer(numerator), denominator: Integer(denominator), polarity: polarity)
+-    }
+-
+-    @_disfavoredOverload
+-    public init<N: Swift::BinaryInteger>(numerator: N, polarity: Polarity = .positive) throws(Error) {
+-        try self.init(numerator: Integer(numerator), polarity: polarity)
+-    }
+-
+-    @_disfavoredOverload
+-    public func raised<T: Swift::BinaryInteger>(to exponent: T) throws(Error) -> Self {
+-        try raised(to: Integer(exponent))
+-    }
+-
+-    public func integer<T: Swift::FixedWidthInteger>(as type: T.Type) throws(Error) -> T {
+-        guard denominator == .one else { throw .inexact }
+-        guard !numerator.isNegative || T.isSigned else { throw .unrepresentable }
+-        guard let result = numerator.exactly(type) else { throw .overflow }
+-        return result
+-    }
+-
+-    public func applying<T: Swift::FixedWidthInteger>(to value: T) throws(Error) -> T {
+-        try (self * Self(value)).integer(as: T.self)
+-    }
+-
+-    public func quotient<T: Swift::FixedWidthInteger>(dividing value: T) throws(Error) -> (quotient: T, remainder: T) {
+-        guard !numerator.isZero else { throw .zero }
+-        guard !numerator.isNegative else { throw .unrepresentable }
+-        guard denominator == .one else { throw .inexact }
+-        var result = Self.trapping { try Integer(value).quotientAndRemainder(dividingBy: numerator) }
+-        if result.remainder.isNegative {
+-            result.quotient -= .one
+-            result.remainder += numerator
+-        }
+-        guard let q = result.quotient.exactly(T.self), let r = result.remainder.exactly(T.self) else { throw .overflow }
+-        return (q, r)
+-    }
+-}
+diff --git a/Sources/Rational/Rational+Swift.Comparable.swift b/Sources/Rational/Rational+Swift.Comparable.swift
+deleted file mode 100644
+index 03f5788..0000000
+--- a/Sources/Rational/Rational+Swift.Comparable.swift
++++ /dev/null
+@@ -1,5 +0,0 @@
+-extension Rational: Swift::Comparable {
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        lhs.numerator * rhs.denominator < rhs.numerator * lhs.denominator
+-    }
+-}
+diff --git a/Sources/Rational/Rational+Swift.CustomStringConvertible.swift b/Sources/Rational/Rational+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index f64f645..0000000
+--- a/Sources/Rational/Rational+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,5 +0,0 @@
+-extension Rational: Swift::CustomStringConvertible {
+-    public var description: String {
+-        denominator == 1 ? numerator.description : numerator.description + "/" + denominator.description
+-    }
+-}
+diff --git a/Sources/Rational/Rational+Swift.Double.swift b/Sources/Rational/Rational+Swift.Double.swift
+deleted file mode 100644
+index 218b044..0000000
+--- a/Sources/Rational/Rational+Swift.Double.swift
++++ /dev/null
+@@ -1,3 +0,0 @@
+-extension Rational {
+-    public var approximation: Double { approximation(as: Double.self) }
+-}
+diff --git a/Sources/Rational/Rational+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Rational/Rational+Swift.ExpressibleByIntegerLiteral.swift
+deleted file mode 100644
+index 6a4135e..0000000
+--- a/Sources/Rational/Rational+Swift.ExpressibleByIntegerLiteral.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-import Integer
+-
+-extension Rational: Swift::ExpressibleByIntegerLiteral {
+-    public init(integerLiteral value: Swift::StaticBigInt) {
+-        self.init(Integer(integerLiteral: value))
+-    }
+-}
+diff --git a/Sources/Rational/Rational+Swift.LosslessStringConvertible.swift b/Sources/Rational/Rational+Swift.LosslessStringConvertible.swift
+deleted file mode 100644
+index b09b7ca..0000000
+--- a/Sources/Rational/Rational+Swift.LosslessStringConvertible.swift
++++ /dev/null
+@@ -1,12 +0,0 @@
+-import Integer
+-
+-extension Rational: Swift::LosslessStringConvertible {
+-
+-    public init?(_ description: String) {
+-        let parts = description.split(separator: "/", omittingEmptySubsequences: false)
+-        guard (1...2).contains(parts.count), let n = Integer(String(parts[0])) else { return nil }
+-        let d = parts.count == 2 ? Integer(String(parts[1])) : .one
+-        guard let d, !d.isZero else { return nil }
+-        self.init(reducing: n, denominator: d)
+-    }
+-}
+diff --git a/Sources/Rational/Rational.Error.swift b/Sources/Rational/Rational.Error.swift
+new file mode 100644
+index 0000000..972c807
+--- /dev/null
++++ b/Sources/Rational/Rational.Error.swift
+@@ -0,0 +1,15 @@
++public import Integer
++public import Magnitude
++public import Polarity
++
++
++extension Rational {
++    public enum Error: Swift::Error, Hashable, Sendable {
++        case denominator
++        case zero
++
++        case overflow
++        case inexact
++        case unrepresentable
++    }
++}
+diff --git a/Sources/Rational/Rational.swift b/Sources/Rational/Rational.swift
+index 7977bf0..3681bb4 100644
+--- a/Sources/Rational/Rational.swift
++++ b/Sources/Rational/Rational.swift
+@@ -8,14 +8,7 @@ public struct Rational: Hashable, Sendable {
+ }
+ 
+ extension Rational {
+-    public enum Error: Swift::Error, Hashable, Sendable {
+-        case denominator
+-        case zero
+ 
+-        case overflow
+-        case inexact
+-        case unrepresentable
+-    }
+ 
+     public init(numerator: Integer, denominator: Integer = 1, polarity: Polarity = .positive) throws(Error) {
+         guard !denominator.isZero else { throw .denominator }
+@@ -72,3 +65,160 @@ extension Rational: Magnitude::Representable {
+     public typealias Magnitude = Magnitude::Magnitude<Rational>
+     public var magnitude: Magnitude { Self.trapping { try Magnitude(validating: absolute) } }
+ }
++
++extension Rational {
++    public func inverted() throws(Error) -> Self {
++        guard !numerator.isZero else { throw .zero }
++        return Self(reducing: denominator, denominator: numerator)
++    }
++
++    public func adding(_ other: Self) -> Self {
++        let common = Integer.gcd(denominator, other.denominator)
++        let left = Self.trapping { try denominator.quotientAndRemainder(dividingBy: common).quotient }
++        let right = Self.trapping { try other.denominator.quotientAndRemainder(dividingBy: common).quotient }
++        return Self(reducing: numerator * right + other.numerator * left, denominator: left * other.denominator)
++    }
++
++    public func subtracting(_ other: Self) -> Self { adding(-other) }
++
++    public func multiplied(by other: Self) -> Self {
++        if numerator.isZero || other.numerator.isZero { return .zero }
++        let a = Integer.gcd(numerator, other.denominator)
++        let b = Integer.gcd(other.numerator, denominator)
++        let n = Self.trapping {
++            try numerator.quotientAndRemainder(dividingBy: a).quotient
++                * other.numerator.quotientAndRemainder(dividingBy: b).quotient
++        }
++        let d = Self.trapping {
++            try denominator.quotientAndRemainder(dividingBy: b).quotient
++                * other.denominator.quotientAndRemainder(dividingBy: a).quotient
++        }
++        return Self(reducing: n, denominator: d)
++    }
++
++    public func divided(by other: Self) throws(Error) -> Self { multiplied(by: try other.inverted()) }
++
++    public func raised(to exponent: Integer) throws(Error) -> Self {
++        var factor = exponent.isNegative ? try inverted() : self
++        var count = exponent.absolute
++        var result = Self.one
++        while !count.isZero {
++            if count.isOdd { result *= factor }
++            count = Self.trapping { try count.quotientAndRemainder(dividingBy: 2).quotient }
++            if !count.isZero { factor *= factor }
++        }
++        return result
++    }
++
++    public func root(_ degree: Int) -> Self? {
++        guard let n = numerator.root(degree), let d = denominator.root(degree) else { return nil }
++        return Self(reducing: n, denominator: d)
++    }
++
++    public static func + (lhs: Self, rhs: Self) -> Self { lhs.adding(rhs) }
++    public static func - (lhs: Self, rhs: Self) -> Self { lhs.subtracting(rhs) }
++    public static func * (lhs: Self, rhs: Self) -> Self { lhs.multiplied(by: rhs) }
++    public static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
++    public static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
++    public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
++}
++
++extension Rational {
++
++    public func approximation<Scalar: BinaryFloatingPoint>(as type: Scalar.Type) -> Scalar {
++        let value = scaledApproximation(as: type)
++        return Scalar(
++            sign: numerator.isNegative ? .minus : .plus,
++            exponent: Scalar.Exponent(clamping: value.exponent),
++            significand: value.significand.magnitude
++        )
++    }
++
++    public func scaledApproximation<Scalar: BinaryFloatingPoint>(
++        as type: Scalar.Type
++    ) -> (significand: Scalar, exponent: Int) {
++        let n = numerator.scaledApproximation(as: type)
++        let d = denominator.scaledApproximation(as: type)
++        return (n.significand / d.significand, n.exponent - d.exponent)
++    }
++}
++
++extension Rational {
++    public init<T: Swift::BinaryInteger>(_ value: T) { self.init(Integer(value)) }
++
++    @_disfavoredOverload
++    public init<N: Swift::BinaryInteger, D: Swift::BinaryInteger>(
++        numerator: N,
++        denominator: D,
++        polarity: Polarity = .positive
++    ) throws(Error) {
++        try self.init(numerator: Integer(numerator), denominator: Integer(denominator), polarity: polarity)
++    }
++
++    @_disfavoredOverload
++    public init<N: Swift::BinaryInteger>(numerator: N, polarity: Polarity = .positive) throws(Error) {
++        try self.init(numerator: Integer(numerator), polarity: polarity)
++    }
++
++    @_disfavoredOverload
++    public func raised<T: Swift::BinaryInteger>(to exponent: T) throws(Error) -> Self {
++        try raised(to: Integer(exponent))
++    }
++
++    public func integer<T: Swift::FixedWidthInteger>(as type: T.Type) throws(Error) -> T {
++        guard denominator == .one else { throw .inexact }
++        guard !numerator.isNegative || T.isSigned else { throw .unrepresentable }
++        guard let result = numerator.exactly(type) else { throw .overflow }
++        return result
++    }
++
++    public func applying<T: Swift::FixedWidthInteger>(to value: T) throws(Error) -> T {
++        try (self * Self(value)).integer(as: T.self)
++    }
++
++    public func quotient<T: Swift::FixedWidthInteger>(dividing value: T) throws(Error) -> (quotient: T, remainder: T) {
++        guard !numerator.isZero else { throw .zero }
++        guard !numerator.isNegative else { throw .unrepresentable }
++        guard denominator == .one else { throw .inexact }
++        var result = Self.trapping { try Integer(value).quotientAndRemainder(dividingBy: numerator) }
++        if result.remainder.isNegative {
++            result.quotient -= .one
++            result.remainder += numerator
++        }
++        guard let q = result.quotient.exactly(T.self), let r = result.remainder.exactly(T.self) else { throw .overflow }
++        return (q, r)
++    }
++}
++
++extension Rational: Swift::Comparable {
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs.numerator * rhs.denominator < rhs.numerator * lhs.denominator
++    }
++}
++
++extension Rational: Swift::CustomStringConvertible {
++    public var description: String {
++        denominator == 1 ? numerator.description : numerator.description + "/" + denominator.description
++    }
++}
++
++extension Rational {
++    public var approximation: Double { approximation(as: Double.self) }
++}
++
++extension Rational: Swift::ExpressibleByIntegerLiteral {
++    public init(integerLiteral value: Swift::StaticBigInt) {
++        self.init(Integer(integerLiteral: value))
++    }
++}
++
++extension Rational: Swift::LosslessStringConvertible {
++
++    public init?(_ description: String) {
++        let parts = description.split(separator: "/", omittingEmptySubsequences: false)
++        guard (1...2).contains(parts.count), let n = Integer(String(parts[0])) else { return nil }
++        let d = parts.count == 2 ? Integer(String(parts[1])) : .one
++        guard let d, !d.isZero else { return nil }
++        self.init(reducing: n, denominator: d)
++    }
++}
+-- 
+2.43.0
+

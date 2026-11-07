@@ -1,0 +1,1046 @@
+From a9acf3e9f83633e1821096b2526e71a6e60b3c75 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:50 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Buffer.Linear.Bounded+Builder.swift       |  32 ---
+ ...er.Linear.Bounded+ConformanceSupport.swift |  27 --
+ .../Buffer.Linear.Bounded+OutputSpan.swift    |  32 ---
+ .../Buffer.Linear.Bounded+Subscript.swift     |  26 --
+ .../Buffer.Linear.Bounded+clone.swift         |  28 --
+ .../Buffer.Linear.Bounded+forEach.swift       |  22 --
+ .../Buffer.Linear.Bounded.swift               | 107 +++++++
+ .../Buffer.Linear+ConformanceSupport.swift    |  27 --
+ ...Buffer.Linear+Memory.Small ~Copyable.swift |  80 ------
+ .../Buffer.Linear+OutputSpan.swift            |  55 ----
+ .../Buffer.Linear+Subscript.swift             |  22 --
+ .../Buffer.Linear+Substrate.swift             |  16 --
+ .../Buffer.Linear+clone.swift                 |  45 ---
+ .../Buffer.Linear+forEach.swift               |  22 --
+ .../Buffer.Linear+reallocate.swift            |  26 --
+ .../Buffer.Linear+split.swift                 |  51 ----
+ .../Buffer.Linear.swift                       | 261 ++++++++++++++++++
+ 17 files changed, 368 insertions(+), 511 deletions(-)
+ delete mode 100644 Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Builder.swift
+ delete mode 100644 Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+ConformanceSupport.swift
+ delete mode 100644 Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+OutputSpan.swift
+ delete mode 100644 Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Subscript.swift
+ delete mode 100644 Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+clone.swift
+ delete mode 100644 Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+forEach.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+ConformanceSupport.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+Memory.Small ~Copyable.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+OutputSpan.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+Subscript.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+Substrate.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+clone.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+forEach.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+reallocate.swift
+ delete mode 100644 Sources/Buffer Linear Primitive/Buffer.Linear+split.swift
+
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Builder.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Builder.swift
+deleted file mode 100644
+index be9f2ae..0000000
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Builder.swift	
++++ /dev/null
+@@ -1,32 +0,0 @@
+-public import Buffer
+-public import Cardinal
+-import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-import Store
+-public import Tagged
+-
+-extension Buffer.Linear.Bounded where S: ~Copyable {
+-
+-    @inlinable
+-    public init<E: ~Copyable, Resource: Memory.Growable & ~Copyable>(
+-        minimumCapacity: Tagged<E, Cardinal>,
+-        @Buffer<Storage<Memory.Allocator<Resource>>.Contiguous<E>>.Linear.Builder _ builder: ()
+-            -> Buffer<Storage<Memory.Allocator<Resource>>.Contiguous<E>>.Linear
+-    ) throws(Self.Error) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-        var dynamic = builder()
+-        guard dynamic.count <= minimumCapacity else {
+-            throw .capacityExceeded
+-        }
+-        self.init(minimumCapacity: minimumCapacity)
+-        while !dynamic.isEmpty {
+-            _ = self.append(dynamic.remove.first())
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+ConformanceSupport.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+ConformanceSupport.swift
+deleted file mode 100644
+index 72cc418..0000000
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+ConformanceSupport.swift	
++++ /dev/null
+@@ -1,27 +0,0 @@
+-import Cardinal
+-import Index
+-import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-public import Store
+-import Tagged
+-
+-extension Buffer.Linear.Bounded where S: ~Copyable {
+-
+-    @usableFromInline
+-    package var _storage: S {
+-        _read { yield storage }
+-    }
+-
+-    @usableFromInline
+-    package mutating func _drain(_ body: (consuming S.Element) -> Void) {
+-        var position: Index<S.Element> = .zero
+-        let end = header.count.map { Ordinal($0.rawValue) }
+-        while position < end {
+-            body(storage.move(at: position))
+-            position += .one
+-        }
+-        header.count = .zero
+-    }
+-}
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+OutputSpan.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+OutputSpan.swift
+deleted file mode 100644
+index 0b94094..0000000
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+OutputSpan.swift	
++++ /dev/null
+@@ -1,32 +0,0 @@
+-public import Cardinal
+-import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-public import Store
+-public import Tagged
+-
+-extension Buffer.Linear.Bounded where S: ~Copyable {
+-
+-    @inlinable
+-    public init<E: ~Copyable, Failure: Swift::Error, Resource: Memory.Growable & ~Copyable>(
+-        capacity: Tagged<E, Cardinal>,
+-        initializingWith initializer: (inout Swift::OutputSpan<E>) throws(Failure) -> Void
+-    ) throws(Failure) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-        var storage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
+-            minimumCapacity: capacity
+-        )
+-
+-        try storage.withOutputSpan(addingCapacity: capacity) { output throws(Failure) in
+-            try initializer(&output)
+-        }
+-        var header = Buffer.Linear.Header(capacity: capacity)
+-        header.count = storage.initialization.count
+-        self.init(header: header, storage: storage)
+-    }
+-}
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Subscript.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Subscript.swift
+deleted file mode 100644
+index 32513a8..0000000
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+Subscript.swift	
++++ /dev/null
+@@ -1,26 +0,0 @@
+-import Cardinal
+-public import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-import Store
+-public import Tagged
+-
+-extension Buffer.Linear.Bounded where S: ~Copyable {
+-
+-    @inlinable
+-    public subscript<E: ~Copyable, Resource: Memory.Growable & ~Copyable>(index: Index<E>) -> E
+-    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-        _read {
+-            yield storage[index]
+-        }
+-        _modify {
+-            yield &storage[index]
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+clone.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+clone.swift
+deleted file mode 100644
+index 2099dd6..0000000
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+clone.swift	
++++ /dev/null
+@@ -1,28 +0,0 @@
+-import Cardinal
+-import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-import Store
+-import Tagged
+-
+-extension Buffer.Linear.Bounded where S: ~Copyable {
+-
+-    @inlinable
+-    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
+-    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
+-        var newStorage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
+-            minimumCapacity: header.capacity
+-        )
+-        Buffer.Linear.copy(header: header, source: storage, to: &newStorage)
+-        var newHeader = Buffer.Linear.Header(capacity: header.capacity)
+-        newHeader.count = header.count
+-        newStorage.initialization = newHeader.initialization
+-        return Self(header: newHeader, storage: newStorage)
+-    }
+-}
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+forEach.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+forEach.swift
+deleted file mode 100644
+index fa6f5a8..0000000
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded+forEach.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-public import Cardinal
+-import Finite
+-public import Index
+-public import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-public import Store
+-public import Tagged
+-
+-extension Buffer.Linear.Bounded where S: ~Copyable {
+-
+-    @inlinable
+-    public func forEach<E: Swift::Error>(_ body: (borrowing S.Element) throws(E) -> Void) throws(E) {
+-        var slot: Index<S.Element> = .zero
+-        let end = header.count.map { Ordinal($0.rawValue) }
+-        while slot < end {
+-            try body(storage[slot])
+-            slot += .one
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded.swift b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded.swift
+index d428b8b..00c7ae9 100644
+--- a/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded.swift	
++++ b/Sources/Buffer Linear Bounded Primitive/Buffer.Linear.Bounded.swift	
+@@ -6,6 +6,12 @@ import Span
+ import Storage
+ public import Store
+ import Tagged
++public import Buffer
++public import Memory
++public import Memory_Allocator
++public import Memory_Allocator_Protocol
++import Memory_Small
++import Finite
+ 
+ extension Buffer.Linear where S: ~Copyable {
+ 
+@@ -27,3 +33,104 @@ extension Buffer.Linear where S: ~Copyable {
+ 
+ extension Buffer.Linear.Bounded: @unsafe @unchecked Sendable
+ where S: Store.`Protocol` & ~Copyable & Sendable {}
++
++extension Buffer.Linear.Bounded where S: ~Copyable {
++
++    @inlinable
++    public init<E: ~Copyable, Resource: Memory.Growable & ~Copyable>(
++        minimumCapacity: Tagged<E, Cardinal>,
++        @Buffer<Storage<Memory.Allocator<Resource>>.Contiguous<E>>.Linear.Builder _ builder: ()
++            -> Buffer<Storage<Memory.Allocator<Resource>>.Contiguous<E>>.Linear
++    ) throws(Self.Error) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++        var dynamic = builder()
++        guard dynamic.count <= minimumCapacity else {
++            throw .capacityExceeded
++        }
++        self.init(minimumCapacity: minimumCapacity)
++        while !dynamic.isEmpty {
++            _ = self.append(dynamic.remove.first())
++        }
++    }
++}
++
++extension Buffer.Linear.Bounded where S: ~Copyable {
++
++    @usableFromInline
++    package var _storage: S {
++        _read { yield storage }
++    }
++
++    @usableFromInline
++    package mutating func _drain(_ body: (consuming S.Element) -> Void) {
++        var position: Index<S.Element> = .zero
++        let end = header.count.map { Ordinal($0.rawValue) }
++        while position < end {
++            body(storage.move(at: position))
++            position += .one
++        }
++        header.count = .zero
++    }
++}
++
++extension Buffer.Linear.Bounded where S: ~Copyable {
++
++    @inlinable
++    public init<E: ~Copyable, Failure: Swift::Error, Resource: Memory.Growable & ~Copyable>(
++        capacity: Tagged<E, Cardinal>,
++        initializingWith initializer: (inout Swift::OutputSpan<E>) throws(Failure) -> Void
++    ) throws(Failure) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++        var storage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
++            minimumCapacity: capacity
++        )
++
++        try storage.withOutputSpan(addingCapacity: capacity) { output throws(Failure) in
++            try initializer(&output)
++        }
++        var header = Buffer.Linear.Header(capacity: capacity)
++        header.count = storage.initialization.count
++        self.init(header: header, storage: storage)
++    }
++}
++
++extension Buffer.Linear.Bounded where S: ~Copyable {
++
++    @inlinable
++    public subscript<E: ~Copyable, Resource: Memory.Growable & ~Copyable>(index: Index<E>) -> E
++    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++        _read {
++            yield storage[index]
++        }
++        _modify {
++            yield &storage[index]
++        }
++    }
++}
++
++extension Buffer.Linear.Bounded where S: ~Copyable {
++
++    @inlinable
++    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
++    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
++        var newStorage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
++            minimumCapacity: header.capacity
++        )
++        Buffer.Linear.copy(header: header, source: storage, to: &newStorage)
++        var newHeader = Buffer.Linear.Header(capacity: header.capacity)
++        newHeader.count = header.count
++        newStorage.initialization = newHeader.initialization
++        return Self(header: newHeader, storage: newStorage)
++    }
++}
++
++extension Buffer.Linear.Bounded where S: ~Copyable {
++
++    @inlinable
++    public func forEach<E: Swift::Error>(_ body: (borrowing S.Element) throws(E) -> Void) throws(E) {
++        var slot: Index<S.Element> = .zero
++        let end = header.count.map { Ordinal($0.rawValue) }
++        while slot < end {
++            try body(storage[slot])
++            slot += .one
++        }
++    }
++}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+ConformanceSupport.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+ConformanceSupport.swift
+deleted file mode 100644
+index a93915f..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+ConformanceSupport.swift	
++++ /dev/null
+@@ -1,27 +0,0 @@
+-import Cardinal
+-import Index
+-import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-public import Store
+-import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @usableFromInline
+-    package var _storage: S {
+-        _read { yield storage }
+-    }
+-
+-    @usableFromInline
+-    package mutating func _drain(_ body: (consuming S.Element) -> Void) {
+-        var position: Index<S.Element> = .zero
+-        let end = header.count.map { Ordinal($0.rawValue) }
+-        while position < end {
+-            body(storage.move(at: position))
+-            position += .one
+-        }
+-        header.count = .zero
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+Memory.Small ~Copyable.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+Memory.Small ~Copyable.swift
+deleted file mode 100644
+index 7380816..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+Memory.Small ~Copyable.swift	
++++ /dev/null
+@@ -1,80 +0,0 @@
+-public import Cardinal
+-public import Index
+-import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-public import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public static func append(
+-        _ element: consuming S.Element,
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        S.linearAppend(consume element, count: &header.count, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func removeFirst(
+-        header: inout Header,
+-        storage: inout S
+-    ) -> S.Element {
+-        S.linearRemoveFirst(count: &header.count, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func remove(
+-        at index: Index<S.Element>,
+-        header: inout Header,
+-        storage: inout S
+-    ) -> S.Element {
+-        S.linearRemove(at: index, count: &header.count, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func replace(
+-        at index: Index<S.Element>,
+-        with newElement: consuming S.Element,
+-        storage: inout S
+-    ) -> S.Element {
+-        S.linearReplace(at: index, with: consume newElement, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func consumeBack(
+-        header: inout Header,
+-        storage: inout S
+-    ) -> S.Element {
+-        S.linearConsumeBack(count: &header.count, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func swap(
+-        at i: Index<S.Element>,
+-        with j: Index<S.Element>,
+-        storage: inout S
+-    ) {
+-        S.linearSwap(at: i, with: j, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func deinitializeAll(
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        S.linearDeinitializeAll(count: &header.count, storage: &storage)
+-    }
+-
+-    @inlinable
+-    public static func truncate(
+-        to newCount: Tagged<S.Element, Cardinal>,
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        S.linearTruncate(to: newCount, count: &header.count, storage: &storage)
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+OutputSpan.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+OutputSpan.swift
+deleted file mode 100644
+index aa740b6..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+OutputSpan.swift	
++++ /dev/null
+@@ -1,55 +0,0 @@
+-public import Cardinal
+-import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-public import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public init<E: ~Copyable, Failure: Swift::Error, Resource: Memory.Growable & ~Copyable>(
+-        capacity: Tagged<E, Cardinal>,
+-        initializingWith initializer: (inout Swift::OutputSpan<E>) throws(Failure) -> Void
+-    ) throws(Failure) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-        var storage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
+-            minimumCapacity: capacity
+-        )
+-
+-        try initializer(&storage.outputSpan)
+-        var header = Self.Header(capacity: storage.capacity)
+-        header.count = storage.initialization.count
+-        self.init(header: header, storage: storage)
+-    }
+-
+-    @inlinable
+-    public mutating func edit<E: ~Copyable, Failure: Swift::Error, R: ~Copyable, Resource: Memory.Growable & ~Copyable>(
+-        _ body: (inout Swift::OutputSpan<E>) throws(Failure) -> R
+-    ) throws(Failure) -> R where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-
+-        storage.initialization = header.initialization
+-        defer { header.count = storage.initialization.count }
+-        return try body(&storage.outputSpan)
+-    }
+-
+-    @inlinable
+-    public mutating func append<E: ~Copyable, Failure: Swift::Error, Resource: Memory.Growable & ~Copyable>(
+-        addingCapacity: Tagged<E, Cardinal>,
+-        initializingWith initializer: (inout Swift::OutputSpan<E>) throws(Failure) -> Void
+-    ) throws(Failure) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-        let required = header.count.add.saturating(addingCapacity)
+-        if required > header.capacity {
+-            _growTo(required)
+-        }
+-
+-        storage.initialization = header.initialization
+-        defer { header.count = storage.initialization.count }
+-        try storage.withOutputSpan(addingCapacity: addingCapacity, initializer)
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+Subscript.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+Subscript.swift
+deleted file mode 100644
+index 35dcedc..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+Subscript.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-import Cardinal
+-public import Index
+-import Memory
+-import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-public import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public subscript(_ index: Index<S.Element>) -> S.Element {
+-        _read {
+-            yield storage[index]
+-        }
+-        _modify {
+-            yield &storage[index]
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+Substrate.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+Substrate.swift
+deleted file mode 100644
+index 0775edf..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+Substrate.swift	
++++ /dev/null
+@@ -1,16 +0,0 @@
+-import Cardinal
+-import Index
+-import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-import Store
+-import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public var substrate: S {
+-        _read { yield storage }
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+clone.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+clone.swift
+deleted file mode 100644
+index ef5770f..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+clone.swift	
++++ /dev/null
+@@ -1,45 +0,0 @@
+-public import Cardinal
+-import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
+-    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
+-        var newStorage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
+-            minimumCapacity: header.count
+-        )
+-        Self.copy(header: header, source: storage, to: &newStorage)
+-        var newHeader = Self.Header(capacity: newStorage.capacity)
+-        newHeader.count = header.count
+-        newStorage.initialization = newHeader.initialization
+-        return Self(header: newHeader, storage: newStorage)
+-    }
+-
+-    @inlinable
+-    public func clone<E, Resource: Memory.Growable & ~Copyable>(capacity: Tagged<E, Cardinal>) -> Self
+-    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
+-        precondition(
+-            capacity >= header.count,
+-            "Buffer.Linear.clone(capacity:): capacity must be >= count"
+-        )
+-        var newStorage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
+-            minimumCapacity: capacity
+-        )
+-        Self.copy(header: header, source: storage, to: &newStorage)
+-        var newHeader = Self.Header(capacity: newStorage.capacity)
+-        newHeader.count = header.count
+-        newStorage.initialization = newHeader.initialization
+-        return Self(header: newHeader, storage: newStorage)
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+forEach.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+forEach.swift
+deleted file mode 100644
+index 3c395b2..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+forEach.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-public import Cardinal
+-import Finite
+-public import Index
+-public import Ordinal
+-import Ownership
+-import Span
+-import Storage
+-public import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public func forEach<E: Swift::Error>(_ body: (borrowing S.Element) throws(E) -> Void) throws(E) {
+-        var slot: Index<S.Element> = .zero
+-        let end = header.count.map { Ordinal($0.rawValue) }
+-        while slot < end {
+-            try body(storage[slot])
+-            slot += .one
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+reallocate.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+reallocate.swift
+deleted file mode 100644
+index accac47..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+reallocate.swift	
++++ /dev/null
+@@ -1,26 +0,0 @@
+-public import Cardinal
+-import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Memory_Small
+-import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public mutating func reallocate<E: ~Copyable, Resource: Memory.Growable & ~Copyable>(
+-        capacity newCapacity: Tagged<E, Cardinal>
+-    ) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
+-        precondition(
+-            newCapacity >= header.count,
+-            "Buffer.Linear.reallocate(capacity:): capacity must be >= count"
+-        )
+-        _growTo(newCapacity)
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear+split.swift b/Sources/Buffer Linear Primitive/Buffer.Linear+split.swift
+deleted file mode 100644
+index c3fb46d..0000000
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear+split.swift	
++++ /dev/null
+@@ -1,51 +0,0 @@
+-public import Cardinal
+-public import Index
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-public import Ordinal
+-import Ownership
+-import Span
+-public import Storage
+-import Store
+-public import Tagged
+-
+-extension Buffer.Linear where S: ~Copyable {
+-
+-    @inlinable
+-    public consuming func split<Element: ~Copyable, Resource: Memory.Growable & ~Copyable>(
+-        maximum: Tagged<Element, Cardinal>
+-    ) -> Split where S == Storage<Memory.Allocator<Resource>>.Contiguous<Element> {
+-        var source = consume self
+-        let prefixCount = maximum < source.header.count ? maximum : source.header.count
+-        let remainderCount = source.header.count.subtract.saturating(prefixCount)
+-        var prefixStorage = S.create(minimumCapacity: prefixCount)
+-        var remainderStorage = S.create(minimumCapacity: remainderCount)
+-
+-        var sourceSlot: Index<Element> = .zero
+-        let prefixEnd = prefixCount.map { Ordinal($0.rawValue) }
+-        while sourceSlot < prefixEnd {
+-            prefixStorage.initialize(at: sourceSlot, to: source.storage.move(at: sourceSlot))
+-            sourceSlot += Tagged<Element, Cardinal>.one
+-        }
+-
+-        var remainderSlot: Index<Element> = .zero
+-        let sourceEnd = source.header.count.map { Ordinal($0.rawValue) }
+-        while sourceSlot < sourceEnd {
+-            remainderStorage.initialize(
+-                at: remainderSlot,
+-                to: source.storage.move(at: sourceSlot)
+-            )
+-            sourceSlot += Tagged<Element, Cardinal>.one
+-            remainderSlot += Tagged<Element, Cardinal>.one
+-        }
+-
+-        var prefixHeader = Self.Header(capacity: prefixStorage.capacity)
+-        prefixHeader.count = prefixCount
+-        var remainderHeader = Self.Header(capacity: remainderStorage.capacity)
+-        remainderHeader.count = remainderCount
+-        return Split(
+-            prefix: Self(header: prefixHeader, storage: prefixStorage),
+-            remainder: Self(header: remainderHeader, storage: remainderStorage)
+-        )
+-    }
+-}
+diff --git a/Sources/Buffer Linear Primitive/Buffer.Linear.swift b/Sources/Buffer Linear Primitive/Buffer.Linear.swift
+index 4041df1..053296e 100644
+--- a/Sources/Buffer Linear Primitive/Buffer.Linear.swift	
++++ b/Sources/Buffer Linear Primitive/Buffer.Linear.swift	
+@@ -6,6 +6,11 @@ import Span
+ import Storage
+ public import Store
+ import Tagged
++public import Memory
++public import Memory_Allocator
++public import Memory_Allocator_Protocol
++import Memory_Small
++import Finite
+ 
+ extension Buffer where S: Store.`Protocol`, S: ~Copyable {
+ 
+@@ -28,3 +33,259 @@ extension Buffer where S: Store.`Protocol`, S: ~Copyable {
+ 
+ extension Buffer.Linear: @unsafe @unchecked Sendable
+ where S: Store.`Protocol` & ~Copyable & Sendable {}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @usableFromInline
++    package var _storage: S {
++        _read { yield storage }
++    }
++
++    @usableFromInline
++    package mutating func _drain(_ body: (consuming S.Element) -> Void) {
++        var position: Index<S.Element> = .zero
++        let end = header.count.map { Ordinal($0.rawValue) }
++        while position < end {
++            body(storage.move(at: position))
++            position += .one
++        }
++        header.count = .zero
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public static func append(
++        _ element: consuming S.Element,
++        header: inout Header,
++        storage: inout S
++    ) {
++        S.linearAppend(consume element, count: &header.count, storage: &storage)
++    }
++
++    @inlinable
++    public static func removeFirst(
++        header: inout Header,
++        storage: inout S
++    ) -> S.Element {
++        S.linearRemoveFirst(count: &header.count, storage: &storage)
++    }
++
++    @inlinable
++    public static func remove(
++        at index: Index<S.Element>,
++        header: inout Header,
++        storage: inout S
++    ) -> S.Element {
++        S.linearRemove(at: index, count: &header.count, storage: &storage)
++    }
++
++    @inlinable
++    public static func replace(
++        at index: Index<S.Element>,
++        with newElement: consuming S.Element,
++        storage: inout S
++    ) -> S.Element {
++        S.linearReplace(at: index, with: consume newElement, storage: &storage)
++    }
++
++    @inlinable
++    public static func consumeBack(
++        header: inout Header,
++        storage: inout S
++    ) -> S.Element {
++        S.linearConsumeBack(count: &header.count, storage: &storage)
++    }
++
++    @inlinable
++    public static func swap(
++        at i: Index<S.Element>,
++        with j: Index<S.Element>,
++        storage: inout S
++    ) {
++        S.linearSwap(at: i, with: j, storage: &storage)
++    }
++
++    @inlinable
++    public static func deinitializeAll(
++        header: inout Header,
++        storage: inout S
++    ) {
++        S.linearDeinitializeAll(count: &header.count, storage: &storage)
++    }
++
++    @inlinable
++    public static func truncate(
++        to newCount: Tagged<S.Element, Cardinal>,
++        header: inout Header,
++        storage: inout S
++    ) {
++        S.linearTruncate(to: newCount, count: &header.count, storage: &storage)
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public init<E: ~Copyable, Failure: Swift::Error, Resource: Memory.Growable & ~Copyable>(
++        capacity: Tagged<E, Cardinal>,
++        initializingWith initializer: (inout Swift::OutputSpan<E>) throws(Failure) -> Void
++    ) throws(Failure) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++        var storage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
++            minimumCapacity: capacity
++        )
++
++        try initializer(&storage.outputSpan)
++        var header = Self.Header(capacity: storage.capacity)
++        header.count = storage.initialization.count
++        self.init(header: header, storage: storage)
++    }
++
++    @inlinable
++    public mutating func edit<E: ~Copyable, Failure: Swift::Error, R: ~Copyable, Resource: Memory.Growable & ~Copyable>(
++        _ body: (inout Swift::OutputSpan<E>) throws(Failure) -> R
++    ) throws(Failure) -> R where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++
++        storage.initialization = header.initialization
++        defer { header.count = storage.initialization.count }
++        return try body(&storage.outputSpan)
++    }
++
++    @inlinable
++    public mutating func append<E: ~Copyable, Failure: Swift::Error, Resource: Memory.Growable & ~Copyable>(
++        addingCapacity: Tagged<E, Cardinal>,
++        initializingWith initializer: (inout Swift::OutputSpan<E>) throws(Failure) -> Void
++    ) throws(Failure) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++        let required = header.count.add.saturating(addingCapacity)
++        if required > header.capacity {
++            _growTo(required)
++        }
++
++        storage.initialization = header.initialization
++        defer { header.count = storage.initialization.count }
++        try storage.withOutputSpan(addingCapacity: addingCapacity, initializer)
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public subscript(_ index: Index<S.Element>) -> S.Element {
++        _read {
++            yield storage[index]
++        }
++        _modify {
++            yield &storage[index]
++        }
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public var substrate: S {
++        _read { yield storage }
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
++    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
++        var newStorage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
++            minimumCapacity: header.count
++        )
++        Self.copy(header: header, source: storage, to: &newStorage)
++        var newHeader = Self.Header(capacity: newStorage.capacity)
++        newHeader.count = header.count
++        newStorage.initialization = newHeader.initialization
++        return Self(header: newHeader, storage: newStorage)
++    }
++
++    @inlinable
++    public func clone<E, Resource: Memory.Growable & ~Copyable>(capacity: Tagged<E, Cardinal>) -> Self
++    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
++        precondition(
++            capacity >= header.count,
++            "Buffer.Linear.clone(capacity:): capacity must be >= count"
++        )
++        var newStorage = Storage<Memory.Allocator<Resource>>.Contiguous<E>.create(
++            minimumCapacity: capacity
++        )
++        Self.copy(header: header, source: storage, to: &newStorage)
++        var newHeader = Self.Header(capacity: newStorage.capacity)
++        newHeader.count = header.count
++        newStorage.initialization = newHeader.initialization
++        return Self(header: newHeader, storage: newStorage)
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public func forEach<E: Swift::Error>(_ body: (borrowing S.Element) throws(E) -> Void) throws(E) {
++        var slot: Index<S.Element> = .zero
++        let end = header.count.map { Ordinal($0.rawValue) }
++        while slot < end {
++            try body(storage[slot])
++            slot += .one
++        }
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public mutating func reallocate<E: ~Copyable, Resource: Memory.Growable & ~Copyable>(
++        capacity newCapacity: Tagged<E, Cardinal>
++    ) where S == Storage<Memory.Allocator<Resource>>.Contiguous<E> {
++        precondition(
++            newCapacity >= header.count,
++            "Buffer.Linear.reallocate(capacity:): capacity must be >= count"
++        )
++        _growTo(newCapacity)
++    }
++}
++
++extension Buffer.Linear where S: ~Copyable {
++
++    @inlinable
++    public consuming func split<Element: ~Copyable, Resource: Memory.Growable & ~Copyable>(
++        maximum: Tagged<Element, Cardinal>
++    ) -> Split where S == Storage<Memory.Allocator<Resource>>.Contiguous<Element> {
++        var source = consume self
++        let prefixCount = maximum < source.header.count ? maximum : source.header.count
++        let remainderCount = source.header.count.subtract.saturating(prefixCount)
++        var prefixStorage = S.create(minimumCapacity: prefixCount)
++        var remainderStorage = S.create(minimumCapacity: remainderCount)
++
++        var sourceSlot: Index<Element> = .zero
++        let prefixEnd = prefixCount.map { Ordinal($0.rawValue) }
++        while sourceSlot < prefixEnd {
++            prefixStorage.initialize(at: sourceSlot, to: source.storage.move(at: sourceSlot))
++            sourceSlot += Tagged<Element, Cardinal>.one
++        }
++
++        var remainderSlot: Index<Element> = .zero
++        let sourceEnd = source.header.count.map { Ordinal($0.rawValue) }
++        while sourceSlot < sourceEnd {
++            remainderStorage.initialize(
++                at: remainderSlot,
++                to: source.storage.move(at: sourceSlot)
++            )
++            sourceSlot += Tagged<Element, Cardinal>.one
++            remainderSlot += Tagged<Element, Cardinal>.one
++        }
++
++        var prefixHeader = Self.Header(capacity: prefixStorage.capacity)
++        prefixHeader.count = prefixCount
++        var remainderHeader = Self.Header(capacity: remainderStorage.capacity)
++        remainderHeader.count = remainderCount
++        return Split(
++            prefix: Self(header: prefixHeader, storage: prefixStorage),
++            remainder: Self(header: remainderHeader, storage: remainderStorage)
++        )
++    }
++}
+-- 
+2.43.0
+

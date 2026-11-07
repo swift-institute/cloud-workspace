@@ -1,0 +1,949 @@
+From c2c9d2a08b20d2df1ebb5bcdd421412022acad0c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:45 +0000
+Subject: [PATCH 4/4] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Numeric/Complex/Complex.Relaxed.swift | 122 -------
+ Sources/Numeric/Numeric.Integer.swift         |   4 -
+ Sources/Numeric/Numeric.Math.swift            | 298 ++++++++++++++++++
+ Sources/Numeric/Numeric.Quantized.swift       |   3 -
+ Sources/Numeric/Numeric.Relaxed.swift         | 123 ++++++++
+ Sources/Numeric/Numeric.Rounding.swift        |   3 -
+ Sources/Numeric/Numeric.swift                 |  12 +
+ Sources/Numeric/Real.Numeric.Math.swift       | 297 -----------------
+ 8 files changed, 433 insertions(+), 429 deletions(-)
+ delete mode 100644 Sources/Numeric/Complex/Complex.Relaxed.swift
+ delete mode 100644 Sources/Numeric/Numeric.Integer.swift
+ delete mode 100644 Sources/Numeric/Numeric.Quantized.swift
+ delete mode 100644 Sources/Numeric/Numeric.Rounding.swift
+ delete mode 100644 Sources/Numeric/Real.Numeric.Math.swift
+
+diff --git a/Sources/Numeric/Complex/Complex.Relaxed.swift b/Sources/Numeric/Complex/Complex.Relaxed.swift
+deleted file mode 100644
+index 7278d00..0000000
+--- a/Sources/Numeric/Complex/Complex.Relaxed.swift
++++ /dev/null
+@@ -1,122 +0,0 @@
+-#if Complex
+-    public import Complex
+-
+-    extension Numeric.Relaxed {
+-
+-        @inlinable
+-        public static func sum(
+-            _ a: Complex.Number<Double>,
+-            _ b: Complex.Number<Double>
+-        ) -> Complex.Number<Double> {
+-            Complex.Number(
+-                Self.sum(a.real.value, b.real.value),
+-                Self.sum(a.imaginary.value, b.imaginary.value)
+-            )
+-        }
+-
+-        @inlinable
+-        public static func product(
+-            _ a: Complex.Number<Double>,
+-            _ b: Complex.Number<Double>
+-        ) -> Complex.Number<Double> {
+-
+-            Complex.Number(
+-                Self.sum(
+-                    Self.product(a.real.value, b.real.value),
+-                    -Self.product(a.imaginary.value, b.imaginary.value)
+-                ),
+-                Self.sum(
+-                    Self.product(a.real.value, b.imaginary.value),
+-                    Self.product(a.imaginary.value, b.real.value)
+-                )
+-            )
+-        }
+-
+-        @inlinable
+-        public static func multiplyAdd(
+-            _ a: Complex.Number<Double>,
+-            _ b: Complex.Number<Double>,
+-            _ c: Complex.Number<Double>
+-        ) -> Complex.Number<Double> {
+-            sum(product(a, b), c)
+-        }
+-
+-        @inlinable
+-        public static func product(
+-            _ z: Complex.Number<Double>,
+-            _ s: Double
+-        ) -> Complex.Number<Double> {
+-            Complex.Number(
+-                Self.product(z.real.value, s),
+-                Self.product(z.imaginary.value, s)
+-            )
+-        }
+-
+-        @inlinable
+-        public static func product(
+-            _ s: Double,
+-            _ z: Complex.Number<Double>
+-        ) -> Complex.Number<Double> {
+-            product(z, s)
+-        }
+-    }
+-
+-    extension Numeric.Relaxed {
+-
+-        @inlinable
+-        public static func sum(
+-            _ a: Complex.Number<Float>,
+-            _ b: Complex.Number<Float>
+-        ) -> Complex.Number<Float> {
+-            Complex.Number(
+-                Self.sum(a.real.value, b.real.value),
+-                Self.sum(a.imaginary.value, b.imaginary.value)
+-            )
+-        }
+-
+-        @inlinable
+-        public static func product(
+-            _ a: Complex.Number<Float>,
+-            _ b: Complex.Number<Float>
+-        ) -> Complex.Number<Float> {
+-            Complex.Number(
+-                Self.sum(
+-                    Self.product(a.real.value, b.real.value),
+-                    -Self.product(a.imaginary.value, b.imaginary.value)
+-                ),
+-                Self.sum(
+-                    Self.product(a.real.value, b.imaginary.value),
+-                    Self.product(a.imaginary.value, b.real.value)
+-                )
+-            )
+-        }
+-
+-        @inlinable
+-        public static func multiplyAdd(
+-            _ a: Complex.Number<Float>,
+-            _ b: Complex.Number<Float>,
+-            _ c: Complex.Number<Float>
+-        ) -> Complex.Number<Float> {
+-            sum(product(a, b), c)
+-        }
+-
+-        @inlinable
+-        public static func product(
+-            _ z: Complex.Number<Float>,
+-            _ s: Float
+-        ) -> Complex.Number<Float> {
+-            Complex.Number(
+-                Self.product(z.real.value, s),
+-                Self.product(z.imaginary.value, s)
+-            )
+-        }
+-
+-        @inlinable
+-        public static func product(
+-            _ s: Float,
+-            _ z: Complex.Number<Float>
+-        ) -> Complex.Number<Float> {
+-            product(z, s)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Numeric/Numeric.Integer.swift b/Sources/Numeric/Numeric.Integer.swift
+deleted file mode 100644
+index a20d02d..0000000
+--- a/Sources/Numeric/Numeric.Integer.swift
++++ /dev/null
+@@ -1,4 +0,0 @@
+-extension Numeric {
+-
+-    public typealias Integer = Int
+-}
+diff --git a/Sources/Numeric/Numeric.Math.swift b/Sources/Numeric/Numeric.Math.swift
+index b7edd60..259f230 100644
+--- a/Sources/Numeric/Numeric.Math.swift
++++ b/Sources/Numeric/Numeric.Math.swift
+@@ -1,4 +1,302 @@
++import Numeric_Shims
++
+ extension Numeric {
+ 
+     public enum Math {}
+ }
++
++extension Numeric.Math {
++    @usableFromInline
++    internal static func exp(_ x: Float) -> Float { shim_expf(x) }
++
++    @usableFromInline
++    internal static func expm1(_ x: Float) -> Float { shim_expm1f(x) }
++
++    @usableFromInline
++    internal static func log(_ x: Float) -> Float { shim_logf(x) }
++
++    @usableFromInline
++    internal static func log1p(_ x: Float) -> Float { shim_log1pf(x) }
++
++    @usableFromInline
++    internal static func log2(_ x: Float) -> Float { shim_log2f(x) }
++
++    @usableFromInline
++    internal static func log10(_ x: Float) -> Float { shim_log10f(x) }
++
++    @usableFromInline
++    internal static func sin(_ x: Float) -> Float { shim_sinf(x) }
++
++    @usableFromInline
++    internal static func cos(_ x: Float) -> Float { shim_cosf(x) }
++
++    @usableFromInline
++    internal static func tan(_ x: Float) -> Float { shim_tanf(x) }
++
++    @usableFromInline
++    internal static func asin(_ x: Float) -> Float { shim_asinf(x) }
++
++    @usableFromInline
++    internal static func acos(_ x: Float) -> Float { shim_acosf(x) }
++
++    @usableFromInline
++    internal static func atan(_ x: Float) -> Float { shim_atanf(x) }
++
++    @usableFromInline
++    internal static func atan2(_ y: Float, _ x: Float) -> Float { shim_atan2f(y, x) }
++
++    @usableFromInline
++    internal static func sinh(_ x: Float) -> Float { shim_sinhf(x) }
++
++    @usableFromInline
++    internal static func cosh(_ x: Float) -> Float { shim_coshf(x) }
++
++    @usableFromInline
++    internal static func tanh(_ x: Float) -> Float { shim_tanhf(x) }
++
++    @usableFromInline
++    internal static func asinh(_ x: Float) -> Float { shim_asinhf(x) }
++
++    @usableFromInline
++    internal static func acosh(_ x: Float) -> Float { shim_acoshf(x) }
++
++    @usableFromInline
++    internal static func atanh(_ x: Float) -> Float { shim_atanhf(x) }
++
++    @usableFromInline
++    internal static func pow(_ x: Float, _ y: Float) -> Float { shim_powf(x, y) }
++
++    @usableFromInline
++    internal static func sqrt(_ x: Float) -> Float { x.squareRoot() }
++
++    @usableFromInline
++    internal static func cbrt(_ x: Float) -> Float { shim_cbrtf(x) }
++
++    @usableFromInline
++    internal static func root(_ x: Float, _ n: Int) -> Float {
++
++        guard x >= 0 || n % 2 != 0 else { return .nan }
++
++        if n == 3 { return shim_cbrtf(x) }
++
++        return Float(signOf: x, magnitudeOf: shim_powf(x.magnitude, 1 / Float(n)))
++    }
++
++    @usableFromInline
++    internal static func hypot(_ x: Float, _ y: Float) -> Float { shim_hypotf(x, y) }
++
++    @usableFromInline
++    internal static func exp2(_ x: Float) -> Float { shim_exp2f(x) }
++
++    @usableFromInline
++    internal static func erf(_ x: Float) -> Float { shim_erff(x) }
++
++    @usableFromInline
++    internal static func erfc(_ x: Float) -> Float { shim_erfcf(x) }
++
++    @usableFromInline
++    internal static func tgamma(_ x: Float) -> Float { shim_tgammaf(x) }
++
++    @usableFromInline
++    internal static func lgamma(_ x: Float) -> Float { shim_lgammaf(x) }
++}
++
++extension Numeric.Math {
++    @usableFromInline
++    internal static func exp(_ x: Double) -> Double { shim_exp(x) }
++
++    @usableFromInline
++    internal static func expm1(_ x: Double) -> Double { shim_expm1(x) }
++
++    @usableFromInline
++    internal static func log(_ x: Double) -> Double { shim_log(x) }
++
++    @usableFromInline
++    internal static func log1p(_ x: Double) -> Double { shim_log1p(x) }
++
++    @usableFromInline
++    internal static func log2(_ x: Double) -> Double { shim_log2(x) }
++
++    @usableFromInline
++    internal static func log10(_ x: Double) -> Double { shim_log10(x) }
++
++    @usableFromInline
++    internal static func sin(_ x: Double) -> Double { shim_sin(x) }
++
++    @usableFromInline
++    internal static func cos(_ x: Double) -> Double { shim_cos(x) }
++
++    @usableFromInline
++    internal static func tan(_ x: Double) -> Double { shim_tan(x) }
++
++    @usableFromInline
++    internal static func asin(_ x: Double) -> Double { shim_asin(x) }
++
++    @usableFromInline
++    internal static func acos(_ x: Double) -> Double { shim_acos(x) }
++
++    @usableFromInline
++    internal static func atan(_ x: Double) -> Double { shim_atan(x) }
++
++    @usableFromInline
++    internal static func atan2(_ y: Double, _ x: Double) -> Double { shim_atan2(y, x) }
++
++    @usableFromInline
++    internal static func sinh(_ x: Double) -> Double { shim_sinh(x) }
++
++    @usableFromInline
++    internal static func cosh(_ x: Double) -> Double { shim_cosh(x) }
++
++    @usableFromInline
++    internal static func tanh(_ x: Double) -> Double { shim_tanh(x) }
++
++    @usableFromInline
++    internal static func asinh(_ x: Double) -> Double { shim_asinh(x) }
++
++    @usableFromInline
++    internal static func acosh(_ x: Double) -> Double { shim_acosh(x) }
++
++    @usableFromInline
++    internal static func atanh(_ x: Double) -> Double { shim_atanh(x) }
++
++    @usableFromInline
++    internal static func pow(_ x: Double, _ y: Double) -> Double { shim_pow(x, y) }
++
++    @usableFromInline
++    internal static func sqrt(_ x: Double) -> Double { x.squareRoot() }
++
++    @usableFromInline
++    internal static func cbrt(_ x: Double) -> Double { shim_cbrt(x) }
++
++    @usableFromInline
++    internal static func root(_ x: Double, _ n: Int) -> Double {
++
++        guard x >= 0 || n % 2 != 0 else { return .nan }
++
++        if n == 3 { return shim_cbrt(x) }
++
++        return Double(signOf: x, magnitudeOf: shim_pow(x.magnitude, 1 / Double(n)))
++    }
++
++    @usableFromInline
++    internal static func hypot(_ x: Double, _ y: Double) -> Double { shim_hypot(x, y) }
++
++    @usableFromInline
++    internal static func exp2(_ x: Double) -> Double { shim_exp2(x) }
++
++    @usableFromInline
++    internal static func erf(_ x: Double) -> Double { shim_erf(x) }
++
++    @usableFromInline
++    internal static func erfc(_ x: Double) -> Double { shim_erfc(x) }
++
++    @usableFromInline
++    internal static func tgamma(_ x: Double) -> Double { shim_tgamma(x) }
++
++    @usableFromInline
++    internal static func lgamma(_ x: Double) -> Double { shim_lgamma(x) }
++}
++
++#if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || ((os(macOS) || targetEnvironment(macCatalyst)) && arch(arm64))
++    extension Numeric.Math {
++        @usableFromInline
++        internal static func exp(_ x: Float16) -> Float16 { Float16(shim_expf(Float(x))) }
++
++        @usableFromInline
++        internal static func expm1(_ x: Float16) -> Float16 { Float16(shim_expm1f(Float(x))) }
++
++        @usableFromInline
++        internal static func log(_ x: Float16) -> Float16 { Float16(shim_logf(Float(x))) }
++
++        @usableFromInline
++        internal static func log1p(_ x: Float16) -> Float16 { Float16(shim_log1pf(Float(x))) }
++
++        @usableFromInline
++        internal static func log2(_ x: Float16) -> Float16 { Float16(shim_log2f(Float(x))) }
++
++        @usableFromInline
++        internal static func log10(_ x: Float16) -> Float16 { Float16(shim_log10f(Float(x))) }
++
++        @usableFromInline
++        internal static func sin(_ x: Float16) -> Float16 { Float16(shim_sinf(Float(x))) }
++
++        @usableFromInline
++        internal static func cos(_ x: Float16) -> Float16 { Float16(shim_cosf(Float(x))) }
++
++        @usableFromInline
++        internal static func tan(_ x: Float16) -> Float16 { Float16(shim_tanf(Float(x))) }
++
++        @usableFromInline
++        internal static func asin(_ x: Float16) -> Float16 { Float16(shim_asinf(Float(x))) }
++
++        @usableFromInline
++        internal static func acos(_ x: Float16) -> Float16 { Float16(shim_acosf(Float(x))) }
++
++        @usableFromInline
++        internal static func atan(_ x: Float16) -> Float16 { Float16(shim_atanf(Float(x))) }
++
++        @usableFromInline
++        internal static func atan2(_ y: Float16, _ x: Float16) -> Float16 {
++            Float16(shim_atan2f(Float(y), Float(x)))
++        }
++
++        @usableFromInline
++        internal static func sinh(_ x: Float16) -> Float16 { Float16(shim_sinhf(Float(x))) }
++
++        @usableFromInline
++        internal static func cosh(_ x: Float16) -> Float16 { Float16(shim_coshf(Float(x))) }
++
++        @usableFromInline
++        internal static func tanh(_ x: Float16) -> Float16 { Float16(shim_tanhf(Float(x))) }
++
++        @usableFromInline
++        internal static func asinh(_ x: Float16) -> Float16 { Float16(shim_asinhf(Float(x))) }
++
++        @usableFromInline
++        internal static func acosh(_ x: Float16) -> Float16 { Float16(shim_acoshf(Float(x))) }
++
++        @usableFromInline
++        internal static func atanh(_ x: Float16) -> Float16 { Float16(shim_atanhf(Float(x))) }
++
++        @usableFromInline
++        internal static func pow(_ x: Float16, _ y: Float16) -> Float16 {
++            Float16(shim_powf(Float(x), Float(y)))
++        }
++
++        @usableFromInline
++        internal static func sqrt(_ x: Float16) -> Float16 { x.squareRoot() }
++
++        @usableFromInline
++        internal static func cbrt(_ x: Float16) -> Float16 { Float16(shim_cbrtf(Float(x))) }
++
++        @usableFromInline
++        internal static func root(_ x: Float16, _ n: Int) -> Float16 {
++            guard x >= 0 || n % 2 != 0 else { return .nan }
++            if n == 3 { return Float16(shim_cbrtf(Float(x))) }
++            return Float16(
++                signOf: x,
++                magnitudeOf: Float16(shim_powf(Float(x.magnitude), 1 / Float(n)))
++            )
++        }
++
++        @usableFromInline
++        internal static func hypot(_ x: Float16, _ y: Float16) -> Float16 {
++            Float16(shim_hypotf(Float(x), Float(y)))
++        }
++
++        @usableFromInline
++        internal static func exp2(_ x: Float16) -> Float16 { Float16(shim_exp2f(Float(x))) }
++
++        @usableFromInline
++        internal static func erf(_ x: Float16) -> Float16 { Float16(shim_erff(Float(x))) }
++
++        @usableFromInline
++        internal static func erfc(_ x: Float16) -> Float16 { Float16(shim_erfcf(Float(x))) }
++
++        @usableFromInline
++        internal static func tgamma(_ x: Float16) -> Float16 { Float16(shim_tgammaf(Float(x))) }
++
++        @usableFromInline
++        internal static func lgamma(_ x: Float16) -> Float16 { Float16(shim_lgammaf(Float(x))) }
++    }
++#endif
+diff --git a/Sources/Numeric/Numeric.Quantized.swift b/Sources/Numeric/Numeric.Quantized.swift
+deleted file mode 100644
+index 180c470..0000000
+--- a/Sources/Numeric/Numeric.Quantized.swift
++++ /dev/null
+@@ -1,3 +0,0 @@
+-public import Quantizer
+-
+-extension Numeric { public typealias Quantized = Quantizer::Quantized }
+diff --git a/Sources/Numeric/Numeric.Relaxed.swift b/Sources/Numeric/Numeric.Relaxed.swift
+index f602e39..b48741e 100644
+--- a/Sources/Numeric/Numeric.Relaxed.swift
++++ b/Sources/Numeric/Numeric.Relaxed.swift
+@@ -38,3 +38,126 @@ extension Numeric.Relaxed {
+         c + a * b
+     }
+ }
++
++#if Complex
++    public import Complex
++
++    extension Numeric.Relaxed {
++
++        @inlinable
++        public static func sum(
++            _ a: Complex.Number<Double>,
++            _ b: Complex.Number<Double>
++        ) -> Complex.Number<Double> {
++            Complex.Number(
++                Self.sum(a.real.value, b.real.value),
++                Self.sum(a.imaginary.value, b.imaginary.value)
++            )
++        }
++
++        @inlinable
++        public static func product(
++            _ a: Complex.Number<Double>,
++            _ b: Complex.Number<Double>
++        ) -> Complex.Number<Double> {
++
++            Complex.Number(
++                Self.sum(
++                    Self.product(a.real.value, b.real.value),
++                    -Self.product(a.imaginary.value, b.imaginary.value)
++                ),
++                Self.sum(
++                    Self.product(a.real.value, b.imaginary.value),
++                    Self.product(a.imaginary.value, b.real.value)
++                )
++            )
++        }
++
++        @inlinable
++        public static func multiplyAdd(
++            _ a: Complex.Number<Double>,
++            _ b: Complex.Number<Double>,
++            _ c: Complex.Number<Double>
++        ) -> Complex.Number<Double> {
++            sum(product(a, b), c)
++        }
++
++        @inlinable
++        public static func product(
++            _ z: Complex.Number<Double>,
++            _ s: Double
++        ) -> Complex.Number<Double> {
++            Complex.Number(
++                Self.product(z.real.value, s),
++                Self.product(z.imaginary.value, s)
++            )
++        }
++
++        @inlinable
++        public static func product(
++            _ s: Double,
++            _ z: Complex.Number<Double>
++        ) -> Complex.Number<Double> {
++            product(z, s)
++        }
++    }
++
++    extension Numeric.Relaxed {
++
++        @inlinable
++        public static func sum(
++            _ a: Complex.Number<Float>,
++            _ b: Complex.Number<Float>
++        ) -> Complex.Number<Float> {
++            Complex.Number(
++                Self.sum(a.real.value, b.real.value),
++                Self.sum(a.imaginary.value, b.imaginary.value)
++            )
++        }
++
++        @inlinable
++        public static func product(
++            _ a: Complex.Number<Float>,
++            _ b: Complex.Number<Float>
++        ) -> Complex.Number<Float> {
++            Complex.Number(
++                Self.sum(
++                    Self.product(a.real.value, b.real.value),
++                    -Self.product(a.imaginary.value, b.imaginary.value)
++                ),
++                Self.sum(
++                    Self.product(a.real.value, b.imaginary.value),
++                    Self.product(a.imaginary.value, b.real.value)
++                )
++            )
++        }
++
++        @inlinable
++        public static func multiplyAdd(
++            _ a: Complex.Number<Float>,
++            _ b: Complex.Number<Float>,
++            _ c: Complex.Number<Float>
++        ) -> Complex.Number<Float> {
++            sum(product(a, b), c)
++        }
++
++        @inlinable
++        public static func product(
++            _ z: Complex.Number<Float>,
++            _ s: Float
++        ) -> Complex.Number<Float> {
++            Complex.Number(
++                Self.product(z.real.value, s),
++                Self.product(z.imaginary.value, s)
++            )
++        }
++
++        @inlinable
++        public static func product(
++            _ s: Float,
++            _ z: Complex.Number<Float>
++        ) -> Complex.Number<Float> {
++            product(z, s)
++        }
++    }
++#endif
+diff --git a/Sources/Numeric/Numeric.Rounding.swift b/Sources/Numeric/Numeric.Rounding.swift
+deleted file mode 100644
+index 42e1087..0000000
+--- a/Sources/Numeric/Numeric.Rounding.swift
++++ /dev/null
+@@ -1,3 +0,0 @@
+-public import Rounding
+-
+-extension Numeric { public typealias Rounding = Rounding::Rounding }
+diff --git a/Sources/Numeric/Numeric.swift b/Sources/Numeric/Numeric.swift
+index 45aec6a..6af4957 100644
+--- a/Sources/Numeric/Numeric.swift
++++ b/Sources/Numeric/Numeric.swift
+@@ -1,3 +1,6 @@
++public import Quantizer
++public import Rounding
++
+ public enum Numeric {
+ 
+     public typealias `Protocol` = Swift::Numeric
+@@ -6,3 +9,12 @@ public enum Numeric {
+ extension Numeric {
+     public typealias Transcendental = Numeric::Transcendental
+ }
++
++extension Numeric {
++
++    public typealias Integer = Int
++}
++
++extension Numeric { public typealias Quantized = Quantizer::Quantized }
++
++extension Numeric { public typealias Rounding = Rounding::Rounding }
+diff --git a/Sources/Numeric/Real.Numeric.Math.swift b/Sources/Numeric/Real.Numeric.Math.swift
+deleted file mode 100644
+index 6df7758..0000000
+--- a/Sources/Numeric/Real.Numeric.Math.swift
++++ /dev/null
+@@ -1,297 +0,0 @@
+-import Numeric_Shims
+-
+-extension Numeric.Math {
+-    @usableFromInline
+-    internal static func exp(_ x: Float) -> Float { shim_expf(x) }
+-
+-    @usableFromInline
+-    internal static func expm1(_ x: Float) -> Float { shim_expm1f(x) }
+-
+-    @usableFromInline
+-    internal static func log(_ x: Float) -> Float { shim_logf(x) }
+-
+-    @usableFromInline
+-    internal static func log1p(_ x: Float) -> Float { shim_log1pf(x) }
+-
+-    @usableFromInline
+-    internal static func log2(_ x: Float) -> Float { shim_log2f(x) }
+-
+-    @usableFromInline
+-    internal static func log10(_ x: Float) -> Float { shim_log10f(x) }
+-
+-    @usableFromInline
+-    internal static func sin(_ x: Float) -> Float { shim_sinf(x) }
+-
+-    @usableFromInline
+-    internal static func cos(_ x: Float) -> Float { shim_cosf(x) }
+-
+-    @usableFromInline
+-    internal static func tan(_ x: Float) -> Float { shim_tanf(x) }
+-
+-    @usableFromInline
+-    internal static func asin(_ x: Float) -> Float { shim_asinf(x) }
+-
+-    @usableFromInline
+-    internal static func acos(_ x: Float) -> Float { shim_acosf(x) }
+-
+-    @usableFromInline
+-    internal static func atan(_ x: Float) -> Float { shim_atanf(x) }
+-
+-    @usableFromInline
+-    internal static func atan2(_ y: Float, _ x: Float) -> Float { shim_atan2f(y, x) }
+-
+-    @usableFromInline
+-    internal static func sinh(_ x: Float) -> Float { shim_sinhf(x) }
+-
+-    @usableFromInline
+-    internal static func cosh(_ x: Float) -> Float { shim_coshf(x) }
+-
+-    @usableFromInline
+-    internal static func tanh(_ x: Float) -> Float { shim_tanhf(x) }
+-
+-    @usableFromInline
+-    internal static func asinh(_ x: Float) -> Float { shim_asinhf(x) }
+-
+-    @usableFromInline
+-    internal static func acosh(_ x: Float) -> Float { shim_acoshf(x) }
+-
+-    @usableFromInline
+-    internal static func atanh(_ x: Float) -> Float { shim_atanhf(x) }
+-
+-    @usableFromInline
+-    internal static func pow(_ x: Float, _ y: Float) -> Float { shim_powf(x, y) }
+-
+-    @usableFromInline
+-    internal static func sqrt(_ x: Float) -> Float { x.squareRoot() }
+-
+-    @usableFromInline
+-    internal static func cbrt(_ x: Float) -> Float { shim_cbrtf(x) }
+-
+-    @usableFromInline
+-    internal static func root(_ x: Float, _ n: Int) -> Float {
+-
+-        guard x >= 0 || n % 2 != 0 else { return .nan }
+-
+-        if n == 3 { return shim_cbrtf(x) }
+-
+-        return Float(signOf: x, magnitudeOf: shim_powf(x.magnitude, 1 / Float(n)))
+-    }
+-
+-    @usableFromInline
+-    internal static func hypot(_ x: Float, _ y: Float) -> Float { shim_hypotf(x, y) }
+-
+-    @usableFromInline
+-    internal static func exp2(_ x: Float) -> Float { shim_exp2f(x) }
+-
+-    @usableFromInline
+-    internal static func erf(_ x: Float) -> Float { shim_erff(x) }
+-
+-    @usableFromInline
+-    internal static func erfc(_ x: Float) -> Float { shim_erfcf(x) }
+-
+-    @usableFromInline
+-    internal static func tgamma(_ x: Float) -> Float { shim_tgammaf(x) }
+-
+-    @usableFromInline
+-    internal static func lgamma(_ x: Float) -> Float { shim_lgammaf(x) }
+-}
+-
+-extension Numeric.Math {
+-    @usableFromInline
+-    internal static func exp(_ x: Double) -> Double { shim_exp(x) }
+-
+-    @usableFromInline
+-    internal static func expm1(_ x: Double) -> Double { shim_expm1(x) }
+-
+-    @usableFromInline
+-    internal static func log(_ x: Double) -> Double { shim_log(x) }
+-
+-    @usableFromInline
+-    internal static func log1p(_ x: Double) -> Double { shim_log1p(x) }
+-
+-    @usableFromInline
+-    internal static func log2(_ x: Double) -> Double { shim_log2(x) }
+-
+-    @usableFromInline
+-    internal static func log10(_ x: Double) -> Double { shim_log10(x) }
+-
+-    @usableFromInline
+-    internal static func sin(_ x: Double) -> Double { shim_sin(x) }
+-
+-    @usableFromInline
+-    internal static func cos(_ x: Double) -> Double { shim_cos(x) }
+-
+-    @usableFromInline
+-    internal static func tan(_ x: Double) -> Double { shim_tan(x) }
+-
+-    @usableFromInline
+-    internal static func asin(_ x: Double) -> Double { shim_asin(x) }
+-
+-    @usableFromInline
+-    internal static func acos(_ x: Double) -> Double { shim_acos(x) }
+-
+-    @usableFromInline
+-    internal static func atan(_ x: Double) -> Double { shim_atan(x) }
+-
+-    @usableFromInline
+-    internal static func atan2(_ y: Double, _ x: Double) -> Double { shim_atan2(y, x) }
+-
+-    @usableFromInline
+-    internal static func sinh(_ x: Double) -> Double { shim_sinh(x) }
+-
+-    @usableFromInline
+-    internal static func cosh(_ x: Double) -> Double { shim_cosh(x) }
+-
+-    @usableFromInline
+-    internal static func tanh(_ x: Double) -> Double { shim_tanh(x) }
+-
+-    @usableFromInline
+-    internal static func asinh(_ x: Double) -> Double { shim_asinh(x) }
+-
+-    @usableFromInline
+-    internal static func acosh(_ x: Double) -> Double { shim_acosh(x) }
+-
+-    @usableFromInline
+-    internal static func atanh(_ x: Double) -> Double { shim_atanh(x) }
+-
+-    @usableFromInline
+-    internal static func pow(_ x: Double, _ y: Double) -> Double { shim_pow(x, y) }
+-
+-    @usableFromInline
+-    internal static func sqrt(_ x: Double) -> Double { x.squareRoot() }
+-
+-    @usableFromInline
+-    internal static func cbrt(_ x: Double) -> Double { shim_cbrt(x) }
+-
+-    @usableFromInline
+-    internal static func root(_ x: Double, _ n: Int) -> Double {
+-
+-        guard x >= 0 || n % 2 != 0 else { return .nan }
+-
+-        if n == 3 { return shim_cbrt(x) }
+-
+-        return Double(signOf: x, magnitudeOf: shim_pow(x.magnitude, 1 / Double(n)))
+-    }
+-
+-    @usableFromInline
+-    internal static func hypot(_ x: Double, _ y: Double) -> Double { shim_hypot(x, y) }
+-
+-    @usableFromInline
+-    internal static func exp2(_ x: Double) -> Double { shim_exp2(x) }
+-
+-    @usableFromInline
+-    internal static func erf(_ x: Double) -> Double { shim_erf(x) }
+-
+-    @usableFromInline
+-    internal static func erfc(_ x: Double) -> Double { shim_erfc(x) }
+-
+-    @usableFromInline
+-    internal static func tgamma(_ x: Double) -> Double { shim_tgamma(x) }
+-
+-    @usableFromInline
+-    internal static func lgamma(_ x: Double) -> Double { shim_lgamma(x) }
+-}
+-
+-#if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || ((os(macOS) || targetEnvironment(macCatalyst)) && arch(arm64))
+-    extension Numeric.Math {
+-        @usableFromInline
+-        internal static func exp(_ x: Float16) -> Float16 { Float16(shim_expf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func expm1(_ x: Float16) -> Float16 { Float16(shim_expm1f(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func log(_ x: Float16) -> Float16 { Float16(shim_logf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func log1p(_ x: Float16) -> Float16 { Float16(shim_log1pf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func log2(_ x: Float16) -> Float16 { Float16(shim_log2f(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func log10(_ x: Float16) -> Float16 { Float16(shim_log10f(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func sin(_ x: Float16) -> Float16 { Float16(shim_sinf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func cos(_ x: Float16) -> Float16 { Float16(shim_cosf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func tan(_ x: Float16) -> Float16 { Float16(shim_tanf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func asin(_ x: Float16) -> Float16 { Float16(shim_asinf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func acos(_ x: Float16) -> Float16 { Float16(shim_acosf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func atan(_ x: Float16) -> Float16 { Float16(shim_atanf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func atan2(_ y: Float16, _ x: Float16) -> Float16 {
+-            Float16(shim_atan2f(Float(y), Float(x)))
+-        }
+-
+-        @usableFromInline
+-        internal static func sinh(_ x: Float16) -> Float16 { Float16(shim_sinhf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func cosh(_ x: Float16) -> Float16 { Float16(shim_coshf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func tanh(_ x: Float16) -> Float16 { Float16(shim_tanhf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func asinh(_ x: Float16) -> Float16 { Float16(shim_asinhf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func acosh(_ x: Float16) -> Float16 { Float16(shim_acoshf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func atanh(_ x: Float16) -> Float16 { Float16(shim_atanhf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func pow(_ x: Float16, _ y: Float16) -> Float16 {
+-            Float16(shim_powf(Float(x), Float(y)))
+-        }
+-
+-        @usableFromInline
+-        internal static func sqrt(_ x: Float16) -> Float16 { x.squareRoot() }
+-
+-        @usableFromInline
+-        internal static func cbrt(_ x: Float16) -> Float16 { Float16(shim_cbrtf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func root(_ x: Float16, _ n: Int) -> Float16 {
+-            guard x >= 0 || n % 2 != 0 else { return .nan }
+-            if n == 3 { return Float16(shim_cbrtf(Float(x))) }
+-            return Float16(
+-                signOf: x,
+-                magnitudeOf: Float16(shim_powf(Float(x.magnitude), 1 / Float(n)))
+-            )
+-        }
+-
+-        @usableFromInline
+-        internal static func hypot(_ x: Float16, _ y: Float16) -> Float16 {
+-            Float16(shim_hypotf(Float(x), Float(y)))
+-        }
+-
+-        @usableFromInline
+-        internal static func exp2(_ x: Float16) -> Float16 { Float16(shim_exp2f(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func erf(_ x: Float16) -> Float16 { Float16(shim_erff(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func erfc(_ x: Float16) -> Float16 { Float16(shim_erfcf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func tgamma(_ x: Float16) -> Float16 { Float16(shim_tgammaf(Float(x))) }
+-
+-        @usableFromInline
+-        internal static func lgamma(_ x: Float16) -> Float16 { Float16(shim_lgammaf(Float(x))) }
+-    }
+-#endif
+-- 
+2.43.0
+

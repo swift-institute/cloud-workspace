@@ -1,0 +1,152 @@
+From b07c3fdc22dbe8b12f1c826c34570969cf505064 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:40 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Affine/Affine.swift               | 57 +++++++++++++++++++++++
+ Sources/Affine/Tagged/Affine+Tagged.swift | 19 --------
+ Sources/Affine/Vector/Affine+Vector.swift | 36 --------------
+ 3 files changed, 57 insertions(+), 55 deletions(-)
+ delete mode 100644 Sources/Affine/Tagged/Affine+Tagged.swift
+ delete mode 100644 Sources/Affine/Vector/Affine+Vector.swift
+
+diff --git a/Sources/Affine/Affine.swift b/Sources/Affine/Affine.swift
+index a17cea3..dcdae08 100644
+--- a/Sources/Affine/Affine.swift
++++ b/Sources/Affine/Affine.swift
+@@ -21,3 +21,60 @@ extension Affine {
+         try difference(start, end)
+     }
+ }
++
++#if Tagged
++    @_exported public import Tagged
++
++    extension Affine {
++
++        public func tagged<Tag: ~Copyable & ~Escapable>(
++            _ tag: Tag.Type = Tag.self
++        ) -> Affine<Tagged<Tag, Point>, Displacement, Failure> {
++            .init(
++                translating: { (point, offset) throws(Failure) in
++                    Tagged(_unchecked: try self.translated(point.underlying, by: offset))
++                },
++                displacement: { (start, end) throws(Failure) in
++                    try self.displacement(from: start.underlying, to: end.underlying)
++                }
++            )
++        }
++    }
++#endif
++
++#if Vector
++    @_exported public import Vector
++
++    extension Affine {
++
++        public static func componentwise<let N: Int, PositionScalar, DisplacementScalar>(
++            coordinates: @escaping (Point) -> Vector<N, PositionScalar>,
++            point: @escaping (Vector<N, PositionScalar>) -> Point,
++            components: @escaping (Displacement) -> Vector<N, DisplacementScalar>,
++            displacement: @escaping (Vector<N, DisplacementScalar>) -> Displacement,
++            translating:
++                @escaping (PositionScalar, DisplacementScalar) throws(Failure) -> PositionScalar,
++            subtracting:
++                @escaping (PositionScalar, PositionScalar) throws(Failure) -> DisplacementScalar
++        ) -> Self {
++            Self(
++                translating: { (value, offset) throws(Failure) in
++                    let source = coordinates(value)
++                    let delta = components(offset)
++                    let result: InlineArray<N, PositionScalar> = try InlineArray {
++                        (index: Int) throws(Failure) in try translating(source[index], delta[index])
++                    }
++                    return point(Vector(result))
++                },
++                displacement: { (start, end) throws(Failure) in
++                    let lhs = coordinates(start)
++                    let rhs = coordinates(end)
++                    let result: InlineArray<N, DisplacementScalar> = try InlineArray {
++                        (index: Int) throws(Failure) in try subtracting(lhs[index], rhs[index])
++                    }
++                    return displacement(Vector(result))
++                }
++            )
++        }
++    }
++#endif
+diff --git a/Sources/Affine/Tagged/Affine+Tagged.swift b/Sources/Affine/Tagged/Affine+Tagged.swift
+deleted file mode 100644
+index af7ec7e..0000000
+--- a/Sources/Affine/Tagged/Affine+Tagged.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-#if Tagged
+-    @_exported public import Tagged
+-
+-    extension Affine {
+-
+-        public func tagged<Tag: ~Copyable & ~Escapable>(
+-            _ tag: Tag.Type = Tag.self
+-        ) -> Affine<Tagged<Tag, Point>, Displacement, Failure> {
+-            .init(
+-                translating: { (point, offset) throws(Failure) in
+-                    Tagged(_unchecked: try self.translated(point.underlying, by: offset))
+-                },
+-                displacement: { (start, end) throws(Failure) in
+-                    try self.displacement(from: start.underlying, to: end.underlying)
+-                }
+-            )
+-        }
+-    }
+-#endif
+diff --git a/Sources/Affine/Vector/Affine+Vector.swift b/Sources/Affine/Vector/Affine+Vector.swift
+deleted file mode 100644
+index 727ef00..0000000
+--- a/Sources/Affine/Vector/Affine+Vector.swift
++++ /dev/null
+@@ -1,36 +0,0 @@
+-#if Vector
+-    @_exported public import Vector
+-
+-    extension Affine {
+-
+-        public static func componentwise<let N: Int, PositionScalar, DisplacementScalar>(
+-            coordinates: @escaping (Point) -> Vector<N, PositionScalar>,
+-            point: @escaping (Vector<N, PositionScalar>) -> Point,
+-            components: @escaping (Displacement) -> Vector<N, DisplacementScalar>,
+-            displacement: @escaping (Vector<N, DisplacementScalar>) -> Displacement,
+-            translating:
+-                @escaping (PositionScalar, DisplacementScalar) throws(Failure) -> PositionScalar,
+-            subtracting:
+-                @escaping (PositionScalar, PositionScalar) throws(Failure) -> DisplacementScalar
+-        ) -> Self {
+-            Self(
+-                translating: { (value, offset) throws(Failure) in
+-                    let source = coordinates(value)
+-                    let delta = components(offset)
+-                    let result: InlineArray<N, PositionScalar> = try InlineArray {
+-                        (index: Int) throws(Failure) in try translating(source[index], delta[index])
+-                    }
+-                    return point(Vector(result))
+-                },
+-                displacement: { (start, end) throws(Failure) in
+-                    let lhs = coordinates(start)
+-                    let rhs = coordinates(end)
+-                    let result: InlineArray<N, DisplacementScalar> = try InlineArray {
+-                        (index: Int) throws(Failure) in try subtracting(lhs[index], rhs[index])
+-                    }
+-                    return displacement(Vector(result))
+-                }
+-            )
+-        }
+-    }
+-#endif
+-- 
+2.43.0
+

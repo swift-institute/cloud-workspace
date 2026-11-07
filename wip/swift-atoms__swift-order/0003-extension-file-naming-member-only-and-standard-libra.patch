@@ -1,0 +1,322 @@
+From b4dca87e8a9c9f7da41c3ad002fbf68740f343f5 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:46 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Order/Order.Comparator+Chaining.swift | 22 -------
+ .../Order/Order.Comparator+Projection.swift   | 21 ------
+ Sources/Order/Order.Comparator+Reversal.swift |  9 ---
+ Sources/Order/Order.Comparator.swift          | 55 ++++++++++++++++
+ Sources/Order/Order.Comparison+Chaining.swift | 18 -----
+ .../Order/Order.Comparison+Comparable.swift   | 15 -----
+ .../Order/Order.Comparison+Predicates.swift   | 17 -----
+ Sources/Order/Order.Comparison+Reversal.swift | 11 ----
+ Sources/Order/Order.Comparison.swift          | 65 +++++++++++++++++++
+ 9 files changed, 120 insertions(+), 113 deletions(-)
+ delete mode 100644 Sources/Order/Order.Comparator+Chaining.swift
+ delete mode 100644 Sources/Order/Order.Comparator+Projection.swift
+ delete mode 100644 Sources/Order/Order.Comparator+Reversal.swift
+ delete mode 100644 Sources/Order/Order.Comparison+Chaining.swift
+ delete mode 100644 Sources/Order/Order.Comparison+Comparable.swift
+ delete mode 100644 Sources/Order/Order.Comparison+Predicates.swift
+ delete mode 100644 Sources/Order/Order.Comparison+Reversal.swift
+
+diff --git a/Sources/Order/Order.Comparator+Chaining.swift b/Sources/Order/Order.Comparator+Chaining.swift
+deleted file mode 100644
+index d37f119..0000000
+--- a/Sources/Order/Order.Comparator+Chaining.swift
++++ /dev/null
+@@ -1,22 +0,0 @@
+-extension Order.Comparator where T: ~Copyable {
+-
+-    @inlinable
+-    public func then(_ other: Order.Comparator<T>) -> Order.Comparator<T> {
+-        Order.Comparator { [compare] lhs, rhs in
+-            compare(lhs, rhs).then(other.compare(lhs, rhs))
+-        }
+-    }
+-
+-    @inlinable
+-    public func then(
+-        with other: @escaping @Sendable () -> Order.Comparator<T>
+-    ) -> Order.Comparator<T> {
+-        Order.Comparator { [compare] lhs, rhs in
+-            let primary = compare(lhs, rhs)
+-            if primary.isEqual {
+-                return other().compare(lhs, rhs)
+-            }
+-            return primary
+-        }
+-    }
+-}
+diff --git a/Sources/Order/Order.Comparator+Projection.swift b/Sources/Order/Order.Comparator+Projection.swift
+deleted file mode 100644
+index 8ed8372..0000000
+--- a/Sources/Order/Order.Comparator+Projection.swift
++++ /dev/null
+@@ -1,21 +0,0 @@
+-extension Order.Comparator where T: ~Copyable {
+-
+-    @inlinable
+-    public static func by<Value: Swift::Comparable & SendableMetatype & ~Copyable>(
+-        _ selector: @escaping @Sendable (borrowing T) -> Value
+-    ) -> Order.Comparator<T> {
+-        return Order.Comparator { lhs, rhs in
+-            Order.Comparison(selector(lhs), selector(rhs))
+-        }
+-    }
+-
+-    @inlinable
+-    public static func by<Value: ~Copyable>(
+-        using comparator: Order.Comparator<Value>,
+-        _ selector: @escaping @Sendable (borrowing T) -> Value
+-    ) -> Order.Comparator<T> {
+-        Order.Comparator { lhs, rhs in
+-            comparator(selector(lhs), selector(rhs))
+-        }
+-    }
+-}
+diff --git a/Sources/Order/Order.Comparator+Reversal.swift b/Sources/Order/Order.Comparator+Reversal.swift
+deleted file mode 100644
+index b77ff5b..0000000
+--- a/Sources/Order/Order.Comparator+Reversal.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Order.Comparator where T: ~Copyable {
+-
+-    @inlinable
+-    public var reversed: Order.Comparator<T> {
+-        Order.Comparator { [compare] lhs, rhs in
+-            compare(lhs, rhs).reversed
+-        }
+-    }
+-}
+diff --git a/Sources/Order/Order.Comparator.swift b/Sources/Order/Order.Comparator.swift
+index 6cea911..2c32652 100644
+--- a/Sources/Order/Order.Comparator.swift
++++ b/Sources/Order/Order.Comparator.swift
+@@ -20,3 +20,58 @@ extension Order.Comparator where T: ~Copyable {
+         compare(lhs, rhs)
+     }
+ }
++
++extension Order.Comparator where T: ~Copyable {
++
++    @inlinable
++    public func then(_ other: Order.Comparator<T>) -> Order.Comparator<T> {
++        Order.Comparator { [compare] lhs, rhs in
++            compare(lhs, rhs).then(other.compare(lhs, rhs))
++        }
++    }
++
++    @inlinable
++    public func then(
++        with other: @escaping @Sendable () -> Order.Comparator<T>
++    ) -> Order.Comparator<T> {
++        Order.Comparator { [compare] lhs, rhs in
++            let primary = compare(lhs, rhs)
++            if primary.isEqual {
++                return other().compare(lhs, rhs)
++            }
++            return primary
++        }
++    }
++}
++
++extension Order.Comparator where T: ~Copyable {
++
++    @inlinable
++    public static func by<Value: Swift::Comparable & SendableMetatype & ~Copyable>(
++        _ selector: @escaping @Sendable (borrowing T) -> Value
++    ) -> Order.Comparator<T> {
++        return Order.Comparator { lhs, rhs in
++            Order.Comparison(selector(lhs), selector(rhs))
++        }
++    }
++
++    @inlinable
++    public static func by<Value: ~Copyable>(
++        using comparator: Order.Comparator<Value>,
++        _ selector: @escaping @Sendable (borrowing T) -> Value
++    ) -> Order.Comparator<T> {
++        Order.Comparator { lhs, rhs in
++            comparator(selector(lhs), selector(rhs))
++        }
++    }
++}
++
++extension Order.Comparator where T: ~Copyable {
++
++    @inlinable
++    public var reversed: Order.Comparator<T> {
++        Order.Comparator { [compare] lhs, rhs in
++            compare(lhs, rhs).reversed
++        }
++    }
++}
+diff --git a/Sources/Order/Order.Comparison+Chaining.swift b/Sources/Order/Order.Comparison+Chaining.swift
+deleted file mode 100644
+index 4273cc8..0000000
+--- a/Sources/Order/Order.Comparison+Chaining.swift
++++ /dev/null
+@@ -1,18 +0,0 @@
+-extension Order.Comparison {
+-
+-    @inlinable
+-    public func then(_ other: Order.Comparison) -> Order.Comparison {
+-        switch self {
+-        case .equal: other
+-        case .less, .greater: self
+-        }
+-    }
+-
+-    @inlinable
+-    public func then(with other: () -> Order.Comparison) -> Order.Comparison {
+-        switch self {
+-        case .equal: other()
+-        case .less, .greater: self
+-        }
+-    }
+-}
+diff --git a/Sources/Order/Order.Comparison+Comparable.swift b/Sources/Order/Order.Comparison+Comparable.swift
+deleted file mode 100644
+index 9ed2d27..0000000
+--- a/Sources/Order/Order.Comparison+Comparable.swift
++++ /dev/null
+@@ -1,15 +0,0 @@
+-extension Order.Comparison {
+-
+-    @inlinable
+-    public init<T: Swift::Comparable & ~Copyable>(_ lhs: borrowing T, _ rhs: borrowing T) {
+-        if lhs < rhs {
+-            self = .less
+-        } else if lhs > rhs {
+-            self = .greater
+-        } else if lhs == rhs {
+-            self = .equal
+-        } else {
+-            preconditionFailure("Unordered values have no Order.Comparison; use Order.Comparator.Partial")
+-        }
+-    }
+-}
+diff --git a/Sources/Order/Order.Comparison+Predicates.swift b/Sources/Order/Order.Comparison+Predicates.swift
+deleted file mode 100644
+index 24fb06a..0000000
+--- a/Sources/Order/Order.Comparison+Predicates.swift
++++ /dev/null
+@@ -1,17 +0,0 @@
+-extension Order.Comparison {
+-
+-    @inlinable
+-    public var isLess: Bool { self == .less }
+-
+-    @inlinable
+-    public var isEqual: Bool { self == .equal }
+-
+-    @inlinable
+-    public var isGreater: Bool { self == .greater }
+-
+-    @inlinable
+-    public var isLessOrEqual: Bool { self != .greater }
+-
+-    @inlinable
+-    public var isGreaterOrEqual: Bool { self != .less }
+-}
+diff --git a/Sources/Order/Order.Comparison+Reversal.swift b/Sources/Order/Order.Comparison+Reversal.swift
+deleted file mode 100644
+index 12fd08d..0000000
+--- a/Sources/Order/Order.Comparison+Reversal.swift
++++ /dev/null
+@@ -1,11 +0,0 @@
+-extension Order.Comparison {
+-
+-    @inlinable
+-    public var reversed: Order.Comparison {
+-        switch self {
+-        case .less: .greater
+-        case .equal: .equal
+-        case .greater: .less
+-        }
+-    }
+-}
+diff --git a/Sources/Order/Order.Comparison.swift b/Sources/Order/Order.Comparison.swift
+index d2fe71f..e6ac892 100644
+--- a/Sources/Order/Order.Comparison.swift
++++ b/Sources/Order/Order.Comparison.swift
+@@ -13,3 +13,68 @@ extension Order {
+ #if !hasFeature(Embedded)
+     extension Order.Comparison: Swift::Codable {}
+ #endif
++
++extension Order.Comparison {
++
++    @inlinable
++    public func then(_ other: Order.Comparison) -> Order.Comparison {
++        switch self {
++        case .equal: other
++        case .less, .greater: self
++        }
++    }
++
++    @inlinable
++    public func then(with other: () -> Order.Comparison) -> Order.Comparison {
++        switch self {
++        case .equal: other()
++        case .less, .greater: self
++        }
++    }
++}
++
++extension Order.Comparison {
++
++    @inlinable
++    public init<T: Swift::Comparable & ~Copyable>(_ lhs: borrowing T, _ rhs: borrowing T) {
++        if lhs < rhs {
++            self = .less
++        } else if lhs > rhs {
++            self = .greater
++        } else if lhs == rhs {
++            self = .equal
++        } else {
++            preconditionFailure("Unordered values have no Order.Comparison; use Order.Comparator.Partial")
++        }
++    }
++}
++
++extension Order.Comparison {
++
++    @inlinable
++    public var isLess: Bool { self == .less }
++
++    @inlinable
++    public var isEqual: Bool { self == .equal }
++
++    @inlinable
++    public var isGreater: Bool { self == .greater }
++
++    @inlinable
++    public var isLessOrEqual: Bool { self != .greater }
++
++    @inlinable
++    public var isGreaterOrEqual: Bool { self != .less }
++}
++
++extension Order.Comparison {
++
++    @inlinable
++    public var reversed: Order.Comparison {
++        switch self {
++        case .less: .greater
++        case .equal: .equal
++        case .greater: .less
++        }
++    }
++}
+-- 
+2.43.0
+

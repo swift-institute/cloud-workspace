@@ -1,0 +1,199 @@
+From a98a69237b372de9d482af55495ea68d9d86a206 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:41 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Calendar/Calendar+Arithmetic.swift    | 43 -------------
+ Sources/Calendar/Calendar+Conversion.swift    | 19 ------
+ Sources/Calendar/Calendar.swift               | 61 +++++++++++++++++++
+ .../Calendar/DayNumber+Swift.Comparable.swift |  1 -
+ .../DayNumber+Swift.RawRepresentable.swift    |  1 -
+ Sources/Calendar/DayNumber.swift              |  4 ++
+ 6 files changed, 65 insertions(+), 64 deletions(-)
+ delete mode 100644 Sources/Calendar/Calendar+Arithmetic.swift
+ delete mode 100644 Sources/Calendar/Calendar+Conversion.swift
+ delete mode 100644 Sources/Calendar/DayNumber+Swift.Comparable.swift
+ delete mode 100644 Sources/Calendar/DayNumber+Swift.RawRepresentable.swift
+
+diff --git a/Sources/Calendar/Calendar+Arithmetic.swift b/Sources/Calendar/Calendar+Arithmetic.swift
+deleted file mode 100644
+index 550d799..0000000
+--- a/Sources/Calendar/Calendar+Arithmetic.swift
++++ /dev/null
+@@ -1,43 +0,0 @@
+-internal import Difference
+-
+-extension Calendar {
+-    @_disfavoredOverload
+-    public func adding(days: Int64, to date: Date) throws(Calendar<Date>.Error) -> Date {
+-        try adding(days: DayNumber.Offset(Int(days)), to: date)
+-    }
+-
+-    public func adding(days: DayNumber.Offset, to date: Date) throws(Calendar<Date>.Error) -> Date {
+-        let day: DayNumber
+-        do throws(Calendar<Date>.Encode.Error) {
+-            day = try dayNumber(of: date)
+-        } catch {
+-            throw .encode(error)
+-        }
+-        let result: DayNumber
+-        do throws(DayNumber.Error) {
+-            result = try day.advanced(by: days)
+-        } catch {
+-            throw .arithmetic(error)
+-        }
+-        do throws(Calendar<Date>.Decode.Error) {
+-            return try self.date(on: result)
+-        } catch {
+-            throw .decode(error)
+-        }
+-    }
+-
+-    public func distance(
+-        from start: Date,
+-        to end: Date
+-    ) throws(Calendar<Date>.Error) -> DayNumber.Offset {
+-        let first: DayNumber
+-        let last: DayNumber
+-        do throws(Calendar<Date>.Encode.Error) {
+-            first = try dayNumber(of: start)
+-            last = try dayNumber(of: end)
+-        } catch {
+-            throw .encode(error)
+-        }
+-        return first.distance(to: last)
+-    }
+-}
+diff --git a/Sources/Calendar/Calendar+Conversion.swift b/Sources/Calendar/Calendar+Conversion.swift
+deleted file mode 100644
+index 0eee0b3..0000000
+--- a/Sources/Calendar/Calendar+Conversion.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-internal import Either
+-internal import Optic
+-
+-extension Calendar {
+-    public func convert<OtherDate>(
+-        _ date: Date,
+-        to calendar: Calendar<OtherDate>
+-    ) throws(Calendar<Date>.Error) -> OtherDate {
+-        let conversion = correspondence.appending(calendar.correspondence.reversed)
+-        do throws(Either<Calendar<Date>.Encode.Error, Calendar<OtherDate>.Decode.Error>) {
+-            return try conversion.forward(date)
+-        } catch {
+-            switch error {
+-            case .left(let error): throw .encode(error)
+-            case .right(.unsupported(let day)): throw .decode(.unsupported(day))
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Calendar/Calendar.swift b/Sources/Calendar/Calendar.swift
+index 4528d1e..a38353a 100644
+--- a/Sources/Calendar/Calendar.swift
++++ b/Sources/Calendar/Calendar.swift
+@@ -1,4 +1,6 @@
+ public import Optic
++internal import Difference
++internal import Either
+ 
+ public struct Calendar<Date> {
+     public let correspondence:
+@@ -36,3 +38,62 @@ extension Calendar {
+         try correspondence.backward(day)
+     }
+ }
++
++extension Calendar {
++    @_disfavoredOverload
++    public func adding(days: Int64, to date: Date) throws(Calendar<Date>.Error) -> Date {
++        try adding(days: DayNumber.Offset(Int(days)), to: date)
++    }
++
++    public func adding(days: DayNumber.Offset, to date: Date) throws(Calendar<Date>.Error) -> Date {
++        let day: DayNumber
++        do throws(Calendar<Date>.Encode.Error) {
++            day = try dayNumber(of: date)
++        } catch {
++            throw .encode(error)
++        }
++        let result: DayNumber
++        do throws(DayNumber.Error) {
++            result = try day.advanced(by: days)
++        } catch {
++            throw .arithmetic(error)
++        }
++        do throws(Calendar<Date>.Decode.Error) {
++            return try self.date(on: result)
++        } catch {
++            throw .decode(error)
++        }
++    }
++
++    public func distance(
++        from start: Date,
++        to end: Date
++    ) throws(Calendar<Date>.Error) -> DayNumber.Offset {
++        let first: DayNumber
++        let last: DayNumber
++        do throws(Calendar<Date>.Encode.Error) {
++            first = try dayNumber(of: start)
++            last = try dayNumber(of: end)
++        } catch {
++            throw .encode(error)
++        }
++        return first.distance(to: last)
++    }
++}
++
++extension Calendar {
++    public func convert<OtherDate>(
++        _ date: Date,
++        to calendar: Calendar<OtherDate>
++    ) throws(Calendar<Date>.Error) -> OtherDate {
++        let conversion = correspondence.appending(calendar.correspondence.reversed)
++        do throws(Either<Calendar<Date>.Encode.Error, Calendar<OtherDate>.Decode.Error>) {
++            return try conversion.forward(date)
++        } catch {
++            switch error {
++            case .left(let error): throw .encode(error)
++            case .right(.unsupported(let day)): throw .decode(.unsupported(day))
++            }
++        }
++    }
++}
+diff --git a/Sources/Calendar/DayNumber+Swift.Comparable.swift b/Sources/Calendar/DayNumber+Swift.Comparable.swift
+deleted file mode 100644
+index 304fbbb..0000000
+--- a/Sources/Calendar/DayNumber+Swift.Comparable.swift
++++ /dev/null
+@@ -1 +0,0 @@
+-extension DayNumber: Swift::Comparable {}
+diff --git a/Sources/Calendar/DayNumber+Swift.RawRepresentable.swift b/Sources/Calendar/DayNumber+Swift.RawRepresentable.swift
+deleted file mode 100644
+index a503f76..0000000
+--- a/Sources/Calendar/DayNumber+Swift.RawRepresentable.swift
++++ /dev/null
+@@ -1 +0,0 @@
+-extension DayNumber: Swift::RawRepresentable {}
+diff --git a/Sources/Calendar/DayNumber.swift b/Sources/Calendar/DayNumber.swift
+index 28329d4..29f3b72 100644
+--- a/Sources/Calendar/DayNumber.swift
++++ b/Sources/Calendar/DayNumber.swift
+@@ -52,3 +52,7 @@ extension DayNumber {
+ 
+ extension DayNumber: Swift::Sendable {}
+ extension DayNumber: Swift::Hashable {}
++
++extension DayNumber: Swift::Comparable {}
++
++extension DayNumber: Swift::RawRepresentable {}
+-- 
+2.43.0
+

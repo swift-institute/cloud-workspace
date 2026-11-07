@@ -1,0 +1,948 @@
+From 99f5247f958775d2d8e20e11fe0f0a3fc97b8b16 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:55 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ ...ATWG.HTML.Base.Element.Configuration.swift |  15 ++
+ .../WHATWG.HTML.Base.Element.swift            |   8 -
+ .../WHATWG.HTML.Area.Element.Shape.swift      |  19 ++
+ .../WHATWG.HTML.Area.Element.swift            |  11 --
+ ...ATWG.HTML.Audio.Element.ControlsList.swift |  25 +++
+ .../WHATWG.HTML.Audio.Element.Preload.swift   |  15 ++
+ .../WHATWG.HTML.Audio.Element.swift           |  28 ---
+ ...omplete.Attribute.GroupingIdentifier.swift |  11 ++
+ ...Autocomplete.Attribute.RecipientType.swift |  17 ++
+ ...Autocomplete.Attribute.Token.Address.swift |  29 ++++
+ ...plete.Attribute.Token.DigitalContact.swift |  27 +++
+ ...ML.Autocomplete.Attribute.Token.Name.swift |  27 +++
+ ...L.Autocomplete.Attribute.Token.Other.swift |  29 ++++
+ ...Autocomplete.Attribute.Token.Payment.swift |  31 ++++
+ ...WG.HTML.Autocomplete.Attribute.Token.swift |  25 +++
+ .../WHATWG.HTML.Autocomplete.Attribute.swift  | 164 ------------------
+ ...WHATWG.HTML.Max.Attribute.DateFormat.swift |  18 ++
+ .../WHATWG.HTML.Max.Attribute.swift           |  13 --
+ ...TWG.HTML.Method.Attribute.HTTPMethod.swift |  13 ++
+ .../WHATWG.HTML.Method.Attribute.swift        |   8 -
+ ...WHATWG.HTML.Min.Attribute.DateFormat.swift |  18 ++
+ .../WHATWG.HTML.Min.Attribute.swift           |  12 --
+ .../WHATWG.HTML.Form.Data.File.MIMEType.swift |   7 +
+ .../WHATWG.HTML.Form.Data.File.swift          |   3 -
+ ...TML.Elementtiming.Attribute.Category.swift |  12 ++
+ .../WHATWG.HTML.Elementtiming.Attribute.swift |   7 -
+ ...WHATWG.HTML.Download.Attribute.Value.swift |  11 ++
+ .../WHATWG.HTML.Download.Attribute.swift      |   6 -
+ ....HTML.AttributionSrc.Attribute.Value.swift |  11 ++
+ ...WHATWG.HTML.AttributionSrc.Attribute.swift |   6 -
+ 30 files changed, 360 insertions(+), 266 deletions(-)
+ create mode 100644 Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.Configuration.swift
+ create mode 100644 Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.Shape.swift
+ create mode 100644 Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.ControlsList.swift
+ create mode 100644 Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.Preload.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.GroupingIdentifier.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.RecipientType.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Address.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.DigitalContact.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Name.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Other.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Payment.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.DateFormat.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.HTTPMethod.swift
+ create mode 100644 Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.DateFormat.swift
+ create mode 100644 Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.MIMEType.swift
+ create mode 100644 Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.Category.swift
+ create mode 100644 Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.Value.swift
+ create mode 100644 Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.Value.swift
+
+diff --git a/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.Configuration.swift b/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.Configuration.swift
+new file mode 100644
+index 0000000..2cde972
+--- /dev/null
++++ b/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.Configuration.swift	
+@@ -0,0 +1,15 @@
++public import WHATWG_HTML_FormAttributes
++public import WHATWG_HTML_LinkAttributes
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Base.Element {
++    public enum Configuration: Sendable, Hashable {
++
++        case href(WHATWG.HTML.Href.Attribute)
++
++        case target(WHATWG.HTML.Target.Attribute)
++
++        case both(href: WHATWG.HTML.Href.Attribute, target: WHATWG.HTML.Target.Attribute)
++    }
++}
+diff --git a/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.swift b/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.swift
+index 6340a26..cf7a28f 100644
+--- a/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.swift	
++++ b/Sources/WHATWG HTML Document/WHATWG.HTML.Base.Element.swift	
+@@ -25,14 +25,6 @@ extension WHATWG.HTML.Base.Element {
+     public static let categories: Set<WHATWG.HTML.Content.Category> = [.metadata]
+     public static let content: WHATWG.HTML.Content = .init(model: .nothing)
+ 
+-    public enum Configuration: Sendable, Hashable {
+-
+-        case href(WHATWG.HTML.Href.Attribute)
+-
+-        case target(WHATWG.HTML.Target.Attribute)
+-
+-        case both(href: WHATWG.HTML.Href.Attribute, target: WHATWG.HTML.Target.Attribute)
+-    }
+ 
+     public var href: WHATWG.HTML.Href.Attribute? {
+         switch configuration {
+diff --git a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.Shape.swift b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.Shape.swift
+new file mode 100644
+index 0000000..2f6606a
+--- /dev/null
++++ b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.Shape.swift	
+@@ -0,0 +1,19 @@
++public import WHATWG_HTML_FormAttributes
++import WHATWG_HTML_GlobalAttributes
++public import WHATWG_HTML_LinkAttributes
++public import WHATWG_HTML_MediaAttributes
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Area.Element {
++    public enum Shape: Sendable, Hashable {
++
++        case rect(coords: String)
++
++        case circle(coords: String)
++
++        case poly(coords: String)
++
++        case `default`
++    }
++}
+diff --git a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.swift b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.swift
+index 5c198b5..d50d2a2 100644
+--- a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.swift	
++++ b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Area.Element.swift	
+@@ -74,17 +74,6 @@ extension WHATWG.HTML.Area.Element {
+ }
+ 
+ extension WHATWG.HTML.Area.Element {
+-
+-    public enum Shape: Sendable, Hashable {
+-
+-        case rect(coords: String)
+-
+-        case circle(coords: String)
+-
+-        case poly(coords: String)
+-
+-        case `default`
+-    }
+ }
+ 
+ extension WHATWG.HTML.Area.Element.Shape {
+diff --git a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.ControlsList.swift b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.ControlsList.swift
+new file mode 100644
+index 0000000..49ec141
+--- /dev/null
++++ b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.ControlsList.swift	
+@@ -0,0 +1,25 @@
++public import WHATWG_HTML_LinkAttributes
++public import WHATWG_HTML_MediaAttributes
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Audio.Element {
++    public struct ControlsList: Sendable, Hashable {
++
++        public var nodownload: Bool
++
++        public var nofullscreen: Bool
++
++        public var noremoteplayback: Bool
++
++        public init(
++            nodownload: Bool = false,
++            nofullscreen: Bool = false,
++            noremoteplayback: Bool = false
++        ) {
++            self.nodownload = nodownload
++            self.nofullscreen = nofullscreen
++            self.noremoteplayback = noremoteplayback
++        }
++    }
++}
+diff --git a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.Preload.swift b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.Preload.swift
+new file mode 100644
+index 0000000..fa4d9eb
+--- /dev/null
++++ b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.Preload.swift	
+@@ -0,0 +1,15 @@
++public import WHATWG_HTML_LinkAttributes
++public import WHATWG_HTML_MediaAttributes
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Audio.Element {
++    public enum Preload: String, Sendable {
++
++        case none
++
++        case metadata
++
++        case auto
++    }
++}
+diff --git a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.swift b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.swift
+index f24a5e2..a3fee54 100644
+--- a/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.swift	
++++ b/Sources/WHATWG HTML Embedded/WHATWG.HTML.Audio.Element.swift	
+@@ -58,34 +58,6 @@ extension WHATWG.HTML.Audio.Element {
+ }
+ 
+ extension WHATWG.HTML.Audio.Element {
+-
+-    public enum Preload: String, Sendable {
+-
+-        case none
+-
+-        case metadata
+-
+-        case auto
+-    }
+-
+-    public struct ControlsList: Sendable, Hashable {
+-
+-        public var nodownload: Bool
+-
+-        public var nofullscreen: Bool
+-
+-        public var noremoteplayback: Bool
+-
+-        public init(
+-            nodownload: Bool = false,
+-            nofullscreen: Bool = false,
+-            noremoteplayback: Bool = false
+-        ) {
+-            self.nodownload = nodownload
+-            self.nofullscreen = nofullscreen
+-            self.noremoteplayback = noremoteplayback
+-        }
+-    }
+ }
+ 
+ extension WHATWG.HTML.Audio.Element.ControlsList {
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.GroupingIdentifier.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.GroupingIdentifier.swift
+new file mode 100644
+index 0000000..b73d8d9
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.GroupingIdentifier.swift	
+@@ -0,0 +1,11 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute {
++    public enum GroupingIdentifier: String {
++
++        case shipping
++
++        case billing
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.RecipientType.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.RecipientType.swift
+new file mode 100644
+index 0000000..3dd7c4f
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.RecipientType.swift	
+@@ -0,0 +1,17 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute {
++    public enum RecipientType: String {
++
++        case home
++
++        case work
++
++        case mobile
++
++        case fax
++
++        case page
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Address.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Address.swift
+new file mode 100644
+index 0000000..ad5220e
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Address.swift	
+@@ -0,0 +1,29 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute.Token {
++    public enum Address: String {
++
++        case streetAddress = "street-address"
++
++        case addressLine1 = "address-line1"
++
++        case addressLine2 = "address-line2"
++
++        case addressLine3 = "address-line3"
++
++        case addressLevel4 = "address-level4"
++
++        case addressLevel3 = "address-level3"
++
++        case addressLevel2 = "address-level2"
++
++        case addressLevel1 = "address-level1"
++
++        case country
++
++        case countryName = "country-name"
++
++        case postalCode = "postal-code"
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.DigitalContact.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.DigitalContact.swift
+new file mode 100644
+index 0000000..d8358ed
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.DigitalContact.swift	
+@@ -0,0 +1,27 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute.Token {
++    public enum DigitalContact: String {
++
++        case tel
++
++        case telCountryCode = "tel-country-code"
++
++        case telNational = "tel-national"
++
++        case telAreaCode = "tel-area-code"
++
++        case telLocal = "tel-local"
++
++        case telLocalPrefix = "tel-local-prefix"
++
++        case telLocalSuffix = "tel-local-suffix"
++
++        case telExtension = "tel-extension"
++
++        case email
++
++        case impp
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Name.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Name.swift
+new file mode 100644
+index 0000000..81384d5
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Name.swift	
+@@ -0,0 +1,27 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute.Token {
++    public enum Name: String {
++
++        case name
++
++        case honorificPrefix = "honorific-prefix"
++
++        case givenName = "given-name"
++
++        case additionalName = "additional-name"
++
++        case familyName = "family-name"
++
++        case honorificSuffix = "honorific-suffix"
++
++        case nickname
++
++        case username
++
++        case organizationTitle = "organization-title"
++
++        case organization
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Other.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Other.swift
+new file mode 100644
+index 0000000..a018500
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Other.swift	
+@@ -0,0 +1,29 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute.Token {
++    public enum Other: String {
++
++        case newPassword = "new-password"
++
++        case currentPassword = "current-password"
++
++        case oneTimeCode = "one-time-code"
++
++        case language
++
++        case bday
++
++        case bdayDay = "bday-day"
++
++        case bdayMonth = "bday-month"
++
++        case bdayYear = "bday-year"
++
++        case sex
++
++        case url
++
++        case photo
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Payment.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Payment.swift
+new file mode 100644
+index 0000000..a75fc97
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.Payment.swift	
+@@ -0,0 +1,31 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute.Token {
++    public enum Payment: String {
++
++        case ccName = "cc-name"
++
++        case ccGivenName = "cc-given-name"
++
++        case ccAdditionalName = "cc-additional-name"
++
++        case ccFamilyName = "cc-family-name"
++
++        case ccNumber = "cc-number"
++
++        case ccExp = "cc-exp"
++
++        case ccExpMonth = "cc-exp-month"
++
++        case ccExpYear = "cc-exp-year"
++
++        case ccCsc = "cc-csc"
++
++        case ccType = "cc-type"
++
++        case transactionCurrency = "transaction-currency"
++
++        case transactionAmount = "transaction-amount"
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.swift
+new file mode 100644
+index 0000000..86b534b
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.Token.swift	
+@@ -0,0 +1,25 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Autocomplete.Attribute {
++    public enum Token {
++
++        case section(String)
++
++        case grouping(GroupingIdentifier)
++
++        case recipientType(RecipientType)
++
++        case name(WHATWG.HTML.Autocomplete.Attribute.Token.Name)
++
++        case address(Address)
++
++        case payment(Payment)
++
++        case contact(DigitalContact)
++
++        case other(Other)
++
++        case webauthn
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.swift
+index 6c3c67f..4cc88ad 100644
+--- a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.swift	
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Autocomplete.Attribute.swift	
+@@ -76,27 +76,6 @@ extension WHATWG.HTML.Autocomplete.Attribute {
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute {
+-
+-    public enum Token {
+-
+-        case section(String)
+-
+-        case grouping(GroupingIdentifier)
+-
+-        case recipientType(RecipientType)
+-
+-        case name(WHATWG.HTML.Autocomplete.Attribute.Token.Name)
+-
+-        case address(Address)
+-
+-        case payment(Payment)
+-
+-        case contact(DigitalContact)
+-
+-        case other(Other)
+-
+-        case webauthn
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+@@ -117,165 +96,22 @@ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute {
+-
+-    public enum GroupingIdentifier: String {
+-
+-        case shipping
+-
+-        case billing
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute {
+-
+-    public enum RecipientType: String {
+-
+-        case home
+-
+-        case work
+-
+-        case mobile
+-
+-        case fax
+-
+-        case page
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+-
+-    public enum Name: String {
+-
+-        case name
+-
+-        case honorificPrefix = "honorific-prefix"
+-
+-        case givenName = "given-name"
+-
+-        case additionalName = "additional-name"
+-
+-        case familyName = "family-name"
+-
+-        case honorificSuffix = "honorific-suffix"
+-
+-        case nickname
+-
+-        case username
+-
+-        case organizationTitle = "organization-title"
+-
+-        case organization
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+-
+-    public enum Address: String {
+-
+-        case streetAddress = "street-address"
+-
+-        case addressLine1 = "address-line1"
+-
+-        case addressLine2 = "address-line2"
+-
+-        case addressLine3 = "address-line3"
+-
+-        case addressLevel4 = "address-level4"
+-
+-        case addressLevel3 = "address-level3"
+-
+-        case addressLevel2 = "address-level2"
+-
+-        case addressLevel1 = "address-level1"
+-
+-        case country
+-
+-        case countryName = "country-name"
+-
+-        case postalCode = "postal-code"
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+-
+-    public enum Payment: String {
+-
+-        case ccName = "cc-name"
+-
+-        case ccGivenName = "cc-given-name"
+-
+-        case ccAdditionalName = "cc-additional-name"
+-
+-        case ccFamilyName = "cc-family-name"
+-
+-        case ccNumber = "cc-number"
+-
+-        case ccExp = "cc-exp"
+-
+-        case ccExpMonth = "cc-exp-month"
+-
+-        case ccExpYear = "cc-exp-year"
+-
+-        case ccCsc = "cc-csc"
+-
+-        case ccType = "cc-type"
+-
+-        case transactionCurrency = "transaction-currency"
+-
+-        case transactionAmount = "transaction-amount"
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+-
+-    public enum DigitalContact: String {
+-
+-        case tel
+-
+-        case telCountryCode = "tel-country-code"
+-
+-        case telNational = "tel-national"
+-
+-        case telAreaCode = "tel-area-code"
+-
+-        case telLocal = "tel-local"
+-
+-        case telLocalPrefix = "tel-local-prefix"
+-
+-        case telLocalSuffix = "tel-local-suffix"
+-
+-        case telExtension = "tel-extension"
+-
+-        case email
+-
+-        case impp
+-    }
+ }
+ 
+ extension WHATWG.HTML.Autocomplete.Attribute.Token {
+-
+-    public enum Other: String {
+-
+-        case newPassword = "new-password"
+-
+-        case currentPassword = "current-password"
+-
+-        case oneTimeCode = "one-time-code"
+-
+-        case language
+-
+-        case bday
+-
+-        case bdayDay = "bday-day"
+-
+-        case bdayMonth = "bday-month"
+-
+-        case bdayYear = "bday-year"
+-
+-        case sex
+-
+-        case url
+-
+-        case photo
+-    }
+ }
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.DateFormat.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.DateFormat.swift
+new file mode 100644
+index 0000000..5ef9330
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.DateFormat.swift	
+@@ -0,0 +1,18 @@
++public import ISO_8601
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Max.Attribute {
++    public enum DateFormat {
++
++        case fullDate
++
++        case month
++
++        case week
++
++        case time
++
++        case dateTimeLocal
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.swift
+index e70b6f7..051b733 100644
+--- a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.swift	
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Max.Attribute.swift	
+@@ -21,19 +21,6 @@ extension WHATWG.HTML.Max.Attribute {
+ }
+ 
+ extension WHATWG.HTML.Max.Attribute {
+-
+-    public enum DateFormat {
+-
+-        case fullDate
+-
+-        case month
+-
+-        case week
+-
+-        case time
+-
+-        case dateTimeLocal
+-    }
+ }
+ 
+ extension WHATWG.HTML.Max.Attribute: ExpressibleByIntegerLiteral {
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.HTTPMethod.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.HTTPMethod.swift
+new file mode 100644
+index 0000000..eee9f44
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.HTTPMethod.swift	
+@@ -0,0 +1,13 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Method.Attribute {
++    public enum HTTPMethod: String {
++
++        case get
++
++        case post
++
++        case dialog
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.swift
+index a3bd03b..1c57a75 100644
+--- a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.swift	
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Method.Attribute.swift	
+@@ -19,14 +19,6 @@ extension WHATWG.HTML.Method.Attribute {
+ 
+     public init(_ method: HTTPMethod) { self.rawValue = method.rawValue }
+ 
+-    public enum HTTPMethod: String {
+-
+-        case get
+-
+-        case post
+-
+-        case dialog
+-    }
+ }
+ 
+ extension WHATWG.HTML.Method.Attribute {
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.DateFormat.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.DateFormat.swift
+new file mode 100644
+index 0000000..23d67e8
+--- /dev/null
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.DateFormat.swift	
+@@ -0,0 +1,18 @@
++public import ISO_8601
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Min.Attribute {
++    public enum DateFormat {
++
++        case fullDate
++
++        case month
++
++        case week
++
++        case time
++
++        case dateTimeLocal
++    }
++}
+diff --git a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.swift b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.swift
+index 2ebcf5e..a86076c 100644
+--- a/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.swift	
++++ b/Sources/WHATWG HTML FormAttributes/WHATWG.HTML.Min.Attribute.swift	
+@@ -22,18 +22,6 @@ extension WHATWG.HTML.Min.Attribute {
+ 
+ extension WHATWG.HTML.Min.Attribute {
+ 
+-    public enum DateFormat {
+-
+-        case fullDate
+-
+-        case month
+-
+-        case week
+-
+-        case time
+-
+-        case dateTimeLocal
+-    }
+ 
+     public static let zero = WHATWG.HTML.Min.Attribute(0)
+ }
+diff --git a/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.MIMEType.swift b/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.MIMEType.swift
+new file mode 100644
+index 0000000..3805063
+--- /dev/null
++++ b/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.MIMEType.swift	
+@@ -0,0 +1,7 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Form.Data.File {
++    public enum MIMEType {
++    }
++}
+diff --git a/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.swift b/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.swift
+index 6925ebe..6e2dcee 100644
+--- a/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.swift	
++++ b/Sources/WHATWG HTML FormData/WHATWG.HTML.Form.Data.File.swift	
+@@ -30,9 +30,6 @@ extension WHATWG.HTML.Form.Data.File: CustomStringConvertible {
+ }
+ 
+ extension WHATWG.HTML.Form.Data.File {
+-
+-    public enum MIMEType {
+-    }
+ }
+ 
+ extension WHATWG.HTML.Form.Data.File.MIMEType {
+diff --git a/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.Category.swift b/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.Category.swift
+new file mode 100644
+index 0000000..89e078d
+--- /dev/null
++++ b/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.Category.swift	
+@@ -0,0 +1,12 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Elementtiming.Attribute {
++    public struct Category: Sendable, Hashable, ExpressibleByStringLiteral, CustomStringConvertible {
++        public var value: String
++
++        public init(_ value: String) { self.value = value }
++
++        public init(stringLiteral value: String) { self.value = value }
++    }
++}
+diff --git a/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.swift b/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.swift
+index d4de29d..acf716a 100644
+--- a/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.swift	
++++ b/Sources/WHATWG HTML GlobalAttributes/WHATWG.HTML.Elementtiming.Attribute.swift	
+@@ -18,13 +18,6 @@ extension WHATWG.HTML.Elementtiming.Attribute {
+         self.rawValue = "\(category)\(separator)\(name)"
+     }
+ 
+-    public struct Category: Sendable, Hashable, ExpressibleByStringLiteral, CustomStringConvertible {
+-        public var value: String
+-
+-        public init(_ value: String) { self.value = value }
+-
+-        public init(stringLiteral value: String) { self.value = value }
+-    }
+ 
+     public init(category: Category, name: String, separator: String = "-") {
+         if category == .custom {
+diff --git a/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.Value.swift b/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.Value.swift
+new file mode 100644
+index 0000000..bb3395a
+--- /dev/null
++++ b/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.Value.swift	
+@@ -0,0 +1,11 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.Download.Attribute {
++    public enum Value: Sendable, Hashable {
++
++        case boolean(Bool)
++
++        case withFilename(String)
++    }
++}
+diff --git a/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.swift b/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.swift
+index 813731f..6a4ace3 100644
+--- a/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.swift	
++++ b/Sources/WHATWG HTML LinkAttributes/WHATWG.HTML.Download.Attribute.swift	
+@@ -20,12 +20,6 @@ extension WHATWG.HTML.Download.Attribute {
+ 
+     @inlinable public static var attribute: String { "download" }
+ 
+-    public enum Value: Sendable, Hashable {
+-
+-        case boolean(Bool)
+-
+-        case withFilename(String)
+-    }
+ 
+     public var description: String {
+         switch value {
+diff --git a/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.Value.swift b/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.Value.swift
+new file mode 100644
+index 0000000..7c75054
+--- /dev/null
++++ b/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.Value.swift	
+@@ -0,0 +1,11 @@
++public import WHATWG_HTML_Shared
++
++
++extension WHATWG.HTML.AttributionSrc.Attribute {
++    public enum Value: Sendable, Hashable {
++
++        case boolean(Bool)
++
++        case urls(String)
++    }
++}
+diff --git a/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.swift b/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.swift
+index 58f52a1..865be27 100644
+--- a/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.swift	
++++ b/Sources/WHATWG HTML MediaAttributes/WHATWG.HTML.AttributionSrc.Attribute.swift	
+@@ -18,12 +18,6 @@ extension WHATWG.HTML.AttributionSrc.Attribute {
+ 
+     @inlinable public static var attribute: String { "attributionsrc" }
+ 
+-    public enum Value: Sendable, Hashable {
+-
+-        case boolean(Bool)
+-
+-        case urls(String)
+-    }
+ 
+     public var description: String {
+         switch value {
+-- 
+2.43.0
+

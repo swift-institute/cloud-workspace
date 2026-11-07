@@ -1,0 +1,1019 @@
+From 65c8117551a33af929c39b8bbac87da18a9990ae Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:49 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Async Stream/Async.Stream+debounce.swift  |  21 --
+ .../Async Stream/Async.Stream+filter.swift    |  37 ---
+ Sources/Async Stream/Async.Stream+first.swift |  14 -
+ Sources/Async Stream/Async.Stream+last.swift  |  19 --
+ .../Async Stream/Async.Stream+reduce.swift    |  15 -
+ .../Async Stream/Async.Stream+repeating.swift |  36 ---
+ Sources/Async Stream/Async.Stream+scan.swift  |  21 --
+ .../Async Stream/Async.Stream+throttle.swift  |  21 --
+ Sources/Async Stream/Async.Stream+timer.swift |  37 ---
+ .../Async Stream/Async.Stream+unfold.swift    |  31 --
+ .../Async.Stream.Combine.Latest.swift         |  40 ---
+ .../Async Stream/Async.Stream.Combine.swift   |  39 +++
+ Sources/Async Stream/Async.Stream.Delay.swift |  23 --
+ .../Async.Stream.Iterator.Box.swift           |   7 -
+ .../Async Stream/Async.Stream.Iterator.swift  |   6 +
+ .../Async.Stream.Latest.From.swift            |  22 --
+ .../Async Stream/Async.Stream.Latest.swift    |  21 ++
+ .../Async.Stream.Map.Flat.Latest.swift        |  32 --
+ .../Async Stream/Async.Stream.Map.Flat.swift  |  31 ++
+ .../Async Stream/Async.Stream.Timeout.swift   |  43 ---
+ Sources/Async Stream/Async.Stream.swift       | 298 ++++++++++++++++++
+ 21 files changed, 395 insertions(+), 419 deletions(-)
+ delete mode 100644 Sources/Async Stream/Async.Stream+debounce.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+filter.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+first.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+last.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+reduce.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+repeating.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+scan.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+throttle.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+timer.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream+unfold.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream.Combine.Latest.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream.Delay.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream.Iterator.Box.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream.Latest.From.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream.Map.Flat.Latest.swift
+ delete mode 100644 Sources/Async Stream/Async.Stream.Timeout.swift
+
+diff --git a/Sources/Async Stream/Async.Stream+debounce.swift b/Sources/Async Stream/Async.Stream+debounce.swift
+deleted file mode 100644
+index e636886..0000000
+--- a/Sources/Async Stream/Async.Stream+debounce.swift	
++++ /dev/null
+@@ -1,21 +0,0 @@
+-public import Async
+-public import Clock_Concurrency
+-
+-extension Async.Stream {
+-
+-    public func debounce(
+-        _ duration: Duration,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self {
+-        Self { [self] in
+-            let state = Async.Stream<Element>.Debounce.State(
+-                stream: self,
+-                duration: duration,
+-                clock: Clock.`Any`(clock)
+-            )
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+filter.swift b/Sources/Async Stream/Async.Stream+filter.swift
+deleted file mode 100644
+index abd4552..0000000
+--- a/Sources/Async Stream/Async.Stream+filter.swift	
++++ /dev/null
+@@ -1,37 +0,0 @@
+-public import Async
+-internal import Ownership
+-
+-extension Async.Stream {
+-
+-    public func filter(
+-        _ predicate: @escaping @Sendable (Element) -> Bool
+-    ) -> Self {
+-        Self { [self] in
+-            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
+-            return Iterator {
+-                while true {
+-                    guard let element = await box.next() else { return nil }
+-                    if predicate(element) {
+-                        return element
+-                    }
+-                }
+-            }
+-        }
+-    }
+-
+-    public func filter(
+-        _ predicate: @escaping @Sendable (Element) async -> Bool
+-    ) -> Self {
+-        Self { [self] in
+-            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
+-            return Iterator {
+-                while true {
+-                    guard let element = await box.next() else { return nil }
+-                    if await predicate(element) {
+-                        return element
+-                    }
+-                }
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+first.swift b/Sources/Async Stream/Async.Stream+first.swift
+deleted file mode 100644
+index 89c2647..0000000
+--- a/Sources/Async Stream/Async.Stream+first.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-public import Async
+-
+-extension Async.Stream {
+-
+-    public func first() -> Self {
+-        prefix(1)
+-    }
+-
+-    public func first(
+-        where predicate: @escaping @Sendable (Element) -> Bool
+-    ) -> Self {
+-        filter(predicate).first()
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+last.swift b/Sources/Async Stream/Async.Stream+last.swift
+deleted file mode 100644
+index 8131f63..0000000
+--- a/Sources/Async Stream/Async.Stream+last.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-public import Async
+-
+-extension Async.Stream {
+-
+-    public func last() -> Self {
+-        Self { [self] in
+-            let state = Async.Stream<Element>.Last.State(stream: self)
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-
+-    public func last(
+-        where predicate: @escaping @Sendable (Element) -> Bool
+-    ) -> Self {
+-        filter(predicate).last()
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+reduce.swift b/Sources/Async Stream/Async.Stream+reduce.swift
+deleted file mode 100644
+index 9cbb935..0000000
+--- a/Sources/Async Stream/Async.Stream+reduce.swift	
++++ /dev/null
+@@ -1,15 +0,0 @@
+-public import Async
+-
+-extension Async.Stream {
+-
+-    public func reduce<Result: Sendable>(
+-        _ initial: Result,
+-        _ accumulator: @escaping @Sendable (Result, Element) -> Result
+-    ) async -> Result {
+-        var result = initial
+-        for await element in self {
+-            result = accumulator(result, element)
+-        }
+-        return result
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+repeating.swift b/Sources/Async Stream/Async.Stream+repeating.swift
+deleted file mode 100644
+index c092670..0000000
+--- a/Sources/Async Stream/Async.Stream+repeating.swift	
++++ /dev/null
+@@ -1,36 +0,0 @@
+-public import Async
+-public import Clock_Concurrency
+-
+-extension Async.Stream {
+-
+-    public static func repeating(_ value: Element, count: Int? = nil) -> Self {
+-        Self {
+-            let state = Async.Stream<Element>.Repeat.State(value: value, count: count)
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+-
+-extension Async.Stream {
+-
+-    public static func repeating(
+-        _ value: Element,
+-        every interval: Duration,
+-        count: Int? = nil,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self {
+-        Self {
+-            let state = Async.Stream<Element>.Repeat.Interval.State(
+-                value: value,
+-                interval: interval,
+-                count: count,
+-                clock: Clock.`Any`(clock)
+-            )
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+scan.swift b/Sources/Async Stream/Async.Stream+scan.swift
+deleted file mode 100644
+index 0b1d7e3..0000000
+--- a/Sources/Async Stream/Async.Stream+scan.swift	
++++ /dev/null
+@@ -1,21 +0,0 @@
+-public import Async
+-
+-extension Async.Stream {
+-
+-    public func scan<Result: Sendable>(
+-        _ initial: sending Result,
+-        _ accumulator: @escaping @Sendable (Result, Element) -> Result
+-    ) -> Async.Stream<Result> {
+-        let captured = initial
+-        return Async.Stream<Result> { [self] in
+-            let state = Async.Stream<Element>.Scan.State(
+-                stream: self,
+-                initial: captured,
+-                accumulator: accumulator
+-            )
+-            return Async.Stream<Result>.Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+throttle.swift b/Sources/Async Stream/Async.Stream+throttle.swift
+deleted file mode 100644
+index 5441873..0000000
+--- a/Sources/Async Stream/Async.Stream+throttle.swift	
++++ /dev/null
+@@ -1,21 +0,0 @@
+-public import Async
+-public import Clock_Concurrency
+-
+-extension Async.Stream {
+-
+-    public func throttle(
+-        _ duration: Duration,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self {
+-        Self { [self] in
+-            let state = Async.Stream<Element>.Throttle.State(
+-                stream: self,
+-                duration: duration,
+-                clock: Clock.`Any`(clock)
+-            )
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+timer.swift b/Sources/Async Stream/Async.Stream+timer.swift
+deleted file mode 100644
+index 3513274..0000000
+--- a/Sources/Async Stream/Async.Stream+timer.swift	
++++ /dev/null
+@@ -1,37 +0,0 @@
+-public import Async
+-public import Clock_Concurrency
+-
+-extension Async.Stream {
+-
+-    public static func timer(
+-        after delay: Duration,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self where Element == Void {
+-        Self {
+-            let state = Async.Stream<Void>.Timer.State(delay: delay, clock: Clock.`Any`(clock))
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+-
+-extension Async.Stream {
+-
+-    public static func timer(
+-        after delay: Duration,
+-        value: Element,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self {
+-        Self {
+-            let state = Async.Stream<Element>.Timer.Value.State(
+-                delay: delay,
+-                value: value,
+-                clock: Clock.`Any`(clock)
+-            )
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream+unfold.swift b/Sources/Async Stream/Async.Stream+unfold.swift
+deleted file mode 100644
+index 51f6903..0000000
+--- a/Sources/Async Stream/Async.Stream+unfold.swift	
++++ /dev/null
+@@ -1,31 +0,0 @@
+-public import Async
+-
+-extension Async.Stream {
+-
+-    public static func unfold<State: Sendable>(
+-        _ initial: sending State,
+-        _ next: @escaping @Sendable (State) async -> (Element, State)?
+-    ) -> Self {
+-        let captured = initial
+-        return Self {
+-            let state = Async.Stream<Element>.Unfold.State(initial: captured, next: next)
+-            return Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+-
+-extension Async.Stream {
+-
+-    public static func generate(
+-        _ generator: @escaping @Sendable () async -> Element?
+-    ) -> Self {
+-        Self {
+-            Iterator {
+-                if Task.isCancelled { return nil }
+-                return await generator()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream.Combine.Latest.swift b/Sources/Async Stream/Async.Stream.Combine.Latest.swift
+deleted file mode 100644
+index acdda57..0000000
+--- a/Sources/Async Stream/Async.Stream.Combine.Latest.swift	
++++ /dev/null
+@@ -1,40 +0,0 @@
+-public import Async
+-internal import Standard_Library_Extensions
+-
+-extension Async.Stream.Combine {
+-
+-    public func latest<Other: Sendable>(
+-        _ other: Async.Stream<Other>
+-    ) -> Async.Stream<(Element, Other)> {
+-        Async.Stream<(Element, Other)> { [base] in
+-            let state = Async.Stream<(Element, Other)>.Combine.State<Element, Other>()
+-
+-            let task1 = Task {
+-                await state.run { state in
+-                    for await element in base {
+-                        state.updateA(element)
+-                    }
+-                    state.completeA()
+-                }
+-            }
+-
+-            let task2 = Task {
+-                await state.run { state in
+-                    for await element in other {
+-                        state.updateB(element)
+-                    }
+-                    state.completeB()
+-                }
+-            }
+-
+-            return Async.Stream<(Element, Other)>.Iterator {
+-                let result = await state.receive()
+-                if result == nil {
+-                    task1.cancel()
+-                    task2.cancel()
+-                }
+-                return result
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream.Combine.swift b/Sources/Async Stream/Async.Stream.Combine.swift
+index fd1d78f..29d2060 100644
+--- a/Sources/Async Stream/Async.Stream.Combine.swift	
++++ b/Sources/Async Stream/Async.Stream.Combine.swift	
+@@ -1,4 +1,5 @@
+ public import Async
++internal import Standard_Library_Extensions
+ 
+ extension Async.Stream {
+ 
+@@ -17,3 +18,41 @@ extension Async.Stream {
+ 
+     public var combine: Combine { Combine(base: self) }
+ }
++
++extension Async.Stream.Combine {
++
++    public func latest<Other: Sendable>(
++        _ other: Async.Stream<Other>
++    ) -> Async.Stream<(Element, Other)> {
++        Async.Stream<(Element, Other)> { [base] in
++            let state = Async.Stream<(Element, Other)>.Combine.State<Element, Other>()
++
++            let task1 = Task {
++                await state.run { state in
++                    for await element in base {
++                        state.updateA(element)
++                    }
++                    state.completeA()
++                }
++            }
++
++            let task2 = Task {
++                await state.run { state in
++                    for await element in other {
++                        state.updateB(element)
++                    }
++                    state.completeB()
++                }
++            }
++
++            return Async.Stream<(Element, Other)>.Iterator {
++                let result = await state.receive()
++                if result == nil {
++                    task1.cancel()
++                    task2.cancel()
++                }
++                return result
++            }
++        }
++    }
++}
+diff --git a/Sources/Async Stream/Async.Stream.Delay.swift b/Sources/Async Stream/Async.Stream.Delay.swift
+deleted file mode 100644
+index 0b21f4f..0000000
+--- a/Sources/Async Stream/Async.Stream.Delay.swift	
++++ /dev/null
+@@ -1,23 +0,0 @@
+-public import Async
+-public import Clock_Concurrency
+-internal import Ownership
+-
+-extension Async.Stream {
+-
+-    public func delay(
+-        _ duration: Duration,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self {
+-        let clock = Clock.`Any`(clock)
+-        return Self { [self] in
+-            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
+-            return Iterator {
+-                guard let element = await box.next() else { return nil }
+-
+-                try? await clock.sleep(for: duration)
+-                if Task.isCancelled { return nil }
+-                return element
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream.Iterator.Box.swift b/Sources/Async Stream/Async.Stream.Iterator.Box.swift
+deleted file mode 100644
+index 7610d62..0000000
+--- a/Sources/Async Stream/Async.Stream.Iterator.Box.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-public import Async
+-public import Ownership
+-
+-extension Async.Stream.Iterator {
+-
+-    public typealias Box<I: AsyncIteratorProtocol> = Ownership.Mutable<I>.Unchecked
+-}
+diff --git a/Sources/Async Stream/Async.Stream.Iterator.swift b/Sources/Async Stream/Async.Stream.Iterator.swift
+index 38ce364..cd58d58 100644
+--- a/Sources/Async Stream/Async.Stream.Iterator.swift	
++++ b/Sources/Async Stream/Async.Stream.Iterator.swift	
+@@ -1,4 +1,5 @@
+ public import Async
++public import Ownership
+ 
+ extension Async.Stream {
+ 
+@@ -19,3 +20,8 @@ extension Async.Stream.Iterator {
+         await _next()
+     }
+ }
++
++extension Async.Stream.Iterator {
++
++    public typealias Box<I: AsyncIteratorProtocol> = Ownership.Mutable<I>.Unchecked
++}
+diff --git a/Sources/Async Stream/Async.Stream.Latest.From.swift b/Sources/Async Stream/Async.Stream.Latest.From.swift
+deleted file mode 100644
+index 832c60d..0000000
+--- a/Sources/Async Stream/Async.Stream.Latest.From.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-public import Async
+-
+-extension Async.Stream.Latest {
+-
+-    public func from<Other: Sendable>(
+-        _ other: Async.Stream<Other>
+-    ) -> Async.Stream<(Element, Other)> {
+-        Async.Stream<(Element, Other)> { [base] in
+-            let state = Async.Stream<Element>.Latest.State<Other>(source: base, other: other)
+-            return Async.Stream<(Element, Other)>.Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-
+-    public func from<Other: Sendable, Result: Sendable>(
+-        _ other: Async.Stream<Other>,
+-        _ transform: @escaping @Sendable (Element, Other) -> Result
+-    ) -> Async.Stream<Result> {
+-        self.from(other).map { transform($0.0, $0.1) }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream.Latest.swift b/Sources/Async Stream/Async.Stream.Latest.swift
+index 4aacdaa..ccafd08 100644
+--- a/Sources/Async Stream/Async.Stream.Latest.swift	
++++ b/Sources/Async Stream/Async.Stream.Latest.swift	
+@@ -17,3 +17,24 @@ extension Async.Stream {
+ 
+     public var latest: Latest { Latest(base: self) }
+ }
++
++extension Async.Stream.Latest {
++
++    public func from<Other: Sendable>(
++        _ other: Async.Stream<Other>
++    ) -> Async.Stream<(Element, Other)> {
++        Async.Stream<(Element, Other)> { [base] in
++            let state = Async.Stream<Element>.Latest.State<Other>(source: base, other: other)
++            return Async.Stream<(Element, Other)>.Iterator {
++                await state.next()
++            }
++        }
++    }
++
++    public func from<Other: Sendable, Result: Sendable>(
++        _ other: Async.Stream<Other>,
++        _ transform: @escaping @Sendable (Element, Other) -> Result
++    ) -> Async.Stream<Result> {
++        self.from(other).map { transform($0.0, $0.1) }
++    }
++}
+diff --git a/Sources/Async Stream/Async.Stream.Map.Flat.Latest.swift b/Sources/Async Stream/Async.Stream.Map.Flat.Latest.swift
+deleted file mode 100644
+index 34a3e48..0000000
+--- a/Sources/Async Stream/Async.Stream.Map.Flat.Latest.swift	
++++ /dev/null
+@@ -1,32 +0,0 @@
+-public import Async
+-
+-extension Async.Stream.Map.Flat {
+-
+-    public func latest<U: Sendable>(
+-        _ transform: @escaping @Sendable (Element) -> Async.Stream<U>
+-    ) -> Async.Stream<U> {
+-        Async.Stream<U> { [base] in
+-            let state = Async.Stream<Element>.Map.Flat.Latest.State<U>(
+-                stream: base,
+-                transform: .sync(transform)
+-            )
+-            return Async.Stream<U>.Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-
+-    public func latest<U: Sendable>(
+-        _ transform: @escaping @Sendable (Element) async -> Async.Stream<U>
+-    ) -> Async.Stream<U> {
+-        Async.Stream<U> { [base] in
+-            let state = Async.Stream<Element>.Map.Flat.Latest.State<U>(
+-                stream: base,
+-                transform: .async(transform)
+-            )
+-            return Async.Stream<U>.Iterator {
+-                await state.next()
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream.Map.Flat.swift b/Sources/Async Stream/Async.Stream.Map.Flat.swift
+index 669a374..8e4a188 100644
+--- a/Sources/Async Stream/Async.Stream.Map.Flat.swift	
++++ b/Sources/Async Stream/Async.Stream.Map.Flat.swift	
+@@ -45,3 +45,34 @@ extension Async.Stream.Map.Flat {
+         }
+     }
+ }
++
++extension Async.Stream.Map.Flat {
++
++    public func latest<U: Sendable>(
++        _ transform: @escaping @Sendable (Element) -> Async.Stream<U>
++    ) -> Async.Stream<U> {
++        Async.Stream<U> { [base] in
++            let state = Async.Stream<Element>.Map.Flat.Latest.State<U>(
++                stream: base,
++                transform: .sync(transform)
++            )
++            return Async.Stream<U>.Iterator {
++                await state.next()
++            }
++        }
++    }
++
++    public func latest<U: Sendable>(
++        _ transform: @escaping @Sendable (Element) async -> Async.Stream<U>
++    ) -> Async.Stream<U> {
++        Async.Stream<U> { [base] in
++            let state = Async.Stream<Element>.Map.Flat.Latest.State<U>(
++                stream: base,
++                transform: .async(transform)
++            )
++            return Async.Stream<U>.Iterator {
++                await state.next()
++            }
++        }
++    }
++}
+diff --git a/Sources/Async Stream/Async.Stream.Timeout.swift b/Sources/Async Stream/Async.Stream.Timeout.swift
+deleted file mode 100644
+index 204730e..0000000
+--- a/Sources/Async Stream/Async.Stream.Timeout.swift	
++++ /dev/null
+@@ -1,43 +0,0 @@
+-public import Async
+-public import Clock_Concurrency
+-internal import Ownership
+-
+-extension Async.Stream {
+-
+-    public func timeout(
+-        _ duration: Duration,
+-        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+-    ) -> Self {
+-        let clock = Clock.`Any`(clock)
+-        return Self { [self] in
+-            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
+-
+-            return Iterator {
+-                let resolvedClock = clock
+-                do {
+-                    return try await withThrowingTaskGroup(of: Element?.self) { group in
+-                        group.addTask {
+-                            await box.next()
+-                        }
+-                        group.addTask {
+-                            try await resolvedClock.sleep(
+-                                until: resolvedClock.now.advanced(by: duration)
+-                            )
+-                            throw CancellationError()
+-                        }
+-
+-                        if let result = try await group.next() {
+-                            group.cancelAll()
+-                            return result
+-                        }
+-
+-                        return nil
+-                    }
+-                } catch {
+-
+-                    return nil
+-                }
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Async Stream/Async.Stream.swift b/Sources/Async Stream/Async.Stream.swift
+index 399f6f5..fbf2188 100644
+--- a/Sources/Async Stream/Async.Stream.swift	
++++ b/Sources/Async Stream/Async.Stream.swift	
+@@ -1,6 +1,7 @@
+ public import Async
+ internal import Ownership
+ import _Concurrency
++public import Clock_Concurrency
+ 
+ extension Async {
+ 
+@@ -67,3 +68,300 @@ extension Async.Stream {
+         }
+     }
+ }
++
++extension Async.Stream {
++
++    public func debounce(
++        _ duration: Duration,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self {
++        Self { [self] in
++            let state = Async.Stream<Element>.Debounce.State(
++                stream: self,
++                duration: duration,
++                clock: Clock.`Any`(clock)
++            )
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public func filter(
++        _ predicate: @escaping @Sendable (Element) -> Bool
++    ) -> Self {
++        Self { [self] in
++            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
++            return Iterator {
++                while true {
++                    guard let element = await box.next() else { return nil }
++                    if predicate(element) {
++                        return element
++                    }
++                }
++            }
++        }
++    }
++
++    public func filter(
++        _ predicate: @escaping @Sendable (Element) async -> Bool
++    ) -> Self {
++        Self { [self] in
++            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
++            return Iterator {
++                while true {
++                    guard let element = await box.next() else { return nil }
++                    if await predicate(element) {
++                        return element
++                    }
++                }
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public func first() -> Self {
++        prefix(1)
++    }
++
++    public func first(
++        where predicate: @escaping @Sendable (Element) -> Bool
++    ) -> Self {
++        filter(predicate).first()
++    }
++}
++
++extension Async.Stream {
++
++    public func last() -> Self {
++        Self { [self] in
++            let state = Async.Stream<Element>.Last.State(stream: self)
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++
++    public func last(
++        where predicate: @escaping @Sendable (Element) -> Bool
++    ) -> Self {
++        filter(predicate).last()
++    }
++}
++
++extension Async.Stream {
++
++    public func reduce<Result: Sendable>(
++        _ initial: Result,
++        _ accumulator: @escaping @Sendable (Result, Element) -> Result
++    ) async -> Result {
++        var result = initial
++        for await element in self {
++            result = accumulator(result, element)
++        }
++        return result
++    }
++}
++
++extension Async.Stream {
++
++    public static func repeating(_ value: Element, count: Int? = nil) -> Self {
++        Self {
++            let state = Async.Stream<Element>.Repeat.State(value: value, count: count)
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public static func repeating(
++        _ value: Element,
++        every interval: Duration,
++        count: Int? = nil,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self {
++        Self {
++            let state = Async.Stream<Element>.Repeat.Interval.State(
++                value: value,
++                interval: interval,
++                count: count,
++                clock: Clock.`Any`(clock)
++            )
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public func scan<Result: Sendable>(
++        _ initial: sending Result,
++        _ accumulator: @escaping @Sendable (Result, Element) -> Result
++    ) -> Async.Stream<Result> {
++        let captured = initial
++        return Async.Stream<Result> { [self] in
++            let state = Async.Stream<Element>.Scan.State(
++                stream: self,
++                initial: captured,
++                accumulator: accumulator
++            )
++            return Async.Stream<Result>.Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public func throttle(
++        _ duration: Duration,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self {
++        Self { [self] in
++            let state = Async.Stream<Element>.Throttle.State(
++                stream: self,
++                duration: duration,
++                clock: Clock.`Any`(clock)
++            )
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public static func timer(
++        after delay: Duration,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self where Element == Void {
++        Self {
++            let state = Async.Stream<Void>.Timer.State(delay: delay, clock: Clock.`Any`(clock))
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public static func timer(
++        after delay: Duration,
++        value: Element,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self {
++        Self {
++            let state = Async.Stream<Element>.Timer.Value.State(
++                delay: delay,
++                value: value,
++                clock: Clock.`Any`(clock)
++            )
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public static func unfold<State: Sendable>(
++        _ initial: sending State,
++        _ next: @escaping @Sendable (State) async -> (Element, State)?
++    ) -> Self {
++        let captured = initial
++        return Self {
++            let state = Async.Stream<Element>.Unfold.State(initial: captured, next: next)
++            return Iterator {
++                await state.next()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public static func generate(
++        _ generator: @escaping @Sendable () async -> Element?
++    ) -> Self {
++        Self {
++            Iterator {
++                if Task.isCancelled { return nil }
++                return await generator()
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public func delay(
++        _ duration: Duration,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self {
++        let clock = Clock.`Any`(clock)
++        return Self { [self] in
++            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
++            return Iterator {
++                guard let element = await box.next() else { return nil }
++
++                try? await clock.sleep(for: duration)
++                if Task.isCancelled { return nil }
++                return element
++            }
++        }
++    }
++}
++
++extension Async.Stream {
++
++    public func timeout(
++        _ duration: Duration,
++        clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
++    ) -> Self {
++        let clock = Clock.`Any`(clock)
++        return Self { [self] in
++            let box = Async.Stream<Element>.Iterator.Box(makeAsyncIterator())
++
++            return Iterator {
++                let resolvedClock = clock
++                do {
++                    return try await withThrowingTaskGroup(of: Element?.self) { group in
++                        group.addTask {
++                            await box.next()
++                        }
++                        group.addTask {
++                            try await resolvedClock.sleep(
++                                until: resolvedClock.now.advanced(by: duration)
++                            )
++                            throw CancellationError()
++                        }
++
++                        if let result = try await group.next() {
++                            group.cancelAll()
++                            return result
++                        }
++
++                        return nil
++                    }
++                } catch {
++
++                    return nil
++                }
++            }
++        }
++    }
++}
+-- 
+2.43.0
+

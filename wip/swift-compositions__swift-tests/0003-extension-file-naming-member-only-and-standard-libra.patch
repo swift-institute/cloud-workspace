@@ -1,0 +1,2676 @@
+From 53e70786cad731dd9b2bbc8700fefcf4557cb620 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:59 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ ...t.Trait.Collection.Modifier.builtins.swift |  95 ----
+ .../Test.Trait.Collection.Modifier.swift      |  96 ++++
+ .../Test.Environment+Capture.swift            |  58 ---
+ .../Tests Performance/Test.Environment.swift  |  57 +++
+ .../Tests.Complexity+analyze.swift            | 236 ----------
+ .../Tests.Complexity+classify.swift           | 158 -------
+ .../Tests.Complexity+sizes.swift              |  40 --
+ .../Tests.Complexity.Diagnostic+Format.swift  | 261 -----------
+ .../Tests.Complexity.Diagnostic.swift         | 261 +++++++++++
+ .../Tests Performance/Tests.Complexity.swift  | 435 ++++++++++++++++++
+ .../Tests.Diagnostic+Format.swift             | 320 -------------
+ .../Tests.Diagnostic+Summary.swift            |  79 ----
+ .../Tests Performance/Tests.Diagnostic.swift  | 396 ++++++++++++++++
+ .../Test.Snapshot.Configuration.Key.swift     |  15 +
+ .../Test.Snapshot.Configuration.swift         |   5 -
+ 15 files changed, 1260 insertions(+), 1252 deletions(-)
+ delete mode 100644 Sources/Tests Core/Test.Trait.Collection.Modifier.builtins.swift
+ delete mode 100644 Sources/Tests Performance/Test.Environment+Capture.swift
+ delete mode 100644 Sources/Tests Performance/Tests.Complexity+analyze.swift
+ delete mode 100644 Sources/Tests Performance/Tests.Complexity+classify.swift
+ delete mode 100644 Sources/Tests Performance/Tests.Complexity+sizes.swift
+ delete mode 100644 Sources/Tests Performance/Tests.Complexity.Diagnostic+Format.swift
+ delete mode 100644 Sources/Tests Performance/Tests.Diagnostic+Format.swift
+ delete mode 100644 Sources/Tests Performance/Tests.Diagnostic+Summary.swift
+ create mode 100644 Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift
+
+diff --git a/Sources/Tests Core/Test.Trait.Collection.Modifier.builtins.swift b/Sources/Tests Core/Test.Trait.Collection.Modifier.builtins.swift
+deleted file mode 100644
+index 06a24d3..0000000
+--- a/Sources/Tests Core/Test.Trait.Collection.Modifier.builtins.swift	
++++ /dev/null
+@@ -1,95 +0,0 @@
+-public import Sample
+-
+-extension Test.Trait.Collection.Modifier {
+-    /// Sets a time limit for test execution.
+-    ///
+-    /// - Parameter duration: The maximum duration for the test.
+-    public static func timeLimit(_ duration: Duration) -> Self {
+-        Self { $0[Test.Trait.TimeLimit.self] = duration }
+-    }
+-
+-    /// Adds a tag for filtering and categorization.
+-    ///
+-    /// - Parameter name: The tag name.
+-    public static func tag(_ name: Swift.String) -> Self {
+-        Self { collection in
+-            var tags = collection[Test.Trait.Tag.self]
+-            tags.insert(name)
+-            collection[Test.Trait.Tag.self] = tags
+-        }
+-    }
+-
+-    /// Sets an enabled condition.
+-    ///
+-    /// - Parameters:
+-    ///   - condition: Whether the test should run.
+-    ///   - comment: Explanation for why the test is disabled.
+-    public static func enabled(if condition: Bool, _ comment: Test.Text? = nil) -> Self {
+-        Self { $0[Test.Trait.Enabled.self] = .init(isEnabled: condition, comment: comment) }
+-    }
+-
+-    /// Disables the test.
+-    ///
+-    /// - Parameter comment: Explanation for why the test is disabled.
+-    public static func disabled(_ comment: Test.Text? = nil) -> Self {
+-        Self { $0[Test.Trait.Enabled.self] = .init(isEnabled: false, comment: comment) }
+-    }
+-
+-    /// Adds a bug reference.
+-    ///
+-    /// - Parameters:
+-    ///   - id: The bug identifier.
+-    ///   - comment: Additional context.
+-    public static func bug(_ id: Swift.String, _ comment: Test.Text? = nil) -> Self {
+-        Self { $0[Test.Trait.Bug.self] = .init(id: id, comment: comment) }
+-    }
+-
+-    /// Marks the test for serial execution (not in parallel).
+-    public static var serialized: Self {
+-        Self { $0[Test.Trait.Serialized.self] = true }
+-    }
+-
+-    /// Marks the test for mutual exclusion within the global group.
+-    public static var exclusive: Self {
+-        exclusive(group: Test.Trait.Exclusive.globalGroup)
+-    }
+-
+-    /// Marks the test for mutual exclusion within a specific group.
+-    ///
+-    /// - Parameter group: The exclusion group name.
+-    public static func exclusive(group: Swift.String) -> Self {
+-        Self { $0[Test.Trait.Exclusive.self] = .init(group: group) }
+-    }
+-
+-    /// Configures timed benchmark execution.
+-    ///
+-    /// - Parameters:
+-    ///   - iterations: Number of measurement runs (default: 10).
+-    ///   - warmup: Number of untimed warmup runs (default: 0).
+-    ///   - threshold: Optional performance budget.
+-    ///   - metric: Metric to check against threshold (default: .median).
+-    ///   - trackAllocations: Whether to track memory allocations per iteration (default: false).
+-    ///   - baselineTolerance: Optional tolerance for baseline regression detection
+-    ///     (e.g., `0.10` = 10%). When set, baselines are loaded, compared, and
+-    ///     saved automatically.
+-    public static func timed(
+-        iterations: Int = 10,
+-        warmup: Int = 0,
+-        threshold: Duration? = nil,
+-        metric: Test.Benchmark.Metric = .median,
+-        trackAllocations: Bool = false,
+-        baselineTolerance: Double? = nil
+-    ) -> Self {
+-        Self {
+-            $0[Test.Trait.Timed.self] = .init(
+-                iteration: .init(count: iterations, warmup: warmup),
+-                evaluation: .init(
+-                    threshold: threshold,
+-                    metric: metric,
+-                    baselineTolerance: baselineTolerance,
+-                    trackAllocations: trackAllocations
+-                )
+-            )
+-        }
+-    }
+-}
+diff --git a/Sources/Tests Core/Test.Trait.Collection.Modifier.swift b/Sources/Tests Core/Test.Trait.Collection.Modifier.swift
+index 32fce00..ff5ebe0 100644
+--- a/Sources/Tests Core/Test.Trait.Collection.Modifier.swift	
++++ b/Sources/Tests Core/Test.Trait.Collection.Modifier.swift	
+@@ -1,3 +1,5 @@
++public import Sample
++
+ extension Test.Trait.Collection {
+     /// A closure that sets witness values on a trait collection.
+     ///
+@@ -60,3 +62,97 @@ extension Test.Trait.Collection.Modifier {
+         _apply(&collection)
+     }
+ }
++
++extension Test.Trait.Collection.Modifier {
++    /// Sets a time limit for test execution.
++    ///
++    /// - Parameter duration: The maximum duration for the test.
++    public static func timeLimit(_ duration: Duration) -> Self {
++        Self { $0[Test.Trait.TimeLimit.self] = duration }
++    }
++
++    /// Adds a tag for filtering and categorization.
++    ///
++    /// - Parameter name: The tag name.
++    public static func tag(_ name: Swift.String) -> Self {
++        Self { collection in
++            var tags = collection[Test.Trait.Tag.self]
++            tags.insert(name)
++            collection[Test.Trait.Tag.self] = tags
++        }
++    }
++
++    /// Sets an enabled condition.
++    ///
++    /// - Parameters:
++    ///   - condition: Whether the test should run.
++    ///   - comment: Explanation for why the test is disabled.
++    public static func enabled(if condition: Bool, _ comment: Test.Text? = nil) -> Self {
++        Self { $0[Test.Trait.Enabled.self] = .init(isEnabled: condition, comment: comment) }
++    }
++
++    /// Disables the test.
++    ///
++    /// - Parameter comment: Explanation for why the test is disabled.
++    public static func disabled(_ comment: Test.Text? = nil) -> Self {
++        Self { $0[Test.Trait.Enabled.self] = .init(isEnabled: false, comment: comment) }
++    }
++
++    /// Adds a bug reference.
++    ///
++    /// - Parameters:
++    ///   - id: The bug identifier.
++    ///   - comment: Additional context.
++    public static func bug(_ id: Swift.String, _ comment: Test.Text? = nil) -> Self {
++        Self { $0[Test.Trait.Bug.self] = .init(id: id, comment: comment) }
++    }
++
++    /// Marks the test for serial execution (not in parallel).
++    public static var serialized: Self {
++        Self { $0[Test.Trait.Serialized.self] = true }
++    }
++
++    /// Marks the test for mutual exclusion within the global group.
++    public static var exclusive: Self {
++        exclusive(group: Test.Trait.Exclusive.globalGroup)
++    }
++
++    /// Marks the test for mutual exclusion within a specific group.
++    ///
++    /// - Parameter group: The exclusion group name.
++    public static func exclusive(group: Swift.String) -> Self {
++        Self { $0[Test.Trait.Exclusive.self] = .init(group: group) }
++    }
++
++    /// Configures timed benchmark execution.
++    ///
++    /// - Parameters:
++    ///   - iterations: Number of measurement runs (default: 10).
++    ///   - warmup: Number of untimed warmup runs (default: 0).
++    ///   - threshold: Optional performance budget.
++    ///   - metric: Metric to check against threshold (default: .median).
++    ///   - trackAllocations: Whether to track memory allocations per iteration (default: false).
++    ///   - baselineTolerance: Optional tolerance for baseline regression detection
++    ///     (e.g., `0.10` = 10%). When set, baselines are loaded, compared, and
++    ///     saved automatically.
++    public static func timed(
++        iterations: Int = 10,
++        warmup: Int = 0,
++        threshold: Duration? = nil,
++        metric: Test.Benchmark.Metric = .median,
++        trackAllocations: Bool = false,
++        baselineTolerance: Double? = nil
++    ) -> Self {
++        Self {
++            $0[Test.Trait.Timed.self] = .init(
++                iteration: .init(count: iterations, warmup: warmup),
++                evaluation: .init(
++                    threshold: threshold,
++                    metric: metric,
++                    baselineTolerance: baselineTolerance,
++                    trackAllocations: trackAllocations
++                )
++            )
++        }
++    }
++}
+diff --git a/Sources/Tests Performance/Test.Environment+Capture.swift b/Sources/Tests Performance/Test.Environment+Capture.swift
+deleted file mode 100644
+index 6c9a3e7..0000000
+--- a/Sources/Tests Performance/Test.Environment+Capture.swift	
++++ /dev/null
+@@ -1,58 +0,0 @@
+-import Kernel
+-
+-extension Test.Environment {
+-    /// Captures the current runtime and compile-time environment.
+-    public static func capture() -> Self {
+-        let osVersion = Kernel.Name.current.map { "\($0.system) \($0.release)" } ?? "unknown"
+-        let physical = Int(CPU.Core.count)
+-        let logical = Int(CPU.Logical.count)
+-        let memory = Memory.Physical.capacity.underlying
+-        return Self(
+-            architecture: _architecture,
+-            physicalCPUCount: physical,
+-            logicalCPUCount: logical,
+-            memoryBytes: memory,
+-            osVersion: osVersion,
+-            swiftVersion: _swiftVersion,
+-            optimization: .current,
+-            features: .current
+-        )
+-    }
+-
+-    /// Human-readable fingerprint for file keying and display.
+-    ///
+-    /// Example: `"arm64-10c-debug-nnbd-sms"` or `"x86_64-8c-release"`
+-    public var fingerprint: Swift.String {
+-        var parts = [architecture, "\(physicalCPUCount)c"]
+-        parts.append(optimization.rawValue)
+-        if features.nonisolatedNonsendingByDefault { parts.append("nnbd") }
+-        if features.strictMemorySafety { parts.append("sms") }
+-        return parts.joined(separator: "-")
+-    }
+-}
+-
+-extension Test.Environment {
+-    private static var _architecture: Swift.String {
+-        #if arch(arm64)
+-            "arm64"
+-        #elseif arch(x86_64)
+-            "x86_64"
+-        #elseif arch(i386)
+-            "i386"
+-        #else
+-            "unknown"
+-        #endif
+-    }
+-
+-    private static var _swiftVersion: Swift.String {
+-        #if swift(>=6.2)
+-            "6.2"
+-        #elseif swift(>=6.1)
+-            "6.1"
+-        #elseif swift(>=6.0)
+-            "6.0"
+-        #else
+-            "< 6.0"
+-        #endif
+-    }
+-}
+diff --git a/Sources/Tests Performance/Test.Environment.swift b/Sources/Tests Performance/Test.Environment.swift
+index 72ebcb8..197bfd4 100644
+--- a/Sources/Tests Performance/Test.Environment.swift	
++++ b/Sources/Tests Performance/Test.Environment.swift	
+@@ -67,3 +67,60 @@ extension Test {
+         }
+     }
+ }
++
++extension Test.Environment {
++    /// Captures the current runtime and compile-time environment.
++    public static func capture() -> Self {
++        let osVersion = Kernel.Name.current.map { "\($0.system) \($0.release)" } ?? "unknown"
++        let physical = Int(CPU.Core.count)
++        let logical = Int(CPU.Logical.count)
++        let memory = Memory.Physical.capacity.underlying
++        return Self(
++            architecture: _architecture,
++            physicalCPUCount: physical,
++            logicalCPUCount: logical,
++            memoryBytes: memory,
++            osVersion: osVersion,
++            swiftVersion: _swiftVersion,
++            optimization: .current,
++            features: .current
++        )
++    }
++
++    /// Human-readable fingerprint for file keying and display.
++    ///
++    /// Example: `"arm64-10c-debug-nnbd-sms"` or `"x86_64-8c-release"`
++    public var fingerprint: Swift.String {
++        var parts = [architecture, "\(physicalCPUCount)c"]
++        parts.append(optimization.rawValue)
++        if features.nonisolatedNonsendingByDefault { parts.append("nnbd") }
++        if features.strictMemorySafety { parts.append("sms") }
++        return parts.joined(separator: "-")
++    }
++}
++
++extension Test.Environment {
++    private static var _architecture: Swift.String {
++        #if arch(arm64)
++            "arm64"
++        #elseif arch(x86_64)
++            "x86_64"
++        #elseif arch(i386)
++            "i386"
++        #else
++            "unknown"
++        #endif
++    }
++
++    private static var _swiftVersion: Swift.String {
++        #if swift(>=6.2)
++            "6.2"
++        #elseif swift(>=6.1)
++            "6.1"
++        #elseif swift(>=6.0)
++            "6.0"
++        #else
++            "< 6.0"
++        #endif
++    }
++}
+diff --git a/Sources/Tests Performance/Tests.Complexity+analyze.swift b/Sources/Tests Performance/Tests.Complexity+analyze.swift
+deleted file mode 100644
+index b3bfba8..0000000
+--- a/Sources/Tests Performance/Tests.Complexity+analyze.swift	
++++ /dev/null
+@@ -1,236 +0,0 @@
+-import Kernel_Clock
+-import Test
+-
+-extension Tests.Complexity {
+-    /// Analyzes the empirical complexity of an operation.
+-    ///
+-    /// Measures execution time at each input size, constructs analytical
+-    /// evidence via L1 fitting, and applies policy-based classification.
+-    /// Returns a ``Diagnostic`` containing the ``Result`` and all
+-    /// measurement data needed for human or machine interpretation.
+-    ///
+-    /// The operation closure receives the input size and should perform
+-    /// the workload under test. The framework measures **total** execution
+-    /// time of the closure (total-work semantics). If you want per-operation
+-    /// complexity, structure the closure accordingly.
+-    ///
+-    /// ```swift
+-    /// @Test(.serialized)
+-    /// func sortIsNLogN() async throws {
+-    ///     let diagnostic = try Tests.Complexity.analyze(
+-    ///         sizes: [1_000, 10_000, 100_000, 1_000_000]
+-    ///     ) { n in
+-    ///         var array = (0..<n).map { _ in Int.random(in: 0..<n) }
+-    ///         array.sort()
+-    ///     }
+-    ///     #expect(diagnostic.result.isCompatible(with: .linearithmic))
+-    /// }
+-    /// ```
+-    ///
+-    /// - Parameters:
+-    ///   - sizes: Input sizes to measure at. Should span >= 2 orders of magnitude.
+-    ///   - warmup: Warmup iterations per size point (not timed).
+-    ///   - iterations: Timed iterations per size point.
+-    ///   - metric: Which statistic represents each size point (default: median).
+-    ///   - policy: Classification thresholds.
+-    ///   - baselineKey: Optional key for baseline storage. When provided,
+-    ///     loads the previous baseline, compares, and saves the current result.
+-    ///   - printDiagnostic: Whether to print the diagnostic to console (default: true).
+-    ///   - operation: The workload to measure. Receives the input size.
+-    /// - Returns: A ``Diagnostic`` containing the ``Result`` and measurement data.
+-    @discardableResult
+-    public static func analyze<E: Swift.Error>(
+-        sizes: [Int],
+-        warmup: Int = 2,
+-        iterations: Int = 10,
+-        metric: Sample.Metric = .median,
+-        policy: Policy = .default,
+-        baselineKey: Swift.String? = nil,
+-        printDiagnostic: Bool = true,
+-        operation: (Int) throws(E) -> Void
+-    ) throws(E) -> Diagnostic {
+-        let points = try _measure(
+-            sizes: sizes,
+-            warmup: warmup,
+-            iterations: iterations,
+-            metric: metric,
+-            operation: operation
+-        )
+-
+-        return _finalize(
+-            points: points,
+-            metric: metric,
+-            policy: policy,
+-            baselineKey: baselineKey,
+-            printDiagnostic: printDiagnostic
+-        )
+-    }
+-
+-    /// Async variant for async workloads.
+-    @discardableResult
+-    public static func analyze<E: Swift.Error>(
+-        sizes: [Int],
+-        warmup: Int = 2,
+-        iterations: Int = 10,
+-        metric: Sample.Metric = .median,
+-        policy: Policy = .default,
+-        baselineKey: Swift.String? = nil,
+-        printDiagnostic: Bool = true,
+-        operation: (Int) async throws(E) -> Void
+-    ) async throws(E) -> Diagnostic {
+-        let points = try await _measureAsync(
+-            sizes: sizes,
+-            warmup: warmup,
+-            iterations: iterations,
+-            metric: metric,
+-            operation: operation
+-        )
+-
+-        return _finalize(
+-            points: points,
+-            metric: metric,
+-            policy: policy,
+-            baselineKey: baselineKey,
+-            printDiagnostic: printDiagnostic
+-        )
+-    }
+-}
+-
+-extension Tests.Complexity {
+-    private static func _finalize(
+-        points: [(size: Int, metric: Duration)],
+-        metric: Sample.Metric,
+-        policy: Policy,
+-        baselineKey: Swift.String?,
+-        printDiagnostic: Bool
+-    ) -> Diagnostic {
+-        let evidence = Test.Benchmark.Complexity.evidence(
+-            from: points,
+-            classes: policy.candidateClasses
+-        )
+-
+-        let result = classify(evidence, under: policy)
+-
+-        var diagnostic = Diagnostic(
+-            result: result,
+-            points: points,
+-            metric: metric,
+-            policy: policy
+-        )
+-
+-        _handleBaseline(key: baselineKey, result: result, diagnostic: &diagnostic)
+-
+-        if printDiagnostic {
+-            print(diagnostic.formatted())
+-        }
+-
+-        return diagnostic
+-    }
+-}
+-
+-extension Tests.Complexity {
+-    private static func _measure<E: Swift.Error>(
+-        sizes: [Int],
+-        warmup: Int,
+-        iterations: Int,
+-        metric: Sample.Metric,
+-        operation: (Int) throws(E) -> Void
+-    ) throws(E) -> [(size: Int, metric: Duration)] {
+-        var points: [(size: Int, metric: Duration)] = []
+-        points.reserveCapacity(sizes.count)
+-
+-        for size in sizes.sorted() {
+-            for _ in 0..<warmup {
+-                try operation(size)
+-            }
+-
+-            var durations: [Duration] = []
+-            durations.reserveCapacity(iterations)
+-            for _ in 0..<iterations {
+-                let start = Clock::Clock.Continuous.now
+-                try operation(size)
+-                durations.append(Clock::Clock.Continuous.now.offset - start.offset)
+-            }
+-
+-            let measurement = Test.Benchmark.Measurement(durations: durations)
+-            let value = metric.extract(from: measurement)
+-            points.append((size: size, metric: value))
+-        }
+-
+-        return points
+-    }
+-
+-    private static func _measureAsync<E: Swift.Error>(
+-        sizes: [Int],
+-        warmup: Int,
+-        iterations: Int,
+-        metric: Sample.Metric,
+-        operation: (Int) async throws(E) -> Void
+-    ) async throws(E) -> [(size: Int, metric: Duration)] {
+-        var points: [(size: Int, metric: Duration)] = []
+-        points.reserveCapacity(sizes.count)
+-
+-        for size in sizes.sorted() {
+-            for _ in 0..<warmup {
+-                try await operation(size)
+-            }
+-
+-            var durations: [Duration] = []
+-            durations.reserveCapacity(iterations)
+-            for _ in 0..<iterations {
+-                let start = Clock::Clock.Continuous.now
+-                try await operation(size)
+-                durations.append(Clock::Clock.Continuous.now.offset - start.offset)
+-            }
+-
+-            let measurement = Test.Benchmark.Measurement(durations: durations)
+-            let value = metric.extract(from: measurement)
+-            points.append((size: size, metric: value))
+-        }
+-
+-        return points
+-    }
+-}
+-
+-extension Tests.Complexity {
+-    private static func _handleBaseline(
+-        key: Swift.String?,
+-        result: Result,
+-        diagnostic: inout Diagnostic
+-    ) {
+-        guard let key else { return }
+-
+-        let path = Baseline.path(key: key)
+-        let recording = Tests.Baseline.Recording.current
+-
+-        let previous = Baseline.load(at: path)
+-
+-        if let previous {
+-            let current = Baseline(result: result)
+-            diagnostic.baselineComparison = Baseline.Comparison(
+-                previous: previous,
+-                current: current
+-            )
+-        }
+-
+-        let shouldSave: Bool
+-        switch recording {
+-        case .all:
+-            shouldSave = true
+-
+-        case .normal:
+-            shouldSave = previous == nil
+-
+-        case .never:
+-            shouldSave = false
+-        }
+-
+-        if shouldSave {
+-            let current = Baseline(result: result)
+-            do throws(Tests.Baseline.Storage.Error) {
+-                try current.save(to: path)
+-            } catch {
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Complexity+classify.swift b/Sources/Tests Performance/Tests.Complexity+classify.swift
+deleted file mode 100644
+index b31ffff..0000000
+--- a/Sources/Tests Performance/Tests.Complexity+classify.swift	
++++ /dev/null
+@@ -1,158 +0,0 @@
+-import Sample
+-public import Test
+-
+-extension Tests.Complexity {
+-    /// Interprets raw complexity evidence under a policy to produce a result.
+-    ///
+-    /// Applies constant-time detection, adequacy gates, monotonicity checks,
+-    /// fit quality thresholds, separation analysis, and cross-validation to
+-    /// derive a confidence level and best candidate classification.
+-    ///
+-    /// All thresholds come from the ``Policy`` and are provisional.
+-    ///
+-    /// - Parameters:
+-    ///   - evidence: Raw analytical evidence from L1 fitting.
+-    ///   - policy: Classification thresholds and candidate set.
+-    /// - Returns: An interpreted ``Result`` with confidence and classification.
+-    public static func classify(
+-        _ evidence: Test.Benchmark.Complexity.Evidence,
+-        under policy: Policy = .default
+-    ) -> Result {
+-        if policy.constantCVThreshold > 0,
+-            evidence.monotonicity.interpretation == .none,
+-            evidence.metricCV < policy.constantCVThreshold,
+-            evidence.points.count >= policy.minimumSizePoints,
+-            Self.hasScaleRange(evidence, policy: policy)
+-        {
+-            let constantCandidate =
+-                evidence.candidates
+-                .first { $0.complexity == .constant }
+-                ?? Test.Benchmark.Complexity.Candidate.Fit(
+-                    complexity: .constant,
+-                    regression: Sample.Regression.Fit(
+-                        slope: 0,
+-                        intercept: 0,
+-                        rSquared: 0,
+-                        meanSquaredError: 0
+-                    ),
+-                    effectiveExponent: 0
+-                )
+-            let confidence: Confidence
+-            if evidence.metricCV < policy.constantCVThreshold * 0.2 {
+-                confidence = .high
+-            } else if evidence.metricCV < policy.constantCVThreshold * 0.5 {
+-                confidence = .medium
+-            } else {
+-                confidence = .low
+-            }
+-            return Result(
+-                evidence: evidence,
+-                best: constantCandidate,
+-                confidence: confidence,
+-                ambiguousWith: [],
+-                reasons: []
+-            )
+-        }
+-
+-        var reasons: [InconclusiveReason] = []
+-
+-        if evidence.points.count < policy.minimumSizePoints {
+-            reasons.append(.insufficientData)
+-        }
+-
+-        if !Self.hasScaleRange(evidence, policy: policy) {
+-            reasons.append(.insufficientScaleRange)
+-        }
+-
+-        if evidence.monotonicity.interpretation == .none
+-            || evidence.monotonicity.interpretation == .decreasing
+-        {
+-            reasons.append(.nonMonotone)
+-        }
+-
+-        if evidence.exponent.fit.rSquared < policy.logLogRSquaredFloor {
+-            reasons.append(.weakContinuousFit)
+-        }
+-
+-        if !reasons.isEmpty {
+-            return Result(
+-                evidence: evidence,
+-                best: nil,
+-                confidence: .inconclusive,
+-                ambiguousWith: [],
+-                reasons: reasons
+-            )
+-        }
+-
+-        let viable = evidence.candidates.filter {
+-            $0.regression.slope > 0
+-                && $0.regression.rSquared >= policy.candidateRSquaredFloor
+-        }
+-
+-        guard let best = viable.first else {
+-            return Result(
+-                evidence: evidence,
+-                best: nil,
+-                confidence: .inconclusive,
+-                ambiguousWith: [],
+-                reasons: [.noSeparatedWinner]
+-            )
+-        }
+-
+-        let runnerUp = viable.dropFirst().first
+-        let separation =
+-            runnerUp.map {
+-                best.regression.rSquared - $0.regression.rSquared
+-            } ?? 1.0
+-
+-        let ambiguous = viable.filter {
+-            $0.complexity != best.complexity
+-                && (best.regression.rSquared - $0.regression.rSquared)
+-                    < policy.mediumSeparationThreshold
+-        }.map(\.complexity)
+-
+-        var confidence: Confidence
+-        if separation >= policy.highSeparationThreshold {
+-            confidence = .high
+-        } else if separation >= policy.mediumSeparationThreshold {
+-            confidence = .medium
+-        } else {
+-            confidence = .low
+-        }
+-
+-        let tolerance = Swift.max(
+-            policy.exponentConsistencyTolerance,
+-            0.3 * Swift.abs(best.effectiveExponent)
+-        )
+-        let deviation = Swift.abs(
+-            evidence.exponent.value - best.effectiveExponent
+-        )
+-        if deviation > tolerance {
+-            switch confidence {
+-            case .high: confidence = .medium
+-            case .medium: confidence = .low
+-            case .low, .inconclusive: break
+-            }
+-            reasons.append(.inconsistentSignals)
+-        }
+-
+-        return Result(
+-            evidence: evidence,
+-            best: best,
+-            confidence: confidence,
+-            ambiguousWith: ambiguous,
+-            reasons: reasons
+-        )
+-    }
+-
+-    private static func hasScaleRange(
+-        _ evidence: Test.Benchmark.Complexity.Evidence,
+-        policy: Policy
+-    ) -> Bool {
+-        guard let first = evidence.points.first,
+-            let last = evidence.points.last,
+-            first.size > 0
+-        else { return false }
+-        return Double(last.size) / Double(first.size) >= policy.minimumScaleRange
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Complexity+sizes.swift b/Sources/Tests Performance/Tests.Complexity+sizes.swift
+deleted file mode 100644
+index fb184b2..0000000
+--- a/Sources/Tests Performance/Tests.Complexity+sizes.swift	
++++ /dev/null
+@@ -1,40 +0,0 @@
+-extension Tests.Complexity {
+-    /// Generates a geometric sequence of input sizes.
+-    ///
+-    /// Produces sizes starting at `from`, multiplied by `factor` at each
+-    /// step, up to and including `through`. The result is deterministic
+-    /// and always includes the endpoint if it's reachable.
+-    ///
+-    /// ```swift
+-    /// Tests.Complexity.sizes(from: 100, through: 1_000_000)
+-    /// // [100, 1_000, 10_000, 100_000, 1_000_000]
+-    ///
+-    /// Tests.Complexity.sizes(from: 1_024, through: 1_048_576, factor: 4)
+-    /// // [1_024, 4_096, 16_384, 65_536, 262_144, 1_048_576]
+-    /// ```
+-    ///
+-    /// - Parameters:
+-    ///   - from: Starting size (must be > 0).
+-    ///   - through: Maximum size (inclusive if reachable).
+-    ///   - factor: Multiplicative step between sizes (default: 10).
+-    /// - Returns: Array of input sizes in ascending order.
+-    public static func sizes(
+-        from: Int,
+-        through: Int,
+-        factor: Int = 10
+-    ) -> [Int] {
+-        precondition(from > 0, "Starting size must be positive")
+-        precondition(through >= from, "End size must be >= start size")
+-        precondition(factor >= 2, "Factor must be >= 2")
+-
+-        var result: [Int] = []
+-        var current = from
+-        while current <= through {
+-            result.append(current)
+-            let next = current.multipliedReportingOverflow(by: factor)
+-            if next.overflow { break }
+-            current = next.partialValue
+-        }
+-        return result
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Complexity.Diagnostic+Format.swift b/Sources/Tests Performance/Tests.Complexity.Diagnostic+Format.swift
+deleted file mode 100644
+index 9443768..0000000
+--- a/Sources/Tests Performance/Tests.Complexity.Diagnostic+Format.swift	
++++ /dev/null
+@@ -1,261 +0,0 @@
+-import Console
+-import Formatter
+-
+-extension Tests.Complexity.Diagnostic {
+-
+-    /// Human-readable formatted diagnostic for console output.
+-    public func formatted() -> Swift.String {
+-        let cap = Tests.consoleCapability
+-        let evidence = result.evidence
+-        var lines: [Swift.String] = []
+-
+-        let header: Swift.String
+-        if result.confidence == .inconclusive {
+-            header = Console.Style.warning.apply(
+-                to: "COMPLEXITY ANALYSIS — INCONCLUSIVE",
+-                capability: cap
+-            )
+-        } else if let best = result.best {
+-            header = Console.Style.success.apply(
+-                to: "COMPLEXITY ANALYSIS — \(best.complexity.rawValue.uppercased())",
+-                capability: cap
+-            )
+-        } else {
+-            header = Console.Style.warning.apply(
+-                to: "COMPLEXITY ANALYSIS — NO RESULT",
+-                capability: cap
+-            )
+-        }
+-        lines.append(header)
+-
+-        lines.append("")
+-        lines.append("  Continuous Exponent:")
+-        let k = evidence.exponent.value.formatted(Formatter::Formatter.Number(fractionDigits: 3))
+-        let r2 = evidence.exponent.fit.rSquared.formatted(
+-            Formatter::Formatter.Number(fractionDigits: 4)
+-        )
+-        lines.append("    k = \(k)  (T ≈ c·nᵏ)")
+-        lines.append("    R² = \(r2)")
+-
+-        if let best = result.best {
+-            lines.append("")
+-            lines.append("  Best Candidate:")
+-            let bestR2 = best.regression.rSquared.formatted(
+-                Formatter::Formatter.Number(fractionDigits: 4)
+-            )
+-            lines.append("    \(best.complexity.rawValue)  R² = \(bestR2)")
+-
+-            let confidenceLabel: Swift.String
+-            switch result.confidence {
+-            case .high:
+-                confidenceLabel = Console.Style.success.apply(
+-                    to: "HIGH",
+-                    capability: cap
+-                )
+-
+-            case .medium:
+-                confidenceLabel = Console.Style.warning.apply(
+-                    to: "MEDIUM",
+-                    capability: cap
+-                )
+-
+-            case .low:
+-                confidenceLabel = Console.Style.warning.apply(
+-                    to: "LOW",
+-                    capability: cap
+-                )
+-
+-            case .inconclusive:
+-                confidenceLabel = Console.Style.error.apply(
+-                    to: "INCONCLUSIVE",
+-                    capability: cap
+-                )
+-            }
+-            lines.append("    Confidence: \(confidenceLabel)")
+-
+-            if !result.ambiguousWith.isEmpty {
+-                let alt = result.ambiguousWith.map(\.rawValue).joined(separator: ", ")
+-                lines.append("    Ambiguous with: \(alt)")
+-            }
+-        }
+-
+-        if !result.reasons.isEmpty {
+-            lines.append("")
+-            lines.append("  Reasons:")
+-            for reason in result.reasons {
+-                lines.append("    • \(reason)")
+-            }
+-        }
+-
+-        lines.append("")
+-        lines.append("  Measurements:")
+-        for point in points {
+-            let size = Swift.String(point.size)
+-            let duration = point.metric.formatted(
+-                Formatter::Formatter.Duration(numeric: Formatter::Formatter.Number())
+-            )
+-            lines.append("    n=\(size)  →  \(duration)")
+-        }
+-
+-        if !evidence.growthRatios.isEmpty {
+-            lines.append("")
+-            lines.append("  Growth Ratios:")
+-            let ratioStrs = evidence.growthRatios.map {
+-                $0.formatted(Formatter::Formatter.Number(fractionDigits: 2))
+-            }
+-            lines.append("    [\(ratioStrs.joined(separator: ", "))]")
+-        }
+-
+-        let topN = Swift.min(evidence.candidates.count, 3)
+-        if topN > 0 {
+-            lines.append("")
+-            lines.append("  Top Candidates:")
+-            for candidate in evidence.candidates.prefix(topN) {
+-                let cR2 = candidate.regression.rSquared.formatted(
+-                    Formatter::Formatter.Number(fractionDigits: 4)
+-                )
+-                lines.append("    \(candidate.complexity.rawValue)  R² = \(cR2)")
+-            }
+-        }
+-
+-        if let comparison = baselineComparison {
+-            lines.append("")
+-            lines.append("  Baseline Comparison:")
+-            let prevClass = comparison.previous.bestClass?.rawValue ?? "inconclusive"
+-            let currClass = comparison.current.bestClass?.rawValue ?? "inconclusive"
+-            lines.append(
+-                "    Previous: \(prevClass) (k=\(comparison.previous.exponent.formatted(Formatter::Formatter.Number(fractionDigits: 3))))"
+-            )
+-            lines.append(
+-                "    Current:  \(currClass) (k=\(comparison.current.exponent.formatted(Formatter::Formatter.Number(fractionDigits: 3))))"
+-            )
+-
+-            if comparison.classRegressed {
+-                let label = Console.Style.error.apply(
+-                    to: "REGRESSION — class worsened from \(prevClass) to \(currClass)",
+-                    capability: cap
+-                )
+-                lines.append("    \(label)")
+-            } else if comparison.classImproved {
+-                let label = Console.Style.success.apply(
+-                    to: "IMPROVED — class improved from \(prevClass) to \(currClass)",
+-                    capability: cap
+-                )
+-                lines.append("    \(label)")
+-            } else if comparison.exponentDriftExceeds(0.3) {
+-                let drift = comparison.exponentDrift.formatted(
+-                    Formatter::Formatter.Number(fractionDigits: 3)
+-                )
+-                let label = Console.Style.warning.apply(
+-                    to: "DRIFT — exponent shifted by \(drift)",
+-                    capability: cap
+-                )
+-                lines.append("    \(label)")
+-            } else {
+-                lines.append("    NO CHANGE")
+-            }
+-        }
+-
+-        return lines.joined(separator: "\n")
+-    }
+-
+-    /// Structured JSON block delimited for AI agent parsing.
+-    public func jsonBlock() -> Swift.String {
+-        let evidence = result.evidence
+-        var json: [Swift.String] = []
+-        json.append("<!-- COMPLEXITY_DIAGNOSTIC_BEGIN -->")
+-        json.append("{")
+-
+-        json.append("  \"exponent\": {")
+-        json.append(
+-            "    \"k\": \(evidence.exponent.value.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
+-        )
+-        json.append(
+-            "    \"r_squared\": \(evidence.exponent.fit.rSquared.formatted(Formatter::Formatter.Number(fractionDigits: 4)))"
+-        )
+-        json.append("  },")
+-
+-        if let best = result.best {
+-            json.append("  \"best\": {")
+-            json.append("    \"class\": \(_jsonString(best.complexity.rawValue)),")
+-            json.append(
+-                "    \"r_squared\": \(best.regression.rSquared.formatted(Formatter::Formatter.Number(fractionDigits: 4)))"
+-            )
+-            json.append("  },")
+-        } else {
+-            json.append("  \"best\": null,")
+-        }
+-
+-        json.append("  \"confidence\": \(_jsonString("\(result.confidence)")),")
+-
+-        let ambStr = result.ambiguousWith.map { _jsonString($0.rawValue) }.joined(separator: ", ")
+-        json.append("  \"ambiguous_with\": [\(ambStr)],")
+-
+-        let reasonStr = result.reasons.map { _jsonString("\($0)") }.joined(separator: ", ")
+-        json.append("  \"reasons\": [\(reasonStr)],")
+-
+-        json.append("  \"candidates\": [")
+-        for (i, c) in evidence.candidates.enumerated() {
+-            let comma = i < evidence.candidates.count - 1 ? "," : ""
+-            json.append(
+-                "    {\"class\": \(_jsonString(c.complexity.rawValue)), \"r_squared\": \(c.regression.rSquared.formatted(Formatter::Formatter.Number(fractionDigits: 4)))}\(comma)"
+-            )
+-        }
+-        json.append("  ],")
+-
+-        json.append("  \"points\": [")
+-        for (i, p) in points.enumerated() {
+-            let comma = i < points.count - 1 ? "," : ""
+-            json.append(
+-                "    {\"size\": \(p.size), \"seconds\": \(p.metric.inSeconds.formatted(Formatter::Formatter.Number(fractionDigits: 6)))}\(comma)"
+-            )
+-        }
+-        json.append("  ],")
+-
+-        let ratioStr = evidence.growthRatios.map {
+-            $0.formatted(Formatter::Formatter.Number(fractionDigits: 3))
+-        }.joined(
+-            separator: ", "
+-        )
+-        json.append("  \"growth_ratios\": [\(ratioStr)],")
+-
+-        if let comparison = baselineComparison {
+-            json.append("  \"baseline\": {")
+-            if let prevClass = comparison.previous.bestClass {
+-                json.append("    \"previous_class\": \(_jsonString(prevClass.rawValue)),")
+-            } else {
+-                json.append("    \"previous_class\": null,")
+-            }
+-            json.append(
+-                "    \"previous_exponent\": \(comparison.previous.exponent.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
+-            )
+-            json.append(
+-                "    \"exponent_drift\": \(comparison.exponentDrift.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
+-            )
+-            json.append("    \"class_regressed\": \(comparison.classRegressed),")
+-            json.append("    \"is_regression\": \(comparison.isRegression)")
+-            json.append("  }")
+-        } else {
+-            json.append("  \"baseline\": null")
+-        }
+-
+-        json.append("}")
+-        json.append("<!-- COMPLEXITY_DIAGNOSTIC_END -->")
+-
+-        return json.joined(separator: "\n")
+-    }
+-
+-    private func _jsonString(_ s: Swift.String) -> Swift.String {
+-        var result = "\""
+-        for c in s {
+-            switch c {
+-            case "\\": result += "\\\\"
+-            case "\"": result += "\\\""
+-            case "\n": result += "\\n"
+-            default: result.append(c)
+-            }
+-        }
+-        result += "\""
+-        return result
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Complexity.Diagnostic.swift b/Sources/Tests Performance/Tests.Complexity.Diagnostic.swift
+index bebb342..555f235 100644
+--- a/Sources/Tests Performance/Tests.Complexity.Diagnostic.swift	
++++ b/Sources/Tests Performance/Tests.Complexity.Diagnostic.swift	
+@@ -1,4 +1,6 @@
+ import Test
++import Console
++import Formatter
+ 
+ extension Tests.Complexity {
+     /// Structured complexity diagnostic aggregating classification results.
+@@ -43,3 +45,262 @@ extension Tests.Complexity {
+         }
+     }
+ }
++
++extension Tests.Complexity.Diagnostic {
++
++    /// Human-readable formatted diagnostic for console output.
++    public func formatted() -> Swift.String {
++        let cap = Tests.consoleCapability
++        let evidence = result.evidence
++        var lines: [Swift.String] = []
++
++        let header: Swift.String
++        if result.confidence == .inconclusive {
++            header = Console.Style.warning.apply(
++                to: "COMPLEXITY ANALYSIS — INCONCLUSIVE",
++                capability: cap
++            )
++        } else if let best = result.best {
++            header = Console.Style.success.apply(
++                to: "COMPLEXITY ANALYSIS — \(best.complexity.rawValue.uppercased())",
++                capability: cap
++            )
++        } else {
++            header = Console.Style.warning.apply(
++                to: "COMPLEXITY ANALYSIS — NO RESULT",
++                capability: cap
++            )
++        }
++        lines.append(header)
++
++        lines.append("")
++        lines.append("  Continuous Exponent:")
++        let k = evidence.exponent.value.formatted(Formatter::Formatter.Number(fractionDigits: 3))
++        let r2 = evidence.exponent.fit.rSquared.formatted(
++            Formatter::Formatter.Number(fractionDigits: 4)
++        )
++        lines.append("    k = \(k)  (T ≈ c·nᵏ)")
++        lines.append("    R² = \(r2)")
++
++        if let best = result.best {
++            lines.append("")
++            lines.append("  Best Candidate:")
++            let bestR2 = best.regression.rSquared.formatted(
++                Formatter::Formatter.Number(fractionDigits: 4)
++            )
++            lines.append("    \(best.complexity.rawValue)  R² = \(bestR2)")
++
++            let confidenceLabel: Swift.String
++            switch result.confidence {
++            case .high:
++                confidenceLabel = Console.Style.success.apply(
++                    to: "HIGH",
++                    capability: cap
++                )
++
++            case .medium:
++                confidenceLabel = Console.Style.warning.apply(
++                    to: "MEDIUM",
++                    capability: cap
++                )
++
++            case .low:
++                confidenceLabel = Console.Style.warning.apply(
++                    to: "LOW",
++                    capability: cap
++                )
++
++            case .inconclusive:
++                confidenceLabel = Console.Style.error.apply(
++                    to: "INCONCLUSIVE",
++                    capability: cap
++                )
++            }
++            lines.append("    Confidence: \(confidenceLabel)")
++
++            if !result.ambiguousWith.isEmpty {
++                let alt = result.ambiguousWith.map(\.rawValue).joined(separator: ", ")
++                lines.append("    Ambiguous with: \(alt)")
++            }
++        }
++
++        if !result.reasons.isEmpty {
++            lines.append("")
++            lines.append("  Reasons:")
++            for reason in result.reasons {
++                lines.append("    • \(reason)")
++            }
++        }
++
++        lines.append("")
++        lines.append("  Measurements:")
++        for point in points {
++            let size = Swift.String(point.size)
++            let duration = point.metric.formatted(
++                Formatter::Formatter.Duration(numeric: Formatter::Formatter.Number())
++            )
++            lines.append("    n=\(size)  →  \(duration)")
++        }
++
++        if !evidence.growthRatios.isEmpty {
++            lines.append("")
++            lines.append("  Growth Ratios:")
++            let ratioStrs = evidence.growthRatios.map {
++                $0.formatted(Formatter::Formatter.Number(fractionDigits: 2))
++            }
++            lines.append("    [\(ratioStrs.joined(separator: ", "))]")
++        }
++
++        let topN = Swift.min(evidence.candidates.count, 3)
++        if topN > 0 {
++            lines.append("")
++            lines.append("  Top Candidates:")
++            for candidate in evidence.candidates.prefix(topN) {
++                let cR2 = candidate.regression.rSquared.formatted(
++                    Formatter::Formatter.Number(fractionDigits: 4)
++                )
++                lines.append("    \(candidate.complexity.rawValue)  R² = \(cR2)")
++            }
++        }
++
++        if let comparison = baselineComparison {
++            lines.append("")
++            lines.append("  Baseline Comparison:")
++            let prevClass = comparison.previous.bestClass?.rawValue ?? "inconclusive"
++            let currClass = comparison.current.bestClass?.rawValue ?? "inconclusive"
++            lines.append(
++                "    Previous: \(prevClass) (k=\(comparison.previous.exponent.formatted(Formatter::Formatter.Number(fractionDigits: 3))))"
++            )
++            lines.append(
++                "    Current:  \(currClass) (k=\(comparison.current.exponent.formatted(Formatter::Formatter.Number(fractionDigits: 3))))"
++            )
++
++            if comparison.classRegressed {
++                let label = Console.Style.error.apply(
++                    to: "REGRESSION — class worsened from \(prevClass) to \(currClass)",
++                    capability: cap
++                )
++                lines.append("    \(label)")
++            } else if comparison.classImproved {
++                let label = Console.Style.success.apply(
++                    to: "IMPROVED — class improved from \(prevClass) to \(currClass)",
++                    capability: cap
++                )
++                lines.append("    \(label)")
++            } else if comparison.exponentDriftExceeds(0.3) {
++                let drift = comparison.exponentDrift.formatted(
++                    Formatter::Formatter.Number(fractionDigits: 3)
++                )
++                let label = Console.Style.warning.apply(
++                    to: "DRIFT — exponent shifted by \(drift)",
++                    capability: cap
++                )
++                lines.append("    \(label)")
++            } else {
++                lines.append("    NO CHANGE")
++            }
++        }
++
++        return lines.joined(separator: "\n")
++    }
++
++    /// Structured JSON block delimited for AI agent parsing.
++    public func jsonBlock() -> Swift.String {
++        let evidence = result.evidence
++        var json: [Swift.String] = []
++        json.append("<!-- COMPLEXITY_DIAGNOSTIC_BEGIN -->")
++        json.append("{")
++
++        json.append("  \"exponent\": {")
++        json.append(
++            "    \"k\": \(evidence.exponent.value.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
++        )
++        json.append(
++            "    \"r_squared\": \(evidence.exponent.fit.rSquared.formatted(Formatter::Formatter.Number(fractionDigits: 4)))"
++        )
++        json.append("  },")
++
++        if let best = result.best {
++            json.append("  \"best\": {")
++            json.append("    \"class\": \(_jsonString(best.complexity.rawValue)),")
++            json.append(
++                "    \"r_squared\": \(best.regression.rSquared.formatted(Formatter::Formatter.Number(fractionDigits: 4)))"
++            )
++            json.append("  },")
++        } else {
++            json.append("  \"best\": null,")
++        }
++
++        json.append("  \"confidence\": \(_jsonString("\(result.confidence)")),")
++
++        let ambStr = result.ambiguousWith.map { _jsonString($0.rawValue) }.joined(separator: ", ")
++        json.append("  \"ambiguous_with\": [\(ambStr)],")
++
++        let reasonStr = result.reasons.map { _jsonString("\($0)") }.joined(separator: ", ")
++        json.append("  \"reasons\": [\(reasonStr)],")
++
++        json.append("  \"candidates\": [")
++        for (i, c) in evidence.candidates.enumerated() {
++            let comma = i < evidence.candidates.count - 1 ? "," : ""
++            json.append(
++                "    {\"class\": \(_jsonString(c.complexity.rawValue)), \"r_squared\": \(c.regression.rSquared.formatted(Formatter::Formatter.Number(fractionDigits: 4)))}\(comma)"
++            )
++        }
++        json.append("  ],")
++
++        json.append("  \"points\": [")
++        for (i, p) in points.enumerated() {
++            let comma = i < points.count - 1 ? "," : ""
++            json.append(
++                "    {\"size\": \(p.size), \"seconds\": \(p.metric.inSeconds.formatted(Formatter::Formatter.Number(fractionDigits: 6)))}\(comma)"
++            )
++        }
++        json.append("  ],")
++
++        let ratioStr = evidence.growthRatios.map {
++            $0.formatted(Formatter::Formatter.Number(fractionDigits: 3))
++        }.joined(
++            separator: ", "
++        )
++        json.append("  \"growth_ratios\": [\(ratioStr)],")
++
++        if let comparison = baselineComparison {
++            json.append("  \"baseline\": {")
++            if let prevClass = comparison.previous.bestClass {
++                json.append("    \"previous_class\": \(_jsonString(prevClass.rawValue)),")
++            } else {
++                json.append("    \"previous_class\": null,")
++            }
++            json.append(
++                "    \"previous_exponent\": \(comparison.previous.exponent.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
++            )
++            json.append(
++                "    \"exponent_drift\": \(comparison.exponentDrift.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
++            )
++            json.append("    \"class_regressed\": \(comparison.classRegressed),")
++            json.append("    \"is_regression\": \(comparison.isRegression)")
++            json.append("  }")
++        } else {
++            json.append("  \"baseline\": null")
++        }
++
++        json.append("}")
++        json.append("<!-- COMPLEXITY_DIAGNOSTIC_END -->")
++
++        return json.joined(separator: "\n")
++    }
++
++    private func _jsonString(_ s: Swift.String) -> Swift.String {
++        var result = "\""
++        for c in s {
++            switch c {
++            case "\\": result += "\\\\"
++            case "\"": result += "\\\""
++            case "\n": result += "\\n"
++            default: result.append(c)
++            }
++        }
++        result += "\""
++        return result
++    }
++}
+diff --git a/Sources/Tests Performance/Tests.Complexity.swift b/Sources/Tests Performance/Tests.Complexity.swift
+index e72eb91..38ef663 100644
+--- a/Sources/Tests Performance/Tests.Complexity.swift	
++++ b/Sources/Tests Performance/Tests.Complexity.swift	
+@@ -1,3 +1,7 @@
++import Kernel_Clock
++import Test
++import Sample
++
+ extension Tests {
+     /// Namespace for empirical complexity analysis.
+     ///
+@@ -21,3 +25,434 @@ extension Tests {
+     ///   ```
+     public enum Complexity {}
+ }
++
++extension Tests.Complexity {
++    /// Analyzes the empirical complexity of an operation.
++    ///
++    /// Measures execution time at each input size, constructs analytical
++    /// evidence via L1 fitting, and applies policy-based classification.
++    /// Returns a ``Diagnostic`` containing the ``Result`` and all
++    /// measurement data needed for human or machine interpretation.
++    ///
++    /// The operation closure receives the input size and should perform
++    /// the workload under test. The framework measures **total** execution
++    /// time of the closure (total-work semantics). If you want per-operation
++    /// complexity, structure the closure accordingly.
++    ///
++    /// ```swift
++    /// @Test(.serialized)
++    /// func sortIsNLogN() async throws {
++    ///     let diagnostic = try Tests.Complexity.analyze(
++    ///         sizes: [1_000, 10_000, 100_000, 1_000_000]
++    ///     ) { n in
++    ///         var array = (0..<n).map { _ in Int.random(in: 0..<n) }
++    ///         array.sort()
++    ///     }
++    ///     #expect(diagnostic.result.isCompatible(with: .linearithmic))
++    /// }
++    /// ```
++    ///
++    /// - Parameters:
++    ///   - sizes: Input sizes to measure at. Should span >= 2 orders of magnitude.
++    ///   - warmup: Warmup iterations per size point (not timed).
++    ///   - iterations: Timed iterations per size point.
++    ///   - metric: Which statistic represents each size point (default: median).
++    ///   - policy: Classification thresholds.
++    ///   - baselineKey: Optional key for baseline storage. When provided,
++    ///     loads the previous baseline, compares, and saves the current result.
++    ///   - printDiagnostic: Whether to print the diagnostic to console (default: true).
++    ///   - operation: The workload to measure. Receives the input size.
++    /// - Returns: A ``Diagnostic`` containing the ``Result`` and measurement data.
++    @discardableResult
++    public static func analyze<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int = 2,
++        iterations: Int = 10,
++        metric: Sample.Metric = .median,
++        policy: Policy = .default,
++        baselineKey: Swift.String? = nil,
++        printDiagnostic: Bool = true,
++        operation: (Int) throws(E) -> Void
++    ) throws(E) -> Diagnostic {
++        let points = try _measure(
++            sizes: sizes,
++            warmup: warmup,
++            iterations: iterations,
++            metric: metric,
++            operation: operation
++        )
++
++        return _finalize(
++            points: points,
++            metric: metric,
++            policy: policy,
++            baselineKey: baselineKey,
++            printDiagnostic: printDiagnostic
++        )
++    }
++
++    /// Async variant for async workloads.
++    @discardableResult
++    public static func analyze<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int = 2,
++        iterations: Int = 10,
++        metric: Sample.Metric = .median,
++        policy: Policy = .default,
++        baselineKey: Swift.String? = nil,
++        printDiagnostic: Bool = true,
++        operation: (Int) async throws(E) -> Void
++    ) async throws(E) -> Diagnostic {
++        let points = try await _measureAsync(
++            sizes: sizes,
++            warmup: warmup,
++            iterations: iterations,
++            metric: metric,
++            operation: operation
++        )
++
++        return _finalize(
++            points: points,
++            metric: metric,
++            policy: policy,
++            baselineKey: baselineKey,
++            printDiagnostic: printDiagnostic
++        )
++    }
++}
++
++extension Tests.Complexity {
++    private static func _finalize(
++        points: [(size: Int, metric: Duration)],
++        metric: Sample.Metric,
++        policy: Policy,
++        baselineKey: Swift.String?,
++        printDiagnostic: Bool
++    ) -> Diagnostic {
++        let evidence = Test.Benchmark.Complexity.evidence(
++            from: points,
++            classes: policy.candidateClasses
++        )
++
++        let result = classify(evidence, under: policy)
++
++        var diagnostic = Diagnostic(
++            result: result,
++            points: points,
++            metric: metric,
++            policy: policy
++        )
++
++        _handleBaseline(key: baselineKey, result: result, diagnostic: &diagnostic)
++
++        if printDiagnostic {
++            print(diagnostic.formatted())
++        }
++
++        return diagnostic
++    }
++}
++
++extension Tests.Complexity {
++    private static func _measure<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int,
++        iterations: Int,
++        metric: Sample.Metric,
++        operation: (Int) throws(E) -> Void
++    ) throws(E) -> [(size: Int, metric: Duration)] {
++        var points: [(size: Int, metric: Duration)] = []
++        points.reserveCapacity(sizes.count)
++
++        for size in sizes.sorted() {
++            for _ in 0..<warmup {
++                try operation(size)
++            }
++
++            var durations: [Duration] = []
++            durations.reserveCapacity(iterations)
++            for _ in 0..<iterations {
++                let start = Clock::Clock.Continuous.now
++                try operation(size)
++                durations.append(Clock::Clock.Continuous.now.offset - start.offset)
++            }
++
++            let measurement = Test.Benchmark.Measurement(durations: durations)
++            let value = metric.extract(from: measurement)
++            points.append((size: size, metric: value))
++        }
++
++        return points
++    }
++
++    private static func _measureAsync<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int,
++        iterations: Int,
++        metric: Sample.Metric,
++        operation: (Int) async throws(E) -> Void
++    ) async throws(E) -> [(size: Int, metric: Duration)] {
++        var points: [(size: Int, metric: Duration)] = []
++        points.reserveCapacity(sizes.count)
++
++        for size in sizes.sorted() {
++            for _ in 0..<warmup {
++                try await operation(size)
++            }
++
++            var durations: [Duration] = []
++            durations.reserveCapacity(iterations)
++            for _ in 0..<iterations {
++                let start = Clock::Clock.Continuous.now
++                try await operation(size)
++                durations.append(Clock::Clock.Continuous.now.offset - start.offset)
++            }
++
++            let measurement = Test.Benchmark.Measurement(durations: durations)
++            let value = metric.extract(from: measurement)
++            points.append((size: size, metric: value))
++        }
++
++        return points
++    }
++}
++
++extension Tests.Complexity {
++    private static func _handleBaseline(
++        key: Swift.String?,
++        result: Result,
++        diagnostic: inout Diagnostic
++    ) {
++        guard let key else { return }
++
++        let path = Baseline.path(key: key)
++        let recording = Tests.Baseline.Recording.current
++
++        let previous = Baseline.load(at: path)
++
++        if let previous {
++            let current = Baseline(result: result)
++            diagnostic.baselineComparison = Baseline.Comparison(
++                previous: previous,
++                current: current
++            )
++        }
++
++        let shouldSave: Bool
++        switch recording {
++        case .all:
++            shouldSave = true
++
++        case .normal:
++            shouldSave = previous == nil
++
++        case .never:
++            shouldSave = false
++        }
++
++        if shouldSave {
++            let current = Baseline(result: result)
++            do throws(Tests.Baseline.Storage.Error) {
++                try current.save(to: path)
++            } catch {
++            }
++        }
++    }
++}
++
++extension Tests.Complexity {
++    /// Interprets raw complexity evidence under a policy to produce a result.
++    ///
++    /// Applies constant-time detection, adequacy gates, monotonicity checks,
++    /// fit quality thresholds, separation analysis, and cross-validation to
++    /// derive a confidence level and best candidate classification.
++    ///
++    /// All thresholds come from the ``Policy`` and are provisional.
++    ///
++    /// - Parameters:
++    ///   - evidence: Raw analytical evidence from L1 fitting.
++    ///   - policy: Classification thresholds and candidate set.
++    /// - Returns: An interpreted ``Result`` with confidence and classification.
++    public static func classify(
++        _ evidence: Test.Benchmark.Complexity.Evidence,
++        under policy: Policy = .default
++    ) -> Result {
++        if policy.constantCVThreshold > 0,
++            evidence.monotonicity.interpretation == .none,
++            evidence.metricCV < policy.constantCVThreshold,
++            evidence.points.count >= policy.minimumSizePoints,
++            Self.hasScaleRange(evidence, policy: policy)
++        {
++            let constantCandidate =
++                evidence.candidates
++                .first { $0.complexity == .constant }
++                ?? Test.Benchmark.Complexity.Candidate.Fit(
++                    complexity: .constant,
++                    regression: Sample.Regression.Fit(
++                        slope: 0,
++                        intercept: 0,
++                        rSquared: 0,
++                        meanSquaredError: 0
++                    ),
++                    effectiveExponent: 0
++                )
++            let confidence: Confidence
++            if evidence.metricCV < policy.constantCVThreshold * 0.2 {
++                confidence = .high
++            } else if evidence.metricCV < policy.constantCVThreshold * 0.5 {
++                confidence = .medium
++            } else {
++                confidence = .low
++            }
++            return Result(
++                evidence: evidence,
++                best: constantCandidate,
++                confidence: confidence,
++                ambiguousWith: [],
++                reasons: []
++            )
++        }
++
++        var reasons: [InconclusiveReason] = []
++
++        if evidence.points.count < policy.minimumSizePoints {
++            reasons.append(.insufficientData)
++        }
++
++        if !Self.hasScaleRange(evidence, policy: policy) {
++            reasons.append(.insufficientScaleRange)
++        }
++
++        if evidence.monotonicity.interpretation == .none
++            || evidence.monotonicity.interpretation == .decreasing
++        {
++            reasons.append(.nonMonotone)
++        }
++
++        if evidence.exponent.fit.rSquared < policy.logLogRSquaredFloor {
++            reasons.append(.weakContinuousFit)
++        }
++
++        if !reasons.isEmpty {
++            return Result(
++                evidence: evidence,
++                best: nil,
++                confidence: .inconclusive,
++                ambiguousWith: [],
++                reasons: reasons
++            )
++        }
++
++        let viable = evidence.candidates.filter {
++            $0.regression.slope > 0
++                && $0.regression.rSquared >= policy.candidateRSquaredFloor
++        }
++
++        guard let best = viable.first else {
++            return Result(
++                evidence: evidence,
++                best: nil,
++                confidence: .inconclusive,
++                ambiguousWith: [],
++                reasons: [.noSeparatedWinner]
++            )
++        }
++
++        let runnerUp = viable.dropFirst().first
++        let separation =
++            runnerUp.map {
++                best.regression.rSquared - $0.regression.rSquared
++            } ?? 1.0
++
++        let ambiguous = viable.filter {
++            $0.complexity != best.complexity
++                && (best.regression.rSquared - $0.regression.rSquared)
++                    < policy.mediumSeparationThreshold
++        }.map(\.complexity)
++
++        var confidence: Confidence
++        if separation >= policy.highSeparationThreshold {
++            confidence = .high
++        } else if separation >= policy.mediumSeparationThreshold {
++            confidence = .medium
++        } else {
++            confidence = .low
++        }
++
++        let tolerance = Swift.max(
++            policy.exponentConsistencyTolerance,
++            0.3 * Swift.abs(best.effectiveExponent)
++        )
++        let deviation = Swift.abs(
++            evidence.exponent.value - best.effectiveExponent
++        )
++        if deviation > tolerance {
++            switch confidence {
++            case .high: confidence = .medium
++            case .medium: confidence = .low
++            case .low, .inconclusive: break
++            }
++            reasons.append(.inconsistentSignals)
++        }
++
++        return Result(
++            evidence: evidence,
++            best: best,
++            confidence: confidence,
++            ambiguousWith: ambiguous,
++            reasons: reasons
++        )
++    }
++
++    private static func hasScaleRange(
++        _ evidence: Test.Benchmark.Complexity.Evidence,
++        policy: Policy
++    ) -> Bool {
++        guard let first = evidence.points.first,
++            let last = evidence.points.last,
++            first.size > 0
++        else { return false }
++        return Double(last.size) / Double(first.size) >= policy.minimumScaleRange
++    }
++}
++
++extension Tests.Complexity {
++    /// Generates a geometric sequence of input sizes.
++    ///
++    /// Produces sizes starting at `from`, multiplied by `factor` at each
++    /// step, up to and including `through`. The result is deterministic
++    /// and always includes the endpoint if it's reachable.
++    ///
++    /// ```swift
++    /// Tests.Complexity.sizes(from: 100, through: 1_000_000)
++    /// // [100, 1_000, 10_000, 100_000, 1_000_000]
++    ///
++    /// Tests.Complexity.sizes(from: 1_024, through: 1_048_576, factor: 4)
++    /// // [1_024, 4_096, 16_384, 65_536, 262_144, 1_048_576]
++    /// ```
++    ///
++    /// - Parameters:
++    ///   - from: Starting size (must be > 0).
++    ///   - through: Maximum size (inclusive if reachable).
++    ///   - factor: Multiplicative step between sizes (default: 10).
++    /// - Returns: Array of input sizes in ascending order.
++    public static func sizes(
++        from: Int,
++        through: Int,
++        factor: Int = 10
++    ) -> [Int] {
++        precondition(from > 0, "Starting size must be positive")
++        precondition(through >= from, "End size must be >= start size")
++        precondition(factor >= 2, "Factor must be >= 2")
++
++        var result: [Int] = []
++        var current = from
++        while current <= through {
++            result.append(current)
++            let next = current.multipliedReportingOverflow(by: factor)
++            if next.overflow { break }
++            current = next.partialValue
++        }
++        return result
++    }
++}
+diff --git a/Sources/Tests Performance/Tests.Diagnostic+Format.swift b/Sources/Tests Performance/Tests.Diagnostic+Format.swift
+deleted file mode 100644
+index 0c97f74..0000000
+--- a/Sources/Tests Performance/Tests.Diagnostic+Format.swift	
++++ /dev/null
+@@ -1,320 +0,0 @@
+-import Cardinal
+-import Console
+-import Formatter
+-import Tagged
+-
+-private let durationFormat = Formatter::Formatter.Duration(numeric: Formatter::Formatter.Number())
+-
+-extension Tests.Diagnostic {
+-
+-    /// Human-readable formatted diagnostic for console output.
+-    public func formatted() -> Swift.String {
+-        let m = measurement
+-        let cap = Tests.consoleCapability
+-
+-        var lines: [Swift.String] = []
+-
+-        if let factor = exceedanceFactor {
+-            let header = Console.Style.error.apply(
+-                to: "PERFORMANCE THRESHOLD EXCEEDED",
+-                capability: cap
+-            )
+-            lines.append(header)
+-            lines.append("  Test:     \(qualifiedName)")
+-            lines.append("  Metric:   \(metric)")
+-            guard let threshold else {
+-                preconditionFailure("an exceedance factor implies a configured threshold")
+-            }
+-            lines.append("  Expected: < \(threshold.formatted(durationFormat))")
+-            lines.append("  Actual:   \(metric.extract(from: m).formatted(durationFormat))")
+-            let factorStr =
+-                "\(factor.formatted(Formatter::Formatter.Number(fractionDigits: 2)))x threshold"
+-            lines.append("  Factor:   \(Console.Style.error.apply(to: factorStr, capability: cap))")
+-        } else {
+-            let header = Console.Style.success.apply(
+-                to: "PERFORMANCE MEASUREMENT",
+-                capability: cap
+-            )
+-            lines.append(header)
+-            lines.append("  Test:     \(qualifiedName)")
+-            lines.append("  Metric:   \(metric)")
+-            lines.append("  Value:    \(metric.extract(from: m).formatted(durationFormat))")
+-        }
+-
+-        lines.append("")
+-        lines.append("  Distribution:")
+-        lines.append(
+-            "    Median: \(m.median.formatted(durationFormat))  Mean: \(m.mean.formatted(durationFormat))  StdDev: \(m.standardDeviation.formatted(durationFormat))"
+-        )
+-
+-        if let cv = coefficientOfVariation {
+-            let cvStr = "\(cv.formatted(Formatter::Formatter.Number(fractionDigits: 2)))%"
+-            let label: Swift.String
+-            if cv <= 5.0 {
+-                label = Console.Style.success.apply(
+-                    to: "STABLE - result is trustworthy",
+-                    capability: cap
+-                )
+-            } else if cv <= 10.0 {
+-                label = Console.Style.warning.apply(
+-                    to: "MODERATE - consider more iterations",
+-                    capability: cap
+-                )
+-            } else {
+-                label = Console.Style.error.apply(
+-                    to: "NOISY - result may be unreliable",
+-                    capability: cap
+-                )
+-            }
+-            lines.append("    CV:     \(cvStr) (\(label))")
+-        }
+-
+-        lines.append(
+-            "    Min:    \(m.min.formatted(durationFormat))  Max: \(m.max.formatted(durationFormat))"
+-        )
+-        lines.append(
+-            "    p95:    \(m.p95.formatted(durationFormat))  p99: \(m.p99.formatted(durationFormat))"
+-        )
+-
+-        if let mad = medianAbsoluteDeviation {
+-            let outlierStr = outlierCount.map { "\($0) of \(m.durations.count)" } ?? "?"
+-            lines.append("    MAD:    \(mad.formatted(durationFormat))   Outliers: \(outlierStr)")
+-        }
+-
+-        lines.append("")
+-        lines.append("  Trend:")
+-        let zStr = trend.z.formatted(Formatter::Formatter.Number(fractionDigits: 2))
+-        let trendLabel: Swift.String
+-        if trend.interpretation == .increasing {
+-            trendLabel = Console.Style.error.apply(
+-                to: "INCREASING - possible thermal throttle",
+-                capability: cap
+-            )
+-        } else if trend.interpretation == .decreasing {
+-            trendLabel = Console.Style.warning.apply(
+-                to: "DECREASING - possible caching/warmup effect",
+-                capability: cap
+-            )
+-        } else {
+-            trendLabel = "NO TREND - not thermal throttle"
+-        }
+-        lines.append("    Mann-Kendall Z: \(zStr) (\(trendLabel))")
+-
+-        if let comparison {
+-            lines.append("")
+-            lines.append("  Baseline Comparison:")
+-            lines.append("    Baseline: \(comparison.baselineValue.formatted(durationFormat))")
+-            lines.append("    Current:  \(comparison.currentValue.formatted(durationFormat))")
+-            let changePercent = (comparison.change * 100.0).formatted(
+-                Formatter::Formatter.Number(fractionDigits: 2)
+-            )
+-            if comparison.isRegression {
+-                let label = Console.Style.error.apply(
+-                    to: "REGRESSION +\(changePercent)%",
+-                    capability: cap
+-                )
+-                lines.append("    Change:   \(label)")
+-            } else if comparison.isImprovement {
+-                let label = Console.Style.success.apply(
+-                    to: "IMPROVEMENT \(changePercent)%",
+-                    capability: cap
+-                )
+-                lines.append("    Change:   \(label)")
+-            } else {
+-                lines.append("    Change:   NO CHANGE")
+-            }
+-        } else if baseline == nil, comparison == nil {
+-        }
+-
+-        if let history = historyAnalysis {
+-            lines.append("")
+-            lines.append("  History (\(history.recordCount) runs):")
+-            let historyZStr = history.trend.z.formatted(
+-                Formatter::Formatter.Number(fractionDigits: 2)
+-            )
+-            let historyTrendLabel: Swift.String
+-            if history.trend.interpretation == .increasing {
+-                historyTrendLabel = Console.Style.error.apply(
+-                    to: "DEGRADING over time",
+-                    capability: cap
+-                )
+-            } else if history.trend.interpretation == .decreasing {
+-                historyTrendLabel = Console.Style.success.apply(
+-                    to: "IMPROVING over time",
+-                    capability: cap
+-                )
+-            } else {
+-                historyTrendLabel = "STABLE across runs"
+-            }
+-            lines.append("    Cross-run Z:  \(historyZStr) (\(historyTrendLabel))")
+-            lines.append("    Earliest:     \(history.earliestValue.formatted(durationFormat))")
+-            lines.append("    Latest:       \(history.latestValue.formatted(durationFormat))")
+-            let changePercent = (history.overallChange * 100.0).formatted(
+-                Formatter::Formatter.Number(fractionDigits: 2)
+-            )
+-            lines.append("    Overall:      \(changePercent)%")
+-        }
+-
+-        lines.append("")
+-        lines.append("  Environment:")
+-        lines.append("    Architecture:  \(environment.architecture)")
+-        lines.append(
+-            "    CPU Cores:     \(environment.physicalCPUCount) (physical) / \(environment.logicalCPUCount) (logical)"
+-        )
+-        let memGB = Double(environment.memoryBytes.rawValue) / (1024.0 * 1024.0 * 1024.0)
+-        lines.append("    Memory:        \(Int(memGB.rounded())) GB")
+-        lines.append("    Swift:         \(environment.swiftVersion)")
+-        lines.append("    Optimization:  \(environment.optimization.rawValue)")
+-
+-        var flagParts: [Swift.String] = []
+-        if environment.features.nonisolatedNonsendingByDefault {
+-            flagParts.append("NonisolatedNonsendingByDefault=true")
+-        }
+-        if environment.features.strictMemorySafety {
+-            flagParts.append("StrictMemorySafety=true")
+-        }
+-        if flagParts.isEmpty {
+-            flagParts.append("none")
+-        }
+-        lines.append("    Feature Flags: \(flagParts.joined(separator: ", "))")
+-        lines.append("    OS:            \(environment.osVersion)")
+-
+-        return lines.joined(separator: "\n")
+-    }
+-
+-    /// Structured JSON block delimited for AI agent parsing.
+-    ///
+-    /// Emits JSON between `<!-- PERFORMANCE_DIAGNOSTIC_BEGIN -->` and
+-    /// `<!-- PERFORMANCE_DIAGNOSTIC_END -->` markers. AI agents can extract
+-    /// this block via simple string search without regex.
+-    public func jsonBlock() -> Swift.String {
+-        let m = measurement
+-        let metricValue = metric.extract(from: m)
+-
+-        var json: [Swift.String] = []
+-        json.append("<!-- PERFORMANCE_DIAGNOSTIC_BEGIN -->")
+-        json.append("{")
+-        json.append("  \"test\": \(_jsonString(testName)),")
+-        if let suiteName {
+-            json.append("  \"suite\": \(_jsonString(suiteName)),")
+-        }
+-        json.append("  \"qualified_name\": \(_jsonString(qualifiedName)),")
+-        json.append(
+-            "  \"status\": \(exceedanceFactor != nil ? "\"THRESHOLD_EXCEEDED\"" : "\"PASS\""),"
+-        )
+-        json.append("  \"metric\": \(_jsonString("\(metric)")),")
+-
+-        if let t = threshold {
+-            json.append("  \"threshold\": \(t.inSeconds),")
+-        }
+-        json.append("  \"actual\": \(metricValue.inSeconds),")
+-
+-        if let factor = exceedanceFactor {
+-            json.append(
+-                "  \"factor\": \(factor.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
+-            )
+-        }
+-
+-        json.append("  \"distribution\": {")
+-        json.append("    \"count\": \(m.durations.count),")
+-        json.append("    \"min\": \(m.min.inSeconds),")
+-        json.append("    \"median\": \(m.median.inSeconds),")
+-        json.append("    \"mean\": \(m.mean.inSeconds),")
+-        json.append("    \"max\": \(m.max.inSeconds),")
+-        json.append("    \"stddev\": \(m.standardDeviation.inSeconds),")
+-        if let cv = coefficientOfVariation {
+-            json.append(
+-                "    \"cv\": \(cv.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
+-            )
+-        }
+-        if let mad = medianAbsoluteDeviation {
+-            json.append("    \"mad\": \(mad.inSeconds),")
+-        }
+-        json.append("    \"p95\": \(m.p95.inSeconds),")
+-        json.append("    \"p99\": \(m.p99.inSeconds),")
+-        if let outliers = outlierCount {
+-            json.append("    \"outliers\": \(outliers)")
+-        } else {
+-            json.append("    \"outliers\": null")
+-        }
+-        json.append("  },")
+-
+-        json.append("  \"trend\": {")
+-        json.append(
+-            "    \"mann_kendall_z\": \(trend.z.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
+-        )
+-        json.append("    \"interpretation\": \(_jsonString(trend.interpretation.rawValue))")
+-        json.append("  },")
+-
+-        json.append("  \"environment\": {")
+-        json.append("    \"arch\": \(_jsonString(environment.architecture)),")
+-        json.append("    \"physical_cores\": \(environment.physicalCPUCount),")
+-        json.append("    \"logical_cores\": \(environment.logicalCPUCount),")
+-        json.append("    \"memory_bytes\": \(environment.memoryBytes),")
+-        json.append("    \"swift_version\": \(_jsonString(environment.swiftVersion)),")
+-        json.append("    \"optimization\": \(_jsonString(environment.optimization.rawValue)),")
+-        json.append("    \"feature_flags\": {")
+-        json.append(
+-            "      \"NonisolatedNonsendingByDefault\": \(environment.features.nonisolatedNonsendingByDefault),"
+-        )
+-        json.append("      \"StrictMemorySafety\": \(environment.features.strictMemorySafety)")
+-        json.append("    },")
+-        json.append("    \"os\": \(_jsonString(environment.osVersion))")
+-        json.append("  },")
+-
+-        if let comparison {
+-            json.append("  \"baseline\": {")
+-            json.append("    \"value\": \(comparison.baselineValue.inSeconds),")
+-            json.append(
+-                "    \"change\": \(comparison.change.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
+-            )
+-            json.append("    \"is_regression\": \(comparison.isRegression)")
+-            json.append("  },")
+-        }
+-
+-        if let history = historyAnalysis {
+-            json.append("  \"history\": {")
+-            json.append("    \"record_count\": \(history.recordCount),")
+-            json.append(
+-                "    \"mann_kendall_z\": \(history.trend.z.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
+-            )
+-            json.append(
+-                "    \"interpretation\": \(_jsonString(history.trend.interpretation.rawValue)),"
+-            )
+-            json.append("    \"earliest_s\": \(history.earliestValue.inSeconds),")
+-            json.append("    \"latest_s\": \(history.latestValue.inSeconds),")
+-            json.append(
+-                "    \"overall_change\": \(history.overallChange.formatted(Formatter::Formatter.Number(fractionDigits: 4)))"
+-            )
+-            json.append("  },")
+-        }
+-
+-        let durationsStr = m.durations.map {
+-            "\($0.inSeconds.formatted(Formatter::Formatter.Number(fractionDigits: 6)))"
+-        }
+-        .joined(separator: ", ")
+-        json.append("  \"durations_seconds\": [\(durationsStr)]")
+-
+-        json.append("}")
+-        json.append("<!-- PERFORMANCE_DIAGNOSTIC_END -->")
+-
+-        return json.joined(separator: "\n")
+-    }
+-
+-    /// Simple JSON string escaping without Foundation.
+-    private func _jsonString(_ s: Swift.String) -> Swift.String {
+-        var result = "\""
+-        for c in s {
+-            switch c {
+-            case "\\": result += "\\\\"
+-            case "\"": result += "\\\""
+-            case "\n": result += "\\n"
+-            case "\r": result += "\\r"
+-            case "\t": result += "\\t"
+-            default: result.append(c)
+-            }
+-        }
+-        result += "\""
+-        return result
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Diagnostic+Summary.swift b/Sources/Tests Performance/Tests.Diagnostic+Summary.swift
+deleted file mode 100644
+index 699f67c..0000000
+--- a/Sources/Tests Performance/Tests.Diagnostic+Summary.swift	
++++ /dev/null
+@@ -1,79 +0,0 @@
+-import Console
+-import Formatter
+-import Time
+-
+-extension Tests.Diagnostic {
+-    /// Prints a summary comparison table from an array of diagnostics.
+-    ///
+-    /// The table is sorted by qualified name and shows median and min
+-    /// for each test. When called after all `.timed()` tests complete,
+-    /// this provides a single view of all performance results.
+-    public static func summary(_ diagnostics: [Tests.Diagnostic]) {
+-        guard !diagnostics.isEmpty else { return }
+-
+-        let sorted = diagnostics.sorted { $0.qualifiedName < $1.qualifiedName }
+-        let cap = Tests.consoleCapability
+-        let format = Formatter::Formatter.Duration(
+-            numeric: Formatter::Formatter.Number(fractionDigits: 3)
+-        )
+-
+-        let displayNames = _stripCommonPrefix(sorted.map(\.qualifiedName))
+-
+-        let nameWidth = max(
+-            displayNames.map(\.count).max() ?? 0,
+-            4
+-        )
+-
+-        let header = Console.Style.bold.apply(to: "PERFORMANCE SUMMARY", capability: cap)
+-        print("\n\(header)")
+-        print("")
+-
+-        let nameHeader = _pad("Test", to: nameWidth)
+-        print("| \(nameHeader) |     Median |        Min |")
+-        print("|\(_line(nameWidth))|------------|------------|")
+-
+-        for (diagnostic, displayName) in zip(sorted, displayNames) {
+-            let m = diagnostic.measurement
+-            let name = _pad(displayName, to: nameWidth)
+-            let median = _right(m.median.formatted(format), width: 10)
+-            let min = _right(m.min.formatted(format), width: 10)
+-            print("| \(name) | \(median) | \(min) |")
+-        }
+-
+-        print("")
+-    }
+-
+-    private static func _pad(_ s: Swift.String, to width: Int) -> Swift.String {
+-        if s.count >= width { return s }
+-        return s + Swift.String(repeating: " ", count: width - s.count)
+-    }
+-
+-    private static func _right(_ s: Swift.String, width: Int) -> Swift.String {
+-        if s.count >= width { return s }
+-        return Swift.String(repeating: " ", count: width - s.count) + s
+-    }
+-
+-    private static func _line(_ width: Int) -> Swift.String {
+-        Swift.String(repeating: "-", count: width + 2)
+-    }
+-
+-    /// Strips the longest common dot-separated prefix from all names.
+-    ///
+-    /// `["M.A._10", "M.A._20", "M.B._10"]` → `["A._10", "A._20", "B._10"]`
+-    private static func _stripCommonPrefix(_ names: [Swift.String]) -> [Swift.String] {
+-        guard let first = names.first else { return names }
+-        let parts = first.split(separator: ".")
+-        var shared = 0
+-        for i in 0..<parts.count {
+-            let prefix = parts[0...i].joined(separator: ".")
+-            let dotPrefix = prefix + "."
+-            guard names.allSatisfy({ $0.hasPrefix(dotPrefix) }) else {
+-                break
+-            }
+-            shared = i + 1
+-        }
+-        guard shared > 0 else { return names }
+-        let dropLength = parts[0..<shared].joined(separator: ".").count + 1
+-        return names.map { Swift.String($0.dropFirst(dropLength)) }
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Diagnostic.swift b/Sources/Tests Performance/Tests.Diagnostic.swift
+index e4f3c2f..602c703 100644
+--- a/Sources/Tests Performance/Tests.Diagnostic.swift	
++++ b/Sources/Tests Performance/Tests.Diagnostic.swift	
+@@ -1,6 +1,10 @@
+ public import Memory_Mapping
+ public import Sample
+ public import Time
++import Cardinal
++import Console
++import Formatter
++import Tagged
+ 
+ extension Tests {
+     /// Structured performance diagnostic aggregating all enrichment data.
+@@ -95,3 +99,395 @@ extension Tests {
+         }
+     }
+ }
++
++private let durationFormat = Formatter::Formatter.Duration(numeric: Formatter::Formatter.Number())
++
++extension Tests.Diagnostic {
++
++    /// Human-readable formatted diagnostic for console output.
++    public func formatted() -> Swift.String {
++        let m = measurement
++        let cap = Tests.consoleCapability
++
++        var lines: [Swift.String] = []
++
++        if let factor = exceedanceFactor {
++            let header = Console.Style.error.apply(
++                to: "PERFORMANCE THRESHOLD EXCEEDED",
++                capability: cap
++            )
++            lines.append(header)
++            lines.append("  Test:     \(qualifiedName)")
++            lines.append("  Metric:   \(metric)")
++            guard let threshold else {
++                preconditionFailure("an exceedance factor implies a configured threshold")
++            }
++            lines.append("  Expected: < \(threshold.formatted(durationFormat))")
++            lines.append("  Actual:   \(metric.extract(from: m).formatted(durationFormat))")
++            let factorStr =
++                "\(factor.formatted(Formatter::Formatter.Number(fractionDigits: 2)))x threshold"
++            lines.append("  Factor:   \(Console.Style.error.apply(to: factorStr, capability: cap))")
++        } else {
++            let header = Console.Style.success.apply(
++                to: "PERFORMANCE MEASUREMENT",
++                capability: cap
++            )
++            lines.append(header)
++            lines.append("  Test:     \(qualifiedName)")
++            lines.append("  Metric:   \(metric)")
++            lines.append("  Value:    \(metric.extract(from: m).formatted(durationFormat))")
++        }
++
++        lines.append("")
++        lines.append("  Distribution:")
++        lines.append(
++            "    Median: \(m.median.formatted(durationFormat))  Mean: \(m.mean.formatted(durationFormat))  StdDev: \(m.standardDeviation.formatted(durationFormat))"
++        )
++
++        if let cv = coefficientOfVariation {
++            let cvStr = "\(cv.formatted(Formatter::Formatter.Number(fractionDigits: 2)))%"
++            let label: Swift.String
++            if cv <= 5.0 {
++                label = Console.Style.success.apply(
++                    to: "STABLE - result is trustworthy",
++                    capability: cap
++                )
++            } else if cv <= 10.0 {
++                label = Console.Style.warning.apply(
++                    to: "MODERATE - consider more iterations",
++                    capability: cap
++                )
++            } else {
++                label = Console.Style.error.apply(
++                    to: "NOISY - result may be unreliable",
++                    capability: cap
++                )
++            }
++            lines.append("    CV:     \(cvStr) (\(label))")
++        }
++
++        lines.append(
++            "    Min:    \(m.min.formatted(durationFormat))  Max: \(m.max.formatted(durationFormat))"
++        )
++        lines.append(
++            "    p95:    \(m.p95.formatted(durationFormat))  p99: \(m.p99.formatted(durationFormat))"
++        )
++
++        if let mad = medianAbsoluteDeviation {
++            let outlierStr = outlierCount.map { "\($0) of \(m.durations.count)" } ?? "?"
++            lines.append("    MAD:    \(mad.formatted(durationFormat))   Outliers: \(outlierStr)")
++        }
++
++        lines.append("")
++        lines.append("  Trend:")
++        let zStr = trend.z.formatted(Formatter::Formatter.Number(fractionDigits: 2))
++        let trendLabel: Swift.String
++        if trend.interpretation == .increasing {
++            trendLabel = Console.Style.error.apply(
++                to: "INCREASING - possible thermal throttle",
++                capability: cap
++            )
++        } else if trend.interpretation == .decreasing {
++            trendLabel = Console.Style.warning.apply(
++                to: "DECREASING - possible caching/warmup effect",
++                capability: cap
++            )
++        } else {
++            trendLabel = "NO TREND - not thermal throttle"
++        }
++        lines.append("    Mann-Kendall Z: \(zStr) (\(trendLabel))")
++
++        if let comparison {
++            lines.append("")
++            lines.append("  Baseline Comparison:")
++            lines.append("    Baseline: \(comparison.baselineValue.formatted(durationFormat))")
++            lines.append("    Current:  \(comparison.currentValue.formatted(durationFormat))")
++            let changePercent = (comparison.change * 100.0).formatted(
++                Formatter::Formatter.Number(fractionDigits: 2)
++            )
++            if comparison.isRegression {
++                let label = Console.Style.error.apply(
++                    to: "REGRESSION +\(changePercent)%",
++                    capability: cap
++                )
++                lines.append("    Change:   \(label)")
++            } else if comparison.isImprovement {
++                let label = Console.Style.success.apply(
++                    to: "IMPROVEMENT \(changePercent)%",
++                    capability: cap
++                )
++                lines.append("    Change:   \(label)")
++            } else {
++                lines.append("    Change:   NO CHANGE")
++            }
++        } else if baseline == nil, comparison == nil {
++        }
++
++        if let history = historyAnalysis {
++            lines.append("")
++            lines.append("  History (\(history.recordCount) runs):")
++            let historyZStr = history.trend.z.formatted(
++                Formatter::Formatter.Number(fractionDigits: 2)
++            )
++            let historyTrendLabel: Swift.String
++            if history.trend.interpretation == .increasing {
++                historyTrendLabel = Console.Style.error.apply(
++                    to: "DEGRADING over time",
++                    capability: cap
++                )
++            } else if history.trend.interpretation == .decreasing {
++                historyTrendLabel = Console.Style.success.apply(
++                    to: "IMPROVING over time",
++                    capability: cap
++                )
++            } else {
++                historyTrendLabel = "STABLE across runs"
++            }
++            lines.append("    Cross-run Z:  \(historyZStr) (\(historyTrendLabel))")
++            lines.append("    Earliest:     \(history.earliestValue.formatted(durationFormat))")
++            lines.append("    Latest:       \(history.latestValue.formatted(durationFormat))")
++            let changePercent = (history.overallChange * 100.0).formatted(
++                Formatter::Formatter.Number(fractionDigits: 2)
++            )
++            lines.append("    Overall:      \(changePercent)%")
++        }
++
++        lines.append("")
++        lines.append("  Environment:")
++        lines.append("    Architecture:  \(environment.architecture)")
++        lines.append(
++            "    CPU Cores:     \(environment.physicalCPUCount) (physical) / \(environment.logicalCPUCount) (logical)"
++        )
++        let memGB = Double(environment.memoryBytes.rawValue) / (1024.0 * 1024.0 * 1024.0)
++        lines.append("    Memory:        \(Int(memGB.rounded())) GB")
++        lines.append("    Swift:         \(environment.swiftVersion)")
++        lines.append("    Optimization:  \(environment.optimization.rawValue)")
++
++        var flagParts: [Swift.String] = []
++        if environment.features.nonisolatedNonsendingByDefault {
++            flagParts.append("NonisolatedNonsendingByDefault=true")
++        }
++        if environment.features.strictMemorySafety {
++            flagParts.append("StrictMemorySafety=true")
++        }
++        if flagParts.isEmpty {
++            flagParts.append("none")
++        }
++        lines.append("    Feature Flags: \(flagParts.joined(separator: ", "))")
++        lines.append("    OS:            \(environment.osVersion)")
++
++        return lines.joined(separator: "\n")
++    }
++
++    /// Structured JSON block delimited for AI agent parsing.
++    ///
++    /// Emits JSON between `<!-- PERFORMANCE_DIAGNOSTIC_BEGIN -->` and
++    /// `<!-- PERFORMANCE_DIAGNOSTIC_END -->` markers. AI agents can extract
++    /// this block via simple string search without regex.
++    public func jsonBlock() -> Swift.String {
++        let m = measurement
++        let metricValue = metric.extract(from: m)
++
++        var json: [Swift.String] = []
++        json.append("<!-- PERFORMANCE_DIAGNOSTIC_BEGIN -->")
++        json.append("{")
++        json.append("  \"test\": \(_jsonString(testName)),")
++        if let suiteName {
++            json.append("  \"suite\": \(_jsonString(suiteName)),")
++        }
++        json.append("  \"qualified_name\": \(_jsonString(qualifiedName)),")
++        json.append(
++            "  \"status\": \(exceedanceFactor != nil ? "\"THRESHOLD_EXCEEDED\"" : "\"PASS\""),"
++        )
++        json.append("  \"metric\": \(_jsonString("\(metric)")),")
++
++        if let t = threshold {
++            json.append("  \"threshold\": \(t.inSeconds),")
++        }
++        json.append("  \"actual\": \(metricValue.inSeconds),")
++
++        if let factor = exceedanceFactor {
++            json.append(
++                "  \"factor\": \(factor.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
++            )
++        }
++
++        json.append("  \"distribution\": {")
++        json.append("    \"count\": \(m.durations.count),")
++        json.append("    \"min\": \(m.min.inSeconds),")
++        json.append("    \"median\": \(m.median.inSeconds),")
++        json.append("    \"mean\": \(m.mean.inSeconds),")
++        json.append("    \"max\": \(m.max.inSeconds),")
++        json.append("    \"stddev\": \(m.standardDeviation.inSeconds),")
++        if let cv = coefficientOfVariation {
++            json.append(
++                "    \"cv\": \(cv.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
++            )
++        }
++        if let mad = medianAbsoluteDeviation {
++            json.append("    \"mad\": \(mad.inSeconds),")
++        }
++        json.append("    \"p95\": \(m.p95.inSeconds),")
++        json.append("    \"p99\": \(m.p99.inSeconds),")
++        if let outliers = outlierCount {
++            json.append("    \"outliers\": \(outliers)")
++        } else {
++            json.append("    \"outliers\": null")
++        }
++        json.append("  },")
++
++        json.append("  \"trend\": {")
++        json.append(
++            "    \"mann_kendall_z\": \(trend.z.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
++        )
++        json.append("    \"interpretation\": \(_jsonString(trend.interpretation.rawValue))")
++        json.append("  },")
++
++        json.append("  \"environment\": {")
++        json.append("    \"arch\": \(_jsonString(environment.architecture)),")
++        json.append("    \"physical_cores\": \(environment.physicalCPUCount),")
++        json.append("    \"logical_cores\": \(environment.logicalCPUCount),")
++        json.append("    \"memory_bytes\": \(environment.memoryBytes),")
++        json.append("    \"swift_version\": \(_jsonString(environment.swiftVersion)),")
++        json.append("    \"optimization\": \(_jsonString(environment.optimization.rawValue)),")
++        json.append("    \"feature_flags\": {")
++        json.append(
++            "      \"NonisolatedNonsendingByDefault\": \(environment.features.nonisolatedNonsendingByDefault),"
++        )
++        json.append("      \"StrictMemorySafety\": \(environment.features.strictMemorySafety)")
++        json.append("    },")
++        json.append("    \"os\": \(_jsonString(environment.osVersion))")
++        json.append("  },")
++
++        if let comparison {
++            json.append("  \"baseline\": {")
++            json.append("    \"value\": \(comparison.baselineValue.inSeconds),")
++            json.append(
++                "    \"change\": \(comparison.change.formatted(Formatter::Formatter.Number(fractionDigits: 4))),"
++            )
++            json.append("    \"is_regression\": \(comparison.isRegression)")
++            json.append("  },")
++        }
++
++        if let history = historyAnalysis {
++            json.append("  \"history\": {")
++            json.append("    \"record_count\": \(history.recordCount),")
++            json.append(
++                "    \"mann_kendall_z\": \(history.trend.z.formatted(Formatter::Formatter.Number(fractionDigits: 2))),"
++            )
++            json.append(
++                "    \"interpretation\": \(_jsonString(history.trend.interpretation.rawValue)),"
++            )
++            json.append("    \"earliest_s\": \(history.earliestValue.inSeconds),")
++            json.append("    \"latest_s\": \(history.latestValue.inSeconds),")
++            json.append(
++                "    \"overall_change\": \(history.overallChange.formatted(Formatter::Formatter.Number(fractionDigits: 4)))"
++            )
++            json.append("  },")
++        }
++
++        let durationsStr = m.durations.map {
++            "\($0.inSeconds.formatted(Formatter::Formatter.Number(fractionDigits: 6)))"
++        }
++        .joined(separator: ", ")
++        json.append("  \"durations_seconds\": [\(durationsStr)]")
++
++        json.append("}")
++        json.append("<!-- PERFORMANCE_DIAGNOSTIC_END -->")
++
++        return json.joined(separator: "\n")
++    }
++
++    /// Simple JSON string escaping without Foundation.
++    private func _jsonString(_ s: Swift.String) -> Swift.String {
++        var result = "\""
++        for c in s {
++            switch c {
++            case "\\": result += "\\\\"
++            case "\"": result += "\\\""
++            case "\n": result += "\\n"
++            case "\r": result += "\\r"
++            case "\t": result += "\\t"
++            default: result.append(c)
++            }
++        }
++        result += "\""
++        return result
++    }
++}
++
++extension Tests.Diagnostic {
++    /// Prints a summary comparison table from an array of diagnostics.
++    ///
++    /// The table is sorted by qualified name and shows median and min
++    /// for each test. When called after all `.timed()` tests complete,
++    /// this provides a single view of all performance results.
++    public static func summary(_ diagnostics: [Tests.Diagnostic]) {
++        guard !diagnostics.isEmpty else { return }
++
++        let sorted = diagnostics.sorted { $0.qualifiedName < $1.qualifiedName }
++        let cap = Tests.consoleCapability
++        let format = Formatter::Formatter.Duration(
++            numeric: Formatter::Formatter.Number(fractionDigits: 3)
++        )
++
++        let displayNames = _stripCommonPrefix(sorted.map(\.qualifiedName))
++
++        let nameWidth = max(
++            displayNames.map(\.count).max() ?? 0,
++            4
++        )
++
++        let header = Console.Style.bold.apply(to: "PERFORMANCE SUMMARY", capability: cap)
++        print("\n\(header)")
++        print("")
++
++        let nameHeader = _pad("Test", to: nameWidth)
++        print("| \(nameHeader) |     Median |        Min |")
++        print("|\(_line(nameWidth))|------------|------------|")
++
++        for (diagnostic, displayName) in zip(sorted, displayNames) {
++            let m = diagnostic.measurement
++            let name = _pad(displayName, to: nameWidth)
++            let median = _right(m.median.formatted(format), width: 10)
++            let min = _right(m.min.formatted(format), width: 10)
++            print("| \(name) | \(median) | \(min) |")
++        }
++
++        print("")
++    }
++
++    private static func _pad(_ s: Swift.String, to width: Int) -> Swift.String {
++        if s.count >= width { return s }
++        return s + Swift.String(repeating: " ", count: width - s.count)
++    }
++
++    private static func _right(_ s: Swift.String, width: Int) -> Swift.String {
++        if s.count >= width { return s }
++        return Swift.String(repeating: " ", count: width - s.count) + s
++    }
++
++    private static func _line(_ width: Int) -> Swift.String {
++        Swift.String(repeating: "-", count: width + 2)
++    }
++
++    /// Strips the longest common dot-separated prefix from all names.
++    ///
++    /// `["M.A._10", "M.A._20", "M.B._10"]` → `["A._10", "A._20", "B._10"]`
++    private static func _stripCommonPrefix(_ names: [Swift.String]) -> [Swift.String] {
++        guard let first = names.first else { return names }
++        let parts = first.split(separator: ".")
++        var shared = 0
++        for i in 0..<parts.count {
++            let prefix = parts[0...i].joined(separator: ".")
++            let dotPrefix = prefix + "."
++            guard names.allSatisfy({ $0.hasPrefix(dotPrefix) }) else {
++                break
++            }
++            shared = i + 1
++        }
++        guard shared > 0 else { return names }
++        let dropLength = parts[0..<shared].joined(separator: ".").count + 1
++        return names.map { Swift.String($0.dropFirst(dropLength)) }
++    }
++}
+diff --git a/Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift b/Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift
+new file mode 100644
+index 0000000..f5e0cd5
+--- /dev/null
++++ b/Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift	
+@@ -0,0 +1,15 @@
++public import Dependency
++public import File_System
++internal import Kernel
++import Standard_Library_Extensions
++internal import Strings
++public import Test
++
++
++extension Test.Snapshot.Configuration {
++    /// Dependency key for snapshot configuration.
++    ///
++    /// Provides optional configuration for each scope.
++    public enum Key: Dependency.Key {
++    }
++}
+diff --git a/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift b/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift
+index 46143eb..ae41bc1 100644
+--- a/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift	
++++ b/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift	
+@@ -73,11 +73,6 @@ extension Test.Snapshot.Configuration {
+         Self()
+     }
+ 
+-    /// Dependency key for snapshot configuration.
+-    ///
+-    /// Provides optional configuration for each scope.
+-    public enum Key: Dependency.Key {
+-    }
+ 
+     /// Current configuration for this scope.
+     public static var current: Self? {
+-- 
+2.43.0
+

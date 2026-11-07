@@ -1,0 +1,582 @@
+From ed1ddb8efc7365fa62a2aaa815450ab8850c911b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:56 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/GitHub App/GitHub.App+token.swift     | 91 -------------------
+ Sources/GitHub App/GitHub.App.swift           | 90 ++++++++++++++++++
+ ...Organization.Repositories.Client+all.swift | 72 ---------------
+ ...Hub.Organization.Repositories.Client.swift | 73 +++++++++++++++
+ ...Hub.Repository.Stargazers.Client+all.swift | 41 ---------
+ .../GitHub.Repository.Stargazers.Client.swift | 42 +++++++++
+ .../GitHub.User.Repositories.Client+all.swift | 41 ---------
+ .../GitHub.User.Repositories.Client.swift     | 42 +++++++++
+ 8 files changed, 247 insertions(+), 245 deletions(-)
+ delete mode 100644 Sources/GitHub App/GitHub.App+token.swift
+ delete mode 100644 Sources/GitHub Organizations/GitHub.Organization.Repositories.Client+all.swift
+ delete mode 100644 Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client+all.swift
+ delete mode 100644 Sources/GitHub Users/GitHub.User.Repositories.Client+all.swift
+
+diff --git a/Sources/GitHub App/GitHub.App+token.swift b/Sources/GitHub App/GitHub.App+token.swift
+deleted file mode 100644
+index 607d1b9..0000000
+--- a/Sources/GitHub App/GitHub.App+token.swift	
++++ /dev/null
+@@ -1,91 +0,0 @@
+-public import GitHub_Standard
+-internal import JSON
+-
+-extension GitHub.App {
+-
+-    public func token(
+-        organization: Swift.String,
+-        permissions: [Permission],
+-        now: Swift.Int64 = GitHub.App.Clock.now()
+-    ) throws(Error) -> (token: Token, cached: Swift.Bool) {
+-        try Self.validate(organization)
+-        let cache = Cache(directory: directory)
+-        if let cached = cache.read(organization: organization, permissions: permissions, at: now) {
+-            return (cached, true)
+-        }
+-
+-        let assertion = try Assertion(app: self, now: now)
+-        let installation = try installation(organization: organization, assertion: assertion)
+-        let token = try mint(
+-            installation: installation,
+-            permissions: permissions,
+-            assertion: assertion
+-        )
+-        try cache.write(token, organization: organization, permissions: permissions)
+-        return (token, false)
+-    }
+-
+-    static func validate(_ organization: Swift.String) throws(Error) {
+-        guard !organization.isEmpty, organization.count <= 39 else {
+-            throw .organization("--org must be a GitHub organization login")
+-        }
+-        guard
+-            organization.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }),
+-            organization.first != "-",
+-            organization.last != "-"
+-        else {
+-            throw .organization(
+-                "--org must be a GitHub organization login; got \(organization)"
+-            )
+-        }
+-    }
+-
+-    func installation(
+-        organization: Swift.String,
+-        assertion: Assertion
+-    ) throws(Error) -> Swift.String {
+-        let response = try GitHub.App.Request.json(
+-            method: "GET",
+-            path: "/orgs/\(organization)/installation",
+-            token: assertion.compact
+-        )
+-        let identifier: Swift.Int
+-        do throws(JSON.Error) {
+-            identifier = try Swift.Int.deserialize(response["id"])
+-        } catch {
+-            throw .response(
+-                "the application is not installed on \(organization), "
+-                    + "or the installation carries no identity"
+-            )
+-        }
+-        return Swift.String(identifier)
+-    }
+-
+-    func mint(
+-        installation: Swift.String,
+-        permissions: [Permission],
+-        assertion: Assertion
+-    ) throws(Error) -> Token {
+-        let response = try GitHub.App.Request.json(
+-            method: "POST",
+-            path: "/app/installations/\(installation)/access_tokens",
+-            fields: permissions.sorted().map(\.field),
+-            token: assertion.compact
+-        )
+-        let value: Swift.String
+-        let expiry: Swift.String
+-        do throws(JSON.Error) {
+-            value = try Swift.String.deserialize(response["token"])
+-            expiry = try Swift.String.deserialize(response["expires_at"])
+-        } catch {
+-            throw .response("GitHub's answer carried no token and expiry pair")
+-        }
+-        guard !value.isEmpty else {
+-            throw .response("GitHub returned no token for the installation")
+-        }
+-        guard let expires = GitHub.App.Timestamp.seconds(from: expiry) else {
+-            throw .response("GitHub returned no usable expiry for the minted token")
+-        }
+-        return .init(value: value, expires: expires)
+-    }
+-}
+diff --git a/Sources/GitHub App/GitHub.App.swift b/Sources/GitHub App/GitHub.App.swift
+index 5bfc272..74cb526 100644
+--- a/Sources/GitHub App/GitHub.App.swift	
++++ b/Sources/GitHub App/GitHub.App.swift	
+@@ -3,6 +3,7 @@ internal import Either
+ private import Environment
+ public import File_System
+ public import GitHub_Standard
++internal import JSON
+ 
+ extension GitHub {
+ 
+@@ -117,3 +118,92 @@ extension Swift.String {
+         return Self(slice)
+     }
+ }
++
++extension GitHub.App {
++
++    public func token(
++        organization: Swift.String,
++        permissions: [Permission],
++        now: Swift.Int64 = GitHub.App.Clock.now()
++    ) throws(Error) -> (token: Token, cached: Swift.Bool) {
++        try Self.validate(organization)
++        let cache = Cache(directory: directory)
++        if let cached = cache.read(organization: organization, permissions: permissions, at: now) {
++            return (cached, true)
++        }
++
++        let assertion = try Assertion(app: self, now: now)
++        let installation = try installation(organization: organization, assertion: assertion)
++        let token = try mint(
++            installation: installation,
++            permissions: permissions,
++            assertion: assertion
++        )
++        try cache.write(token, organization: organization, permissions: permissions)
++        return (token, false)
++    }
++
++    static func validate(_ organization: Swift.String) throws(Error) {
++        guard !organization.isEmpty, organization.count <= 39 else {
++            throw .organization("--org must be a GitHub organization login")
++        }
++        guard
++            organization.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }),
++            organization.first != "-",
++            organization.last != "-"
++        else {
++            throw .organization(
++                "--org must be a GitHub organization login; got \(organization)"
++            )
++        }
++    }
++
++    func installation(
++        organization: Swift.String,
++        assertion: Assertion
++    ) throws(Error) -> Swift.String {
++        let response = try GitHub.App.Request.json(
++            method: "GET",
++            path: "/orgs/\(organization)/installation",
++            token: assertion.compact
++        )
++        let identifier: Swift.Int
++        do throws(JSON.Error) {
++            identifier = try Swift.Int.deserialize(response["id"])
++        } catch {
++            throw .response(
++                "the application is not installed on \(organization), "
++                    + "or the installation carries no identity"
++            )
++        }
++        return Swift.String(identifier)
++    }
++
++    func mint(
++        installation: Swift.String,
++        permissions: [Permission],
++        assertion: Assertion
++    ) throws(Error) -> Token {
++        let response = try GitHub.App.Request.json(
++            method: "POST",
++            path: "/app/installations/\(installation)/access_tokens",
++            fields: permissions.sorted().map(\.field),
++            token: assertion.compact
++        )
++        let value: Swift.String
++        let expiry: Swift.String
++        do throws(JSON.Error) {
++            value = try Swift.String.deserialize(response["token"])
++            expiry = try Swift.String.deserialize(response["expires_at"])
++        } catch {
++            throw .response("GitHub's answer carried no token and expiry pair")
++        }
++        guard !value.isEmpty else {
++            throw .response("GitHub returned no token for the installation")
++        }
++        guard let expires = GitHub.App.Timestamp.seconds(from: expiry) else {
++            throw .response("GitHub returned no usable expiry for the minted token")
++        }
++        return .init(value: value, expires: expires)
++    }
++}
+diff --git a/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client+all.swift b/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client+all.swift
+deleted file mode 100644
+index 8e4323f..0000000
+--- a/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client+all.swift	
++++ /dev/null
+@@ -1,72 +0,0 @@
+-extension GitHub.Organization.Repositories.Client {
+-    public func all(
+-        _ request: GitHub.Organization.Repositories.Request,
+-        limit: GitHub.Organization.Repositories.Traversal.Limit,
+-        duplicate: GitHub.Organization.Repositories.Traversal.Duplicate,
+-        order: GitHub.Organization.Repositories.Traversal.Order
+-    ) async throws(Either<Async.Lifecycle.Error, GitHub.Organization.Repositories.Traversal.Error>)
+-        -> [GitHub.Repository
+-        .Summary]
+-    {
+-        var repositories: [GitHub.Repository.Summary] = []
+-        var positions: [GitHub.Repository.ID: Int] = [:]
+-        var requests: Set<GitHub.Organization.Repositories.Request> = []
+-        var current: GitHub.Organization.Repositories.Request? = request
+-        var pages: UInt = 0
+-
+-        while let request = current {
+-            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
+-
+-            guard pages < limit.pages.rawValue else { throw .right(.pages) }
+-            guard requests.insert(request).inserted else { throw .right(.cycle) }
+-
+-            let page: GitHub.Organization.Repositories.Page
+-            do throws(Either<Async.Lifecycle.Error, GitHub.Organization.Repositories.Page.Error>) {
+-                page = try await self.page(request)
+-            } catch {
+-                switch error {
+-                case .left(let error): throw .left(error)
+-                case .right(let error): throw .right(.page(error))
+-                }
+-            }
+-
+-            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
+-            pages += 1
+-
+-            for repository in page.response.repositories {
+-                switch duplicate {
+-                case .preserve:
+-                    repositories.append(repository)
+-
+-                case .first:
+-                    guard positions[repository.id] == nil else { continue }
+-                    positions[repository.id] = repositories.endIndex
+-                    repositories.append(repository)
+-
+-                case .last:
+-                    if let index = positions[repository.id] {
+-                        repositories[index] = repository
+-                    } else {
+-                        positions[repository.id] = repositories.endIndex
+-                        repositories.append(repository)
+-                    }
+-
+-                case .reject:
+-                    guard positions[repository.id] == nil else {
+-                        throw .right(.duplicate(repository.id))
+-                    }
+-                    positions[repository.id] = repositories.endIndex
+-                    repositories.append(repository)
+-                }
+-
+-                guard UInt(repositories.count) <= limit.items.rawValue else {
+-                    throw .right(.items)
+-                }
+-            }
+-
+-            current = page.next
+-        }
+-
+-        return order(repositories)
+-    }
+-}
+diff --git a/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client.swift b/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client.swift
+index ee716c1..56b54f7 100644
+--- a/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client.swift	
++++ b/Sources/GitHub Organizations/GitHub.Organization.Repositories.Client.swift	
+@@ -12,3 +12,76 @@ extension GitHub.Organization.Repositories {
+         }
+     }
+ }
++
++extension GitHub.Organization.Repositories.Client {
++    public func all(
++        _ request: GitHub.Organization.Repositories.Request,
++        limit: GitHub.Organization.Repositories.Traversal.Limit,
++        duplicate: GitHub.Organization.Repositories.Traversal.Duplicate,
++        order: GitHub.Organization.Repositories.Traversal.Order
++    ) async throws(Either<Async.Lifecycle.Error, GitHub.Organization.Repositories.Traversal.Error>)
++        -> [GitHub.Repository
++        .Summary]
++    {
++        var repositories: [GitHub.Repository.Summary] = []
++        var positions: [GitHub.Repository.ID: Int] = [:]
++        var requests: Set<GitHub.Organization.Repositories.Request> = []
++        var current: GitHub.Organization.Repositories.Request? = request
++        var pages: UInt = 0
++
++        while let request = current {
++            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
++
++            guard pages < limit.pages.rawValue else { throw .right(.pages) }
++            guard requests.insert(request).inserted else { throw .right(.cycle) }
++
++            let page: GitHub.Organization.Repositories.Page
++            do throws(Either<Async.Lifecycle.Error, GitHub.Organization.Repositories.Page.Error>) {
++                page = try await self.page(request)
++            } catch {
++                switch error {
++                case .left(let error): throw .left(error)
++                case .right(let error): throw .right(.page(error))
++                }
++            }
++
++            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
++            pages += 1
++
++            for repository in page.response.repositories {
++                switch duplicate {
++                case .preserve:
++                    repositories.append(repository)
++
++                case .first:
++                    guard positions[repository.id] == nil else { continue }
++                    positions[repository.id] = repositories.endIndex
++                    repositories.append(repository)
++
++                case .last:
++                    if let index = positions[repository.id] {
++                        repositories[index] = repository
++                    } else {
++                        positions[repository.id] = repositories.endIndex
++                        repositories.append(repository)
++                    }
++
++                case .reject:
++                    guard positions[repository.id] == nil else {
++                        throw .right(.duplicate(repository.id))
++                    }
++                    positions[repository.id] = repositories.endIndex
++                    repositories.append(repository)
++                }
++
++                guard UInt(repositories.count) <= limit.items.rawValue else {
++                    throw .right(.items)
++                }
++            }
++
++            current = page.next
++        }
++
++        return order(repositories)
++    }
++}
+diff --git a/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client+all.swift b/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client+all.swift
+deleted file mode 100644
+index 2769b6a..0000000
+--- a/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client+all.swift	
++++ /dev/null
+@@ -1,41 +0,0 @@
+-extension GitHub.Repository.Stargazers.Client {
+-    public func all(
+-        _ request: GitHub.Repository.Stargazers.Request,
+-        limit: GitHub.Repository.Stargazers.Traversal.Limit
+-    ) async throws(Either<Async.Lifecycle.Error, GitHub.Repository.Stargazers.Traversal.Error>)
+-        -> [GitHub.Repository.Stargazers.Stargazer]
+-    {
+-        var stargazers: [GitHub.Repository.Stargazers.Stargazer] = []
+-        var requests: Set<GitHub.Repository.Stargazers.Request> = []
+-        var current: GitHub.Repository.Stargazers.Request? = request
+-        var pages: UInt = 0
+-
+-        while let request = current {
+-            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
+-
+-            guard pages < limit.pages.rawValue else { throw .right(.pages) }
+-            guard requests.insert(request).inserted else { throw .right(.cycle) }
+-
+-            let page: GitHub.Repository.Stargazers.Page
+-            do throws(Either<Async.Lifecycle.Error, GitHub.Repository.Stargazers.Page.Error>) {
+-                page = try await self.page(request)
+-            } catch {
+-                switch error {
+-                case .left(let error): throw .left(error)
+-                case .right(let error): throw .right(.page(error))
+-                }
+-            }
+-
+-            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
+-            pages += 1
+-            stargazers.append(contentsOf: page.response.stargazers)
+-
+-            guard UInt(stargazers.count) <= limit.items.rawValue else {
+-                throw .right(.items)
+-            }
+-            current = page.next
+-        }
+-
+-        return stargazers
+-    }
+-}
+diff --git a/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client.swift b/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client.swift
+index 0115d97..3ad05cb 100644
+--- a/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client.swift	
++++ b/Sources/GitHub Stargazers/GitHub.Repository.Stargazers.Client.swift	
+@@ -12,3 +12,45 @@ extension GitHub.Repository.Stargazers {
+         }
+     }
+ }
++
++extension GitHub.Repository.Stargazers.Client {
++    public func all(
++        _ request: GitHub.Repository.Stargazers.Request,
++        limit: GitHub.Repository.Stargazers.Traversal.Limit
++    ) async throws(Either<Async.Lifecycle.Error, GitHub.Repository.Stargazers.Traversal.Error>)
++        -> [GitHub.Repository.Stargazers.Stargazer]
++    {
++        var stargazers: [GitHub.Repository.Stargazers.Stargazer] = []
++        var requests: Set<GitHub.Repository.Stargazers.Request> = []
++        var current: GitHub.Repository.Stargazers.Request? = request
++        var pages: UInt = 0
++
++        while let request = current {
++            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
++
++            guard pages < limit.pages.rawValue else { throw .right(.pages) }
++            guard requests.insert(request).inserted else { throw .right(.cycle) }
++
++            let page: GitHub.Repository.Stargazers.Page
++            do throws(Either<Async.Lifecycle.Error, GitHub.Repository.Stargazers.Page.Error>) {
++                page = try await self.page(request)
++            } catch {
++                switch error {
++                case .left(let error): throw .left(error)
++                case .right(let error): throw .right(.page(error))
++                }
++            }
++
++            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
++            pages += 1
++            stargazers.append(contentsOf: page.response.stargazers)
++
++            guard UInt(stargazers.count) <= limit.items.rawValue else {
++                throw .right(.items)
++            }
++            current = page.next
++        }
++
++        return stargazers
++    }
++}
+diff --git a/Sources/GitHub Users/GitHub.User.Repositories.Client+all.swift b/Sources/GitHub Users/GitHub.User.Repositories.Client+all.swift
+deleted file mode 100644
+index fb11de5..0000000
+--- a/Sources/GitHub Users/GitHub.User.Repositories.Client+all.swift	
++++ /dev/null
+@@ -1,41 +0,0 @@
+-extension GitHub.User.Repositories.Client {
+-    public func all(
+-        _ request: GitHub.User.Repositories.Request,
+-        limit: GitHub.User.Repositories.Traversal.Limit
+-    ) async throws(Either<Async.Lifecycle.Error, GitHub.User.Repositories.Traversal.Error>)
+-        -> [GitHub.Repository.Metadata]
+-    {
+-        var repositories: [GitHub.Repository.Metadata] = []
+-        var requests: Set<GitHub.User.Repositories.Request> = []
+-        var current: GitHub.User.Repositories.Request? = request
+-        var pages: UInt = 0
+-
+-        while let request = current {
+-            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
+-
+-            guard pages < limit.pages.rawValue else { throw .right(.pages) }
+-            guard requests.insert(request).inserted else { throw .right(.cycle) }
+-
+-            let page: GitHub.User.Repositories.Page
+-            do throws(Either<Async.Lifecycle.Error, GitHub.User.Repositories.Page.Error>) {
+-                page = try await self.page(request)
+-            } catch {
+-                switch error {
+-                case .left(let error): throw .left(error)
+-                case .right(let error): throw .right(.page(error))
+-                }
+-            }
+-
+-            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
+-            pages += 1
+-            repositories.append(contentsOf: page.response.repositories)
+-
+-            guard UInt(repositories.count) <= limit.items.rawValue else {
+-                throw .right(.items)
+-            }
+-            current = page.next
+-        }
+-
+-        return repositories
+-    }
+-}
+diff --git a/Sources/GitHub Users/GitHub.User.Repositories.Client.swift b/Sources/GitHub Users/GitHub.User.Repositories.Client.swift
+index 7c532fd..8bc4aa5 100644
+--- a/Sources/GitHub Users/GitHub.User.Repositories.Client.swift	
++++ b/Sources/GitHub Users/GitHub.User.Repositories.Client.swift	
+@@ -12,3 +12,45 @@ extension GitHub.User.Repositories {
+         }
+     }
+ }
++
++extension GitHub.User.Repositories.Client {
++    public func all(
++        _ request: GitHub.User.Repositories.Request,
++        limit: GitHub.User.Repositories.Traversal.Limit
++    ) async throws(Either<Async.Lifecycle.Error, GitHub.User.Repositories.Traversal.Error>)
++        -> [GitHub.Repository.Metadata]
++    {
++        var repositories: [GitHub.Repository.Metadata] = []
++        var requests: Set<GitHub.User.Repositories.Request> = []
++        var current: GitHub.User.Repositories.Request? = request
++        var pages: UInt = 0
++
++        while let request = current {
++            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
++
++            guard pages < limit.pages.rawValue else { throw .right(.pages) }
++            guard requests.insert(request).inserted else { throw .right(.cycle) }
++
++            let page: GitHub.User.Repositories.Page
++            do throws(Either<Async.Lifecycle.Error, GitHub.User.Repositories.Page.Error>) {
++                page = try await self.page(request)
++            } catch {
++                switch error {
++                case .left(let error): throw .left(error)
++                case .right(let error): throw .right(.page(error))
++                }
++            }
++
++            guard !Task<Never, Never>.isCancelled else { throw .left(.cancelled) }
++            pages += 1
++            repositories.append(contentsOf: page.response.repositories)
++
++            guard UInt(repositories.count) <= limit.items.rawValue else {
++                throw .right(.items)
++            }
++            current = page.next
++        }
++
++        return repositories
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,1416 @@
+From 56ebe34e46ea90a39bd4dd9346159b447b2f3979 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:50 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Bit.Vector.Bounded+growth.swift           |  51 -----
+ .../Bit.Vector.Bounded+mutating.swift         |  60 ------
+ .../Bit.Vector.Bounded+ones.swift             |   7 -
+ .../Bit.Vector.Bounded+protocols.swift        |  44 -----
+ .../Bit.Vector.Bounded+take.swift             |   9 -
+ .../Bit.Vector.Bounded+zeros.swift            |   7 -
+ .../Bit.Vector.Bounded.swift                  | 166 ++++++++++++++++
+ .../Bit.Vector.Dynamic+conversions.swift      |  31 ---
+ .../Bit.Vector.Dynamic+growth.swift           | 104 ----------
+ .../Bit.Vector.Dynamic+mutating.swift         |  36 ----
+ .../Bit.Vector.Dynamic+protocols.swift        |  32 ---
+ .../Bit.Vector.Dynamic.swift                  | 186 ++++++++++++++++++
+ .../Bit.Vector.Inline+growth.swift            |  51 -----
+ .../Bit.Vector.Inline+mutating.swift          |  60 ------
+ .../Bit.Vector.Inline+ones.swift              |   7 -
+ .../Bit.Vector.Inline+protocols.swift         |  33 ----
+ .../Bit.Vector.Inline+zeros.swift             |   7 -
+ .../Bit Vector Inline/Bit.Vector.Inline.swift | 148 ++++++++++++++
+ .../Bit.Vector.Static+ones.swift              |   7 -
+ .../Bit.Vector.Static+toggle.swift            |  14 --
+ .../Bit.Vector.Static+zeros.swift             |   7 -
+ .../Bit Vector Static/Bit.Vector.Static.swift |  26 +++
+ .../Bit Vector Storage/Bit.Vector+ones.swift  |  10 -
+ .../Bit Vector Storage/Bit.Vector+take.swift  |   9 -
+ .../Bit.Vector+toggle.swift                   |  15 --
+ .../Bit Vector Storage/Bit.Vector+zeros.swift |  10 -
+ Sources/Bit Vector Storage/Bit.Vector.swift   |  43 ++++
+ 27 files changed, 569 insertions(+), 611 deletions(-)
+ delete mode 100644 Sources/Bit Vector Bounded/Bit.Vector.Bounded+growth.swift
+ delete mode 100644 Sources/Bit Vector Bounded/Bit.Vector.Bounded+mutating.swift
+ delete mode 100644 Sources/Bit Vector Bounded/Bit.Vector.Bounded+ones.swift
+ delete mode 100644 Sources/Bit Vector Bounded/Bit.Vector.Bounded+protocols.swift
+ delete mode 100644 Sources/Bit Vector Bounded/Bit.Vector.Bounded+take.swift
+ delete mode 100644 Sources/Bit Vector Bounded/Bit.Vector.Bounded+zeros.swift
+ delete mode 100644 Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+conversions.swift
+ delete mode 100644 Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+growth.swift
+ delete mode 100644 Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+mutating.swift
+ delete mode 100644 Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+protocols.swift
+ delete mode 100644 Sources/Bit Vector Inline/Bit.Vector.Inline+growth.swift
+ delete mode 100644 Sources/Bit Vector Inline/Bit.Vector.Inline+mutating.swift
+ delete mode 100644 Sources/Bit Vector Inline/Bit.Vector.Inline+ones.swift
+ delete mode 100644 Sources/Bit Vector Inline/Bit.Vector.Inline+protocols.swift
+ delete mode 100644 Sources/Bit Vector Inline/Bit.Vector.Inline+zeros.swift
+ delete mode 100644 Sources/Bit Vector Static/Bit.Vector.Static+ones.swift
+ delete mode 100644 Sources/Bit Vector Static/Bit.Vector.Static+toggle.swift
+ delete mode 100644 Sources/Bit Vector Static/Bit.Vector.Static+zeros.swift
+ delete mode 100644 Sources/Bit Vector Storage/Bit.Vector+ones.swift
+ delete mode 100644 Sources/Bit Vector Storage/Bit.Vector+take.swift
+ delete mode 100644 Sources/Bit Vector Storage/Bit.Vector+toggle.swift
+ delete mode 100644 Sources/Bit Vector Storage/Bit.Vector+zeros.swift
+
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+growth.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded+growth.swift
+deleted file mode 100644
+index 92a5586..0000000
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+growth.swift	
++++ /dev/null
+@@ -1,51 +0,0 @@
+-public import Cardinal
+-import Difference
+-public import Ordinal
+-public import Tagged
+-
+-extension Bit.Vector.Bounded {
+-
+-    @inlinable
+-    public mutating func append(_ value: Bool) throws(Self.Error) {
+-        guard _count < _capacity else {
+-            throw .overflow
+-        }
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        if value {
+-            _storage[loc.word] |= loc.mask
+-        }
+-        _count += .one
+-    }
+-
+-    @inlinable
+-    public mutating func append(_ bit: Bit) throws(Self.Error) {
+-        try append(bit == .one)
+-    }
+-
+-    @discardableResult
+-    @inlinable
+-    public mutating func popLast() -> Bool? {
+-        guard _count > .zero else { return nil }
+-        _count = _count.subtract.saturating(.one)
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        let value = (_storage[loc.word] & loc.mask) != 0
+-        _storage[loc.word] &= ~loc.mask
+-        return value
+-    }
+-
+-    @inlinable
+-    public mutating func removeLast() {
+-        precondition(_count > .zero, "Cannot remove from empty vector")
+-        _count = _count.subtract.saturating(.one)
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] &= ~loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func removeAll() {
+-        (0..<_storage.count).forEach { i in
+-            _storage[i] = 0
+-        }
+-        _count = .zero
+-    }
+-}
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+mutating.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded+mutating.swift
+deleted file mode 100644
+index 1fdc3c5..0000000
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+mutating.swift	
++++ /dev/null
+@@ -1,60 +0,0 @@
+-public import Cardinal
+-import Carrier
+-import Difference
+-public import Index
+-public import Ordinal
+-import Property
+-public import Tagged
+-
+-extension Bit.Vector.Bounded {
+-
+-    @inlinable
+-    public mutating func set(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] |= loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func clear(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] &= ~loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func toggle(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] ^= loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func setAll() {
+-        let pack = Bit.Pack<UInt>(count: _count, bitsPerWord: .bitsPerWord)
+-        let end = pack.words.count.map(Ordinal.init)
+-        var w: Tagged<UInt, Ordinal> = .zero
+-        while w < end {
+-            _storage[w] = ~0
+-            w += Tagged<UInt, Cardinal>.one
+-        }
+-        if pack.bits.unused > .zero && pack.words.count > .zero {
+-
+-            let lastWord = {
+-                do {
+-                    return try end.predecessor.exact()
+-                } catch {
+-                    preconditionFailure("The last word index exists because the bit count is positive: \(error)")
+-                }
+-            }()
+-            let mask: UInt = ~0 >> pack.bits.unused
+-            _storage[lastWord] = mask
+-        }
+-    }
+-}
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+ones.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded+ones.swift
+deleted file mode 100644
+index 94e36c0..0000000
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+ones.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bit.Vector.Bounded {
+-
+-    @inlinable
+-    public var ones: Bit.Vector.Ones.Bounded {
+-        Bit.Vector.Ones.Bounded(storage: _storage, capacity: _capacity)
+-    }
+-}
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+protocols.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded+protocols.swift
+deleted file mode 100644
+index ca9d2ff..0000000
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+protocols.swift	
++++ /dev/null
+@@ -1,44 +0,0 @@
+-public import Cardinal
+-import Carrier
+-public import Ordinal
+-import Tagged
+-
+-extension Bit.Vector.Bounded: Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard lhs._count == rhs._count else { return false }
+-        let pack = Bit.Pack<UInt>(count: lhs._count, bitsPerWord: .bitsPerWord)
+-        let end = pack.words.count.map(Ordinal.init)
+-        var w: Tagged<UInt, Ordinal> = .zero
+-        while w < end {
+-            if lhs._storage[w] != rhs._storage[w] { return false }
+-            w += Tagged<UInt, Cardinal>.one
+-        }
+-        return true
+-    }
+-}
+-
+-extension Bit.Vector.Bounded: Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        let pack = Bit.Pack<UInt>(count: _count, bitsPerWord: .bitsPerWord)
+-        let end = pack.words.count.map(Ordinal.init)
+-        hasher.combine(_count)
+-        var w: Tagged<UInt, Ordinal> = .zero
+-        while w < end {
+-            hasher.combine(_storage[w])
+-            w += Tagged<UInt, Cardinal>.one
+-        }
+-    }
+-}
+-
+-extension Bit.Vector.Bounded: CustomStringConvertible {
+-
+-    public var description: String {
+-        let bits = prefix(64).map { $0 ? "1" : "0" }.joined()
+-        let suffix = Int(clamping: _count) > 64 ? "..." : ""
+-        return "Bit.Vector.Bounded(\(bits)\(suffix), capacity: \(Int(clamping: _capacity)))"
+-    }
+-}
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+take.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded+take.swift
+deleted file mode 100644
+index 647a4af..0000000
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+take.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Bit.Vector.Bounded {
+-
+-    @inlinable
+-    public mutating func take() -> Bit.Vector.Bounded {
+-        var empty = Bit.Vector.Bounded(capacity: _capacity)
+-        swap(&self, &empty)
+-        return empty
+-    }
+-}
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+zeros.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded+zeros.swift
+deleted file mode 100644
+index 702353d..0000000
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded+zeros.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bit.Vector.Bounded {
+-
+-    @inlinable
+-    public var zeros: Bit.Vector.Zeros.Bounded {
+-        Bit.Vector.Zeros.Bounded(storage: _storage, capacity: _capacity)
+-    }
+-}
+diff --git a/Sources/Bit Vector Bounded/Bit.Vector.Bounded.swift b/Sources/Bit Vector Bounded/Bit.Vector.Bounded.swift
+index 01006c1..fe3fcf7 100644
+--- a/Sources/Bit Vector Bounded/Bit.Vector.Bounded.swift	
++++ b/Sources/Bit Vector Bounded/Bit.Vector.Bounded.swift	
+@@ -145,3 +145,169 @@ extension Bit.Vector.Bounded {
+         return (_storage[loc.word] & loc.mask) != 0
+     }
+ }
++
++extension Bit.Vector.Bounded {
++
++    @inlinable
++    public mutating func append(_ value: Bool) throws(Self.Error) {
++        guard _count < _capacity else {
++            throw .overflow
++        }
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        if value {
++            _storage[loc.word] |= loc.mask
++        }
++        _count += .one
++    }
++
++    @inlinable
++    public mutating func append(_ bit: Bit) throws(Self.Error) {
++        try append(bit == .one)
++    }
++
++    @discardableResult
++    @inlinable
++    public mutating func popLast() -> Bool? {
++        guard _count > .zero else { return nil }
++        _count = _count.subtract.saturating(.one)
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        let value = (_storage[loc.word] & loc.mask) != 0
++        _storage[loc.word] &= ~loc.mask
++        return value
++    }
++
++    @inlinable
++    public mutating func removeLast() {
++        precondition(_count > .zero, "Cannot remove from empty vector")
++        _count = _count.subtract.saturating(.one)
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        _storage[loc.word] &= ~loc.mask
++    }
++
++    @inlinable
++    public mutating func removeAll() {
++        (0..<_storage.count).forEach { i in
++            _storage[i] = 0
++        }
++        _count = .zero
++    }
++}
++
++extension Bit.Vector.Bounded {
++
++    @inlinable
++    public mutating func set(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] |= loc.mask
++    }
++
++    @inlinable
++    public mutating func clear(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] &= ~loc.mask
++    }
++
++    @inlinable
++    public mutating func toggle(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] ^= loc.mask
++    }
++
++    @inlinable
++    public mutating func setAll() {
++        let pack = Bit.Pack<UInt>(count: _count, bitsPerWord: .bitsPerWord)
++        let end = pack.words.count.map(Ordinal.init)
++        var w: Tagged<UInt, Ordinal> = .zero
++        while w < end {
++            _storage[w] = ~0
++            w += Tagged<UInt, Cardinal>.one
++        }
++        if pack.bits.unused > .zero && pack.words.count > .zero {
++
++            let lastWord = {
++                do {
++                    return try end.predecessor.exact()
++                } catch {
++                    preconditionFailure("The last word index exists because the bit count is positive: \(error)")
++                }
++            }()
++            let mask: UInt = ~0 >> pack.bits.unused
++            _storage[lastWord] = mask
++        }
++    }
++}
++
++extension Bit.Vector.Bounded {
++
++    @inlinable
++    public var ones: Bit.Vector.Ones.Bounded {
++        Bit.Vector.Ones.Bounded(storage: _storage, capacity: _capacity)
++    }
++}
++
++extension Bit.Vector.Bounded: Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard lhs._count == rhs._count else { return false }
++        let pack = Bit.Pack<UInt>(count: lhs._count, bitsPerWord: .bitsPerWord)
++        let end = pack.words.count.map(Ordinal.init)
++        var w: Tagged<UInt, Ordinal> = .zero
++        while w < end {
++            if lhs._storage[w] != rhs._storage[w] { return false }
++            w += Tagged<UInt, Cardinal>.one
++        }
++        return true
++    }
++}
++
++extension Bit.Vector.Bounded: Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        let pack = Bit.Pack<UInt>(count: _count, bitsPerWord: .bitsPerWord)
++        let end = pack.words.count.map(Ordinal.init)
++        hasher.combine(_count)
++        var w: Tagged<UInt, Ordinal> = .zero
++        while w < end {
++            hasher.combine(_storage[w])
++            w += Tagged<UInt, Cardinal>.one
++        }
++    }
++}
++
++extension Bit.Vector.Bounded: CustomStringConvertible {
++
++    public var description: String {
++        let bits = prefix(64).map { $0 ? "1" : "0" }.joined()
++        let suffix = Int(clamping: _count) > 64 ? "..." : ""
++        return "Bit.Vector.Bounded(\(bits)\(suffix), capacity: \(Int(clamping: _capacity)))"
++    }
++}
++
++extension Bit.Vector.Bounded {
++
++    @inlinable
++    public mutating func take() -> Bit.Vector.Bounded {
++        var empty = Bit.Vector.Bounded(capacity: _capacity)
++        swap(&self, &empty)
++        return empty
++    }
++}
++
++extension Bit.Vector.Bounded {
++
++    @inlinable
++    public var zeros: Bit.Vector.Zeros.Bounded {
++        Bit.Vector.Zeros.Bounded(storage: _storage, capacity: _capacity)
++    }
++}
+diff --git a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+conversions.swift b/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+conversions.swift
+deleted file mode 100644
+index 37c5665..0000000
+--- a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+conversions.swift	
++++ /dev/null
+@@ -1,31 +0,0 @@
+-import Cardinal
+-import Carrier
+-import Difference
+-import Ordinal
+-import Tagged
+-
+-extension Bit.Vector.Dynamic {
+-
+-    @inlinable
+-    public init(_ bounded: Bit.Vector.Bounded) {
+-        self._storage = bounded._storage
+-        self._count = bounded._count
+-    }
+-}
+-
+-extension Bit.Vector.Dynamic {
+-
+-    @inlinable
+-    public init<let wordCount: Int>(_ inline: Bit.Vector.Inline<wordCount>) {
+-        let pack = Bit.Pack<UInt>(count: inline._count, bitsPerWord: .bitsPerWord)
+-        let end = pack.words.count.map(Ordinal.init)
+-        self._storage = ContiguousArray<UInt>()
+-        self._storage.reserveCapacity(pack.words.count)
+-        var w: Tagged<UInt, Ordinal> = .zero
+-        while w < end {
+-            self._storage.append(inline._storage[w])
+-            w += Tagged<UInt, Cardinal>.one
+-        }
+-        self._count = inline._count
+-    }
+-}
+diff --git a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+growth.swift b/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+growth.swift
+deleted file mode 100644
+index ea62786..0000000
+--- a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+growth.swift	
++++ /dev/null
+@@ -1,104 +0,0 @@
+-public import Cardinal
+-import Carrier
+-public import Difference
+-public import Index
+-public import Ordinal
+-public import Tagged
+-
+-extension Bit.Vector.Dynamic {
+-
+-    @inlinable
+-    public mutating func append(_ value: Bool) {
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-
+-        if Int(bitPattern: loc.word) >= _storage.count {
+-            _storage.append(0)
+-        }
+-
+-        if value {
+-            _storage[loc.word] |= loc.mask
+-        }
+-
+-        _count += .one
+-    }
+-
+-    @inlinable
+-    public mutating func append(_ bit: Bit) {
+-        append(bit == .one)
+-    }
+-
+-    @discardableResult
+-    @inlinable
+-    public mutating func popLast() -> Bool? {
+-        guard _count > .zero else { return nil }
+-        _count = _count.subtract.saturating(.one)
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        let value = (_storage[loc.word] & loc.mask) != 0
+-        _storage[loc.word] &= ~loc.mask
+-        return value
+-    }
+-
+-    @inlinable
+-    public mutating func removeLast() {
+-        precondition(_count > .zero, "Cannot remove from empty vector")
+-        _count = _count.subtract.saturating(.one)
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] &= ~loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func removeAll(keepingCapacity: Bool = false) {
+-        if keepingCapacity {
+-            (0..<_storage.count).forEach { i in
+-                _storage[i] = 0
+-            }
+-        } else {
+-            _storage.removeAll()
+-        }
+-        _count = .zero
+-    }
+-}
+-
+-extension Bit.Vector.Dynamic {
+-
+-    @inlinable
+-    public mutating func resize(to newCount: Index<Bit>.Count, fill: Bool = false) {
+-        let newPack = Bit.Pack<UInt>(count: newCount, bitsPerWord: .bitsPerWord)
+-        let oldWordCount = _storage.count
+-        let newWordCount = Int(bitPattern: newPack.words.count)
+-
+-        if newWordCount > oldWordCount {
+-            let fillValue: UInt = fill ? ~0 : 0
+-            _storage.reserveCapacity(newWordCount)
+-            for _ in oldWordCount..<newWordCount {
+-                _storage.append(fillValue)
+-            }
+-        } else if newWordCount < oldWordCount {
+-            _storage.removeLast(oldWordCount - newWordCount)
+-        }
+-
+-        if fill && newCount > _count {
+-            let oldLoc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-            var firstFullWord = Int(bitPattern: oldLoc.word)
+-            if oldLoc.bit > .zero {
+-                let highMask: UInt = ~0 << oldLoc.bit.underlying.magnitude.value.rawValue
+-                _storage[oldLoc.word] |= highMask
+-                firstFullWord += 1
+-            }
+-            let keptWordCount = Swift.min(oldWordCount, newWordCount)
+-            if firstFullWord < keptWordCount {
+-                (firstFullWord..<keptWordCount).forEach { i in
+-                    _storage[i] = ~0
+-                }
+-            }
+-        }
+-
+-        _count = newCount
+-
+-        if newWordCount > 0 && newPack.bits.unused > .zero {
+-            let lastWord = newWordCount - 1
+-            let mask: UInt = ~0 >> newPack.bits.unused
+-            _storage[lastWord] &= mask
+-        }
+-    }
+-}
+diff --git a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+mutating.swift b/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+mutating.swift
+deleted file mode 100644
+index dd1ac3e..0000000
+--- a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+mutating.swift	
++++ /dev/null
+@@ -1,36 +0,0 @@
+-import Carrier
+-import Difference
+-public import Index
+-public import Ordinal
+-import Tagged
+-
+-extension Bit.Vector.Dynamic {
+-
+-    @inlinable
+-    public mutating func set(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] |= loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func clear(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] &= ~loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func toggle(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] ^= loc.mask
+-    }
+-
+-}
+diff --git a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+protocols.swift b/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+protocols.swift
+deleted file mode 100644
+index 1c4f485..0000000
+--- a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic+protocols.swift	
++++ /dev/null
+@@ -1,32 +0,0 @@
+-public import Cardinal
+-
+-extension Bit.Vector.Dynamic: Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard lhs._count == rhs._count else { return false }
+-        guard lhs._storage.count == rhs._storage.count else { return false }
+-        for i in 0..<lhs._storage.count {
+-            if lhs._storage[i] != rhs._storage[i] { return false }
+-        }
+-        return true
+-    }
+-}
+-
+-extension Bit.Vector.Dynamic: Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        hasher.combine(_count)
+-        hasher.combine(_storage)
+-    }
+-}
+-
+-extension Bit.Vector.Dynamic: CustomStringConvertible {
+-
+-    public var description: String {
+-        let bits = prefix(64).map { $0 ? "1" : "0" }.joined()
+-        let suffix = Int(clamping: _count) > 64 ? "..." : ""
+-        return "Bit.Vector.Dynamic(\(bits)\(suffix))"
+-    }
+-}
+diff --git a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic.swift b/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic.swift
+index 8b9fd2a..454093a 100644
+--- a/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic.swift	
++++ b/Sources/Bit Vector Dynamic/Bit.Vector.Dynamic.swift	
+@@ -123,3 +123,189 @@ extension Bit.Vector.Dynamic {
+         return (_storage[loc.word] & loc.mask) != 0
+     }
+ }
++
++extension Bit.Vector.Dynamic {
++
++    @inlinable
++    public init(_ bounded: Bit.Vector.Bounded) {
++        self._storage = bounded._storage
++        self._count = bounded._count
++    }
++}
++
++extension Bit.Vector.Dynamic {
++
++    @inlinable
++    public init<let wordCount: Int>(_ inline: Bit.Vector.Inline<wordCount>) {
++        let pack = Bit.Pack<UInt>(count: inline._count, bitsPerWord: .bitsPerWord)
++        let end = pack.words.count.map(Ordinal.init)
++        self._storage = ContiguousArray<UInt>()
++        self._storage.reserveCapacity(pack.words.count)
++        var w: Tagged<UInt, Ordinal> = .zero
++        while w < end {
++            self._storage.append(inline._storage[w])
++            w += Tagged<UInt, Cardinal>.one
++        }
++        self._count = inline._count
++    }
++}
++
++extension Bit.Vector.Dynamic {
++
++    @inlinable
++    public mutating func append(_ value: Bool) {
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++
++        if Int(bitPattern: loc.word) >= _storage.count {
++            _storage.append(0)
++        }
++
++        if value {
++            _storage[loc.word] |= loc.mask
++        }
++
++        _count += .one
++    }
++
++    @inlinable
++    public mutating func append(_ bit: Bit) {
++        append(bit == .one)
++    }
++
++    @discardableResult
++    @inlinable
++    public mutating func popLast() -> Bool? {
++        guard _count > .zero else { return nil }
++        _count = _count.subtract.saturating(.one)
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        let value = (_storage[loc.word] & loc.mask) != 0
++        _storage[loc.word] &= ~loc.mask
++        return value
++    }
++
++    @inlinable
++    public mutating func removeLast() {
++        precondition(_count > .zero, "Cannot remove from empty vector")
++        _count = _count.subtract.saturating(.one)
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        _storage[loc.word] &= ~loc.mask
++    }
++
++    @inlinable
++    public mutating func removeAll(keepingCapacity: Bool = false) {
++        if keepingCapacity {
++            (0..<_storage.count).forEach { i in
++                _storage[i] = 0
++            }
++        } else {
++            _storage.removeAll()
++        }
++        _count = .zero
++    }
++}
++
++extension Bit.Vector.Dynamic {
++
++    @inlinable
++    public mutating func resize(to newCount: Index<Bit>.Count, fill: Bool = false) {
++        let newPack = Bit.Pack<UInt>(count: newCount, bitsPerWord: .bitsPerWord)
++        let oldWordCount = _storage.count
++        let newWordCount = Int(bitPattern: newPack.words.count)
++
++        if newWordCount > oldWordCount {
++            let fillValue: UInt = fill ? ~0 : 0
++            _storage.reserveCapacity(newWordCount)
++            for _ in oldWordCount..<newWordCount {
++                _storage.append(fillValue)
++            }
++        } else if newWordCount < oldWordCount {
++            _storage.removeLast(oldWordCount - newWordCount)
++        }
++
++        if fill && newCount > _count {
++            let oldLoc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++            var firstFullWord = Int(bitPattern: oldLoc.word)
++            if oldLoc.bit > .zero {
++                let highMask: UInt = ~0 << oldLoc.bit.underlying.magnitude.value.rawValue
++                _storage[oldLoc.word] |= highMask
++                firstFullWord += 1
++            }
++            let keptWordCount = Swift.min(oldWordCount, newWordCount)
++            if firstFullWord < keptWordCount {
++                (firstFullWord..<keptWordCount).forEach { i in
++                    _storage[i] = ~0
++                }
++            }
++        }
++
++        _count = newCount
++
++        if newWordCount > 0 && newPack.bits.unused > .zero {
++            let lastWord = newWordCount - 1
++            let mask: UInt = ~0 >> newPack.bits.unused
++            _storage[lastWord] &= mask
++        }
++    }
++}
++
++extension Bit.Vector.Dynamic {
++
++    @inlinable
++    public mutating func set(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] |= loc.mask
++    }
++
++    @inlinable
++    public mutating func clear(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] &= ~loc.mask
++    }
++
++    @inlinable
++    public mutating func toggle(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] ^= loc.mask
++    }
++
++}
++
++extension Bit.Vector.Dynamic: Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard lhs._count == rhs._count else { return false }
++        guard lhs._storage.count == rhs._storage.count else { return false }
++        for i in 0..<lhs._storage.count {
++            if lhs._storage[i] != rhs._storage[i] { return false }
++        }
++        return true
++    }
++}
++
++extension Bit.Vector.Dynamic: Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(_count)
++        hasher.combine(_storage)
++    }
++}
++
++extension Bit.Vector.Dynamic: CustomStringConvertible {
++
++    public var description: String {
++        let bits = prefix(64).map { $0 ? "1" : "0" }.joined()
++        let suffix = Int(clamping: _count) > 64 ? "..." : ""
++        return "Bit.Vector.Dynamic(\(bits)\(suffix))"
++    }
++}
+diff --git a/Sources/Bit Vector Inline/Bit.Vector.Inline+growth.swift b/Sources/Bit Vector Inline/Bit.Vector.Inline+growth.swift
+deleted file mode 100644
+index bef7dba..0000000
+--- a/Sources/Bit Vector Inline/Bit.Vector.Inline+growth.swift	
++++ /dev/null
+@@ -1,51 +0,0 @@
+-public import Cardinal
+-import Difference
+-public import Ordinal
+-public import Tagged
+-
+-extension Bit.Vector.Inline {
+-
+-    @inlinable
+-    public mutating func append(_ value: Bool) throws(Self.Error) {
+-        guard _count < Self._capacity else {
+-            throw .overflow
+-        }
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        if value {
+-            _storage[loc.word] |= loc.mask
+-        }
+-        _count += .one
+-    }
+-
+-    @inlinable
+-    public mutating func append(_ bit: Bit) throws(Self.Error) {
+-        try append(bit == .one)
+-    }
+-
+-    @discardableResult
+-    @inlinable
+-    public mutating func popLast() -> Bool? {
+-        guard _count > .zero else { return nil }
+-        _count = _count.subtract.saturating(.one)
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        let value = (_storage[loc.word] & loc.mask) != 0
+-        _storage[loc.word] &= ~loc.mask
+-        return value
+-    }
+-
+-    @inlinable
+-    public mutating func removeLast() {
+-        precondition(_count > .zero, "Cannot remove from empty vector")
+-        _count = _count.subtract.saturating(.one)
+-        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] &= ~loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func removeAll() {
+-        (0..<wordCount).forEach { i in
+-            _storage[i] = 0
+-        }
+-        _count = .zero
+-    }
+-}
+diff --git a/Sources/Bit Vector Inline/Bit.Vector.Inline+mutating.swift b/Sources/Bit Vector Inline/Bit.Vector.Inline+mutating.swift
+deleted file mode 100644
+index 7c50501..0000000
+--- a/Sources/Bit Vector Inline/Bit.Vector.Inline+mutating.swift	
++++ /dev/null
+@@ -1,60 +0,0 @@
+-public import Cardinal
+-import Carrier
+-import Difference
+-public import Index
+-public import Ordinal
+-import Property
+-public import Tagged
+-
+-extension Bit.Vector.Inline {
+-
+-    @inlinable
+-    public mutating func set(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] |= loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func clear(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] &= ~loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func toggle(_ index: Index<Bit>) throws(Self.Error) {
+-        guard index < _count else {
+-            throw .bounds(index: index, count: _count)
+-        }
+-        let loc = index.location(bitsPerWord: .bitsPerWord)
+-        _storage[loc.word] ^= loc.mask
+-    }
+-
+-    @inlinable
+-    public mutating func setAll() {
+-        let pack = Bit.Pack<UInt>(count: _count, bitsPerWord: .bitsPerWord)
+-        let end = pack.words.count.map(Ordinal.init)
+-        var w: Tagged<UInt, Ordinal> = .zero
+-        while w < end {
+-            _storage[w] = ~0
+-            w += Tagged<UInt, Cardinal>.one
+-        }
+-        if pack.bits.unused > .zero && pack.words.count > .zero {
+-
+-            let lastWord = {
+-                do {
+-                    return try end.predecessor.exact()
+-                } catch {
+-                    preconditionFailure("The last word index exists because the bit count is positive: \(error)")
+-                }
+-            }()
+-            let mask: UInt = ~0 >> pack.bits.unused
+-            _storage[lastWord] = mask
+-        }
+-    }
+-}
+diff --git a/Sources/Bit Vector Inline/Bit.Vector.Inline+ones.swift b/Sources/Bit Vector Inline/Bit.Vector.Inline+ones.swift
+deleted file mode 100644
+index 3014ffd..0000000
+--- a/Sources/Bit Vector Inline/Bit.Vector.Inline+ones.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bit.Vector.Inline {
+-
+-    @inlinable
+-    public var ones: Bit.Vector.Ones.Inline<wordCount> {
+-        Bit.Vector.Ones.Inline<wordCount>(storage: _storage, capacity: _count)
+-    }
+-}
+diff --git a/Sources/Bit Vector Inline/Bit.Vector.Inline+protocols.swift b/Sources/Bit Vector Inline/Bit.Vector.Inline+protocols.swift
+deleted file mode 100644
+index b5c9052..0000000
+--- a/Sources/Bit Vector Inline/Bit.Vector.Inline+protocols.swift	
++++ /dev/null
+@@ -1,33 +0,0 @@
+-public import Cardinal
+-
+-extension Bit.Vector.Inline: Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard lhs._count == rhs._count else { return false }
+-        for i in 0..<wordCount {
+-            if lhs._storage[i] != rhs._storage[i] { return false }
+-        }
+-        return true
+-    }
+-}
+-
+-extension Bit.Vector.Inline: Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        hasher.combine(_count)
+-        (0..<wordCount).forEach { i in
+-            hasher.combine(_storage[i])
+-        }
+-    }
+-}
+-
+-extension Bit.Vector.Inline: CustomStringConvertible {
+-
+-    public var description: String {
+-        let bits = prefix(64).map { $0 ? "1" : "0" }.joined()
+-        let suffix = Int(clamping: _count) > 64 ? "..." : ""
+-        return "Bit.Vector.Inline<\(wordCount)>(\(bits)\(suffix))"
+-    }
+-}
+diff --git a/Sources/Bit Vector Inline/Bit.Vector.Inline+zeros.swift b/Sources/Bit Vector Inline/Bit.Vector.Inline+zeros.swift
+deleted file mode 100644
+index 8e260b6..0000000
+--- a/Sources/Bit Vector Inline/Bit.Vector.Inline+zeros.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bit.Vector.Inline {
+-
+-    @inlinable
+-    public var zeros: Bit.Vector.Zeros.Inline<wordCount> {
+-        Bit.Vector.Zeros.Inline<wordCount>(storage: _storage, capacity: _count)
+-    }
+-}
+diff --git a/Sources/Bit Vector Inline/Bit.Vector.Inline.swift b/Sources/Bit Vector Inline/Bit.Vector.Inline.swift
+index 8272e32..bdb2954 100644
+--- a/Sources/Bit Vector Inline/Bit.Vector.Inline.swift	
++++ b/Sources/Bit Vector Inline/Bit.Vector.Inline.swift	
+@@ -127,3 +127,151 @@ extension Bit.Vector.Inline {
+         return (_storage[loc.word] & loc.mask) != 0
+     }
+ }
++
++extension Bit.Vector.Inline {
++
++    @inlinable
++    public mutating func append(_ value: Bool) throws(Self.Error) {
++        guard _count < Self._capacity else {
++            throw .overflow
++        }
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        if value {
++            _storage[loc.word] |= loc.mask
++        }
++        _count += .one
++    }
++
++    @inlinable
++    public mutating func append(_ bit: Bit) throws(Self.Error) {
++        try append(bit == .one)
++    }
++
++    @discardableResult
++    @inlinable
++    public mutating func popLast() -> Bool? {
++        guard _count > .zero else { return nil }
++        _count = _count.subtract.saturating(.one)
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        let value = (_storage[loc.word] & loc.mask) != 0
++        _storage[loc.word] &= ~loc.mask
++        return value
++    }
++
++    @inlinable
++    public mutating func removeLast() {
++        precondition(_count > .zero, "Cannot remove from empty vector")
++        _count = _count.subtract.saturating(.one)
++        let loc = Bit.Pack<UInt>.Location(count: _count, bitsPerWord: .bitsPerWord)
++        _storage[loc.word] &= ~loc.mask
++    }
++
++    @inlinable
++    public mutating func removeAll() {
++        (0..<wordCount).forEach { i in
++            _storage[i] = 0
++        }
++        _count = .zero
++    }
++}
++
++extension Bit.Vector.Inline {
++
++    @inlinable
++    public mutating func set(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] |= loc.mask
++    }
++
++    @inlinable
++    public mutating func clear(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] &= ~loc.mask
++    }
++
++    @inlinable
++    public mutating func toggle(_ index: Index<Bit>) throws(Self.Error) {
++        guard index < _count else {
++            throw .bounds(index: index, count: _count)
++        }
++        let loc = index.location(bitsPerWord: .bitsPerWord)
++        _storage[loc.word] ^= loc.mask
++    }
++
++    @inlinable
++    public mutating func setAll() {
++        let pack = Bit.Pack<UInt>(count: _count, bitsPerWord: .bitsPerWord)
++        let end = pack.words.count.map(Ordinal.init)
++        var w: Tagged<UInt, Ordinal> = .zero
++        while w < end {
++            _storage[w] = ~0
++            w += Tagged<UInt, Cardinal>.one
++        }
++        if pack.bits.unused > .zero && pack.words.count > .zero {
++
++            let lastWord = {
++                do {
++                    return try end.predecessor.exact()
++                } catch {
++                    preconditionFailure("The last word index exists because the bit count is positive: \(error)")
++                }
++            }()
++            let mask: UInt = ~0 >> pack.bits.unused
++            _storage[lastWord] = mask
++        }
++    }
++}
++
++extension Bit.Vector.Inline {
++
++    @inlinable
++    public var ones: Bit.Vector.Ones.Inline<wordCount> {
++        Bit.Vector.Ones.Inline<wordCount>(storage: _storage, capacity: _count)
++    }
++}
++
++extension Bit.Vector.Inline: Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard lhs._count == rhs._count else { return false }
++        for i in 0..<wordCount {
++            if lhs._storage[i] != rhs._storage[i] { return false }
++        }
++        return true
++    }
++}
++
++extension Bit.Vector.Inline: Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(_count)
++        (0..<wordCount).forEach { i in
++            hasher.combine(_storage[i])
++        }
++    }
++}
++
++extension Bit.Vector.Inline: CustomStringConvertible {
++
++    public var description: String {
++        let bits = prefix(64).map { $0 ? "1" : "0" }.joined()
++        let suffix = Int(clamping: _count) > 64 ? "..." : ""
++        return "Bit.Vector.Inline<\(wordCount)>(\(bits)\(suffix))"
++    }
++}
++
++extension Bit.Vector.Inline {
++
++    @inlinable
++    public var zeros: Bit.Vector.Zeros.Inline<wordCount> {
++        Bit.Vector.Zeros.Inline<wordCount>(storage: _storage, capacity: _count)
++    }
++}
+diff --git a/Sources/Bit Vector Static/Bit.Vector.Static+ones.swift b/Sources/Bit Vector Static/Bit.Vector.Static+ones.swift
+deleted file mode 100644
+index 9f12cd7..0000000
+--- a/Sources/Bit Vector Static/Bit.Vector.Static+ones.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bit.Vector.Static {
+-
+-    @inlinable
+-    public var ones: Bit.Vector.Ones.Static<wordCount> {
+-        Bit.Vector.Ones.Static<wordCount>(storage: _storage)
+-    }
+-}
+diff --git a/Sources/Bit Vector Static/Bit.Vector.Static+toggle.swift b/Sources/Bit Vector Static/Bit.Vector.Static+toggle.swift
+deleted file mode 100644
+index 196c0f2..0000000
+--- a/Sources/Bit Vector Static/Bit.Vector.Static+toggle.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-import Carrier
+-public import Index
+-public import Ordinal
+-import Tagged
+-
+-extension Bit.Vector.Static {
+-
+-    @inlinable
+-    public mutating func toggle(_ index: Index<Bit>) {
+-        precondition(index < Self.capacity, "Index out of bounds")
+-        let location = Bit.Pack<UInt>.Location(index: index, bitsPerWord: .bitsPerWord)
+-        _storage[location.word] ^= location.mask
+-    }
+-}
+diff --git a/Sources/Bit Vector Static/Bit.Vector.Static+zeros.swift b/Sources/Bit Vector Static/Bit.Vector.Static+zeros.swift
+deleted file mode 100644
+index abb71e0..0000000
+--- a/Sources/Bit Vector Static/Bit.Vector.Static+zeros.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bit.Vector.Static {
+-
+-    @inlinable
+-    public var zeros: Bit.Vector.Zeros.Static<wordCount> {
+-        Bit.Vector.Zeros.Static<wordCount>(storage: _storage)
+-    }
+-}
+diff --git a/Sources/Bit Vector Static/Bit.Vector.Static.swift b/Sources/Bit Vector Static/Bit.Vector.Static.swift
+index 58885f5..5e1b234 100644
+--- a/Sources/Bit Vector Static/Bit.Vector.Static.swift	
++++ b/Sources/Bit Vector Static/Bit.Vector.Static.swift	
+@@ -52,3 +52,29 @@ extension Bit.Vector.Static {
+     @inlinable
+     public var isFull: Bool { allTrue }
+ }
++
++extension Bit.Vector.Static {
++
++    @inlinable
++    public var ones: Bit.Vector.Ones.Static<wordCount> {
++        Bit.Vector.Ones.Static<wordCount>(storage: _storage)
++    }
++}
++
++extension Bit.Vector.Static {
++
++    @inlinable
++    public mutating func toggle(_ index: Index<Bit>) {
++        precondition(index < Self.capacity, "Index out of bounds")
++        let location = Bit.Pack<UInt>.Location(index: index, bitsPerWord: .bitsPerWord)
++        _storage[location.word] ^= location.mask
++    }
++}
++
++extension Bit.Vector.Static {
++
++    @inlinable
++    public var zeros: Bit.Vector.Zeros.Static<wordCount> {
++        Bit.Vector.Zeros.Static<wordCount>(storage: _storage)
++    }
++}
+diff --git a/Sources/Bit Vector Storage/Bit.Vector+ones.swift b/Sources/Bit Vector Storage/Bit.Vector+ones.swift
+deleted file mode 100644
+index f10009e..0000000
+--- a/Sources/Bit Vector Storage/Bit.Vector+ones.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Bit.Vector {
+-
+-    @inlinable
+-    public var ones: Ones.View {
+-        @_lifetime(borrow self)
+-        borrowing get {
+-            Ones.View(vector: self)
+-        }
+-    }
+-}
+diff --git a/Sources/Bit Vector Storage/Bit.Vector+take.swift b/Sources/Bit Vector Storage/Bit.Vector+take.swift
+deleted file mode 100644
+index 7706db7..0000000
+--- a/Sources/Bit Vector Storage/Bit.Vector+take.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Bit.Vector {
+-
+-    @inlinable
+-    public mutating func take() -> Bit.Vector {
+-        var empty = Bit.Vector(capacity: capacity)
+-        swap(&self, &empty)
+-        return empty
+-    }
+-}
+diff --git a/Sources/Bit Vector Storage/Bit.Vector+toggle.swift b/Sources/Bit Vector Storage/Bit.Vector+toggle.swift
+deleted file mode 100644
+index 65bb0d2..0000000
+--- a/Sources/Bit Vector Storage/Bit.Vector+toggle.swift	
++++ /dev/null
+@@ -1,15 +0,0 @@
+-import Carrier
+-public import Index
+-public import Ordinal
+-import Tagged
+-
+-extension Bit.Vector {
+-
+-    @inlinable
+-    public nonmutating func toggle(_ index: Index<Bit>) {
+-        precondition(index < capacity, "Index out of bounds")
+-        let location = Bit.Pack<UInt>.Location(index: index, bitsPerWord: .bitsPerWord)
+-        let current = unsafe _words[location.word]
+-        unsafe _words[location.word] = current ^ location.mask
+-    }
+-}
+diff --git a/Sources/Bit Vector Storage/Bit.Vector+zeros.swift b/Sources/Bit Vector Storage/Bit.Vector+zeros.swift
+deleted file mode 100644
+index 7a1c0b9..0000000
+--- a/Sources/Bit Vector Storage/Bit.Vector+zeros.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Bit.Vector {
+-
+-    @inlinable
+-    public var zeros: Zeros.View {
+-        @_lifetime(borrow self)
+-        borrowing get {
+-            Zeros.View(vector: self)
+-        }
+-    }
+-}
+diff --git a/Sources/Bit Vector Storage/Bit.Vector.swift b/Sources/Bit Vector Storage/Bit.Vector.swift
+index 6929428..07c0e05 100644
+--- a/Sources/Bit Vector Storage/Bit.Vector.swift	
++++ b/Sources/Bit Vector Storage/Bit.Vector.swift	
+@@ -88,3 +88,46 @@ extension Bit.Vector {
+         return unsafe body(UnsafeMutableBufferPointer(start: _words, count: _wordCount))
+     }
+ }
++
++extension Bit.Vector {
++
++    @inlinable
++    public var ones: Ones.View {
++        @_lifetime(borrow self)
++        borrowing get {
++            Ones.View(vector: self)
++        }
++    }
++}
++
++extension Bit.Vector {
++
++    @inlinable
++    public mutating func take() -> Bit.Vector {
++        var empty = Bit.Vector(capacity: capacity)
++        swap(&self, &empty)
++        return empty
++    }
++}
++
++extension Bit.Vector {
++
++    @inlinable
++    public nonmutating func toggle(_ index: Index<Bit>) {
++        precondition(index < capacity, "Index out of bounds")
++        let location = Bit.Pack<UInt>.Location(index: index, bitsPerWord: .bitsPerWord)
++        let current = unsafe _words[location.word]
++        unsafe _words[location.word] = current ^ location.mask
++    }
++}
++
++extension Bit.Vector {
++
++    @inlinable
++    public var zeros: Zeros.View {
++        @_lifetime(borrow self)
++        borrowing get {
++            Zeros.View(vector: self)
++        }
++    }
++}
+-- 
+2.43.0
+

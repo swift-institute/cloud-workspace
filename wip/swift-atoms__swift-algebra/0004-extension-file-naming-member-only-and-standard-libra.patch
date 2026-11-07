@@ -1,0 +1,406 @@
+From 621546778be471054aac03d45d35f3f15dbf99ce Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:40 +0000
+Subject: [PATCH 4/4] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Algebra/Algebra.Monoid+Transport.swift    | 13 -------
+ Sources/Algebra/Algebra.Monoid.swift          | 14 +++++++
+ Sources/Type Algebra/Type.Construction.swift  | 29 +-------------
+ Sources/Type Algebra/Type.Equation.swift      | 13 +++++++
+ Sources/Type Algebra/Type.Family.swift        | 14 +++++++
+ Sources/Type Algebra/Type.Interface.swift     | 20 +---------
+ Sources/Type Algebra/Type.Isomorphism.swift   | 35 +++++++++++++++++
+ Sources/Type Algebra/Type.Quotient.swift      | 10 +++++
+ Sources/Type Algebra/Type.Record.swift        | 33 ----------------
+ Sources/Type Algebra/Type.Recursion.swift     | 38 +++++++++++++++++++
+ Sources/Type Algebra/Type.Refinement.swift    | 10 +++++
+ Sources/Type Algebra/Type.Signature.swift     | 36 ------------------
+ Sources/Type Algebra/Type.Theory.swift        | 10 +++++
+ 13 files changed, 146 insertions(+), 129 deletions(-)
+ delete mode 100644 Sources/Algebra/Algebra.Monoid+Transport.swift
+ create mode 100644 Sources/Type Algebra/Type.Equation.swift
+ create mode 100644 Sources/Type Algebra/Type.Family.swift
+ create mode 100644 Sources/Type Algebra/Type.Isomorphism.swift
+ create mode 100644 Sources/Type Algebra/Type.Quotient.swift
+ create mode 100644 Sources/Type Algebra/Type.Recursion.swift
+ create mode 100644 Sources/Type Algebra/Type.Refinement.swift
+ create mode 100644 Sources/Type Algebra/Type.Theory.swift
+
+diff --git a/Sources/Algebra/Algebra.Monoid+Transport.swift b/Sources/Algebra/Algebra.Monoid+Transport.swift
+deleted file mode 100644
+index a757302..0000000
+--- a/Sources/Algebra/Algebra.Monoid+Transport.swift
++++ /dev/null
+@@ -1,13 +0,0 @@
+-extension Algebra.Monoid {
+-    public func transported<Other>(
+-        to forward: @escaping (Element) -> Other,
+-        from backward: @escaping (Other) -> Element
+-    ) -> Algebra.Monoid<Other> {
+-        .init(
+-            identity: forward(identity),
+-            combining: { lhs, rhs in
+-                forward(self.combining(backward(lhs), backward(rhs)))
+-            }
+-        )
+-    }
+-}
+diff --git a/Sources/Algebra/Algebra.Monoid.swift b/Sources/Algebra/Algebra.Monoid.swift
+index 08a4486..91af7a3 100644
+--- a/Sources/Algebra/Algebra.Monoid.swift
++++ b/Sources/Algebra/Algebra.Monoid.swift
+@@ -37,3 +37,17 @@ extension Algebra.Monoid {
+     @inlinable
+     public var magma: Algebra.Magma<Element> { .init(self) }
+ }
++
++extension Algebra.Monoid {
++    public func transported<Other>(
++        to forward: @escaping (Element) -> Other,
++        from backward: @escaping (Other) -> Element
++    ) -> Algebra.Monoid<Other> {
++        .init(
++            identity: forward(identity),
++            combining: { lhs, rhs in
++                forward(self.combining(backward(lhs), backward(rhs)))
++            }
++        )
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Construction.swift b/Sources/Type Algebra/Type.Construction.swift
+index b945494..8ffcf9a 100644
+--- a/Sources/Type Algebra/Type.Construction.swift	
++++ b/Sources/Type Algebra/Type.Construction.swift	
+@@ -34,35 +34,8 @@ extension Type {
+         }
+     }
+ 
+-    public struct Refinement: Equatable, Sendable {
+-        public let base: Expression
+-        public let predicate: Atom
+-        public init(_ base: Expression, satisfying predicate: Atom) {
+-            self.base = base
+-            self.predicate = predicate
+-        }
+-    }
+-    public struct Quotient: Equatable, Sendable {
+-        public let base: Expression
+-        public let relation: Atom
+-        public init(_ base: Expression, by relation: Atom) {
+-            self.base = base
+-            self.relation = relation
+-        }
+-    }
+ 
+-    public struct Family: Equatable, Sendable {
+-        public let fibers: Record
+-        public init(_ fibers: Record) { self.fibers = fibers }
+-        public var sum: Expression { fibers.alternatives }
+-        public var product: Expression { fibers.expression }
+-        public func fiber(at index: String) throws -> Expression {
+-            guard let field = fibers.fields.first(where: { $0.name == index }) else {
+-                throw Failure("unknown family index")
+-            }
+-            return field.type
+-        }
+-    }
++
+ }
+ 
+ extension Type.Record {
+diff --git a/Sources/Type Algebra/Type.Equation.swift b/Sources/Type Algebra/Type.Equation.swift
+new file mode 100644
+index 0000000..fd3d4d0
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Equation.swift	
+@@ -0,0 +1,13 @@
++extension Type {
++    public struct Equation: Equatable, Sendable {
++        public let lhs: Morphism
++        public let rhs: Morphism
++        public init(_ lhs: Morphism, _ rhs: Morphism) throws {
++            guard lhs.domain == rhs.domain, lhs.codomain == rhs.codomain else {
++                throw Failure("an equation requires parallel maps")
++            }
++            self.lhs = lhs
++            self.rhs = rhs
++        }
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Family.swift b/Sources/Type Algebra/Type.Family.swift
+new file mode 100644
+index 0000000..2500543
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Family.swift	
+@@ -0,0 +1,14 @@
++extension Type {
++    public struct Family: Equatable, Sendable {
++        public let fibers: Record
++        public init(_ fibers: Record) { self.fibers = fibers }
++        public var sum: Expression { fibers.alternatives }
++        public var product: Expression { fibers.expression }
++        public func fiber(at index: String) throws -> Expression {
++            guard let field = fibers.fields.first(where: { $0.name == index }) else {
++                throw Failure("unknown family index")
++            }
++            return field.type
++        }
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Interface.swift b/Sources/Type Algebra/Type.Interface.swift
+index c2267f8..12c2ae8 100644
+--- a/Sources/Type Algebra/Type.Interface.swift	
++++ b/Sources/Type Algebra/Type.Interface.swift	
+@@ -31,23 +31,5 @@ extension Type {
+         }
+     }
+ 
+-    public struct Equation: Equatable, Sendable {
+-        public let lhs: Morphism
+-        public let rhs: Morphism
+-        public init(_ lhs: Morphism, _ rhs: Morphism) throws {
+-            guard lhs.domain == rhs.domain, lhs.codomain == rhs.codomain else {
+-                throw Failure("an equation requires parallel maps")
+-            }
+-            self.lhs = lhs
+-            self.rhs = rhs
+-        }
+-    }
+-    public struct Theory: Equatable, Sendable {
+-        public let signature: Signature
+-        public let equations: [Equation]
+-        public init(signature: Signature, equations: [Equation]) {
+-            self.signature = signature
+-            self.equations = equations
+-        }
+-    }
++
+ }
+diff --git a/Sources/Type Algebra/Type.Isomorphism.swift b/Sources/Type Algebra/Type.Isomorphism.swift
+new file mode 100644
+index 0000000..7434303
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Isomorphism.swift	
+@@ -0,0 +1,35 @@
++extension Type {
++    public struct Isomorphism: Equatable, Sendable {
++        public let forward: Morphism
++        public let backward: Morphism
++        public static func distribution(
++            _ factor: Expression,
++            over alternatives: [Expression]
++        ) -> Self {
++            Self(
++                forward: .distribution(factor, over: alternatives),
++                backward: .factorization(factor, from: alternatives)
++            )
++        }
++        public static func productUnit(_ value: Expression) throws -> Self {
++            Self(
++                forward: try .projection([.unit, value], at: 1),
++                backward: try .pairing(from: value, [.terminal(from: value), .identity(value)])
++            )
++        }
++        public static func sumZero(_ value: Expression) throws -> Self {
++            Self(
++                forward: try .elimination(to: value, [.initial(to: value), .identity(value)]),
++                backward: try .injection([.zero, value], at: 1)
++            )
++        }
++        public static func permutation(of record: Record, order: [String]) throws -> Self {
++            guard order.count == record.fields.count else {
++                throw Failure("a permutation must include every coordinate")
++            }
++            let selected = try record.selecting(order)
++            let inverse = try selected.record.selecting(record.fields.map(\.name))
++            return Self(forward: selected.projection, backward: inverse.projection)
++        }
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Quotient.swift b/Sources/Type Algebra/Type.Quotient.swift
+new file mode 100644
+index 0000000..f2465df
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Quotient.swift	
+@@ -0,0 +1,10 @@
++extension Type {
++    public struct Quotient: Equatable, Sendable {
++        public let base: Expression
++        public let relation: Atom
++        public init(_ base: Expression, by relation: Atom) {
++            self.base = base
++            self.relation = relation
++        }
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Record.swift b/Sources/Type Algebra/Type.Record.swift
+index 039314f..c42daeb 100644
+--- a/Sources/Type Algebra/Type.Record.swift	
++++ b/Sources/Type Algebra/Type.Record.swift	
+@@ -63,37 +63,4 @@ extension Type {
+         }
+     }
+ 
+-    public struct Isomorphism: Equatable, Sendable {
+-        public let forward: Morphism
+-        public let backward: Morphism
+-        public static func distribution(
+-            _ factor: Expression,
+-            over alternatives: [Expression]
+-        ) -> Self {
+-            Self(
+-                forward: .distribution(factor, over: alternatives),
+-                backward: .factorization(factor, from: alternatives)
+-            )
+-        }
+-        public static func productUnit(_ value: Expression) throws -> Self {
+-            Self(
+-                forward: try .projection([.unit, value], at: 1),
+-                backward: try .pairing(from: value, [.terminal(from: value), .identity(value)])
+-            )
+-        }
+-        public static func sumZero(_ value: Expression) throws -> Self {
+-            Self(
+-                forward: try .elimination(to: value, [.initial(to: value), .identity(value)]),
+-                backward: try .injection([.zero, value], at: 1)
+-            )
+-        }
+-        public static func permutation(of record: Record, order: [String]) throws -> Self {
+-            guard order.count == record.fields.count else {
+-                throw Failure("a permutation must include every coordinate")
+-            }
+-            let selected = try record.selecting(order)
+-            let inverse = try selected.record.selecting(record.fields.map(\.name))
+-            return Self(forward: selected.projection, backward: inverse.projection)
+-        }
+-    }
+ }
+diff --git a/Sources/Type Algebra/Type.Recursion.swift b/Sources/Type Algebra/Type.Recursion.swift
+new file mode 100644
+index 0000000..5f27853
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Recursion.swift	
+@@ -0,0 +1,38 @@
++extension Type {
++    public struct Recursion: Equatable, Sendable {
++        public enum Kind: Equatable, Sendable { case least, greatest }
++        public let kind: Kind
++        public let variable: Variable
++        public let body: Expression
++        public init(_ kind: Kind, variable: Variable, body: Expression) throws {
++            guard body.isStrictlyPositive(in: variable) else {
++                throw Failure(
++                    "recursive carrier requires a strictly positive, known action in its bound variable"
++                )
++            }
++            self.kind = kind
++            self.variable = variable
++            self.body = body
++        }
++        public static func free(
++            layer: Expression,
++            variable: Variable,
++            returning result: Expression
++        ) throws -> Self {
++            guard !result.variables.contains(variable) else {
++                throw Failure("free carrier would capture the result variable")
++            }
++            return try Self(.least, variable: variable, body: .sum([result, layer]))
++        }
++        public static func cofree(
++            layer: Expression,
++            variable: Variable,
++            observing result: Expression
++        ) throws -> Self {
++            guard !result.variables.contains(variable) else {
++                throw Failure("cofree carrier would capture the observation variable")
++            }
++            return try Self(.greatest, variable: variable, body: .product([result, layer]))
++        }
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Refinement.swift b/Sources/Type Algebra/Type.Refinement.swift
+new file mode 100644
+index 0000000..25ff238
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Refinement.swift	
+@@ -0,0 +1,10 @@
++extension Type {
++    public struct Refinement: Equatable, Sendable {
++        public let base: Expression
++        public let predicate: Atom
++        public init(_ base: Expression, satisfying predicate: Atom) {
++            self.base = base
++            self.predicate = predicate
++        }
++    }
++}
+diff --git a/Sources/Type Algebra/Type.Signature.swift b/Sources/Type Algebra/Type.Signature.swift
+index 6a91a97..4e4fd6a 100644
+--- a/Sources/Type Algebra/Type.Signature.swift	
++++ b/Sources/Type Algebra/Type.Signature.swift	
+@@ -54,40 +54,4 @@ extension Type {
+         }
+     }
+ 
+-    public struct Recursion: Equatable, Sendable {
+-        public enum Kind: Equatable, Sendable { case least, greatest }
+-        public let kind: Kind
+-        public let variable: Variable
+-        public let body: Expression
+-        public init(_ kind: Kind, variable: Variable, body: Expression) throws {
+-            guard body.isStrictlyPositive(in: variable) else {
+-                throw Failure(
+-                    "recursive carrier requires a strictly positive, known action in its bound variable"
+-                )
+-            }
+-            self.kind = kind
+-            self.variable = variable
+-            self.body = body
+-        }
+-        public static func free(
+-            layer: Expression,
+-            variable: Variable,
+-            returning result: Expression
+-        ) throws -> Self {
+-            guard !result.variables.contains(variable) else {
+-                throw Failure("free carrier would capture the result variable")
+-            }
+-            return try Self(.least, variable: variable, body: .sum([result, layer]))
+-        }
+-        public static func cofree(
+-            layer: Expression,
+-            variable: Variable,
+-            observing result: Expression
+-        ) throws -> Self {
+-            guard !result.variables.contains(variable) else {
+-                throw Failure("cofree carrier would capture the observation variable")
+-            }
+-            return try Self(.greatest, variable: variable, body: .product([result, layer]))
+-        }
+-    }
+ }
+diff --git a/Sources/Type Algebra/Type.Theory.swift b/Sources/Type Algebra/Type.Theory.swift
+new file mode 100644
+index 0000000..c5eb3f1
+--- /dev/null
++++ b/Sources/Type Algebra/Type.Theory.swift	
+@@ -0,0 +1,10 @@
++extension Type {
++    public struct Theory: Equatable, Sendable {
++        public let signature: Signature
++        public let equations: [Equation]
++        public init(signature: Signature, equations: [Equation]) {
++            self.signature = signature
++            self.equations = equations
++        }
++    }
++}
+-- 
+2.43.0
+

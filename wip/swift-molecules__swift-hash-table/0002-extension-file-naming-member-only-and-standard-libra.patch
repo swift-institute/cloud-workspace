@@ -1,0 +1,1118 @@
+From 8d0084c701ccde6d0b537a34c4ff42a6ef00dc3e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:51 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Hash.Table+BufferAccess.swift             |  56 ---
+ .../Hash.Table+Insertion.swift                | 190 -------
+ .../Hash.Table+Lookup.swift                   | 200 --------
+ .../Hash.Table+Properties.swift               |  29 --
+ .../Hash.Table+clone.swift                    |  46 --
+ .../Hash.Table.Bucket.Ops.swift               |  11 +
+ .../Hash.Table.Bucket.swift                   |   1 -
+ Sources/Hash Table Primitive/Hash.Table.swift | 468 ++++++++++++++++++
+ Sources/Hash Table Primitive/Hash.Value.swift |   6 -
+ Sources/Hash Table Primitive/Hash.swift       |   7 +
+ 10 files changed, 486 insertions(+), 528 deletions(-)
+ delete mode 100644 Sources/Hash Table Primitive/Hash.Table+BufferAccess.swift
+ delete mode 100644 Sources/Hash Table Primitive/Hash.Table+Insertion.swift
+ delete mode 100644 Sources/Hash Table Primitive/Hash.Table+Lookup.swift
+ delete mode 100644 Sources/Hash Table Primitive/Hash.Table+Properties.swift
+ delete mode 100644 Sources/Hash Table Primitive/Hash.Table+clone.swift
+ create mode 100644 Sources/Hash Table Primitive/Hash.Table.Bucket.Ops.swift
+ delete mode 100644 Sources/Hash Table Primitive/Hash.Value.swift
+
+diff --git a/Sources/Hash Table Primitive/Hash.Table+BufferAccess.swift b/Sources/Hash Table Primitive/Hash.Table+BufferAccess.swift
+deleted file mode 100644
+index 8364a49..0000000
+--- a/Sources/Hash Table Primitive/Hash.Table+BufferAccess.swift	
++++ /dev/null
+@@ -1,56 +0,0 @@
+-public import Buffer_Linear_Primitive
+-public import Buffer_Slots
+-public import Cardinal
+-public import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Small
+-public import Ordinal
+-import Ownership
+-public import Storage
+-public import Store
+-public import Tagged
+-
+-extension Hash.Table where Element: ~Copyable {
+-
+-    @inlinable
+-    package var bucketCapacity: Tagged<Bucket, Cardinal> {
+-        _buffer.capacity.retag(Bucket.self)
+-    }
+-
+-    @inlinable
+-    package subscript(hash bucket: Bucket.Position) -> Int {
+-        get { _buffer[metadata: bucket.retag(Int.self)] }
+-        set { _buffer[metadata: bucket.retag(Int.self)] = newValue }
+-    }
+-
+-    @inlinable
+-    package subscript(position bucket: Bucket.Position) -> Index<Element> {
+-        get {
+-            let raw = _buffer[payload: bucket.retag(Int.self)]
+-            return Index<Element>(_unchecked: Ordinal(UInt(bitPattern: raw)))
+-        }
+-        set {
+-            _buffer[payload: bucket.retag(Int.self)] = Int(
+-                bitPattern: newValue.underlying.rawValue
+-            )
+-        }
+-    }
+-
+-    @inlinable
+-    package subscript(bucketOfRank rank: Index<Element>) -> Bucket.Position {
+-        get {
+-            let raw = _rankToBucket[
+-                Index<Int>(_unchecked: Ordinal(rank.underlying.rawValue))
+-            ]
+-            return Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: raw)))
+-        }
+-        set {
+-            let raw = Int(bitPattern: rank.underlying.rawValue)
+-            guard raw < Int(bitPattern: _rankToBucket.count.underlying.rawValue) else { return }
+-            _rankToBucket[Index<Int>(_unchecked: Ordinal(UInt(bitPattern: raw)))] = Int(
+-                bitPattern: newValue.underlying.rawValue
+-            )
+-        }
+-    }
+-}
+diff --git a/Sources/Hash Table Primitive/Hash.Table+Insertion.swift b/Sources/Hash Table Primitive/Hash.Table+Insertion.swift
+deleted file mode 100644
+index 0e1fcc6..0000000
+--- a/Sources/Hash Table Primitive/Hash.Table+Insertion.swift	
++++ /dev/null
+@@ -1,190 +0,0 @@
+-import Affine
+-public import Buffer
+-public import Buffer_Linear_Primitive
+-public import Buffer_Slots
+-public import Cardinal
+-public import Cyclic
+-public import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Small
+-public import Ordinal
+-import Ownership
+-public import Storage
+-public import Store
+-public import Tagged
+-
+-extension Hash.Table where Element: ~Copyable {
+-
+-    @inlinable
+-    @discardableResult
+-    public mutating func insert(
+-        position: Index<Element>,
+-        hashValue: Hash.Value,
+-        equals: (Index<Element>) -> Bool
+-    ) -> Bool {
+-        if shouldGrow {
+-            grow()
+-        }
+-
+-        let hash = Self.normalize(hashValue)
+-        var currentBucket = bucket.for(hash: hash)
+-        var probes: UInt = 0
+-        let cap = bucketCapacity
+-
+-        while probes < cap.underlying.rawValue {
+-            let storedHash = self[hash: currentBucket]
+-
+-            if storedHash == Self.empty {
+-                self[hash: currentBucket] = hash
+-                self[position: currentBucket] = position
+-                self[bucketOfRank: position] = currentBucket
+-                _count = Tagged(_unchecked: Cardinal(_count.underlying.rawValue &+ 1))
+-                return true
+-            }
+-
+-            if storedHash == hash {
+-                let existingPosition = self[position: currentBucket]
+-                if equals(existingPosition) {
+-                    return false
+-                }
+-            }
+-
+-            currentBucket = bucket.next(currentBucket)
+-            probes &+= 1
+-        }
+-
+-        return false
+-    }
+-
+-    @inlinable
+-    @discardableResult
+-    public mutating func insert<Context: ~Copyable>(
+-        position: Index<Element>,
+-        hashValue: Hash.Value,
+-        context: borrowing Context,
+-        equals: (Index<Element>, borrowing Context) -> Bool
+-    ) -> Bool {
+-        if shouldGrow {
+-            grow()
+-        }
+-
+-        let hash = Self.normalize(hashValue)
+-        var currentBucket = bucket.for(hash: hash)
+-        var probes: UInt = 0
+-        let cap = bucketCapacity
+-
+-        while probes < cap.underlying.rawValue {
+-            let storedHash = self[hash: currentBucket]
+-
+-            if storedHash == Self.empty {
+-                self[hash: currentBucket] = hash
+-                self[position: currentBucket] = position
+-                self[bucketOfRank: position] = currentBucket
+-                _count = Tagged(_unchecked: Cardinal(_count.underlying.rawValue &+ 1))
+-                return true
+-            }
+-
+-            if storedHash == hash {
+-                let existingPosition = self[position: currentBucket]
+-                if equals(existingPosition, context) {
+-                    return false
+-                }
+-            }
+-
+-            currentBucket = bucket.next(currentBucket)
+-            probes &+= 1
+-        }
+-
+-        return false
+-    }
+-
+-    @inlinable
+-    public mutating func insert(
+-        _unchecked: Void,
+-        position: Index<Element>,
+-        hashValue: Hash.Value
+-    ) {
+-        if shouldGrow {
+-            grow()
+-        }
+-
+-        let hash = Self.normalize(hashValue)
+-        var currentBucket = bucket.for(hash: hash)
+-        var probes: UInt = 0
+-        let cap = bucketCapacity
+-
+-        while probes < cap.underlying.rawValue {
+-            let storedHash = self[hash: currentBucket]
+-
+-            if storedHash == Self.empty {
+-                self[hash: currentBucket] = hash
+-                self[position: currentBucket] = position
+-                self[bucketOfRank: position] = currentBucket
+-                _count = Tagged(_unchecked: Cardinal(_count.underlying.rawValue &+ 1))
+-                return
+-            }
+-
+-            currentBucket = bucket.next(currentBucket)
+-            probes &+= 1
+-        }
+-    }
+-
+-    @inlinable
+-    package mutating func grow() {
+-        let oldCapacity = bucketCapacity
+-        let newSeed = Self.makeSeed()
+-        let newCapacity = Tagged<Bucket, Cardinal>(
+-            Swift::max(8, oldCapacity.underlying.rawValue &* 2)
+-        )
+-        var newBuffer = Buffer<
+-            Store.Split<
+-                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>,
+-                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>
+-            >
+-        >.Slots(
+-            capacity: newCapacity.retag(Int.self),
+-            metadataInitial: Self.empty
+-        )
+-        newBuffer.fill(payload: 0)
+-        var newPlane = Self.makeRankPlane(bucketCapacity: newCapacity)
+-
+-        var bucketRaw: UInt = 0
+-        var remaining = _count.underlying.rawValue
+-        while bucketRaw < oldCapacity.underlying.rawValue, remaining != 0 {
+-            let bucket = Bucket.Position(_unchecked: Ordinal(bucketRaw))
+-            let hash = self[hash: bucket]
+-            if hash != Self.empty {
+-                let position = self[position: bucket]
+-                var targetBucket = Self.bucket(for: hash, seed: newSeed, capacity: newCapacity)
+-
+-                var probes: UInt = 0
+-                while newBuffer[metadata: targetBucket.retag(Int.self)] != Self.empty
+-                    && probes < newCapacity.underlying.rawValue
+-                {
+-                    targetBucket = Bucket.Position.Modular.successor(
+-                        of: targetBucket,
+-                        capacity: newCapacity
+-                    )
+-                    probes &+= 1
+-                }
+-
+-                newBuffer[metadata: targetBucket.retag(Int.self)] = hash
+-                let rankRaw = Int(bitPattern: position.underlying.rawValue)
+-                newBuffer[payload: targetBucket.retag(Int.self)] = rankRaw
+-
+-                if rankRaw < Int(bitPattern: newPlane.count.underlying.rawValue) {
+-                    newPlane[Index<Int>(_unchecked: Ordinal(UInt(bitPattern: rankRaw)))] = Int(
+-                        bitPattern: targetBucket.underlying.rawValue
+-                    )
+-                }
+-                remaining &-= 1
+-            }
+-            bucketRaw &+= 1
+-        }
+-
+-        _seed = newSeed
+-        _buffer = newBuffer
+-        _rankToBucket = newPlane
+-    }
+-}
+diff --git a/Sources/Hash Table Primitive/Hash.Table+Lookup.swift b/Sources/Hash Table Primitive/Hash.Table+Lookup.swift
+deleted file mode 100644
+index a0fef7b..0000000
+--- a/Sources/Hash Table Primitive/Hash.Table+Lookup.swift	
++++ /dev/null
+@@ -1,200 +0,0 @@
+-public import Buffer_Slots
+-public import Cardinal
+-public import Index
+-public import Ordinal
+-import Ownership
+-import Store
+-public import Tagged
+-
+-extension Hash.Table where Element: ~Copyable {
+-
+-    @inlinable
+-    public borrowing func position(
+-        forHash hashValue: Hash.Value,
+-        equals: (Index<Element>) -> Bool
+-    ) -> Index<Element>? {
+-        let hash = Self.normalize(hashValue)
+-        let capacityCount = bucketCapacity
+-
+-        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
+-        let mask = capacity &- 1
+-        var bucket = Int(
+-            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
+-                .rawValue
+-        )
+-        var probes = 0
+-
+-        return unsafe _buffer.withMetadataPointer {
+-            (hashes: UnsafePointer<Int>) -> Index<Element>? in
+-            while probes < capacity {
+-
+-                let storedHash = unsafe hashes[bucket]
+-
+-                if storedHash == Self.empty {
+-                    return nil
+-                }
+-
+-                if storedHash == hash {
+-                    let position = self[
+-                        position: Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
+-                    ]
+-                    if equals(position) {
+-                        return position
+-                    }
+-                }
+-
+-                bucket = (bucket &+ 1) & mask
+-                probes &+= 1
+-            }
+-
+-            return nil
+-        }
+-    }
+-
+-    @inlinable
+-    public borrowing func position<Context: ~Copyable>(
+-        forHash hashValue: Hash.Value,
+-        context: borrowing Context,
+-        equals: (Index<Element>, borrowing Context) -> Bool
+-    ) -> Index<Element>? {
+-        let hash = Self.normalize(hashValue)
+-        let capacityCount = bucketCapacity
+-
+-        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
+-        let mask = capacity &- 1
+-        var bucket = Int(
+-            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
+-                .rawValue
+-        )
+-        var probes = 0
+-        return unsafe _buffer.withMetadataPointer {
+-            (hashes: UnsafePointer<Int>) -> Index<Element>? in
+-            while probes < capacity {
+-
+-                let storedHash = unsafe hashes[bucket]
+-
+-                if storedHash == Self.empty {
+-                    return nil
+-                }
+-
+-                if storedHash == hash {
+-                    let position = self[
+-                        position: Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
+-                    ]
+-                    if equals(position, context) {
+-                        return position
+-                    }
+-                }
+-
+-                bucket = (bucket &+ 1) & mask
+-                probes &+= 1
+-            }
+-
+-            return nil
+-        }
+-    }
+-
+-    @inlinable
+-    public borrowing func index(
+-        forHash hashValue: Hash.Value,
+-        equals: (Index<Element>) -> Bool
+-    ) -> Bucket.Position? {
+-        let hash = Self.normalize(hashValue)
+-        let capacityCount = bucketCapacity
+-
+-        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
+-        let mask = capacity &- 1
+-        var bucket = Int(
+-            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
+-                .rawValue
+-        )
+-        var probes = 0
+-        return unsafe _buffer.withMetadataPointer { (hashes: UnsafePointer<Int>) -> Bucket.Position? in
+-            while probes < capacity {
+-
+-                let storedHash = unsafe hashes[bucket]
+-
+-                if storedHash == Self.empty {
+-                    return nil
+-                }
+-
+-                if storedHash == hash {
+-                    let found = Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
+-                    let position = self[position: found]
+-                    if equals(position) {
+-                        return found
+-                    }
+-                }
+-
+-                bucket = (bucket &+ 1) & mask
+-                probes &+= 1
+-            }
+-
+-            return nil
+-        }
+-    }
+-
+-    @inlinable
+-    public borrowing func index<Context: ~Copyable>(
+-        forHash hashValue: Hash.Value,
+-        context: borrowing Context,
+-        equals: (Index<Element>, borrowing Context) -> Bool
+-    ) -> Bucket.Position? {
+-        let hash = Self.normalize(hashValue)
+-        let capacityCount = bucketCapacity
+-
+-        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
+-        let mask = capacity &- 1
+-        var bucket = Int(
+-            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
+-                .rawValue
+-        )
+-        var probes = 0
+-        return unsafe _buffer.withMetadataPointer { (hashes: UnsafePointer<Int>) -> Bucket.Position? in
+-            while probes < capacity {
+-
+-                let storedHash = unsafe hashes[bucket]
+-
+-                if storedHash == Self.empty {
+-                    return nil
+-                }
+-
+-                if storedHash == hash {
+-                    let found = Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
+-                    let position = self[position: found]
+-                    if equals(position, context) {
+-                        return found
+-                    }
+-                }
+-
+-                bucket = (bucket &+ 1) & mask
+-                probes &+= 1
+-            }
+-
+-            return nil
+-        }
+-    }
+-
+-    @inlinable
+-    public borrowing func contains(
+-        hashValue: Hash.Value,
+-        equals: (Index<Element>) -> Bool
+-    ) -> Bool {
+-        if case .some = position(forHash: hashValue, equals: equals) {
+-            return true
+-        }
+-        return false
+-    }
+-
+-    @inlinable
+-    public borrowing func contains<Context: ~Copyable>(
+-        forHash hashValue: Hash.Value,
+-        context: borrowing Context,
+-        equals: (Index<Element>, borrowing Context) -> Bool
+-    ) -> Bool {
+-        if case .some = position(forHash: hashValue, context: context, equals: equals) {
+-            return true
+-        }
+-        return false
+-    }
+-}
+diff --git a/Sources/Hash Table Primitive/Hash.Table+Properties.swift b/Sources/Hash Table Primitive/Hash.Table+Properties.swift
+deleted file mode 100644
+index c635844..0000000
+--- a/Sources/Hash Table Primitive/Hash.Table+Properties.swift	
++++ /dev/null
+@@ -1,29 +0,0 @@
+-public import Cardinal
+-import Index
+-import Ordinal
+-import Ownership
+-import Store
+-public import Tagged
+-
+-extension Hash.Table where Element: ~Copyable {
+-
+-    @inlinable
+-    public var count: Tagged<Element, Cardinal> {
+-        _count
+-    }
+-
+-    @inlinable
+-    public var isEmpty: Bool {
+-        _count.underlying.rawValue == 0
+-    }
+-
+-    @inlinable
+-    public var capacity: Tagged<Bucket, Cardinal> {
+-        bucketCapacity
+-    }
+-
+-    @inlinable
+-    package var shouldGrow: Bool {
+-        _count.underlying.rawValue &* 10 >= bucketCapacity.underlying.rawValue &* 7
+-    }
+-}
+diff --git a/Sources/Hash Table Primitive/Hash.Table+clone.swift b/Sources/Hash Table Primitive/Hash.Table+clone.swift
+deleted file mode 100644
+index 7eaa4c8..0000000
+--- a/Sources/Hash Table Primitive/Hash.Table+clone.swift	
++++ /dev/null
+@@ -1,46 +0,0 @@
+-import Affine
+-public import Buffer
+-public import Buffer_Linear_Primitive
+-public import Buffer_Slots
+-public import Cardinal
+-public import Index
+-public import Memory
+-public import Memory_Allocator
+-public import Memory_Small
+-public import Ordinal
+-import Ownership
+-public import Storage
+-public import Store
+-public import Tagged
+-
+-extension Hash.Table where Element: ~Copyable {
+-
+-    @inlinable
+-    public borrowing func clone() -> Self {
+-        var copy = Self(minimumCapacity: .zero)
+-        var fresh = Buffer<
+-            Store.Split<
+-                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>,
+-                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>
+-            >
+-        >.Slots(
+-            capacity: self.bucketCapacity.retag(Int.self),
+-            metadataInitial: Self.empty
+-        )
+-        fresh.fill(payload: 0)
+-        var freshPlane = Self.makeRankPlane(bucketCapacity: self.bucketCapacity)
+-        var bucket: Index<Int> = .zero
+-        let end = self.bucketCapacity.retag(Int.self).map { Ordinal($0.rawValue) }
+-        while bucket < end {
+-            fresh[metadata: bucket] = _buffer[metadata: bucket]
+-            fresh[payload: bucket] = _buffer[payload: bucket]
+-            freshPlane[bucket] = _rankToBucket[bucket]
+-            bucket += .one
+-        }
+-        copy._buffer = fresh
+-        copy._rankToBucket = freshPlane
+-        copy._count = _count
+-        copy._seed = _seed
+-        return copy
+-    }
+-}
+diff --git a/Sources/Hash Table Primitive/Hash.Table.Bucket.Ops.swift b/Sources/Hash Table Primitive/Hash.Table.Bucket.Ops.swift
+new file mode 100644
+index 0000000..bf4ee11
+--- /dev/null
++++ b/Sources/Hash Table Primitive/Hash.Table.Bucket.Ops.swift	
+@@ -0,0 +1,11 @@
++import Cardinal
++public import Index
++import Ordinal
++import Ownership
++import Store
++public import Tagged
++
++
++extension Hash.Table.Bucket where Element: ~Copyable {
++    public enum Ops {}
++}
+diff --git a/Sources/Hash Table Primitive/Hash.Table.Bucket.swift b/Sources/Hash Table Primitive/Hash.Table.Bucket.swift
+index c5831c9..b09b5ea 100644
+--- a/Sources/Hash Table Primitive/Hash.Table.Bucket.swift	
++++ b/Sources/Hash Table Primitive/Hash.Table.Bucket.swift	
+@@ -14,5 +14,4 @@ extension Hash.Table.Bucket where Element: ~Copyable {
+ 
+     public typealias Position = Index<Self>
+ 
+-    public enum Ops {}
+ }
+diff --git a/Sources/Hash Table Primitive/Hash.Table.swift b/Sources/Hash Table Primitive/Hash.Table.swift
+index 6508592..4a9dd1d 100644
+--- a/Sources/Hash Table Primitive/Hash.Table.swift	
++++ b/Sources/Hash Table Primitive/Hash.Table.swift	
+@@ -12,6 +12,7 @@ import Ownership
+ public import Storage
+ public import Store
+ public import Tagged
++public import Cyclic
+ 
+ extension Hash {
+ 
+@@ -109,3 +110,470 @@ extension Hash.Table where Element: ~Copyable {
+ }
+ 
+ extension Hash.Table: @unsafe @unchecked Sendable where Element: Sendable {}
++
++extension Hash.Table where Element: ~Copyable {
++
++    @inlinable
++    package var bucketCapacity: Tagged<Bucket, Cardinal> {
++        _buffer.capacity.retag(Bucket.self)
++    }
++
++    @inlinable
++    package subscript(hash bucket: Bucket.Position) -> Int {
++        get { _buffer[metadata: bucket.retag(Int.self)] }
++        set { _buffer[metadata: bucket.retag(Int.self)] = newValue }
++    }
++
++    @inlinable
++    package subscript(position bucket: Bucket.Position) -> Index<Element> {
++        get {
++            let raw = _buffer[payload: bucket.retag(Int.self)]
++            return Index<Element>(_unchecked: Ordinal(UInt(bitPattern: raw)))
++        }
++        set {
++            _buffer[payload: bucket.retag(Int.self)] = Int(
++                bitPattern: newValue.underlying.rawValue
++            )
++        }
++    }
++
++    @inlinable
++    package subscript(bucketOfRank rank: Index<Element>) -> Bucket.Position {
++        get {
++            let raw = _rankToBucket[
++                Index<Int>(_unchecked: Ordinal(rank.underlying.rawValue))
++            ]
++            return Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: raw)))
++        }
++        set {
++            let raw = Int(bitPattern: rank.underlying.rawValue)
++            guard raw < Int(bitPattern: _rankToBucket.count.underlying.rawValue) else { return }
++            _rankToBucket[Index<Int>(_unchecked: Ordinal(UInt(bitPattern: raw)))] = Int(
++                bitPattern: newValue.underlying.rawValue
++            )
++        }
++    }
++}
++
++extension Hash.Table where Element: ~Copyable {
++
++    @inlinable
++    @discardableResult
++    public mutating func insert(
++        position: Index<Element>,
++        hashValue: Hash.Value,
++        equals: (Index<Element>) -> Bool
++    ) -> Bool {
++        if shouldGrow {
++            grow()
++        }
++
++        let hash = Self.normalize(hashValue)
++        var currentBucket = bucket.for(hash: hash)
++        var probes: UInt = 0
++        let cap = bucketCapacity
++
++        while probes < cap.underlying.rawValue {
++            let storedHash = self[hash: currentBucket]
++
++            if storedHash == Self.empty {
++                self[hash: currentBucket] = hash
++                self[position: currentBucket] = position
++                self[bucketOfRank: position] = currentBucket
++                _count = Tagged(_unchecked: Cardinal(_count.underlying.rawValue &+ 1))
++                return true
++            }
++
++            if storedHash == hash {
++                let existingPosition = self[position: currentBucket]
++                if equals(existingPosition) {
++                    return false
++                }
++            }
++
++            currentBucket = bucket.next(currentBucket)
++            probes &+= 1
++        }
++
++        return false
++    }
++
++    @inlinable
++    @discardableResult
++    public mutating func insert<Context: ~Copyable>(
++        position: Index<Element>,
++        hashValue: Hash.Value,
++        context: borrowing Context,
++        equals: (Index<Element>, borrowing Context) -> Bool
++    ) -> Bool {
++        if shouldGrow {
++            grow()
++        }
++
++        let hash = Self.normalize(hashValue)
++        var currentBucket = bucket.for(hash: hash)
++        var probes: UInt = 0
++        let cap = bucketCapacity
++
++        while probes < cap.underlying.rawValue {
++            let storedHash = self[hash: currentBucket]
++
++            if storedHash == Self.empty {
++                self[hash: currentBucket] = hash
++                self[position: currentBucket] = position
++                self[bucketOfRank: position] = currentBucket
++                _count = Tagged(_unchecked: Cardinal(_count.underlying.rawValue &+ 1))
++                return true
++            }
++
++            if storedHash == hash {
++                let existingPosition = self[position: currentBucket]
++                if equals(existingPosition, context) {
++                    return false
++                }
++            }
++
++            currentBucket = bucket.next(currentBucket)
++            probes &+= 1
++        }
++
++        return false
++    }
++
++    @inlinable
++    public mutating func insert(
++        _unchecked: Void,
++        position: Index<Element>,
++        hashValue: Hash.Value
++    ) {
++        if shouldGrow {
++            grow()
++        }
++
++        let hash = Self.normalize(hashValue)
++        var currentBucket = bucket.for(hash: hash)
++        var probes: UInt = 0
++        let cap = bucketCapacity
++
++        while probes < cap.underlying.rawValue {
++            let storedHash = self[hash: currentBucket]
++
++            if storedHash == Self.empty {
++                self[hash: currentBucket] = hash
++                self[position: currentBucket] = position
++                self[bucketOfRank: position] = currentBucket
++                _count = Tagged(_unchecked: Cardinal(_count.underlying.rawValue &+ 1))
++                return
++            }
++
++            currentBucket = bucket.next(currentBucket)
++            probes &+= 1
++        }
++    }
++
++    @inlinable
++    package mutating func grow() {
++        let oldCapacity = bucketCapacity
++        let newSeed = Self.makeSeed()
++        let newCapacity = Tagged<Bucket, Cardinal>(
++            Swift::max(8, oldCapacity.underlying.rawValue &* 2)
++        )
++        var newBuffer = Buffer<
++            Store.Split<
++                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>,
++                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>
++            >
++        >.Slots(
++            capacity: newCapacity.retag(Int.self),
++            metadataInitial: Self.empty
++        )
++        newBuffer.fill(payload: 0)
++        var newPlane = Self.makeRankPlane(bucketCapacity: newCapacity)
++
++        var bucketRaw: UInt = 0
++        var remaining = _count.underlying.rawValue
++        while bucketRaw < oldCapacity.underlying.rawValue, remaining != 0 {
++            let bucket = Bucket.Position(_unchecked: Ordinal(bucketRaw))
++            let hash = self[hash: bucket]
++            if hash != Self.empty {
++                let position = self[position: bucket]
++                var targetBucket = Self.bucket(for: hash, seed: newSeed, capacity: newCapacity)
++
++                var probes: UInt = 0
++                while newBuffer[metadata: targetBucket.retag(Int.self)] != Self.empty
++                    && probes < newCapacity.underlying.rawValue
++                {
++                    targetBucket = Bucket.Position.Modular.successor(
++                        of: targetBucket,
++                        capacity: newCapacity
++                    )
++                    probes &+= 1
++                }
++
++                newBuffer[metadata: targetBucket.retag(Int.self)] = hash
++                let rankRaw = Int(bitPattern: position.underlying.rawValue)
++                newBuffer[payload: targetBucket.retag(Int.self)] = rankRaw
++
++                if rankRaw < Int(bitPattern: newPlane.count.underlying.rawValue) {
++                    newPlane[Index<Int>(_unchecked: Ordinal(UInt(bitPattern: rankRaw)))] = Int(
++                        bitPattern: targetBucket.underlying.rawValue
++                    )
++                }
++                remaining &-= 1
++            }
++            bucketRaw &+= 1
++        }
++
++        _seed = newSeed
++        _buffer = newBuffer
++        _rankToBucket = newPlane
++    }
++}
++
++extension Hash.Table where Element: ~Copyable {
++
++    @inlinable
++    public borrowing func position(
++        forHash hashValue: Hash.Value,
++        equals: (Index<Element>) -> Bool
++    ) -> Index<Element>? {
++        let hash = Self.normalize(hashValue)
++        let capacityCount = bucketCapacity
++
++        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
++        let mask = capacity &- 1
++        var bucket = Int(
++            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
++                .rawValue
++        )
++        var probes = 0
++
++        return unsafe _buffer.withMetadataPointer {
++            (hashes: UnsafePointer<Int>) -> Index<Element>? in
++            while probes < capacity {
++
++                let storedHash = unsafe hashes[bucket]
++
++                if storedHash == Self.empty {
++                    return nil
++                }
++
++                if storedHash == hash {
++                    let position = self[
++                        position: Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
++                    ]
++                    if equals(position) {
++                        return position
++                    }
++                }
++
++                bucket = (bucket &+ 1) & mask
++                probes &+= 1
++            }
++
++            return nil
++        }
++    }
++
++    @inlinable
++    public borrowing func position<Context: ~Copyable>(
++        forHash hashValue: Hash.Value,
++        context: borrowing Context,
++        equals: (Index<Element>, borrowing Context) -> Bool
++    ) -> Index<Element>? {
++        let hash = Self.normalize(hashValue)
++        let capacityCount = bucketCapacity
++
++        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
++        let mask = capacity &- 1
++        var bucket = Int(
++            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
++                .rawValue
++        )
++        var probes = 0
++        return unsafe _buffer.withMetadataPointer {
++            (hashes: UnsafePointer<Int>) -> Index<Element>? in
++            while probes < capacity {
++
++                let storedHash = unsafe hashes[bucket]
++
++                if storedHash == Self.empty {
++                    return nil
++                }
++
++                if storedHash == hash {
++                    let position = self[
++                        position: Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
++                    ]
++                    if equals(position, context) {
++                        return position
++                    }
++                }
++
++                bucket = (bucket &+ 1) & mask
++                probes &+= 1
++            }
++
++            return nil
++        }
++    }
++
++    @inlinable
++    public borrowing func index(
++        forHash hashValue: Hash.Value,
++        equals: (Index<Element>) -> Bool
++    ) -> Bucket.Position? {
++        let hash = Self.normalize(hashValue)
++        let capacityCount = bucketCapacity
++
++        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
++        let mask = capacity &- 1
++        var bucket = Int(
++            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
++                .rawValue
++        )
++        var probes = 0
++        return unsafe _buffer.withMetadataPointer { (hashes: UnsafePointer<Int>) -> Bucket.Position? in
++            while probes < capacity {
++
++                let storedHash = unsafe hashes[bucket]
++
++                if storedHash == Self.empty {
++                    return nil
++                }
++
++                if storedHash == hash {
++                    let found = Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
++                    let position = self[position: found]
++                    if equals(position) {
++                        return found
++                    }
++                }
++
++                bucket = (bucket &+ 1) & mask
++                probes &+= 1
++            }
++
++            return nil
++        }
++    }
++
++    @inlinable
++    public borrowing func index<Context: ~Copyable>(
++        forHash hashValue: Hash.Value,
++        context: borrowing Context,
++        equals: (Index<Element>, borrowing Context) -> Bool
++    ) -> Bucket.Position? {
++        let hash = Self.normalize(hashValue)
++        let capacityCount = bucketCapacity
++
++        let capacity = Int(bitPattern: capacityCount.underlying.rawValue)
++        let mask = capacity &- 1
++        var bucket = Int(
++            bitPattern: Self.bucket(for: hash, seed: _seed, capacity: capacityCount).underlying
++                .rawValue
++        )
++        var probes = 0
++        return unsafe _buffer.withMetadataPointer { (hashes: UnsafePointer<Int>) -> Bucket.Position? in
++            while probes < capacity {
++
++                let storedHash = unsafe hashes[bucket]
++
++                if storedHash == Self.empty {
++                    return nil
++                }
++
++                if storedHash == hash {
++                    let found = Bucket.Position(_unchecked: Ordinal(UInt(bitPattern: bucket)))
++                    let position = self[position: found]
++                    if equals(position, context) {
++                        return found
++                    }
++                }
++
++                bucket = (bucket &+ 1) & mask
++                probes &+= 1
++            }
++
++            return nil
++        }
++    }
++
++    @inlinable
++    public borrowing func contains(
++        hashValue: Hash.Value,
++        equals: (Index<Element>) -> Bool
++    ) -> Bool {
++        if case .some = position(forHash: hashValue, equals: equals) {
++            return true
++        }
++        return false
++    }
++
++    @inlinable
++    public borrowing func contains<Context: ~Copyable>(
++        forHash hashValue: Hash.Value,
++        context: borrowing Context,
++        equals: (Index<Element>, borrowing Context) -> Bool
++    ) -> Bool {
++        if case .some = position(forHash: hashValue, context: context, equals: equals) {
++            return true
++        }
++        return false
++    }
++}
++
++extension Hash.Table where Element: ~Copyable {
++
++    @inlinable
++    public var count: Tagged<Element, Cardinal> {
++        _count
++    }
++
++    @inlinable
++    public var isEmpty: Bool {
++        _count.underlying.rawValue == 0
++    }
++
++    @inlinable
++    public var capacity: Tagged<Bucket, Cardinal> {
++        bucketCapacity
++    }
++
++    @inlinable
++    package var shouldGrow: Bool {
++        _count.underlying.rawValue &* 10 >= bucketCapacity.underlying.rawValue &* 7
++    }
++}
++
++extension Hash.Table where Element: ~Copyable {
++
++    @inlinable
++    public borrowing func clone() -> Self {
++        var copy = Self(minimumCapacity: .zero)
++        var fresh = Buffer<
++            Store.Split<
++                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>,
++                Storage<Memory.Allocator<Memory.Small<0>>>.Contiguous<Int>
++            >
++        >.Slots(
++            capacity: self.bucketCapacity.retag(Int.self),
++            metadataInitial: Self.empty
++        )
++        fresh.fill(payload: 0)
++        var freshPlane = Self.makeRankPlane(bucketCapacity: self.bucketCapacity)
++        var bucket: Index<Int> = .zero
++        let end = self.bucketCapacity.retag(Int.self).map { Ordinal($0.rawValue) }
++        while bucket < end {
++            fresh[metadata: bucket] = _buffer[metadata: bucket]
++            fresh[payload: bucket] = _buffer[payload: bucket]
++            freshPlane[bucket] = _rankToBucket[bucket]
++            bucket += .one
++        }
++        copy._buffer = fresh
++        copy._rankToBucket = freshPlane
++        copy._count = _count
++        copy._seed = _seed
++        return copy
++    }
++}
+diff --git a/Sources/Hash Table Primitive/Hash.Value.swift b/Sources/Hash Table Primitive/Hash.Value.swift
+deleted file mode 100644
+index 38924d3..0000000
+--- a/Sources/Hash Table Primitive/Hash.Value.swift	
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Hash {
+-
+-    public typealias Value = Tagged<Hash, Int>
+-}
+diff --git a/Sources/Hash Table Primitive/Hash.swift b/Sources/Hash Table Primitive/Hash.swift
+index 205f18d..2532e77 100644
+--- a/Sources/Hash Table Primitive/Hash.swift	
++++ b/Sources/Hash Table Primitive/Hash.swift	
+@@ -1 +1,8 @@
++public import Tagged
++
+ public enum Hash: Sendable {}
++
++extension Hash {
++
++    public typealias Value = Tagged<Hash, Int>
++}
+-- 
+2.43.0
+

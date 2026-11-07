@@ -1,0 +1,461 @@
+From 490530098267169870b2f2ca3742f17e41f48617 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:41 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ ...Bitset+Swift.CustomStringConvertible.swift |  8 -----
+ Sources/Bitset/Bitset+Swift.Equatable.swift   | 10 ------
+ Sources/Bitset/Bitset+Swift.Hashable.swift    | 13 -------
+ Sources/Bitset/Bitset.Error.Bounds.swift      | 15 ++++++++
+ .../Bitset/Bitset.Error.InvalidCapacity.swift |  8 +++++
+ Sources/Bitset/Bitset.Error.swift             | 19 -----------
+ .../Bitset/Bitset.Fixed+Swift.Equatable.swift |  7 ----
+ .../Bitset/Bitset.Fixed+Swift.Hashable.swift  |  8 -----
+ .../Bitset/Bitset.Fixed.Error.Bounds.swift    | 15 ++++++++
+ .../Bitset.Fixed.Error.InvalidCapacity.swift  |  8 +++++
+ .../Bitset/Bitset.Fixed.Error.Overflow.swift  |  8 +++++
+ Sources/Bitset/Bitset.Fixed.Error.swift       | 25 --------------
+ Sources/Bitset/Bitset.Fixed.swift             | 17 ++++++++++
+ .../Bitset.Static+Swift.Equatable.swift       | 10 ------
+ .../Bitset/Bitset.Static+Swift.Hashable.swift |  9 -----
+ .../Bitset/Bitset.Static.Error.Bounds.swift   | 15 ++++++++
+ .../Bitset/Bitset.Static.Error.Overflow.swift |  8 +++++
+ Sources/Bitset/Bitset.Static.Error.swift      | 19 -----------
+ Sources/Bitset/Bitset.Static.swift            | 21 ++++++++++++
+ Sources/Bitset/Bitset.swift                   | 34 +++++++++++++++++++
+ 20 files changed, 149 insertions(+), 128 deletions(-)
+ delete mode 100644 Sources/Bitset/Bitset+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Bitset/Bitset+Swift.Equatable.swift
+ delete mode 100644 Sources/Bitset/Bitset+Swift.Hashable.swift
+ create mode 100644 Sources/Bitset/Bitset.Error.Bounds.swift
+ create mode 100644 Sources/Bitset/Bitset.Error.InvalidCapacity.swift
+ delete mode 100644 Sources/Bitset/Bitset.Fixed+Swift.Equatable.swift
+ delete mode 100644 Sources/Bitset/Bitset.Fixed+Swift.Hashable.swift
+ create mode 100644 Sources/Bitset/Bitset.Fixed.Error.Bounds.swift
+ create mode 100644 Sources/Bitset/Bitset.Fixed.Error.InvalidCapacity.swift
+ create mode 100644 Sources/Bitset/Bitset.Fixed.Error.Overflow.swift
+ delete mode 100644 Sources/Bitset/Bitset.Static+Swift.Equatable.swift
+ delete mode 100644 Sources/Bitset/Bitset.Static+Swift.Hashable.swift
+ create mode 100644 Sources/Bitset/Bitset.Static.Error.Bounds.swift
+ create mode 100644 Sources/Bitset/Bitset.Static.Error.Overflow.swift
+
+diff --git a/Sources/Bitset/Bitset+Swift.CustomStringConvertible.swift b/Sources/Bitset/Bitset+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index b3fdb36..0000000
+--- a/Sources/Bitset/Bitset+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,8 +0,0 @@
+-extension Bitset: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        let elements = Array(self.prefix(10))
+-        let suffix = count > 10 ? ", ..." : ""
+-        return "Bitset({\(elements.map(String.init).joined(separator: ", "))\(suffix)})"
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset+Swift.Equatable.swift b/Sources/Bitset/Bitset+Swift.Equatable.swift
+deleted file mode 100644
+index 0ea6999..0000000
+--- a/Sources/Bitset/Bitset+Swift.Equatable.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Bitset: Swift::Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        let common = Swift::min(lhs.storage.count, rhs.storage.count)
+-        return !zip(lhs.storage, rhs.storage).contains(where: { $0.0 != $0.1 })
+-            && !lhs.storage.dropFirst(common).contains(where: { $0 != 0 })
+-            && !rhs.storage.dropFirst(common).contains(where: { $0 != 0 })
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset+Swift.Hashable.swift b/Sources/Bitset/Bitset+Swift.Hashable.swift
+deleted file mode 100644
+index 45ced87..0000000
+--- a/Sources/Bitset/Bitset+Swift.Hashable.swift
++++ /dev/null
+@@ -1,13 +0,0 @@
+-extension Bitset: Swift::Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        var significant = storage.count
+-        while significant > 0 && storage[significant - 1] == 0 {
+-            significant -= 1
+-        }
+-        storage.prefix(significant).forEach { word in
+-            hasher.combine(word)
+-        }
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset.Error.Bounds.swift b/Sources/Bitset/Bitset.Error.Bounds.swift
+new file mode 100644
+index 0000000..618a56a
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Error.Bounds.swift
+@@ -0,0 +1,15 @@
++
++extension Bitset.Error {
++    public struct Bounds: Sendable, Equatable {
++
++        public let member: Int
++
++        public let capacity: Int
++
++        @inlinable
++        public init(member: Int, capacity: Int) {
++            self.member = member
++            self.capacity = capacity
++        }
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Error.InvalidCapacity.swift b/Sources/Bitset/Bitset.Error.InvalidCapacity.swift
+new file mode 100644
+index 0000000..333979e
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Error.InvalidCapacity.swift
+@@ -0,0 +1,8 @@
++
++extension Bitset.Error {
++    public struct InvalidCapacity: Sendable, Equatable {
++
++        @inlinable
++        public init() {}
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Error.swift b/Sources/Bitset/Bitset.Error.swift
+index 2e16508..0a3f300 100644
+--- a/Sources/Bitset/Bitset.Error.swift
++++ b/Sources/Bitset/Bitset.Error.swift
+@@ -8,23 +8,4 @@ extension Bitset {
+ }
+ 
+ extension Bitset.Error {
+-
+-    public struct Bounds: Sendable, Equatable {
+-
+-        public let member: Int
+-
+-        public let capacity: Int
+-
+-        @inlinable
+-        public init(member: Int, capacity: Int) {
+-            self.member = member
+-            self.capacity = capacity
+-        }
+-    }
+-
+-    public struct InvalidCapacity: Sendable, Equatable {
+-
+-        @inlinable
+-        public init() {}
+-    }
+ }
+diff --git a/Sources/Bitset/Bitset.Fixed+Swift.Equatable.swift b/Sources/Bitset/Bitset.Fixed+Swift.Equatable.swift
+deleted file mode 100644
+index 2ba54ca..0000000
+--- a/Sources/Bitset/Bitset.Fixed+Swift.Equatable.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Bitset.Fixed: Swift::Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        lhs.capacity == rhs.capacity && lhs.storage == rhs.storage
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset.Fixed+Swift.Hashable.swift b/Sources/Bitset/Bitset.Fixed+Swift.Hashable.swift
+deleted file mode 100644
+index 084cc7c..0000000
+--- a/Sources/Bitset/Bitset.Fixed+Swift.Hashable.swift
++++ /dev/null
+@@ -1,8 +0,0 @@
+-extension Bitset.Fixed: Swift::Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        hasher.combine(capacity)
+-        hasher.combine(storage)
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset.Fixed.Error.Bounds.swift b/Sources/Bitset/Bitset.Fixed.Error.Bounds.swift
+new file mode 100644
+index 0000000..bb7a147
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Fixed.Error.Bounds.swift
+@@ -0,0 +1,15 @@
++
++extension Bitset.Fixed.Error {
++    public struct Bounds: Sendable, Equatable {
++
++        public let member: Int
++
++        public let capacity: Int
++
++        @inlinable
++        public init(member: Int, capacity: Int) {
++            self.member = member
++            self.capacity = capacity
++        }
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Fixed.Error.InvalidCapacity.swift b/Sources/Bitset/Bitset.Fixed.Error.InvalidCapacity.swift
+new file mode 100644
+index 0000000..6528071
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Fixed.Error.InvalidCapacity.swift
+@@ -0,0 +1,8 @@
++
++extension Bitset.Fixed.Error {
++    public struct InvalidCapacity: Sendable, Equatable {
++
++        @inlinable
++        public init() {}
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Fixed.Error.Overflow.swift b/Sources/Bitset/Bitset.Fixed.Error.Overflow.swift
+new file mode 100644
+index 0000000..09e630e
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Fixed.Error.Overflow.swift
+@@ -0,0 +1,8 @@
++
++extension Bitset.Fixed.Error {
++    public struct Overflow: Sendable, Equatable {
++
++        @inlinable
++        public init() {}
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Fixed.Error.swift b/Sources/Bitset/Bitset.Fixed.Error.swift
+index 1c8f90c..df4b745 100644
+--- a/Sources/Bitset/Bitset.Fixed.Error.swift
++++ b/Sources/Bitset/Bitset.Fixed.Error.swift
+@@ -10,29 +10,4 @@ extension Bitset.Fixed {
+ }
+ 
+ extension Bitset.Fixed.Error {
+-
+-    public struct Bounds: Sendable, Equatable {
+-
+-        public let member: Int
+-
+-        public let capacity: Int
+-
+-        @inlinable
+-        public init(member: Int, capacity: Int) {
+-            self.member = member
+-            self.capacity = capacity
+-        }
+-    }
+-
+-    public struct InvalidCapacity: Sendable, Equatable {
+-
+-        @inlinable
+-        public init() {}
+-    }
+-
+-    public struct Overflow: Sendable, Equatable {
+-
+-        @inlinable
+-        public init() {}
+-    }
+ }
+diff --git a/Sources/Bitset/Bitset.Fixed.swift b/Sources/Bitset/Bitset.Fixed.swift
+index 3d21758..a2e3f9a 100644
+--- a/Sources/Bitset/Bitset.Fixed.swift
++++ b/Sources/Bitset/Bitset.Fixed.swift
+@@ -118,3 +118,20 @@ extension Bitset.Fixed {
+         }
+     }
+ }
++
++extension Bitset.Fixed: Swift::Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        lhs.capacity == rhs.capacity && lhs.storage == rhs.storage
++    }
++}
++
++extension Bitset.Fixed: Swift::Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(capacity)
++        hasher.combine(storage)
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Static+Swift.Equatable.swift b/Sources/Bitset/Bitset.Static+Swift.Equatable.swift
+deleted file mode 100644
+index 3d65d56..0000000
+--- a/Sources/Bitset/Bitset.Static+Swift.Equatable.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Bitset.Static: Swift::Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        for i in 0..<wordCount {
+-            if lhs.storage[i] != rhs.storage[i] { return false }
+-        }
+-        return true
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset.Static+Swift.Hashable.swift b/Sources/Bitset/Bitset.Static+Swift.Hashable.swift
+deleted file mode 100644
+index f1755e4..0000000
+--- a/Sources/Bitset/Bitset.Static+Swift.Hashable.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Bitset.Static: Swift::Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        (0..<wordCount).forEach { i in
+-            hasher.combine(storage[i])
+-        }
+-    }
+-}
+diff --git a/Sources/Bitset/Bitset.Static.Error.Bounds.swift b/Sources/Bitset/Bitset.Static.Error.Bounds.swift
+new file mode 100644
+index 0000000..66995df
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Static.Error.Bounds.swift
+@@ -0,0 +1,15 @@
++
++extension Bitset.Static.Error {
++    public struct Bounds: Sendable, Equatable {
++
++        public let member: Int
++
++        public let capacity: Int
++
++        @inlinable
++        public init(member: Int, capacity: Int) {
++            self.member = member
++            self.capacity = capacity
++        }
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Static.Error.Overflow.swift b/Sources/Bitset/Bitset.Static.Error.Overflow.swift
+new file mode 100644
+index 0000000..8af1218
+--- /dev/null
++++ b/Sources/Bitset/Bitset.Static.Error.Overflow.swift
+@@ -0,0 +1,8 @@
++
++extension Bitset.Static.Error {
++    public struct Overflow: Sendable, Equatable {
++
++        @inlinable
++        public init() {}
++    }
++}
+diff --git a/Sources/Bitset/Bitset.Static.Error.swift b/Sources/Bitset/Bitset.Static.Error.swift
+index 791b304..fb0ab43 100644
+--- a/Sources/Bitset/Bitset.Static.Error.swift
++++ b/Sources/Bitset/Bitset.Static.Error.swift
+@@ -8,23 +8,4 @@ extension Bitset.Static {
+ }
+ 
+ extension Bitset.Static.Error {
+-
+-    public struct Bounds: Sendable, Equatable {
+-
+-        public let member: Int
+-
+-        public let capacity: Int
+-
+-        @inlinable
+-        public init(member: Int, capacity: Int) {
+-            self.member = member
+-            self.capacity = capacity
+-        }
+-    }
+-
+-    public struct Overflow: Sendable, Equatable {
+-
+-        @inlinable
+-        public init() {}
+-    }
+ }
+diff --git a/Sources/Bitset/Bitset.Static.swift b/Sources/Bitset/Bitset.Static.swift
+index 7f0295e..d4ce25b 100644
+--- a/Sources/Bitset/Bitset.Static.swift
++++ b/Sources/Bitset/Bitset.Static.swift
+@@ -121,3 +121,24 @@ extension Bitset.Static {
+         }
+     }
+ }
++
++extension Bitset.Static: Swift::Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        for i in 0..<wordCount {
++            if lhs.storage[i] != rhs.storage[i] { return false }
++        }
++        return true
++    }
++}
++
++extension Bitset.Static: Swift::Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        (0..<wordCount).forEach { i in
++            hasher.combine(storage[i])
++        }
++    }
++}
+diff --git a/Sources/Bitset/Bitset.swift b/Sources/Bitset/Bitset.swift
+index 8f0cd88..082dcdb 100644
+--- a/Sources/Bitset/Bitset.swift
++++ b/Sources/Bitset/Bitset.swift
+@@ -187,3 +187,37 @@ extension Bitset {
+         }
+     }
+ }
++
++extension Bitset: Swift::CustomStringConvertible {
++
++    public var description: String {
++        let elements = Array(self.prefix(10))
++        let suffix = count > 10 ? ", ..." : ""
++        return "Bitset({\(elements.map(String.init).joined(separator: ", "))\(suffix)})"
++    }
++}
++
++extension Bitset: Swift::Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        let common = Swift::min(lhs.storage.count, rhs.storage.count)
++        return !zip(lhs.storage, rhs.storage).contains(where: { $0.0 != $0.1 })
++            && !lhs.storage.dropFirst(common).contains(where: { $0 != 0 })
++            && !rhs.storage.dropFirst(common).contains(where: { $0 != 0 })
++    }
++}
++
++extension Bitset: Swift::Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        var significant = storage.count
++        while significant > 0 && storage[significant - 1] == 0 {
++            significant -= 1
++        }
++        storage.prefix(significant).forEach { word in
++            hasher.combine(word)
++        }
++    }
++}
+-- 
+2.43.0
+

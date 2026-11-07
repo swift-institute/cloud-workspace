@@ -1,0 +1,855 @@
+From ae3cebfd7b278599680c5a1f0500d1f86551c587 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:42 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Decimal/Decimal.Class+Finite.swift    |  21 ----
+ Sources/Decimal/Decimal.Class.swift           |  22 ++++
+ .../Decimal.Exponent+Swift.Comparable.swift   |   7 --
+ ...nt+Swift.ExpressibleByIntegerLiteral.swift |   7 --
+ .../Decimal/Decimal.Exponent.Format128.swift  |   4 +
+ .../Decimal/Decimal.Exponent.Format32.swift   |   4 +
+ .../Decimal/Decimal.Exponent.Format64.swift   |   4 +
+ Sources/Decimal/Decimal.Exponent.swift        |  22 ++--
+ .../Decimal/Decimal.Format128+Integer.swift   |  22 ----
+ .../Decimal.Format128+Swift.Hashable.swift    |  51 ---------
+ Sources/Decimal/Decimal.Format128.swift       |  75 +++++++++++++
+ .../Decimal/Decimal.Format32+Integer.swift    |  47 --------
+ .../Decimal.Format32+Swift.Hashable.swift     |  51 ---------
+ Sources/Decimal/Decimal.Format32.swift        | 100 +++++++++++++++++
+ .../Decimal/Decimal.Format64+Integer.swift    |  48 ---------
+ .../Decimal.Format64+Swift.Hashable.swift     |  51 ---------
+ Sources/Decimal/Decimal.Format64.swift        | 101 ++++++++++++++++++
+ .../Decimal.Precision+Swift.Comparable.swift  |   7 --
+ ...on+Swift.ExpressibleByIntegerLiteral.swift |   7 --
+ Sources/Decimal/Decimal.Precision.swift       |  16 +++
+ 20 files changed, 342 insertions(+), 325 deletions(-)
+ delete mode 100644 Sources/Decimal/Decimal.Class+Finite.swift
+ delete mode 100644 Sources/Decimal/Decimal.Exponent+Swift.Comparable.swift
+ delete mode 100644 Sources/Decimal/Decimal.Exponent+Swift.ExpressibleByIntegerLiteral.swift
+ create mode 100644 Sources/Decimal/Decimal.Exponent.Format128.swift
+ create mode 100644 Sources/Decimal/Decimal.Exponent.Format32.swift
+ create mode 100644 Sources/Decimal/Decimal.Exponent.Format64.swift
+ delete mode 100644 Sources/Decimal/Decimal.Format128+Integer.swift
+ delete mode 100644 Sources/Decimal/Decimal.Format128+Swift.Hashable.swift
+ delete mode 100644 Sources/Decimal/Decimal.Format32+Integer.swift
+ delete mode 100644 Sources/Decimal/Decimal.Format32+Swift.Hashable.swift
+ delete mode 100644 Sources/Decimal/Decimal.Format64+Integer.swift
+ delete mode 100644 Sources/Decimal/Decimal.Format64+Swift.Hashable.swift
+ delete mode 100644 Sources/Decimal/Decimal.Precision+Swift.Comparable.swift
+ delete mode 100644 Sources/Decimal/Decimal.Precision+Swift.ExpressibleByIntegerLiteral.swift
+
+diff --git a/Sources/Decimal/Decimal.Class+Finite.swift b/Sources/Decimal/Decimal.Class+Finite.swift
+deleted file mode 100644
+index 866a371..0000000
+--- a/Sources/Decimal/Decimal.Class+Finite.swift
++++ /dev/null
+@@ -1,21 +0,0 @@
+-extension Decimal.Class {
+-
+-    @inlinable
+-    public static func classifyFinite<Coefficient: BinaryInteger>(
+-        coefficient: Coefficient,
+-        exponent: Decimal.Exponent,
+-        scientificMin: Decimal.Exponent
+-    ) -> Self {
+-        guard coefficient != 0 else { return .zero }
+-
+-        var digits = 1
+-        var remaining = coefficient
+-        while remaining >= 10 {
+-            remaining /= 10
+-            digits += 1
+-        }
+-
+-        let adjustedExponent = Int(exponent) + digits - 1
+-        return adjustedExponent < Int(scientificMin) ? .subnormal : .normal
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Class.swift b/Sources/Decimal/Decimal.Class.swift
+index c240fe2..453ecd7 100644
+--- a/Sources/Decimal/Decimal.Class.swift
++++ b/Sources/Decimal/Decimal.Class.swift
+@@ -15,3 +15,25 @@ extension Decimal {
+         case normal
+     }
+ }
++
++extension Decimal.Class {
++
++    @inlinable
++    public static func classifyFinite<Coefficient: BinaryInteger>(
++        coefficient: Coefficient,
++        exponent: Decimal.Exponent,
++        scientificMin: Decimal.Exponent
++    ) -> Self {
++        guard coefficient != 0 else { return .zero }
++
++        var digits = 1
++        var remaining = coefficient
++        while remaining >= 10 {
++            remaining /= 10
++            digits += 1
++        }
++
++        let adjustedExponent = Int(exponent) + digits - 1
++        return adjustedExponent < Int(scientificMin) ? .subnormal : .normal
++    }
++}
+diff --git a/Sources/Decimal/Decimal.Exponent+Swift.Comparable.swift b/Sources/Decimal/Decimal.Exponent+Swift.Comparable.swift
+deleted file mode 100644
+index bb59ac9..0000000
+--- a/Sources/Decimal/Decimal.Exponent+Swift.Comparable.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Decimal.Exponent: Swift::Comparable {
+-
+-    @inlinable
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        lhs.rawValue < rhs.rawValue
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Exponent+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Decimal/Decimal.Exponent+Swift.ExpressibleByIntegerLiteral.swift
+deleted file mode 100644
+index bf9abf8..0000000
+--- a/Sources/Decimal/Decimal.Exponent+Swift.ExpressibleByIntegerLiteral.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Decimal.Exponent: Swift::ExpressibleByIntegerLiteral {
+-
+-    @inlinable
+-    public init(integerLiteral value: Int) {
+-        self.rawValue = value
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Exponent.Format128.swift b/Sources/Decimal/Decimal.Exponent.Format128.swift
+new file mode 100644
+index 0000000..8361f26
+--- /dev/null
++++ b/Sources/Decimal/Decimal.Exponent.Format128.swift
+@@ -0,0 +1,4 @@
++
++extension Decimal.Exponent {
++    public enum Format128 {}
++}
+diff --git a/Sources/Decimal/Decimal.Exponent.Format32.swift b/Sources/Decimal/Decimal.Exponent.Format32.swift
+new file mode 100644
+index 0000000..f4d8a3f
+--- /dev/null
++++ b/Sources/Decimal/Decimal.Exponent.Format32.swift
+@@ -0,0 +1,4 @@
++
++extension Decimal.Exponent {
++    public enum Format32 {}
++}
+diff --git a/Sources/Decimal/Decimal.Exponent.Format64.swift b/Sources/Decimal/Decimal.Exponent.Format64.swift
+new file mode 100644
+index 0000000..201bfd4
+--- /dev/null
++++ b/Sources/Decimal/Decimal.Exponent.Format64.swift
+@@ -0,0 +1,4 @@
++
++extension Decimal.Exponent {
++    public enum Format64 {}
++}
+diff --git a/Sources/Decimal/Decimal.Exponent.swift b/Sources/Decimal/Decimal.Exponent.swift
+index a6be080..5a56d5a 100644
+--- a/Sources/Decimal/Decimal.Exponent.swift
++++ b/Sources/Decimal/Decimal.Exponent.swift
+@@ -65,12 +65,6 @@ extension Decimal.Exponent {
+ }
+ 
+ extension Decimal.Exponent {
+-
+-    public enum Format32 {}
+-
+-    public enum Format64 {}
+-
+-    public enum Format128 {}
+ }
+ 
+ extension Decimal.Exponent.Format32 {
+@@ -111,3 +105,19 @@ extension Decimal.Exponent.Format128 {
+ 
+     public static let scientificMin: Decimal.Exponent = -6143
+ }
++
++extension Decimal.Exponent: Swift::Comparable {
++
++    @inlinable
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs.rawValue < rhs.rawValue
++    }
++}
++
++extension Decimal.Exponent: Swift::ExpressibleByIntegerLiteral {
++
++    @inlinable
++    public init(integerLiteral value: Int) {
++        self.rawValue = value
++    }
++}
+diff --git a/Sources/Decimal/Decimal.Format128+Integer.swift b/Sources/Decimal/Decimal.Format128+Integer.swift
+deleted file mode 100644
+index 13169c5..0000000
+--- a/Sources/Decimal/Decimal.Format128+Integer.swift
++++ /dev/null
+@@ -1,22 +0,0 @@
+-extension Decimal.Format128 {
+-
+-    public init(_ value: Int64) {
+-        if value == 0 {
+-            self = .zero()
+-            return
+-        }
+-
+-        let sign: FloatingPointSign = value < 0 ? .minus : .plus
+-
+-        self = Self.encode(sign: sign, exponent: 0, coefficient: UInt128(value.magnitude))
+-    }
+-
+-    public init(_ value: UInt64) {
+-        if value == 0 {
+-            self = .zero()
+-            return
+-        }
+-
+-        self = Self.encode(sign: .plus, exponent: 0, coefficient: UInt128(value))
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Format128+Swift.Hashable.swift b/Sources/Decimal/Decimal.Format128+Swift.Hashable.swift
+deleted file mode 100644
+index c639288..0000000
+--- a/Sources/Decimal/Decimal.Format128+Swift.Hashable.swift
++++ /dev/null
+@@ -1,51 +0,0 @@
+-extension Decimal.Format128 {
+-
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard !lhs.test.nan, !rhs.test.nan else {
+-            return false
+-        }
+-        guard !lhs.test.infinite, !rhs.test.infinite else {
+-            return lhs.test.infinite && rhs.test.infinite && lhs.sign == rhs.sign
+-        }
+-        let left = lhs.reduced
+-        let right = rhs.reduced
+-        guard left.coefficient != 0 || right.coefficient != 0 else {
+-            return true
+-        }
+-        return lhs.sign == rhs.sign && left.coefficient == right.coefficient && left.exponent == right.exponent
+-    }
+-
+-    public func hash(into hasher: inout Hasher) {
+-        guard !test.nan else {
+-            hasher.combine(Decimal.Class.quiet)
+-            return
+-        }
+-        guard !test.infinite else {
+-            hasher.combine(Decimal.Class.infinite)
+-            hasher.combine(sign)
+-            return
+-        }
+-        let value = reduced
+-        guard value.coefficient != 0 else {
+-            hasher.combine(Decimal.Class.zero)
+-            return
+-        }
+-        hasher.combine(sign)
+-        hasher.combine(value.coefficient)
+-        hasher.combine(value.exponent)
+-    }
+-
+-    @usableFromInline
+-    internal var reduced: (coefficient: UInt128, exponent: Int) {
+-        var coefficient = extractCoefficient()
+-        guard coefficient != 0, coefficient <= Self.coefficientMax() else {
+-            return (0, 0)
+-        }
+-        var exponent = Int(extractExponent())
+-        while coefficient % 10 == 0 {
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-        return (coefficient, exponent)
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Format128.swift b/Sources/Decimal/Decimal.Format128.swift
+index bb3766c..d329875 100644
+--- a/Sources/Decimal/Decimal.Format128.swift
++++ b/Sources/Decimal/Decimal.Format128.swift
+@@ -143,3 +143,78 @@ extension Decimal.Format128 {
+     }
+ 
+ }
++
++extension Decimal.Format128 {
++
++    public init(_ value: Int64) {
++        if value == 0 {
++            self = .zero()
++            return
++        }
++
++        let sign: FloatingPointSign = value < 0 ? .minus : .plus
++
++        self = Self.encode(sign: sign, exponent: 0, coefficient: UInt128(value.magnitude))
++    }
++
++    public init(_ value: UInt64) {
++        if value == 0 {
++            self = .zero()
++            return
++        }
++
++        self = Self.encode(sign: .plus, exponent: 0, coefficient: UInt128(value))
++    }
++}
++
++extension Decimal.Format128 {
++
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard !lhs.test.nan, !rhs.test.nan else {
++            return false
++        }
++        guard !lhs.test.infinite, !rhs.test.infinite else {
++            return lhs.test.infinite && rhs.test.infinite && lhs.sign == rhs.sign
++        }
++        let left = lhs.reduced
++        let right = rhs.reduced
++        guard left.coefficient != 0 || right.coefficient != 0 else {
++            return true
++        }
++        return lhs.sign == rhs.sign && left.coefficient == right.coefficient && left.exponent == right.exponent
++    }
++
++    public func hash(into hasher: inout Hasher) {
++        guard !test.nan else {
++            hasher.combine(Decimal.Class.quiet)
++            return
++        }
++        guard !test.infinite else {
++            hasher.combine(Decimal.Class.infinite)
++            hasher.combine(sign)
++            return
++        }
++        let value = reduced
++        guard value.coefficient != 0 else {
++            hasher.combine(Decimal.Class.zero)
++            return
++        }
++        hasher.combine(sign)
++        hasher.combine(value.coefficient)
++        hasher.combine(value.exponent)
++    }
++
++    @usableFromInline
++    internal var reduced: (coefficient: UInt128, exponent: Int) {
++        var coefficient = extractCoefficient()
++        guard coefficient != 0, coefficient <= Self.coefficientMax() else {
++            return (0, 0)
++        }
++        var exponent = Int(extractExponent())
++        while coefficient % 10 == 0 {
++            coefficient /= 10
++            exponent += 1
++        }
++        return (coefficient, exponent)
++    }
++}
+diff --git a/Sources/Decimal/Decimal.Format32+Integer.swift b/Sources/Decimal/Decimal.Format32+Integer.swift
+deleted file mode 100644
+index 11631d2..0000000
+--- a/Sources/Decimal/Decimal.Format32+Integer.swift
++++ /dev/null
+@@ -1,47 +0,0 @@
+-extension Decimal.Format32 {
+-
+-    public init?(_ value: Int32) {
+-        if value == 0 {
+-            self = .zero()
+-            return
+-        }
+-
+-        let sign: FloatingPointSign = value < 0 ? .minus : .plus
+-        var coefficient = value.magnitude
+-        var exponent = 0
+-
+-        while coefficient > Self.coefficientMax() {
+-            guard coefficient % 10 == 0 else { return nil }
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-
+-        self = Self.encode(
+-            sign: sign,
+-            exponent: Decimal.Exponent(exponent),
+-            coefficient: coefficient
+-        )
+-    }
+-
+-    public init?(_ value: UInt32) {
+-        if value == 0 {
+-            self = .zero()
+-            return
+-        }
+-
+-        var coefficient = value
+-        var exponent = 0
+-
+-        while coefficient > Self.coefficientMax() {
+-            guard coefficient % 10 == 0 else { return nil }
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-
+-        self = Self.encode(
+-            sign: .plus,
+-            exponent: Decimal.Exponent(exponent),
+-            coefficient: coefficient
+-        )
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Format32+Swift.Hashable.swift b/Sources/Decimal/Decimal.Format32+Swift.Hashable.swift
+deleted file mode 100644
+index a53151f..0000000
+--- a/Sources/Decimal/Decimal.Format32+Swift.Hashable.swift
++++ /dev/null
+@@ -1,51 +0,0 @@
+-extension Decimal.Format32 {
+-
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard !lhs.test.nan, !rhs.test.nan else {
+-            return false
+-        }
+-        guard !lhs.test.infinite, !rhs.test.infinite else {
+-            return lhs.test.infinite && rhs.test.infinite && lhs.sign == rhs.sign
+-        }
+-        let left = lhs.reduced
+-        let right = rhs.reduced
+-        guard left.coefficient != 0 || right.coefficient != 0 else {
+-            return true
+-        }
+-        return lhs.sign == rhs.sign && left.coefficient == right.coefficient && left.exponent == right.exponent
+-    }
+-
+-    public func hash(into hasher: inout Hasher) {
+-        guard !test.nan else {
+-            hasher.combine(Decimal.Class.quiet)
+-            return
+-        }
+-        guard !test.infinite else {
+-            hasher.combine(Decimal.Class.infinite)
+-            hasher.combine(sign)
+-            return
+-        }
+-        let value = reduced
+-        guard value.coefficient != 0 else {
+-            hasher.combine(Decimal.Class.zero)
+-            return
+-        }
+-        hasher.combine(sign)
+-        hasher.combine(value.coefficient)
+-        hasher.combine(value.exponent)
+-    }
+-
+-    @usableFromInline
+-    internal var reduced: (coefficient: UInt32, exponent: Int) {
+-        var coefficient = extractCoefficient()
+-        guard coefficient != 0, coefficient <= Self.coefficientMax() else {
+-            return (0, 0)
+-        }
+-        var exponent = Int(extractExponent())
+-        while coefficient % 10 == 0 {
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-        return (coefficient, exponent)
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Format32.swift b/Sources/Decimal/Decimal.Format32.swift
+index b8399dd..1eecf23 100644
+--- a/Sources/Decimal/Decimal.Format32.swift
++++ b/Sources/Decimal/Decimal.Format32.swift
+@@ -136,3 +136,103 @@ extension Decimal.Format32 {
+     }
+ 
+ }
++
++extension Decimal.Format32 {
++
++    public init?(_ value: Int32) {
++        if value == 0 {
++            self = .zero()
++            return
++        }
++
++        let sign: FloatingPointSign = value < 0 ? .minus : .plus
++        var coefficient = value.magnitude
++        var exponent = 0
++
++        while coefficient > Self.coefficientMax() {
++            guard coefficient % 10 == 0 else { return nil }
++            coefficient /= 10
++            exponent += 1
++        }
++
++        self = Self.encode(
++            sign: sign,
++            exponent: Decimal.Exponent(exponent),
++            coefficient: coefficient
++        )
++    }
++
++    public init?(_ value: UInt32) {
++        if value == 0 {
++            self = .zero()
++            return
++        }
++
++        var coefficient = value
++        var exponent = 0
++
++        while coefficient > Self.coefficientMax() {
++            guard coefficient % 10 == 0 else { return nil }
++            coefficient /= 10
++            exponent += 1
++        }
++
++        self = Self.encode(
++            sign: .plus,
++            exponent: Decimal.Exponent(exponent),
++            coefficient: coefficient
++        )
++    }
++}
++
++extension Decimal.Format32 {
++
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard !lhs.test.nan, !rhs.test.nan else {
++            return false
++        }
++        guard !lhs.test.infinite, !rhs.test.infinite else {
++            return lhs.test.infinite && rhs.test.infinite && lhs.sign == rhs.sign
++        }
++        let left = lhs.reduced
++        let right = rhs.reduced
++        guard left.coefficient != 0 || right.coefficient != 0 else {
++            return true
++        }
++        return lhs.sign == rhs.sign && left.coefficient == right.coefficient && left.exponent == right.exponent
++    }
++
++    public func hash(into hasher: inout Hasher) {
++        guard !test.nan else {
++            hasher.combine(Decimal.Class.quiet)
++            return
++        }
++        guard !test.infinite else {
++            hasher.combine(Decimal.Class.infinite)
++            hasher.combine(sign)
++            return
++        }
++        let value = reduced
++        guard value.coefficient != 0 else {
++            hasher.combine(Decimal.Class.zero)
++            return
++        }
++        hasher.combine(sign)
++        hasher.combine(value.coefficient)
++        hasher.combine(value.exponent)
++    }
++
++    @usableFromInline
++    internal var reduced: (coefficient: UInt32, exponent: Int) {
++        var coefficient = extractCoefficient()
++        guard coefficient != 0, coefficient <= Self.coefficientMax() else {
++            return (0, 0)
++        }
++        var exponent = Int(extractExponent())
++        while coefficient % 10 == 0 {
++            coefficient /= 10
++            exponent += 1
++        }
++        return (coefficient, exponent)
++    }
++}
+diff --git a/Sources/Decimal/Decimal.Format64+Integer.swift b/Sources/Decimal/Decimal.Format64+Integer.swift
+deleted file mode 100644
+index 2f5252c..0000000
+--- a/Sources/Decimal/Decimal.Format64+Integer.swift
++++ /dev/null
+@@ -1,48 +0,0 @@
+-extension Decimal.Format64 {
+-
+-    public init?(_ value: Int64) {
+-        if value == 0 {
+-            self = .zero()
+-            return
+-        }
+-
+-        let sign: FloatingPointSign = value < 0 ? .minus : .plus
+-
+-        var coefficient = value.magnitude
+-        var exponent = 0
+-
+-        while coefficient > Self.coefficientMax() {
+-            guard coefficient % 10 == 0 else { return nil }
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-
+-        self = Self.encode(
+-            sign: sign,
+-            exponent: Decimal.Exponent(exponent),
+-            coefficient: coefficient
+-        )
+-    }
+-
+-    public init?(_ value: UInt64) {
+-        if value == 0 {
+-            self = .zero()
+-            return
+-        }
+-
+-        var coefficient = value
+-        var exponent = 0
+-
+-        while coefficient > Self.coefficientMax() {
+-            guard coefficient % 10 == 0 else { return nil }
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-
+-        self = Self.encode(
+-            sign: .plus,
+-            exponent: Decimal.Exponent(exponent),
+-            coefficient: coefficient
+-        )
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Format64+Swift.Hashable.swift b/Sources/Decimal/Decimal.Format64+Swift.Hashable.swift
+deleted file mode 100644
+index 07c4ac8..0000000
+--- a/Sources/Decimal/Decimal.Format64+Swift.Hashable.swift
++++ /dev/null
+@@ -1,51 +0,0 @@
+-extension Decimal.Format64 {
+-
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard !lhs.test.nan, !rhs.test.nan else {
+-            return false
+-        }
+-        guard !lhs.test.infinite, !rhs.test.infinite else {
+-            return lhs.test.infinite && rhs.test.infinite && lhs.sign == rhs.sign
+-        }
+-        let left = lhs.reduced
+-        let right = rhs.reduced
+-        guard left.coefficient != 0 || right.coefficient != 0 else {
+-            return true
+-        }
+-        return lhs.sign == rhs.sign && left.coefficient == right.coefficient && left.exponent == right.exponent
+-    }
+-
+-    public func hash(into hasher: inout Hasher) {
+-        guard !test.nan else {
+-            hasher.combine(Decimal.Class.quiet)
+-            return
+-        }
+-        guard !test.infinite else {
+-            hasher.combine(Decimal.Class.infinite)
+-            hasher.combine(sign)
+-            return
+-        }
+-        let value = reduced
+-        guard value.coefficient != 0 else {
+-            hasher.combine(Decimal.Class.zero)
+-            return
+-        }
+-        hasher.combine(sign)
+-        hasher.combine(value.coefficient)
+-        hasher.combine(value.exponent)
+-    }
+-
+-    @usableFromInline
+-    internal var reduced: (coefficient: UInt64, exponent: Int) {
+-        var coefficient = extractCoefficient()
+-        guard coefficient != 0, coefficient <= Self.coefficientMax() else {
+-            return (0, 0)
+-        }
+-        var exponent = Int(extractExponent())
+-        while coefficient % 10 == 0 {
+-            coefficient /= 10
+-            exponent += 1
+-        }
+-        return (coefficient, exponent)
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Format64.swift b/Sources/Decimal/Decimal.Format64.swift
+index e347b58..062f4d7 100644
+--- a/Sources/Decimal/Decimal.Format64.swift
++++ b/Sources/Decimal/Decimal.Format64.swift
+@@ -176,3 +176,104 @@ extension Decimal.Format64 {
+     }
+ 
+ }
++
++extension Decimal.Format64 {
++
++    public init?(_ value: Int64) {
++        if value == 0 {
++            self = .zero()
++            return
++        }
++
++        let sign: FloatingPointSign = value < 0 ? .minus : .plus
++
++        var coefficient = value.magnitude
++        var exponent = 0
++
++        while coefficient > Self.coefficientMax() {
++            guard coefficient % 10 == 0 else { return nil }
++            coefficient /= 10
++            exponent += 1
++        }
++
++        self = Self.encode(
++            sign: sign,
++            exponent: Decimal.Exponent(exponent),
++            coefficient: coefficient
++        )
++    }
++
++    public init?(_ value: UInt64) {
++        if value == 0 {
++            self = .zero()
++            return
++        }
++
++        var coefficient = value
++        var exponent = 0
++
++        while coefficient > Self.coefficientMax() {
++            guard coefficient % 10 == 0 else { return nil }
++            coefficient /= 10
++            exponent += 1
++        }
++
++        self = Self.encode(
++            sign: .plus,
++            exponent: Decimal.Exponent(exponent),
++            coefficient: coefficient
++        )
++    }
++}
++
++extension Decimal.Format64 {
++
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard !lhs.test.nan, !rhs.test.nan else {
++            return false
++        }
++        guard !lhs.test.infinite, !rhs.test.infinite else {
++            return lhs.test.infinite && rhs.test.infinite && lhs.sign == rhs.sign
++        }
++        let left = lhs.reduced
++        let right = rhs.reduced
++        guard left.coefficient != 0 || right.coefficient != 0 else {
++            return true
++        }
++        return lhs.sign == rhs.sign && left.coefficient == right.coefficient && left.exponent == right.exponent
++    }
++
++    public func hash(into hasher: inout Hasher) {
++        guard !test.nan else {
++            hasher.combine(Decimal.Class.quiet)
++            return
++        }
++        guard !test.infinite else {
++            hasher.combine(Decimal.Class.infinite)
++            hasher.combine(sign)
++            return
++        }
++        let value = reduced
++        guard value.coefficient != 0 else {
++            hasher.combine(Decimal.Class.zero)
++            return
++        }
++        hasher.combine(sign)
++        hasher.combine(value.coefficient)
++        hasher.combine(value.exponent)
++    }
++
++    @usableFromInline
++    internal var reduced: (coefficient: UInt64, exponent: Int) {
++        var coefficient = extractCoefficient()
++        guard coefficient != 0, coefficient <= Self.coefficientMax() else {
++            return (0, 0)
++        }
++        var exponent = Int(extractExponent())
++        while coefficient % 10 == 0 {
++            coefficient /= 10
++            exponent += 1
++        }
++        return (coefficient, exponent)
++    }
++}
+diff --git a/Sources/Decimal/Decimal.Precision+Swift.Comparable.swift b/Sources/Decimal/Decimal.Precision+Swift.Comparable.swift
+deleted file mode 100644
+index ada7bea..0000000
+--- a/Sources/Decimal/Decimal.Precision+Swift.Comparable.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Decimal.Precision: Swift::Comparable {
+-
+-    @inlinable
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        lhs.rawValue < rhs.rawValue
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Precision+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Decimal/Decimal.Precision+Swift.ExpressibleByIntegerLiteral.swift
+deleted file mode 100644
+index 3937150..0000000
+--- a/Sources/Decimal/Decimal.Precision+Swift.ExpressibleByIntegerLiteral.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Decimal.Precision: Swift::ExpressibleByIntegerLiteral {
+-
+-    @inlinable
+-    public init(integerLiteral value: Int) {
+-        self.rawValue = value
+-    }
+-}
+diff --git a/Sources/Decimal/Decimal.Precision.swift b/Sources/Decimal/Decimal.Precision.swift
+index e77f291..9725c8e 100644
+--- a/Sources/Decimal/Decimal.Precision.swift
++++ b/Sources/Decimal/Decimal.Precision.swift
+@@ -47,3 +47,19 @@ extension Decimal.Precision {
+ 
+     public static let format128: Self = 34
+ }
++
++extension Decimal.Precision: Swift::Comparable {
++
++    @inlinable
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs.rawValue < rhs.rawValue
++    }
++}
++
++extension Decimal.Precision: Swift::ExpressibleByIntegerLiteral {
++
++    @inlinable
++    public init(integerLiteral value: Int) {
++        self.rawValue = value
++    }
++}
+-- 
+2.43.0
+

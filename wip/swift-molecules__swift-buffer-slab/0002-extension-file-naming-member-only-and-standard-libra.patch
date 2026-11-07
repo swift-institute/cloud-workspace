@@ -1,0 +1,575 @@
+From 1208b0803ed96667aff76bb1679d0adf8f1ea9a2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:50 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Buffer.Slab.Bounded.Box.swift             |  29 +++++
+ .../Buffer.Slab.Bounded.swift                 |  21 ----
+ ...Buffer.Slab.Header.Static+Operations.swift |  32 -----
+ .../Buffer.Slab.Header.Static.swift           |  30 +++++
+ .../Buffer.Slab.Inline.Box.swift              |  37 ++++++
+ .../Buffer.Slab.Inline.swift                  |  29 -----
+ .../Buffer.Slab+Store ~Copyable.swift         |  73 -----------
+ .../Buffer.Slab+Subscript.swift               |  34 ------
+ .../Buffer.Slab+clone.swift                   |  23 ----
+ .../Buffer Slab Primitive/Buffer.Slab.swift   | 114 ++++++++++++++++++
+ .../Buffer.Slab.Small._Representation.swift   |   8 ++
+ .../Buffer.Slab.Small.swift                   |   6 -
+ 12 files changed, 218 insertions(+), 218 deletions(-)
+ create mode 100644 Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.Box.swift
+ delete mode 100644 Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static+Operations.swift
+ create mode 100644 Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.Box.swift
+ delete mode 100644 Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift
+ delete mode 100644 Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift
+ delete mode 100644 Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift
+ create mode 100644 Sources/Buffer Slab Small Primitive/Buffer.Slab.Small._Representation.swift
+
+diff --git a/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.Box.swift b/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.Box.swift
+new file mode 100644
+index 0000000..480fe7e
+--- /dev/null
++++ b/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.Box.swift	
+@@ -0,0 +1,29 @@
++import Affine
++import Bit_Vector_Bounded
++import Index
++import Ordinal
++import Storage
++
++
++extension Buffer.Slab.Bounded where S: ~Copyable {
++    @usableFromInline
++    internal final class Box {
++        @usableFromInline
++        internal var header: Buffer.Slab.Header
++
++        @usableFromInline
++        internal var storage: S
++
++        @usableFromInline
++        internal init(header: Buffer.Slab.Header, storage: consuming S) {
++            self.header = header
++            self.storage = storage
++        }
++
++        deinit {
++            header.bitmap.ones.forEach { bitIndex in
++                _ = storage.move(at: bitIndex.retag(S.Element.self))
++            }
++        }
++    }
++}
+diff --git a/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.swift b/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.swift
+index 12e13ee..850cc78 100644
+--- a/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.swift	
++++ b/Sources/Buffer Slab Bounded Primitive/Buffer.Slab.Bounded.swift	
+@@ -22,27 +22,6 @@ extension Buffer.Slab where S: ~Copyable {
+ }
+ 
+ extension Buffer.Slab.Bounded where S: ~Copyable {
+-
+-    @usableFromInline
+-    internal final class Box {
+-        @usableFromInline
+-        internal var header: Buffer.Slab.Header
+-
+-        @usableFromInline
+-        internal var storage: S
+-
+-        @usableFromInline
+-        internal init(header: Buffer.Slab.Header, storage: consuming S) {
+-            self.header = header
+-            self.storage = storage
+-        }
+-
+-        deinit {
+-            header.bitmap.ones.forEach { bitIndex in
+-                _ = storage.move(at: bitIndex.retag(S.Element.self))
+-            }
+-        }
+-    }
+ }
+ 
+ extension Buffer.Slab.Bounded where S: ~Copyable {
+diff --git a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static+Operations.swift b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static+Operations.swift
+deleted file mode 100644
+index 98f1eca..0000000
+--- a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static+Operations.swift	
++++ /dev/null
+@@ -1,32 +0,0 @@
+-import Affine
+-public import Growth
+-public import Index
+-import Ordinal
+-
+-extension Buffer.Slab.Header.Static where S: ~Copyable {
+-
+-    @inlinable
+-    public var occupancy: Tagged<Bit, Cardinal> {
+-        bitmap.popcount
+-    }
+-
+-    @inlinable
+-    public var isEmpty: Bool {
+-        bitmap.isEmpty
+-    }
+-
+-    @inlinable
+-    public var isFull: Bool {
+-        bitmap.isFull
+-    }
+-
+-    @inlinable
+-    public func isOccupied(at slot: Index::Index<Bit::Bit>) -> Bool {
+-        bitmap[slot]
+-    }
+-
+-    @inlinable
+-    public func firstVacant(max: Tagged<Bit, Cardinal>) -> Index::Index<Bit::Bit>? {
+-        bitmap.zeros.first(max: max)
+-    }
+-}
+diff --git a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static.swift b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static.swift
+index 7692f93..b80e193 100644
+--- a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static.swift	
++++ b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Header.Static.swift	
+@@ -1,6 +1,8 @@
+ import Affine
+ import Bit_Vector_Static
+ import Ordinal
++public import Growth
++public import Index
+ 
+ extension Buffer.Slab.Header where S: ~Copyable {
+ 
+@@ -14,3 +16,31 @@ extension Buffer.Slab.Header where S: ~Copyable {
+         }
+     }
+ }
++
++extension Buffer.Slab.Header.Static where S: ~Copyable {
++
++    @inlinable
++    public var occupancy: Tagged<Bit, Cardinal> {
++        bitmap.popcount
++    }
++
++    @inlinable
++    public var isEmpty: Bool {
++        bitmap.isEmpty
++    }
++
++    @inlinable
++    public var isFull: Bool {
++        bitmap.isFull
++    }
++
++    @inlinable
++    public func isOccupied(at slot: Index::Index<Bit::Bit>) -> Bool {
++        bitmap[slot]
++    }
++
++    @inlinable
++    public func firstVacant(max: Tagged<Bit, Cardinal>) -> Index::Index<Bit::Bit>? {
++        bitmap.zeros.first(max: max)
++    }
++}
+diff --git a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.Box.swift b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.Box.swift
+new file mode 100644
+index 0000000..ffab8b0
+--- /dev/null
++++ b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.Box.swift	
+@@ -0,0 +1,37 @@
++import Affine
++import Bit_Vector_Static
++import Index
++import Ordinal
++public import Storage
++
++
++extension Buffer.Slab.Inline where S: ~Copyable {
++    @usableFromInline
++    internal final class Box {
++        @usableFromInline
++        internal var header: Buffer.Slab.Header.Static<wordCount>
++
++        @usableFromInline
++        internal var storage: Store.Inline<S.Element, wordCount>
++
++        @usableFromInline
++        internal init(
++            header: Buffer.Slab.Header.Static<wordCount>,
++            storage: consuming Store.Inline<S.Element, wordCount>
++        ) {
++            self.header = header
++            self.storage = storage
++        }
++
++        deinit {
++            var slot = Index::Index<Bit::Bit>(_unchecked: Ordinal(0))
++            let end = Tagged<Bit, Cardinal>(_unchecked: Cardinal(UInt(wordCount))).map(Ordinal.init)
++            while slot < end {
++                if header.bitmap[slot] {
++                    _ = storage.move(at: slot.retag(S.Element.self))
++                }
++                slot = Index::Index<Bit::Bit>(_unchecked: Ordinal(slot.underlying.rawValue + 1))
++            }
++        }
++    }
++}
+diff --git a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.swift b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.swift
+index 363c06b..c598ff3 100644
+--- a/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.swift	
++++ b/Sources/Buffer Slab Inline Primitive/Buffer.Slab.Inline.swift	
+@@ -22,35 +22,6 @@ extension Buffer.Slab where S: ~Copyable {
+ }
+ 
+ extension Buffer.Slab.Inline where S: ~Copyable {
+-
+-    @usableFromInline
+-    internal final class Box {
+-        @usableFromInline
+-        internal var header: Buffer.Slab.Header.Static<wordCount>
+-
+-        @usableFromInline
+-        internal var storage: Store.Inline<S.Element, wordCount>
+-
+-        @usableFromInline
+-        internal init(
+-            header: Buffer.Slab.Header.Static<wordCount>,
+-            storage: consuming Store.Inline<S.Element, wordCount>
+-        ) {
+-            self.header = header
+-            self.storage = storage
+-        }
+-
+-        deinit {
+-            var slot = Index::Index<Bit::Bit>(_unchecked: Ordinal(0))
+-            let end = Tagged<Bit, Cardinal>(_unchecked: Cardinal(UInt(wordCount))).map(Ordinal.init)
+-            while slot < end {
+-                if header.bitmap[slot] {
+-                    _ = storage.move(at: slot.retag(S.Element.self))
+-                }
+-                slot = Index::Index<Bit::Bit>(_unchecked: Ordinal(slot.underlying.rawValue + 1))
+-            }
+-        }
+-    }
+ }
+ 
+ extension Buffer.Slab.Inline.Box where S: ~Copyable {
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift
+deleted file mode 100644
+index 1fff1e6..0000000
+--- a/Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift	
++++ /dev/null
+@@ -1,73 +0,0 @@
+-import Affine
+-public import Bit_Vector_Bounded
+-import Growth
+-public import Index
+-import Ordinal
+-import Storage
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public static func insert(
+-        _ element: consuming S.Element,
+-        at slot: Index::Index<Bit::Bit>,
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        storage.initialize(at: slot.retag(S.Element.self), to: consume element)
+-        header.bitmap[slot] = true
+-    }
+-
+-    @inlinable
+-    public static func remove(
+-        at slot: Index::Index<Bit::Bit>,
+-        header: inout Header,
+-        storage: inout S
+-    ) -> S.Element {
+-        let element = storage.move(at: slot.retag(S.Element.self))
+-        header.bitmap[slot] = false
+-        return element
+-    }
+-
+-    @inlinable
+-    public static func update(
+-        at slot: Index::Index<Bit::Bit>,
+-        with element: consuming S.Element,
+-        storage: inout S
+-    ) -> S.Element {
+-        let storageIndex = slot.retag(S.Element.self)
+-        let old = storage.move(at: storageIndex)
+-        storage.initialize(at: storageIndex, to: consume element)
+-        return old
+-    }
+-
+-    @inlinable
+-    public static func forEachOccupied(
+-        header: borrowing Header,
+-        storage: borrowing S,
+-        _ body: (Index<S.Element>) -> Void
+-    ) {
+-        header.bitmap.ones.forEach { bitIndex in
+-            body(bitIndex.retag(S.Element.self))
+-        }
+-    }
+-
+-    @inlinable
+-    public static func firstVacant(
+-        header: borrowing Header
+-    ) -> Index::Index<Bit::Bit>? {
+-        header.firstVacant(max: header.bitmap.capacity.maximum)
+-    }
+-
+-    @inlinable
+-    public static func deinitializeAll(
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        header.bitmap.ones.forEach { bitIndex in
+-
+-            _ = storage.move(at: bitIndex.retag(S.Element.self))
+-            header.bitmap[bitIndex] = false
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift
+deleted file mode 100644
+index b2863dc..0000000
+--- a/Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift	
++++ /dev/null
+@@ -1,34 +0,0 @@
+-import Affine
+-public import Bit_Vector_Bounded
+-import Growth
+-public import Index
+-import Ordinal
+-import Storage
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public var capacity: Tagged<Bit, Cardinal> {
+-        header.bitmap.capacity.maximum
+-    }
+-}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public subscript(slot: Index::Index<Bit::Bit>) -> S.Element {
+-        _read {
+-            yield storage[slot.retag(S.Element.self)]
+-        }
+-    }
+-}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public var forEach: Property<Sequence.ForEach, Self>.Borrow {
+-        _read {
+-            yield Property<Sequence.ForEach, Self>.Borrow(self)
+-        }
+-    }
+-}
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift
+deleted file mode 100644
+index f3aa703..0000000
+--- a/Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift	
++++ /dev/null
+@@ -1,23 +0,0 @@
+-import Affine
+-public import Bit_Vector_Bounded
+-import Index
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+-import Ordinal
+-public import Storage
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
+-    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
+-        let capacity = storage.capacity
+-        var fresh = S.create(minimumCapacity: capacity)
+-        header.bitmap.ones.forEach { bitIndex in
+-            let index = bitIndex.retag(E.self)
+-            let element = storage[index]
+-            fresh.initialize(at: index, to: element)
+-        }
+-        return Self(header: header, storage: fresh)
+-    }
+-}
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab.swift b/Sources/Buffer Slab Primitive/Buffer.Slab.swift
+index a4cd057..424ddc1 100644
+--- a/Sources/Buffer Slab Primitive/Buffer.Slab.swift	
++++ b/Sources/Buffer Slab Primitive/Buffer.Slab.swift	
+@@ -3,6 +3,9 @@ import Bit_Vector_Bounded
+ import Index
+ import Ordinal
+ import Storage
++import Growth
++public import Memory_Allocator
++public import Memory_Allocator_Protocol
+ 
+ extension Buffer where S: Store.`Protocol`, S: ~Copyable {
+ 
+@@ -58,3 +61,114 @@ extension Buffer.Slab where S: ~Copyable {
+ }
+ 
+ extension Buffer.Slab: @unsafe @unchecked Sendable where S: Sendable {}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public static func insert(
++        _ element: consuming S.Element,
++        at slot: Index::Index<Bit::Bit>,
++        header: inout Header,
++        storage: inout S
++    ) {
++        storage.initialize(at: slot.retag(S.Element.self), to: consume element)
++        header.bitmap[slot] = true
++    }
++
++    @inlinable
++    public static func remove(
++        at slot: Index::Index<Bit::Bit>,
++        header: inout Header,
++        storage: inout S
++    ) -> S.Element {
++        let element = storage.move(at: slot.retag(S.Element.self))
++        header.bitmap[slot] = false
++        return element
++    }
++
++    @inlinable
++    public static func update(
++        at slot: Index::Index<Bit::Bit>,
++        with element: consuming S.Element,
++        storage: inout S
++    ) -> S.Element {
++        let storageIndex = slot.retag(S.Element.self)
++        let old = storage.move(at: storageIndex)
++        storage.initialize(at: storageIndex, to: consume element)
++        return old
++    }
++
++    @inlinable
++    public static func forEachOccupied(
++        header: borrowing Header,
++        storage: borrowing S,
++        _ body: (Index<S.Element>) -> Void
++    ) {
++        header.bitmap.ones.forEach { bitIndex in
++            body(bitIndex.retag(S.Element.self))
++        }
++    }
++
++    @inlinable
++    public static func firstVacant(
++        header: borrowing Header
++    ) -> Index::Index<Bit::Bit>? {
++        header.firstVacant(max: header.bitmap.capacity.maximum)
++    }
++
++    @inlinable
++    public static func deinitializeAll(
++        header: inout Header,
++        storage: inout S
++    ) {
++        header.bitmap.ones.forEach { bitIndex in
++
++            _ = storage.move(at: bitIndex.retag(S.Element.self))
++            header.bitmap[bitIndex] = false
++        }
++    }
++}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public var capacity: Tagged<Bit, Cardinal> {
++        header.bitmap.capacity.maximum
++    }
++}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public subscript(slot: Index::Index<Bit::Bit>) -> S.Element {
++        _read {
++            yield storage[slot.retag(S.Element.self)]
++        }
++    }
++}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public var forEach: Property<Sequence.ForEach, Self>.Borrow {
++        _read {
++            yield Property<Sequence.ForEach, Self>.Borrow(self)
++        }
++    }
++}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
++    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
++        let capacity = storage.capacity
++        var fresh = S.create(minimumCapacity: capacity)
++        header.bitmap.ones.forEach { bitIndex in
++            let index = bitIndex.retag(E.self)
++            let element = storage[index]
++            fresh.initialize(at: index, to: element)
++        }
++        return Self(header: header, storage: fresh)
++    }
++}
+diff --git a/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small._Representation.swift b/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small._Representation.swift
+new file mode 100644
+index 0000000..4a70f3e
+--- /dev/null
++++ b/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small._Representation.swift	
+@@ -0,0 +1,8 @@
++
++extension Buffer.Slab.Small where S: ~Copyable {
++    @frozen @usableFromInline
++    internal enum _Representation: ~Copyable {
++        case inline(Buffer.Slab.Inline<inlineCapacity>)
++        case heap(Buffer.Slab)
++    }
++}
+diff --git a/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small.swift b/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small.swift
+index 13c12c6..433f99a 100644
+--- a/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small.swift	
++++ b/Sources/Buffer Slab Small Primitive/Buffer.Slab.Small.swift	
+@@ -15,12 +15,6 @@ extension Buffer.Slab where S: ~Copyable {
+ }
+ 
+ extension Buffer.Slab.Small where S: ~Copyable {
+-
+-    @frozen @usableFromInline
+-    internal enum _Representation: ~Copyable {
+-        case inline(Buffer.Slab.Inline<inlineCapacity>)
+-        case heap(Buffer.Slab)
+-    }
+ }
+ 
+ extension Buffer.Slab.Small._Representation: @unsafe @unchecked Sendable
+-- 
+2.43.0
+

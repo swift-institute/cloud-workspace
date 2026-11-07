@@ -1,0 +1,192 @@
+From e024b8d6b24e7f1b1d1b9f14bf9cf75c45b99168 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:56 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ ...nel.Thread.Executor.PriorityOverride.swift | 42 ---------------
+ .../Kernel.Thread.Executor.Runtime.swift      | 10 ----
+ ...rnel.Thread.Executor.Sharded.Runtime.swift | 14 -----
+ .../Kernel.Thread.Executor.Sharded.swift      | 15 ++++++
+ .../Executors/Kernel.Thread.Executor.swift    | 54 +++++++++++++++++++
+ 5 files changed, 69 insertions(+), 66 deletions(-)
+ delete mode 100644 Sources/Executors/Kernel.Thread.Executor.PriorityOverride.swift
+ delete mode 100644 Sources/Executors/Kernel.Thread.Executor.Runtime.swift
+ delete mode 100644 Sources/Executors/Kernel.Thread.Executor.Sharded.Runtime.swift
+
+diff --git a/Sources/Executors/Kernel.Thread.Executor.PriorityOverride.swift b/Sources/Executors/Kernel.Thread.Executor.PriorityOverride.swift
+deleted file mode 100644
+index d9814a5..0000000
+--- a/Sources/Executors/Kernel.Thread.Executor.PriorityOverride.swift
++++ /dev/null
+@@ -1,42 +0,0 @@
+-extension Kernel.Thread.Executor {
+-
+-    internal static func runJob(
+-        _ job: UnownedJob,
+-        onSerial executor: UnownedSerialExecutor,
+-        priorityTracking: Bool
+-    ) {
+-        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+-            if priorityTracking,
+-                let qos = Darwin.Kernel.Thread.QoS(priority: UInt32(job.priority.rawValue))
+-            {
+-                qos.withOverride {
+-                    unsafe job.runSynchronously(on: executor)
+-                }
+-            } else {
+-                unsafe job.runSynchronously(on: executor)
+-            }
+-        #else
+-            unsafe job.runSynchronously(on: executor)
+-        #endif
+-    }
+-
+-    internal static func runJob(
+-        _ job: UnownedJob,
+-        onTask executor: UnownedTaskExecutor,
+-        priorityTracking: Bool
+-    ) {
+-        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+-            if priorityTracking,
+-                let qos = Darwin.Kernel.Thread.QoS(priority: UInt32(job.priority.rawValue))
+-            {
+-                qos.withOverride {
+-                    unsafe job.runSynchronously(on: executor)
+-                }
+-            } else {
+-                unsafe job.runSynchronously(on: executor)
+-            }
+-        #else
+-            unsafe job.runSynchronously(on: executor)
+-        #endif
+-    }
+-}
+diff --git a/Sources/Executors/Kernel.Thread.Executor.Runtime.swift b/Sources/Executors/Kernel.Thread.Executor.Runtime.swift
+deleted file mode 100644
+index 768021a..0000000
+--- a/Sources/Executors/Kernel.Thread.Executor.Runtime.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Kernel.Thread.Executor {
+-
+-    public var runtime: Executor.Runtime {
+-        wait.withLock {
+-            if _loopExited { return .terminated }
+-            if _shutdown.isSet { return .draining }
+-            return .running
+-        }
+-    }
+-}
+diff --git a/Sources/Executors/Kernel.Thread.Executor.Sharded.Runtime.swift b/Sources/Executors/Kernel.Thread.Executor.Sharded.Runtime.swift
+deleted file mode 100644
+index a261ebf..0000000
+--- a/Sources/Executors/Kernel.Thread.Executor.Sharded.Runtime.swift
++++ /dev/null
+@@ -1,14 +0,0 @@
+-extension Kernel.Thread.Executor.Sharded {
+-
+-    public var runtime: Executor.Runtime {
+-        let states = executors.map(\.runtime)
+-        if states.contains(.running) { return .running }
+-        if states.contains(.draining) { return .draining }
+-        return .terminated
+-    }
+-
+-    public var affinities: [Executor.Affinity] {
+-        let total = executors.count
+-        return (0..<total).map { Executor.Affinity(index: $0, count: total) }
+-    }
+-}
+diff --git a/Sources/Executors/Kernel.Thread.Executor.Sharded.swift b/Sources/Executors/Kernel.Thread.Executor.Sharded.swift
+index ca653d4..c7cc259 100644
+--- a/Sources/Executors/Kernel.Thread.Executor.Sharded.swift
++++ b/Sources/Executors/Kernel.Thread.Executor.Sharded.swift
+@@ -55,3 +55,18 @@ extension Kernel.Thread.Executor.Sharded {
+         }
+     }
+ }
++
++extension Kernel.Thread.Executor.Sharded {
++
++    public var runtime: Executor.Runtime {
++        let states = executors.map(\.runtime)
++        if states.contains(.running) { return .running }
++        if states.contains(.draining) { return .draining }
++        return .terminated
++    }
++
++    public var affinities: [Executor.Affinity] {
++        let total = executors.count
++        return (0..<total).map { Executor.Affinity(index: $0, count: total) }
++    }
++}
+diff --git a/Sources/Executors/Kernel.Thread.Executor.swift b/Sources/Executors/Kernel.Thread.Executor.swift
+index c665b04..2b6aea7 100644
+--- a/Sources/Executors/Kernel.Thread.Executor.swift
++++ b/Sources/Executors/Kernel.Thread.Executor.swift
+@@ -161,3 +161,57 @@ extension Kernel.Thread.Executor {
+         }
+     }
+ }
++
++extension Kernel.Thread.Executor {
++
++    internal static func runJob(
++        _ job: UnownedJob,
++        onSerial executor: UnownedSerialExecutor,
++        priorityTracking: Bool
++    ) {
++        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
++            if priorityTracking,
++                let qos = Darwin.Kernel.Thread.QoS(priority: UInt32(job.priority.rawValue))
++            {
++                qos.withOverride {
++                    unsafe job.runSynchronously(on: executor)
++                }
++            } else {
++                unsafe job.runSynchronously(on: executor)
++            }
++        #else
++            unsafe job.runSynchronously(on: executor)
++        #endif
++    }
++
++    internal static func runJob(
++        _ job: UnownedJob,
++        onTask executor: UnownedTaskExecutor,
++        priorityTracking: Bool
++    ) {
++        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
++            if priorityTracking,
++                let qos = Darwin.Kernel.Thread.QoS(priority: UInt32(job.priority.rawValue))
++            {
++                qos.withOverride {
++                    unsafe job.runSynchronously(on: executor)
++                }
++            } else {
++                unsafe job.runSynchronously(on: executor)
++            }
++        #else
++            unsafe job.runSynchronously(on: executor)
++        #endif
++    }
++}
++
++extension Kernel.Thread.Executor {
++
++    public var runtime: Executor.Runtime {
++        wait.withLock {
++            if _loopExited { return .terminated }
++            if _shutdown.isSet { return .draining }
++            return .running
++        }
++    }
++}
+-- 
+2.43.0
+

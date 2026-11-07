@@ -1,0 +1,238 @@
+From 706adffa6e534d2b66fc1cb5d2140d7e5d5dff98 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:47 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Scale/Scale+Swift.Codable.swift       | 34 --------
+ Sources/Scale/Scale+Swift.Comparable.swift    |  7 --
+ Sources/Scale/Scale+Swift.Equatable.swift     | 10 ---
+ ...cale+Swift.ExpressibleByFloatLiteral.swift | 10 ---
+ ...le+Swift.ExpressibleByIntegerLiteral.swift | 10 ---
+ Sources/Scale/Scale+Swift.Hashable.swift      |  9 --
+ Sources/Scale/Scale.swift                     | 86 +++++++++++++++++++
+ 7 files changed, 86 insertions(+), 80 deletions(-)
+ delete mode 100644 Sources/Scale/Scale+Swift.Codable.swift
+ delete mode 100644 Sources/Scale/Scale+Swift.Comparable.swift
+ delete mode 100644 Sources/Scale/Scale+Swift.Equatable.swift
+ delete mode 100644 Sources/Scale/Scale+Swift.ExpressibleByFloatLiteral.swift
+ delete mode 100644 Sources/Scale/Scale+Swift.ExpressibleByIntegerLiteral.swift
+ delete mode 100644 Sources/Scale/Scale+Swift.Hashable.swift
+
+diff --git a/Sources/Scale/Scale+Swift.Codable.swift b/Sources/Scale/Scale+Swift.Codable.swift
+deleted file mode 100644
+index d4c0486..0000000
+--- a/Sources/Scale/Scale+Swift.Codable.swift
++++ /dev/null
+@@ -1,34 +0,0 @@
+-#if !hasFeature(Embedded)
+-    extension Scale: Encodable where Scalar: Encodable {
+-
+-        public func encode(to encoder: any Encoder) throws {
+-            var container = encoder.unkeyedContainer()
+-            for i in 0..<N {
+-                try container.encode(factors[i])
+-            }
+-        }
+-    }
+-
+-    extension Scale: Decodable where Scalar: Decodable {
+-
+-        public init(from decoder: any Decoder) throws {
+-            var container = try decoder.unkeyedContainer()
+-            if let count = container.count, count != N {
+-                throw DecodingError.dataCorruptedError(
+-                    in: container,
+-                    debugDescription: "Expected exactly \(N) scale factors"
+-                )
+-            }
+-            let factors: InlineArray<N, Scalar> = try InlineArray { _ in
+-                try container.decode(Scalar.self)
+-            }
+-            guard container.isAtEnd else {
+-                throw DecodingError.dataCorruptedError(
+-                    in: container,
+-                    debugDescription: "Expected exactly \(N) scale factors"
+-                )
+-            }
+-            self.init(factors)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Scale/Scale+Swift.Comparable.swift b/Sources/Scale/Scale+Swift.Comparable.swift
+deleted file mode 100644
+index f9f5e59..0000000
+--- a/Sources/Scale/Scale+Swift.Comparable.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Scale: Swift::Comparable where N == 1, Scalar: FloatingPoint {
+-
+-    @inlinable
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        lhs.value < rhs.value
+-    }
+-}
+diff --git a/Sources/Scale/Scale+Swift.Equatable.swift b/Sources/Scale/Scale+Swift.Equatable.swift
+deleted file mode 100644
+index 38587e2..0000000
+--- a/Sources/Scale/Scale+Swift.Equatable.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Scale: Swift::Equatable where Scalar: Swift::Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        for i in 0..<N {
+-            if lhs.factors[i] != rhs.factors[i] { return false }
+-        }
+-        return true
+-    }
+-}
+diff --git a/Sources/Scale/Scale+Swift.ExpressibleByFloatLiteral.swift b/Sources/Scale/Scale+Swift.ExpressibleByFloatLiteral.swift
+deleted file mode 100644
+index f739c78..0000000
+--- a/Sources/Scale/Scale+Swift.ExpressibleByFloatLiteral.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Scale: Swift::ExpressibleByFloatLiteral
+-where N == 1, Scalar: Swift::ExpressibleByFloatLiteral & FloatingPoint {
+-
+-    public typealias FloatLiteralType = Scalar.FloatLiteralType
+-
+-    @inlinable
+-    public init(floatLiteral value: FloatLiteralType) {
+-        self.init(Scalar(floatLiteral: value))
+-    }
+-}
+diff --git a/Sources/Scale/Scale+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Scale/Scale+Swift.ExpressibleByIntegerLiteral.swift
+deleted file mode 100644
+index 1353214..0000000
+--- a/Sources/Scale/Scale+Swift.ExpressibleByIntegerLiteral.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Scale: Swift::ExpressibleByIntegerLiteral
+-where N == 1, Scalar: Swift::ExpressibleByIntegerLiteral & FloatingPoint {
+-
+-    public typealias IntegerLiteralType = Scalar.IntegerLiteralType
+-
+-    @inlinable
+-    public init(integerLiteral value: IntegerLiteralType) {
+-        self.init(Scalar(integerLiteral: value))
+-    }
+-}
+diff --git a/Sources/Scale/Scale+Swift.Hashable.swift b/Sources/Scale/Scale+Swift.Hashable.swift
+deleted file mode 100644
+index 9534424..0000000
+--- a/Sources/Scale/Scale+Swift.Hashable.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Scale: Swift::Hashable where Scalar: Swift::Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        (0..<N).forEach { i in
+-            hasher.combine(factors[i])
+-        }
+-    }
+-}
+diff --git a/Sources/Scale/Scale.swift b/Sources/Scale/Scale.swift
+index 6a44e6c..45f3865 100644
+--- a/Sources/Scale/Scale.swift
++++ b/Sources/Scale/Scale.swift
+@@ -149,3 +149,89 @@ extension Scale where Scalar: FloatingPoint {
+         Self.inverted(self)
+     }
+ }
++
++#if !hasFeature(Embedded)
++    extension Scale: Encodable where Scalar: Encodable {
++
++        public func encode(to encoder: any Encoder) throws {
++            var container = encoder.unkeyedContainer()
++            for i in 0..<N {
++                try container.encode(factors[i])
++            }
++        }
++    }
++
++    extension Scale: Decodable where Scalar: Decodable {
++
++        public init(from decoder: any Decoder) throws {
++            var container = try decoder.unkeyedContainer()
++            if let count = container.count, count != N {
++                throw DecodingError.dataCorruptedError(
++                    in: container,
++                    debugDescription: "Expected exactly \(N) scale factors"
++                )
++            }
++            let factors: InlineArray<N, Scalar> = try InlineArray { _ in
++                try container.decode(Scalar.self)
++            }
++            guard container.isAtEnd else {
++                throw DecodingError.dataCorruptedError(
++                    in: container,
++                    debugDescription: "Expected exactly \(N) scale factors"
++                )
++            }
++            self.init(factors)
++        }
++    }
++#endif
++
++extension Scale: Swift::Comparable where N == 1, Scalar: FloatingPoint {
++
++    @inlinable
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs.value < rhs.value
++    }
++}
++
++extension Scale: Swift::Equatable where Scalar: Swift::Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        for i in 0..<N {
++            if lhs.factors[i] != rhs.factors[i] { return false }
++        }
++        return true
++    }
++}
++
++extension Scale: Swift::ExpressibleByFloatLiteral
++where N == 1, Scalar: Swift::ExpressibleByFloatLiteral & FloatingPoint {
++
++    public typealias FloatLiteralType = Scalar.FloatLiteralType
++
++    @inlinable
++    public init(floatLiteral value: FloatLiteralType) {
++        self.init(Scalar(floatLiteral: value))
++    }
++}
++
++extension Scale: Swift::ExpressibleByIntegerLiteral
++where N == 1, Scalar: Swift::ExpressibleByIntegerLiteral & FloatingPoint {
++
++    public typealias IntegerLiteralType = Scalar.IntegerLiteralType
++
++    @inlinable
++    public init(integerLiteral value: IntegerLiteralType) {
++        self.init(Scalar(integerLiteral: value))
++    }
++}
++
++extension Scale: Swift::Hashable where Scalar: Swift::Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        (0..<N).forEach { i in
++            hasher.combine(factors[i])
++        }
++    }
++}
+-- 
+2.43.0
+

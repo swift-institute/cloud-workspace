@@ -1,0 +1,398 @@
+From 34802ef4c215cc5995495e67e0f7175de9996424 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:42 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ ...lement+Swift.CustomStringConvertible.swift |  9 ---
+ ...odulus+Swift.CustomStringConvertible.swift |  8 --
+ ...lement+Swift.CustomStringConvertible.swift |  9 ---
+ Sources/Cyclic/Cyclic.Group+Arithmetic.swift  | 73 ------------------
+ Sources/Cyclic/Cyclic.Group.Element.swift     |  7 ++
+ Sources/Cyclic/Cyclic.Group.Modulus.swift     |  7 ++
+ .../Cyclic.Group.Static+Arithmetic.swift      | 57 --------------
+ .../Cyclic/Cyclic.Group.Static.Element.swift  | 62 ++++++++++++++++
+ Sources/Cyclic/Cyclic.Group.swift             | 74 +++++++++++++++++++
+ 9 files changed, 150 insertions(+), 156 deletions(-)
+ delete mode 100644 Sources/Cyclic/Cyclic.Cyclic.Group.Element+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Cyclic/Cyclic.Cyclic.Group.Modulus+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Cyclic/Cyclic.Cyclic.Group.Static.Element+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Cyclic/Cyclic.Group+Arithmetic.swift
+ delete mode 100644 Sources/Cyclic/Cyclic.Group.Static+Arithmetic.swift
+
+diff --git a/Sources/Cyclic/Cyclic.Cyclic.Group.Element+Swift.CustomStringConvertible.swift b/Sources/Cyclic/Cyclic.Cyclic.Group.Element+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 6966283..0000000
+--- a/Sources/Cyclic/Cyclic.Cyclic.Group.Element+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-import Cardinal
+-import Ordinal
+-
+-extension Cyclic::Cyclic.Group.Element: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        "Cyclic.Group.Element(\(residue))"
+-    }
+-}
+diff --git a/Sources/Cyclic/Cyclic.Cyclic.Group.Modulus+Swift.CustomStringConvertible.swift b/Sources/Cyclic/Cyclic.Cyclic.Group.Modulus+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 2d41b32..0000000
+--- a/Sources/Cyclic/Cyclic.Cyclic.Group.Modulus+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,8 +0,0 @@
+-import Cardinal
+-
+-extension Cyclic::Cyclic.Group.Modulus: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        "Cyclic.Group.Modulus(\(value))"
+-    }
+-}
+diff --git a/Sources/Cyclic/Cyclic.Cyclic.Group.Static.Element+Swift.CustomStringConvertible.swift b/Sources/Cyclic/Cyclic.Cyclic.Group.Static.Element+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 5654e05..0000000
+--- a/Sources/Cyclic/Cyclic.Cyclic.Group.Static.Element+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-import Cardinal
+-import Ordinal
+-
+-extension Cyclic::Cyclic.Group.Static.Element: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        "Cyclic.Group.Static<\(modulus)>.Element(\(position))"
+-    }
+-}
+diff --git a/Sources/Cyclic/Cyclic.Group+Arithmetic.swift b/Sources/Cyclic/Cyclic.Group+Arithmetic.swift
+deleted file mode 100644
+index c44d576..0000000
+--- a/Sources/Cyclic/Cyclic.Group+Arithmetic.swift
++++ /dev/null
+@@ -1,73 +0,0 @@
+-public import Cardinal
+-public import Ordinal
+-
+-extension Cyclic::Cyclic.Group {
+-
+-    @inlinable
+-    public static func successor(_ element: Element, modulus: Modulus) -> Element {
+-        let reduced = __cyclicAdd(
+-            element.residue.rawValue,
+-            1,
+-            modulus: modulus.value.rawValue
+-        )
+-        return Element(__unchecked: Ordinal::Ordinal(reduced))
+-    }
+-
+-    @inlinable
+-    public static func predecessor(_ element: Element, modulus: Modulus) -> Element {
+-
+-        let reduced = __cyclicSubtract(
+-            element.residue.rawValue,
+-            1,
+-            modulus: modulus.value.rawValue
+-        )
+-        return Element(__unchecked: Ordinal::Ordinal(reduced))
+-    }
+-
+-    @inlinable
+-    public static func add(_ lhs: Element, _ rhs: Element, modulus: Modulus) -> Element {
+-        let reduced = __cyclicAdd(
+-            lhs.residue.rawValue,
+-            rhs.residue.rawValue,
+-            modulus: modulus.value.rawValue
+-        )
+-        return Element(__unchecked: Ordinal::Ordinal(reduced))
+-    }
+-
+-    @inlinable
+-    public static func subtract(_ lhs: Element, _ rhs: Element, modulus: Modulus) -> Element {
+-
+-        let reduced = __cyclicSubtract(
+-            lhs.residue.rawValue,
+-            rhs.residue.rawValue,
+-            modulus: modulus.value.rawValue
+-        )
+-        return Element(__unchecked: Ordinal::Ordinal(reduced))
+-    }
+-
+-    @inlinable
+-    public static func inverse(_ element: Element, modulus: Modulus) -> Element {
+-        let residue = element.residue.rawValue % modulus.value.rawValue
+-        if residue == 0 { return Element(__unchecked: .zero) }
+-        return Element(
+-            __unchecked: Ordinal::Ordinal(
+-                modulus.value.rawValue - residue
+-            )
+-        )
+-    }
+-}
+-
+-@usableFromInline
+-func __cyclicAdd(_ lhs: UInt, _ rhs: UInt, modulus: UInt) -> UInt {
+-    let lhs = lhs % modulus
+-    let rhs = rhs % modulus
+-    let remaining = modulus - lhs
+-    return rhs >= remaining ? rhs - remaining : lhs + rhs
+-}
+-
+-@usableFromInline
+-func __cyclicSubtract(_ lhs: UInt, _ rhs: UInt, modulus: UInt) -> UInt {
+-    let lhs = lhs % modulus
+-    let rhs = rhs % modulus
+-    return lhs >= rhs ? lhs - rhs : modulus - (rhs - lhs)
+-}
+diff --git a/Sources/Cyclic/Cyclic.Group.Element.swift b/Sources/Cyclic/Cyclic.Group.Element.swift
+index 526b287..67a706f 100644
+--- a/Sources/Cyclic/Cyclic.Group.Element.swift
++++ b/Sources/Cyclic/Cyclic.Group.Element.swift
+@@ -52,3 +52,10 @@ extension Cyclic::Cyclic.Group.Element {
+         hasher.combine(residue.rawValue)
+     }
+ }
++
++extension Cyclic::Cyclic.Group.Element: Swift::CustomStringConvertible {
++
++    public var description: String {
++        "Cyclic.Group.Element(\(residue))"
++    }
++}
+diff --git a/Sources/Cyclic/Cyclic.Group.Modulus.swift b/Sources/Cyclic/Cyclic.Group.Modulus.swift
+index 472e3e0..ef65316 100644
+--- a/Sources/Cyclic/Cyclic.Group.Modulus.swift
++++ b/Sources/Cyclic/Cyclic.Group.Modulus.swift
+@@ -34,3 +34,10 @@ extension Cyclic::Cyclic.Group.Modulus {
+         hasher.combine(value.rawValue)
+     }
+ }
++
++extension Cyclic::Cyclic.Group.Modulus: Swift::CustomStringConvertible {
++
++    public var description: String {
++        "Cyclic.Group.Modulus(\(value))"
++    }
++}
+diff --git a/Sources/Cyclic/Cyclic.Group.Static+Arithmetic.swift b/Sources/Cyclic/Cyclic.Group.Static+Arithmetic.swift
+deleted file mode 100644
+index 90fd94c..0000000
+--- a/Sources/Cyclic/Cyclic.Group.Static+Arithmetic.swift
++++ /dev/null
+@@ -1,57 +0,0 @@
+-public import Cardinal
+-public import Ordinal
+-
+-extension Cyclic::Cyclic.Group.Static.Element {
+-
+-    @inlinable
+-    public static var zero: Self { Self(__unchecked: .zero) }
+-
+-    @inlinable
+-    public static var one: Self {
+-        Self(__unchecked: modulus > 1 ? Ordinal::Ordinal(1 as UInt) : .zero)
+-    }
+-}
+-
+-extension Cyclic::Cyclic.Group.Static.Element {
+-
+-    @inlinable
+-    public static func + (lhs: Self, rhs: Self) -> Self {
+-        let reduced = __cyclicAdd(
+-            lhs.position.rawValue,
+-            rhs.position.rawValue,
+-            modulus: Self.order.rawValue
+-        )
+-        return Self(__unchecked: Ordinal::Ordinal(reduced))
+-    }
+-
+-    @inlinable
+-    public static func - (lhs: Self, rhs: Self) -> Self {
+-
+-        let reduced = __cyclicSubtract(
+-            lhs.position.rawValue,
+-            rhs.position.rawValue,
+-            modulus: Self.order.rawValue
+-        )
+-        return Self(__unchecked: Ordinal::Ordinal(reduced))
+-    }
+-
+-    @inlinable
+-    public static func += (lhs: inout Self, rhs: Self) {
+-        lhs = lhs + rhs
+-    }
+-
+-    @inlinable
+-    public static func -= (lhs: inout Self, rhs: Self) {
+-        lhs = lhs - rhs
+-    }
+-}
+-
+-extension Cyclic::Cyclic.Group.Static.Element {
+-
+-    @inlinable
+-    public var inverse: Self {
+-        let residue = position.rawValue % Self.order.rawValue
+-        if residue == 0 { return Self(__unchecked: .zero) }
+-        return Self(__unchecked: Ordinal::Ordinal(Self.order.rawValue - residue))
+-    }
+-}
+diff --git a/Sources/Cyclic/Cyclic.Group.Static.Element.swift b/Sources/Cyclic/Cyclic.Group.Static.Element.swift
+index a1df091..ef0dc80 100644
+--- a/Sources/Cyclic/Cyclic.Group.Static.Element.swift
++++ b/Sources/Cyclic/Cyclic.Group.Static.Element.swift
+@@ -81,3 +81,65 @@ extension Cyclic::Cyclic.Group.Static.Element {
+         hasher.combine(position.rawValue)
+     }
+ }
++
++extension Cyclic::Cyclic.Group.Static.Element: Swift::CustomStringConvertible {
++
++    public var description: String {
++        "Cyclic.Group.Static<\(modulus)>.Element(\(position))"
++    }
++}
++
++extension Cyclic::Cyclic.Group.Static.Element {
++
++    @inlinable
++    public static var zero: Self { Self(__unchecked: .zero) }
++
++    @inlinable
++    public static var one: Self {
++        Self(__unchecked: modulus > 1 ? Ordinal::Ordinal(1 as UInt) : .zero)
++    }
++}
++
++extension Cyclic::Cyclic.Group.Static.Element {
++
++    @inlinable
++    public static func + (lhs: Self, rhs: Self) -> Self {
++        let reduced = __cyclicAdd(
++            lhs.position.rawValue,
++            rhs.position.rawValue,
++            modulus: Self.order.rawValue
++        )
++        return Self(__unchecked: Ordinal::Ordinal(reduced))
++    }
++
++    @inlinable
++    public static func - (lhs: Self, rhs: Self) -> Self {
++
++        let reduced = __cyclicSubtract(
++            lhs.position.rawValue,
++            rhs.position.rawValue,
++            modulus: Self.order.rawValue
++        )
++        return Self(__unchecked: Ordinal::Ordinal(reduced))
++    }
++
++    @inlinable
++    public static func += (lhs: inout Self, rhs: Self) {
++        lhs = lhs + rhs
++    }
++
++    @inlinable
++    public static func -= (lhs: inout Self, rhs: Self) {
++        lhs = lhs - rhs
++    }
++}
++
++extension Cyclic::Cyclic.Group.Static.Element {
++
++    @inlinable
++    public var inverse: Self {
++        let residue = position.rawValue % Self.order.rawValue
++        if residue == 0 { return Self(__unchecked: .zero) }
++        return Self(__unchecked: Ordinal::Ordinal(Self.order.rawValue - residue))
++    }
++}
+diff --git a/Sources/Cyclic/Cyclic.Group.swift b/Sources/Cyclic/Cyclic.Group.swift
+index cefecf8..e2ea5ab 100644
+--- a/Sources/Cyclic/Cyclic.Group.swift
++++ b/Sources/Cyclic/Cyclic.Group.swift
+@@ -1,4 +1,78 @@
++public import Cardinal
++public import Ordinal
++
+ extension Cyclic {
+ 
+     public enum Group {}
+ }
++
++extension Cyclic::Cyclic.Group {
++
++    @inlinable
++    public static func successor(_ element: Element, modulus: Modulus) -> Element {
++        let reduced = __cyclicAdd(
++            element.residue.rawValue,
++            1,
++            modulus: modulus.value.rawValue
++        )
++        return Element(__unchecked: Ordinal::Ordinal(reduced))
++    }
++
++    @inlinable
++    public static func predecessor(_ element: Element, modulus: Modulus) -> Element {
++
++        let reduced = __cyclicSubtract(
++            element.residue.rawValue,
++            1,
++            modulus: modulus.value.rawValue
++        )
++        return Element(__unchecked: Ordinal::Ordinal(reduced))
++    }
++
++    @inlinable
++    public static func add(_ lhs: Element, _ rhs: Element, modulus: Modulus) -> Element {
++        let reduced = __cyclicAdd(
++            lhs.residue.rawValue,
++            rhs.residue.rawValue,
++            modulus: modulus.value.rawValue
++        )
++        return Element(__unchecked: Ordinal::Ordinal(reduced))
++    }
++
++    @inlinable
++    public static func subtract(_ lhs: Element, _ rhs: Element, modulus: Modulus) -> Element {
++
++        let reduced = __cyclicSubtract(
++            lhs.residue.rawValue,
++            rhs.residue.rawValue,
++            modulus: modulus.value.rawValue
++        )
++        return Element(__unchecked: Ordinal::Ordinal(reduced))
++    }
++
++    @inlinable
++    public static func inverse(_ element: Element, modulus: Modulus) -> Element {
++        let residue = element.residue.rawValue % modulus.value.rawValue
++        if residue == 0 { return Element(__unchecked: .zero) }
++        return Element(
++            __unchecked: Ordinal::Ordinal(
++                modulus.value.rawValue - residue
++            )
++        )
++    }
++}
++
++@usableFromInline
++func __cyclicAdd(_ lhs: UInt, _ rhs: UInt, modulus: UInt) -> UInt {
++    let lhs = lhs % modulus
++    let rhs = rhs % modulus
++    let remaining = modulus - lhs
++    return rhs >= remaining ? rhs - remaining : lhs + rhs
++}
++
++@usableFromInline
++func __cyclicSubtract(_ lhs: UInt, _ rhs: UInt, modulus: UInt) -> UInt {
++    let lhs = lhs % modulus
++    let rhs = rhs % modulus
++    return lhs >= rhs ? lhs - rhs : modulus - (rhs - lhs)
++}
+-- 
+2.43.0
+

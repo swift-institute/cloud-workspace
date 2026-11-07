@@ -1,0 +1,109 @@
+From 75ce7e51f0bdd7d93d278e140b1e10fc7d94dd99 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:40 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Async Mutex/Async.Mutex+Ownership.swift   | 38 ------------------
+ Sources/Async Mutex/Async.Mutex.swift         | 39 +++++++++++++++++++
+ 2 files changed, 39 insertions(+), 38 deletions(-)
+ delete mode 100644 Sources/Async Mutex/Async.Mutex+Ownership.swift
+
+diff --git a/Sources/Async Mutex/Async.Mutex+Ownership.swift b/Sources/Async Mutex/Async.Mutex+Ownership.swift
+deleted file mode 100644
+index ce3faac..0000000
+--- a/Sources/Async Mutex/Async.Mutex+Ownership.swift	
++++ /dev/null
+@@ -1,38 +0,0 @@
+-#if !hasFeature(Embedded) && canImport(Synchronization)
+-
+-    import Synchronization
+-
+-    extension Async.Mutex where Value: ~Copyable {
+-
+-        @inlinable
+-        public func withLock<V: ~Copyable & Sendable, T: ~Copyable, E: Swift::Error>(
+-            consuming value: consuming sending V,
+-            body: (inout sending Value, consuming V) throws(E) -> sending T
+-        ) throws(E) -> sending T {
+-            var slot: V? = value
+-            return try withLock { (state: inout sending Value) throws(E) -> T in
+-                guard let value = slot.take() else {
+-                    preconditionFailure(
+-                        "Async.Mutex.withLock(consuming:body:): value slot was empty"
+-                    )
+-                }
+-                return try body(&state, value)
+-            }
+-        }
+-    }
+-
+-    extension Async.Mutex where Value: ~Copyable {
+-
+-        @inlinable
+-        public func withLock<V: ~Copyable & Sendable, T: ~Copyable, E: Swift::Error>(
+-            deposit value: consuming sending V,
+-            body: (inout sending Value, inout V?) throws(E) -> sending T
+-        ) throws(E) -> sending T {
+-            var slot: V? = value
+-            return try withLock { (state: inout sending Value) throws(E) -> T in
+-                try body(&state, &slot)
+-            }
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Async Mutex/Async.Mutex.swift b/Sources/Async Mutex/Async.Mutex.swift
+index ea6ae8e..00c43a0 100644
+--- a/Sources/Async Mutex/Async.Mutex.swift	
++++ b/Sources/Async Mutex/Async.Mutex.swift	
+@@ -123,3 +123,42 @@
+     }
+ 
+ #endif
++
++#if !hasFeature(Embedded) && canImport(Synchronization)
++
++    import Synchronization
++
++    extension Async.Mutex where Value: ~Copyable {
++
++        @inlinable
++        public func withLock<V: ~Copyable & Sendable, T: ~Copyable, E: Swift::Error>(
++            consuming value: consuming sending V,
++            body: (inout sending Value, consuming V) throws(E) -> sending T
++        ) throws(E) -> sending T {
++            var slot: V? = value
++            return try withLock { (state: inout sending Value) throws(E) -> T in
++                guard let value = slot.take() else {
++                    preconditionFailure(
++                        "Async.Mutex.withLock(consuming:body:): value slot was empty"
++                    )
++                }
++                return try body(&state, value)
++            }
++        }
++    }
++
++    extension Async.Mutex where Value: ~Copyable {
++
++        @inlinable
++        public func withLock<V: ~Copyable & Sendable, T: ~Copyable, E: Swift::Error>(
++            deposit value: consuming sending V,
++            body: (inout sending Value, inout V?) throws(E) -> sending T
++        ) throws(E) -> sending T {
++            var slot: V? = value
++            return try withLock { (state: inout sending Value) throws(E) -> T in
++                try body(&state, &slot)
++            }
++        }
++    }
++
++#endif
+-- 
+2.43.0
+

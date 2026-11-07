@@ -1,0 +1,704 @@
+From 50029eb36a09f21443cfa9cc9581daf8115b3b3c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:58 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/SQL/Collation.swift                   |  11 --
+ Sources/SQL/NamedCollation.swift              |  13 ++
+ Sources/SQL/Never.Selection.swift             |  11 ++
+ Sources/SQL/Never.swift                       |   5 -
+ .../Optional.TableColumns.PrimaryColumn.swift |  28 ++++
+ Sources/SQL/Optional.TableColumns.swift       | 101 ++++++++++++++
+ Sources/SQL/Optional.swift                    | 124 ------------------
+ Sources/SQL/Ordering.swift                    |  13 --
+ Sources/SQL/PrimaryKeyed.swift                |  14 --
+ Sources/SQL/PrimaryKeyedTableDefinition.swift |  11 ++
+ Sources/SQL/QueryDecoder.swift                |   6 -
+ Sources/SQL/QueryDecodingError.swift          |  10 ++
+ Sources/SQL/QueryFragmentBuilder.swift        |   1 -
+ Sources/SQL/Statements/SelectSource.swift     |   5 -
+ Sources/SQL/Statements/_FromTable.swift       |   7 +
+ Sources/SQL/Table.swift                       |   1 -
+ Sources/SQL/TableColumn.swift                 |   6 -
+ Sources/SQL/TableColumnExpression.swift       |   7 +
+ Sources/SQL/TableDraft.swift                  |   7 +
+ .../SQL/WritableTableColumnExpression.swift   |   3 +
+ Sources/SQL/_OptionalPromotable.swift         |   6 +
+ Sources/SQL/_OrderingTerm.swift               |  16 +++
+ Sources/SQL/_Selection.swift                  |   3 +
+ Sources/SQL/_StatementClause.swift            |   3 +
+ Sources/SQL/_UnwrapExpression.swift           |   8 ++
+ 25 files changed, 234 insertions(+), 186 deletions(-)
+ create mode 100644 Sources/SQL/NamedCollation.swift
+ create mode 100644 Sources/SQL/Never.Selection.swift
+ create mode 100644 Sources/SQL/Optional.TableColumns.PrimaryColumn.swift
+ create mode 100644 Sources/SQL/Optional.TableColumns.swift
+ create mode 100644 Sources/SQL/PrimaryKeyedTableDefinition.swift
+ create mode 100644 Sources/SQL/QueryDecodingError.swift
+ create mode 100644 Sources/SQL/Statements/_FromTable.swift
+ create mode 100644 Sources/SQL/TableColumnExpression.swift
+ create mode 100644 Sources/SQL/TableDraft.swift
+ create mode 100644 Sources/SQL/WritableTableColumnExpression.swift
+ create mode 100644 Sources/SQL/_OptionalPromotable.swift
+ create mode 100644 Sources/SQL/_OrderingTerm.swift
+ create mode 100644 Sources/SQL/_Selection.swift
+ create mode 100644 Sources/SQL/_StatementClause.swift
+ create mode 100644 Sources/SQL/_UnwrapExpression.swift
+
+diff --git a/Sources/SQL/Collation.swift b/Sources/SQL/Collation.swift
+index f7b7d17..ba7c09a 100644
+--- a/Sources/SQL/Collation.swift
++++ b/Sources/SQL/Collation.swift
+@@ -10,17 +10,6 @@ extension Collation {
+     }
+ }
+ 
+-public struct NamedCollation: Collation, Sendable {
+-    public let name: String
+-
+-    public init(_ name: String) {
+-        self.name = name
+-    }
+-
+-    public init(_ collation: some Collation) {
+-        self.name = collation.name
+-    }
+-}
+ 
+ extension QueryExpression where QueryValue: _OptionalPromotable<String?> {
+     public func collate(_ collation: some Collation) -> some QueryExpression<QueryValue> {
+diff --git a/Sources/SQL/NamedCollation.swift b/Sources/SQL/NamedCollation.swift
+new file mode 100644
+index 0000000..e9aaba8
+--- /dev/null
++++ b/Sources/SQL/NamedCollation.swift
+@@ -0,0 +1,13 @@
++public import ISO_9075_Foundation
++
++public struct NamedCollation: Collation, Sendable {
++    public let name: String
++
++    public init(_ name: String) {
++        self.name = name
++    }
++
++    public init(_ collation: some Collation) {
++        self.name = collation.name
++    }
++}
+diff --git a/Sources/SQL/Never.Selection.swift b/Sources/SQL/Never.Selection.swift
+new file mode 100644
+index 0000000..ed0f04f
+--- /dev/null
++++ b/Sources/SQL/Never.Selection.swift
+@@ -0,0 +1,11 @@
++public import ISO_9075_Foundation
++
++public import ISO_9075_Foundation
++
++extension Never: Table {
++    public struct Selection: TableExpression {
++        public typealias QueryValue = Never
++
++        public var allColumns: [ISO_9075.Fragment] { [] }
++    }
++}
+diff --git a/Sources/SQL/Never.swift b/Sources/SQL/Never.swift
+index 77683f4..7c048a7 100644
+--- a/Sources/SQL/Never.swift
++++ b/Sources/SQL/Never.swift
+@@ -11,11 +11,6 @@ extension Never: Table {
+         public static var writableColumns: [Column<Never>] { [] }
+     }
+ 
+-    public struct Selection: TableExpression {
+-        public typealias QueryValue = Never
+-
+-        public var allColumns: [ISO_9075.Fragment] { [] }
+-    }
+ 
+     public static var columns: TableColumns {
+         TableColumns()
+diff --git a/Sources/SQL/Optional.TableColumns.PrimaryColumn.swift b/Sources/SQL/Optional.TableColumns.PrimaryColumn.swift
+new file mode 100644
+index 0000000..464b182
+--- /dev/null
++++ b/Sources/SQL/Optional.TableColumns.PrimaryColumn.swift
+@@ -0,0 +1,28 @@
++public import Byte
++public import ISO_9075_Foundation
++
++
++extension Optional.TableColumns: PrimaryKeyedTableDefinition
++where Wrapped.TableColumns: PrimaryKeyedTableDefinition {
++    public struct PrimaryColumn: _TableColumnExpression {
++        public typealias Root = Optional
++
++        public typealias Value = Wrapped.PrimaryKey?
++
++        public var _names: [String] {
++            Wrapped.columns.primaryKey._names
++        }
++
++        public var defaultValue: Wrapped.PrimaryKey.QueryOutput?? {
++            Wrapped.columns.primaryKey.defaultValue
++        }
++
++        public var keyPath: KeyPath<Wrapped?, Wrapped.PrimaryKey.QueryOutput?> {
++            \.[member: \Wrapped.PrimaryKey.self, column: Wrapped.columns.primaryKey.keyPath]
++        }
++
++        public var queryFragment: ISO_9075.Fragment {
++            Wrapped.columns.primaryKey.queryFragment
++        }
++    }
++}
+diff --git a/Sources/SQL/Optional.TableColumns.swift b/Sources/SQL/Optional.TableColumns.swift
+new file mode 100644
+index 0000000..2e1cecf
+--- /dev/null
++++ b/Sources/SQL/Optional.TableColumns.swift
+@@ -0,0 +1,101 @@
++public import Byte
++public import ISO_9075_Foundation
++
++
++extension Optional: Table, PartialSelectStatement, Statement where Wrapped: Table {
++    @dynamicMemberLookup
++    public struct TableColumns: TableDefinition {
++        public typealias QueryValue = Optional
++
++        public static var allColumns: [Column<Optional>] {
++            Wrapped.TableColumns.allColumns.map(\.optional)
++        }
++
++        public static var writableColumns: [Column<Optional>] {
++            Wrapped.TableColumns.writableColumns.map(\.optional)
++        }
++
++        public subscript<Member>(
++            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, TableColumn<Wrapped, Member>>
++        ) -> TableColumn<Optional, Member?> {
++            let column = Wrapped.columns[keyPath: keyPath]
++            return TableColumn<Optional, Member?>(
++                column.name,
++                keyPath: \.[member: \Member.self, column: column.keyPath]
++            )
++        }
++
++        public subscript<Member>(
++            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, GeneratedColumn<Wrapped, Member>>
++        ) -> GeneratedColumn<Optional, Member?> {
++            let column = Wrapped.columns[keyPath: keyPath]
++            return GeneratedColumn<Optional, Member?>(
++                column.name,
++                keyPath: \.[member: \Member.self, column: column.keyPath]
++            )
++        }
++
++        public subscript<Member>(
++            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, ColumnGroup<Wrapped, Member>>
++        ) -> OptionalColumnGroup<Optional, Member> {
++            let column = Wrapped.columns[keyPath: keyPath]
++            return OptionalColumnGroup(
++                base: ColumnGroup<Optional, Member?>(
++                    column.groupName,
++                    keyPath: \.[member: \Member.self, column: column.keyPath]
++                )
++            )
++        }
++
++        public subscript<Member>(
++            dynamicMember keyPath: KeyPath<
++                Wrapped.TableColumns, OptionalColumnGroup<Wrapped, Member>
++            >
++        ) -> OptionalColumnGroup<Optional, Member> {
++            let column = Wrapped.columns[keyPath: keyPath]
++            return OptionalColumnGroup(
++                base: ColumnGroup<Optional, Member?>(
++                    column.groupName,
++                    keyPath: \.[flattenedMember: \Member.self, column: column.keyPath]
++                )
++            )
++        }
++
++        #if CasePaths
++            public subscript<Member>(
++                dynamicMember keyPath: KeyPath<Wrapped.TableColumns, CaseColumn<Wrapped, Member>>
++            ) -> TableColumn<Optional, Member??> {
++                let column = Wrapped.columns[keyPath: keyPath].base
++                return TableColumn<Optional, Member??>(
++                    column.name,
++                    keyPath: \.[member: \Member?.self, column: column.keyPath]
++                )
++            }
++
++            public subscript<Member>(
++                dynamicMember keyPath: KeyPath<
++                    Wrapped.TableColumns, CaseColumnGroup<Wrapped, Member>
++                >
++            ) -> ColumnGroup<Optional, Member??> {
++                let column = Wrapped.columns[keyPath: keyPath].base
++                return ColumnGroup<Optional, Member??>(
++                    column.groupName,
++                    keyPath: \.[member: \Member?.self, column: column.keyPath]
++                )
++            }
++        #endif
++
++        public subscript<Member: QueryExpression>(
++            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, Member>
++        ) -> some QueryExpression<Member.QueryValue?> {
++            Member?.some(Wrapped.columns[keyPath: keyPath])
++        }
++
++        @_disfavoredOverload
++        public subscript<QueryValue>(
++            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, some QueryExpression<QueryValue?>>
++        ) -> some QueryExpression<QueryValue?> {
++            Wrapped.columns[keyPath: keyPath]
++        }
++    }
++}
+diff --git a/Sources/SQL/Optional.swift b/Sources/SQL/Optional.swift
+index 2d1ff99..1d1d19f 100644
+--- a/Sources/SQL/Optional.swift
++++ b/Sources/SQL/Optional.swift
+@@ -14,9 +14,6 @@ extension Optional: _OptionalProtocol {
+     public static func _some(_ wrapped: Wrapped) -> Self { .some(wrapped) }
+ }
+ 
+-public protocol _OptionalPromotable<_Optionalized> {
+-    associatedtype _Optionalized: _OptionalProtocol = Self?
+-}
+ 
+ extension Optional: _OptionalPromotable {
+     public typealias _Optionalized = Self
+@@ -113,101 +110,6 @@ extension Optional: Table, PartialSelectStatement, Statement where Wrapped: Tabl
+         self?[keyPath: keyPath]
+     }
+ 
+-    @dynamicMemberLookup
+-    public struct TableColumns: TableDefinition {
+-        public typealias QueryValue = Optional
+-
+-        public static var allColumns: [Column<Optional>] {
+-            Wrapped.TableColumns.allColumns.map(\.optional)
+-        }
+-
+-        public static var writableColumns: [Column<Optional>] {
+-            Wrapped.TableColumns.writableColumns.map(\.optional)
+-        }
+-
+-        public subscript<Member>(
+-            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, TableColumn<Wrapped, Member>>
+-        ) -> TableColumn<Optional, Member?> {
+-            let column = Wrapped.columns[keyPath: keyPath]
+-            return TableColumn<Optional, Member?>(
+-                column.name,
+-                keyPath: \.[member: \Member.self, column: column.keyPath]
+-            )
+-        }
+-
+-        public subscript<Member>(
+-            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, GeneratedColumn<Wrapped, Member>>
+-        ) -> GeneratedColumn<Optional, Member?> {
+-            let column = Wrapped.columns[keyPath: keyPath]
+-            return GeneratedColumn<Optional, Member?>(
+-                column.name,
+-                keyPath: \.[member: \Member.self, column: column.keyPath]
+-            )
+-        }
+-
+-        public subscript<Member>(
+-            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, ColumnGroup<Wrapped, Member>>
+-        ) -> OptionalColumnGroup<Optional, Member> {
+-            let column = Wrapped.columns[keyPath: keyPath]
+-            return OptionalColumnGroup(
+-                base: ColumnGroup<Optional, Member?>(
+-                    column.groupName,
+-                    keyPath: \.[member: \Member.self, column: column.keyPath]
+-                )
+-            )
+-        }
+-
+-        public subscript<Member>(
+-            dynamicMember keyPath: KeyPath<
+-                Wrapped.TableColumns, OptionalColumnGroup<Wrapped, Member>
+-            >
+-        ) -> OptionalColumnGroup<Optional, Member> {
+-            let column = Wrapped.columns[keyPath: keyPath]
+-            return OptionalColumnGroup(
+-                base: ColumnGroup<Optional, Member?>(
+-                    column.groupName,
+-                    keyPath: \.[flattenedMember: \Member.self, column: column.keyPath]
+-                )
+-            )
+-        }
+-
+-        #if CasePaths
+-            public subscript<Member>(
+-                dynamicMember keyPath: KeyPath<Wrapped.TableColumns, CaseColumn<Wrapped, Member>>
+-            ) -> TableColumn<Optional, Member??> {
+-                let column = Wrapped.columns[keyPath: keyPath].base
+-                return TableColumn<Optional, Member??>(
+-                    column.name,
+-                    keyPath: \.[member: \Member?.self, column: column.keyPath]
+-                )
+-            }
+-
+-            public subscript<Member>(
+-                dynamicMember keyPath: KeyPath<
+-                    Wrapped.TableColumns, CaseColumnGroup<Wrapped, Member>
+-                >
+-            ) -> ColumnGroup<Optional, Member??> {
+-                let column = Wrapped.columns[keyPath: keyPath].base
+-                return ColumnGroup<Optional, Member??>(
+-                    column.groupName,
+-                    keyPath: \.[member: \Member?.self, column: column.keyPath]
+-                )
+-            }
+-        #endif
+-
+-        public subscript<Member: QueryExpression>(
+-            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, Member>
+-        ) -> some QueryExpression<Member.QueryValue?> {
+-            Member?.some(Wrapped.columns[keyPath: keyPath])
+-        }
+-
+-        @_disfavoredOverload
+-        public subscript<QueryValue>(
+-            dynamicMember keyPath: KeyPath<Wrapped.TableColumns, some QueryExpression<QueryValue?>>
+-        ) -> some QueryExpression<QueryValue?> {
+-            Wrapped.columns[keyPath: keyPath]
+-        }
+-    }
+ 
+     public typealias Selection = Wrapped.Selection?
+ }
+@@ -227,27 +129,6 @@ extension Optional.TableColumns: PrimaryKeyedTableDefinition
+ where Wrapped.TableColumns: PrimaryKeyedTableDefinition {
+     public typealias PrimaryKey = Wrapped.PrimaryKey?
+ 
+-    public struct PrimaryColumn: _TableColumnExpression {
+-        public typealias Root = Optional
+-
+-        public typealias Value = Wrapped.PrimaryKey?
+-
+-        public var _names: [String] {
+-            Wrapped.columns.primaryKey._names
+-        }
+-
+-        public var defaultValue: Wrapped.PrimaryKey.QueryOutput?? {
+-            Wrapped.columns.primaryKey.defaultValue
+-        }
+-
+-        public var keyPath: KeyPath<Wrapped?, Wrapped.PrimaryKey.QueryOutput?> {
+-            \.[member: \Wrapped.PrimaryKey.self, column: Wrapped.columns.primaryKey.keyPath]
+-        }
+-
+-        public var queryFragment: ISO_9075.Fragment {
+-            Wrapped.columns.primaryKey.queryFragment
+-        }
+-    }
+ 
+     public var primaryKey: PrimaryColumn {
+         PrimaryColumn()
+@@ -289,11 +170,6 @@ extension QueryExpression where QueryValue: _OptionalProtocol {
+     }
+ }
+ 
+-public struct _UnwrapExpression<Base: QueryExpression>: QueryExpression
+-where Base.QueryValue: _OptionalProtocol {
+-
+-    let base: Base
+-}
+ 
+ extension _UnwrapExpression {
+     public typealias QueryValue = Base.QueryValue.Wrapped
+diff --git a/Sources/SQL/Ordering.swift b/Sources/SQL/Ordering.swift
+index 12bec15..1e53448 100644
+--- a/Sources/SQL/Ordering.swift
++++ b/Sources/SQL/Ordering.swift
+@@ -21,19 +21,6 @@ public enum NullOrdering: Sendable, Hashable, CaseIterable {
+     case last
+ }
+ 
+-public struct _OrderingTerm<Value>: QueryExpression, Sendable {
+-
+-    public var baseQueryFragment: ISO_9075.Fragment
+-
+-    public let direction: Order.Direction
+-    public let nullOrdering: NullOrdering?
+-
+-    init(base: some QueryExpression<Value>, direction: Order.Direction, nullOrdering: NullOrdering?) {
+-        self.baseQueryFragment = base.queryFragment
+-        self.direction = direction
+-        self.nullOrdering = nullOrdering
+-    }
+-}
+ 
+ extension _OrderingTerm {
+     public typealias QueryValue = Never
+diff --git a/Sources/SQL/PrimaryKeyed.swift b/Sources/SQL/PrimaryKeyed.swift
+index 824ba03..a1562e5 100644
+--- a/Sources/SQL/PrimaryKeyed.swift
++++ b/Sources/SQL/PrimaryKeyed.swift
+@@ -10,11 +10,6 @@ where
+     where PrimaryKey.QueryValue == PrimaryKey
+ }
+ 
+-public protocol TableDraft: Table {
+-    associatedtype SourceTable: Table where SourceTable.Draft == Self
+-
+-    init(_ source: SourceTable)
+-}
+ 
+ extension TableDraft where SourceTable: PrimaryKeyedTable {
+     public typealias PrimaryKey = SourceTable.PrimaryKey
+@@ -49,15 +44,6 @@ package func project<Root, Value>(
+     root[keyPath: keyPath]
+ }
+ 
+-public protocol PrimaryKeyedTableDefinition<PrimaryKey>: TableDefinition
+-where QueryValue: PrimaryKeyedTable {
+-    associatedtype PrimaryKey: QueryRepresentable & QueryExpression
+-    where PrimaryKey.QueryValue == PrimaryKey
+-
+-    associatedtype PrimaryColumn: _TableColumnExpression<QueryValue, PrimaryKey>
+-
+-    var primaryKey: PrimaryColumn { get }
+-}
+ 
+ extension TableDefinition where QueryValue: TableDraft {
+     public subscript<Member>(
+diff --git a/Sources/SQL/PrimaryKeyedTableDefinition.swift b/Sources/SQL/PrimaryKeyedTableDefinition.swift
+new file mode 100644
+index 0000000..ec0e67d
+--- /dev/null
++++ b/Sources/SQL/PrimaryKeyedTableDefinition.swift
+@@ -0,0 +1,11 @@
++import ISO_9075_Foundation
++
++public protocol PrimaryKeyedTableDefinition<PrimaryKey>: TableDefinition
++where QueryValue: PrimaryKeyedTable {
++    associatedtype PrimaryKey: QueryRepresentable & QueryExpression
++    where PrimaryKey.QueryValue == PrimaryKey
++
++    associatedtype PrimaryColumn: _TableColumnExpression<QueryValue, PrimaryKey>
++
++    var primaryKey: PrimaryColumn { get }
++}
+diff --git a/Sources/SQL/QueryDecoder.swift b/Sources/SQL/QueryDecoder.swift
+index d9584e3..7dc7059 100644
+--- a/Sources/SQL/QueryDecoder.swift
++++ b/Sources/SQL/QueryDecoder.swift
+@@ -64,9 +64,3 @@ extension QueryDecoder {
+     }
+ }
+ 
+-public enum QueryDecodingError: Swift.Error, Hashable, Sendable {
+-    case missingRequiredColumn
+-    case typeMismatch(expected: String)
+-    case dataCorrupted(String)
+-    case overflow(String)
+-}
+diff --git a/Sources/SQL/QueryDecodingError.swift b/Sources/SQL/QueryDecodingError.swift
+new file mode 100644
+index 0000000..4c551ba
+--- /dev/null
++++ b/Sources/SQL/QueryDecodingError.swift
+@@ -0,0 +1,10 @@
++public import Byte
++public import RFC_4122
++public import Time
++
++public enum QueryDecodingError: Swift.Error, Hashable, Sendable {
++    case missingRequiredColumn
++    case typeMismatch(expected: String)
++    case dataCorrupted(String)
++    case overflow(String)
++}
+diff --git a/Sources/SQL/QueryFragmentBuilder.swift b/Sources/SQL/QueryFragmentBuilder.swift
+index 8c89fcd..2abccc7 100644
+--- a/Sources/SQL/QueryFragmentBuilder.swift
++++ b/Sources/SQL/QueryFragmentBuilder.swift
+@@ -76,4 +76,3 @@ extension QueryFragmentBuilder<_StatementClause> {
+     }
+ }
+ 
+-public enum _StatementClause {}
+diff --git a/Sources/SQL/Statements/SelectSource.swift b/Sources/SQL/Statements/SelectSource.swift
+index 28517f6..2f8a4be 100644
+--- a/Sources/SQL/Statements/SelectSource.swift
++++ b/Sources/SQL/Statements/SelectSource.swift
+@@ -4,11 +4,6 @@ public protocol _SelectSource {
+     static var _fromTable: _FromTable? { get }
+ }
+ 
+-public struct _FromTable: Sendable {
+-    let columns: ISO_9075.Fragment
+-    let reference: ISO_9075.Fragment
+-    let alias: String?
+-}
+ 
+ extension _SelectSource {
+     public static var _fromTable: _FromTable? { nil }
+diff --git a/Sources/SQL/Statements/_FromTable.swift b/Sources/SQL/Statements/_FromTable.swift
+new file mode 100644
+index 0000000..8aee9ea
+--- /dev/null
++++ b/Sources/SQL/Statements/_FromTable.swift
+@@ -0,0 +1,7 @@
++public import ISO_9075_Foundation
++
++public struct _FromTable: Sendable {
++    let columns: ISO_9075.Fragment
++    let reference: ISO_9075.Fragment
++    let alias: String?
++}
+diff --git a/Sources/SQL/Table.swift b/Sources/SQL/Table.swift
+index 8ddfb24..e440b2e 100644
+--- a/Sources/SQL/Table.swift
++++ b/Sources/SQL/Table.swift
+@@ -27,7 +27,6 @@ public protocol Table: QueryRepresentable, PartialSelectStatement, _SelectSource
+     static var all: DefaultScope { get }
+ }
+ 
+-public protocol _Selection: Table {}
+ 
+ extension Table {
+     public static var unscoped: Where<Self> {
+diff --git a/Sources/SQL/TableColumn.swift b/Sources/SQL/TableColumn.swift
+index 35e3077..6c3c4c7 100644
+--- a/Sources/SQL/TableColumn.swift
++++ b/Sources/SQL/TableColumn.swift
+@@ -11,11 +11,6 @@ public protocol _TableColumnExpression<Root, Value>: QueryExpression where Value
+     var keyPath: KeyPath<Root, Value.QueryOutput> { get }
+ }
+ 
+-public protocol TableColumnExpression<Root, Value>: _TableColumnExpression
+-where Value: QueryBindable {
+-    var name: String { get }
+-
+-}
+ 
+ extension TableColumnExpression {
+     public var _names: [String] { [name] }
+@@ -25,7 +20,6 @@ extension TableColumnExpression {
+     }
+ }
+ 
+-public protocol WritableTableColumnExpression<Root, Value>: TableColumnExpression {}
+ 
+ public struct TableColumn<Root: Table, Value: QueryRepresentable & QueryBindable>:
+     WritableTableColumnExpression
+diff --git a/Sources/SQL/TableColumnExpression.swift b/Sources/SQL/TableColumnExpression.swift
+new file mode 100644
+index 0000000..2a51041
+--- /dev/null
++++ b/Sources/SQL/TableColumnExpression.swift
+@@ -0,0 +1,7 @@
++public import ISO_9075_Foundation
++
++public protocol TableColumnExpression<Root, Value>: _TableColumnExpression
++where Value: QueryBindable {
++    var name: String { get }
++
++}
+diff --git a/Sources/SQL/TableDraft.swift b/Sources/SQL/TableDraft.swift
+new file mode 100644
+index 0000000..7376bcc
+--- /dev/null
++++ b/Sources/SQL/TableDraft.swift
+@@ -0,0 +1,7 @@
++import ISO_9075_Foundation
++
++public protocol TableDraft: Table {
++    associatedtype SourceTable: Table where SourceTable.Draft == Self
++
++    init(_ source: SourceTable)
++}
+diff --git a/Sources/SQL/WritableTableColumnExpression.swift b/Sources/SQL/WritableTableColumnExpression.swift
+new file mode 100644
+index 0000000..d07d57e
+--- /dev/null
++++ b/Sources/SQL/WritableTableColumnExpression.swift
+@@ -0,0 +1,3 @@
++public import ISO_9075_Foundation
++
++public protocol WritableTableColumnExpression<Root, Value>: TableColumnExpression {}
+diff --git a/Sources/SQL/_OptionalPromotable.swift b/Sources/SQL/_OptionalPromotable.swift
+new file mode 100644
+index 0000000..b4e4b79
+--- /dev/null
++++ b/Sources/SQL/_OptionalPromotable.swift
+@@ -0,0 +1,6 @@
++public import Byte
++public import ISO_9075_Foundation
++
++public protocol _OptionalPromotable<_Optionalized> {
++    associatedtype _Optionalized: _OptionalProtocol = Self?
++}
+diff --git a/Sources/SQL/_OrderingTerm.swift b/Sources/SQL/_OrderingTerm.swift
+new file mode 100644
+index 0000000..95dd237
+--- /dev/null
++++ b/Sources/SQL/_OrderingTerm.swift
+@@ -0,0 +1,16 @@
++public import ISO_9075_Foundation
++public import Order
++
++public struct _OrderingTerm<Value>: QueryExpression, Sendable {
++
++    public var baseQueryFragment: ISO_9075.Fragment
++
++    public let direction: Order.Direction
++    public let nullOrdering: NullOrdering?
++
++    init(base: some QueryExpression<Value>, direction: Order.Direction, nullOrdering: NullOrdering?) {
++        self.baseQueryFragment = base.queryFragment
++        self.direction = direction
++        self.nullOrdering = nullOrdering
++    }
++}
+diff --git a/Sources/SQL/_Selection.swift b/Sources/SQL/_Selection.swift
+new file mode 100644
+index 0000000..53728b5
+--- /dev/null
++++ b/Sources/SQL/_Selection.swift
+@@ -0,0 +1,3 @@
++public import ISO_9075_Foundation
++
++public protocol _Selection: Table {}
+diff --git a/Sources/SQL/_StatementClause.swift b/Sources/SQL/_StatementClause.swift
+new file mode 100644
+index 0000000..cbb3659
+--- /dev/null
++++ b/Sources/SQL/_StatementClause.swift
+@@ -0,0 +1,3 @@
++public import ISO_9075_Foundation
++
++public enum _StatementClause {}
+diff --git a/Sources/SQL/_UnwrapExpression.swift b/Sources/SQL/_UnwrapExpression.swift
+new file mode 100644
+index 0000000..b081d8a
+--- /dev/null
++++ b/Sources/SQL/_UnwrapExpression.swift
+@@ -0,0 +1,8 @@
++public import Byte
++public import ISO_9075_Foundation
++
++public struct _UnwrapExpression<Base: QueryExpression>: QueryExpression
++where Base.QueryValue: _OptionalProtocol {
++
++    let base: Base
++}
+-- 
+2.43.0
+

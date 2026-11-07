@@ -1,0 +1,192 @@
+From edaa84b945dfe393cc6de4773e1d73fb3190dba9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:55 +0000
+Subject: [PATCH 4/4] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../EnvVars.Foundation.swift                  | 30 ------------------
+ .../EnvVars.swift                             | 31 +++++++++++++++++++
+ Sources/Dependencies/Dependency.Error.swift   |  6 ----
+ Sources/Dependencies/Dependency.Key.swift     |  6 ----
+ Sources/Dependencies/Dependency.swift         | 24 ++++++--------
+ Sources/Dependencies/_Accessor.swift          | 18 +++++++++++
+ 6 files changed, 58 insertions(+), 57 deletions(-)
+ delete mode 100644 Sources/Dependencies Environment Integration/EnvVars.Foundation.swift
+ delete mode 100644 Sources/Dependencies/Dependency.Error.swift
+ delete mode 100644 Sources/Dependencies/Dependency.Key.swift
+ create mode 100644 Sources/Dependencies/_Accessor.swift
+
+diff --git a/Sources/Dependencies Environment Integration/EnvVars.Foundation.swift b/Sources/Dependencies Environment Integration/EnvVars.Foundation.swift
+deleted file mode 100644
+index 9d1032b..0000000
+--- a/Sources/Dependencies Environment Integration/EnvVars.Foundation.swift	
++++ /dev/null
+@@ -1,30 +0,0 @@
+-public import Foundation
+-
+-extension EnvVars {
+-    public func baseUrl() throws(EnvVarsError) -> Foundation.URL {
+-        guard let urlString = self["BASE_URL"] else {
+-            throw EnvVarsError.missingVariable("BASE_URL")
+-        }
+-        guard let url = Foundation.URL(string: urlString) else {
+-            throw EnvVarsError.invalidFormat(
+-                variable: "BASE_URL",
+-                expectedType: "URL",
+-                value: urlString
+-            )
+-        }
+-        return url
+-    }
+-
+-    public mutating func setBaseUrl(_ url: Foundation.URL) {
+-        self["BASE_URL"] = url.absoluteString
+-    }
+-
+-    public var allowedInsecureHosts: [Swift::String]? {
+-        get {
+-            self["ALLOWED_INSECURE_HOSTS"]?.components(separatedBy: ",").map {
+-                $0.trimmingCharacters(in: .whitespaces)
+-            }
+-        }
+-        set { self["ALLOWED_INSECURE_HOSTS"] = newValue?.joined(separator: ",") }
+-    }
+-}
+diff --git a/Sources/Dependencies Environment Integration/EnvVars.swift b/Sources/Dependencies Environment Integration/EnvVars.swift
+index cf3f752..b1626f7 100644
+--- a/Sources/Dependencies Environment Integration/EnvVars.swift	
++++ b/Sources/Dependencies Environment Integration/EnvVars.swift	
+@@ -1,3 +1,5 @@
++public import Foundation
++
+ public enum EnvVarsError: Swift::Error, CustomStringConvertible {
+     case missingVariable(String)
+     case invalidFormat(variable: String, expectedType: String, value: String)
+@@ -78,3 +80,32 @@ extension EnvVars {
+         set { self["TAXIDENTIFICATIONNUMBER"] = newValue }
+     }
+ }
++
++extension EnvVars {
++    public func baseUrl() throws(EnvVarsError) -> Foundation.URL {
++        guard let urlString = self["BASE_URL"] else {
++            throw EnvVarsError.missingVariable("BASE_URL")
++        }
++        guard let url = Foundation.URL(string: urlString) else {
++            throw EnvVarsError.invalidFormat(
++                variable: "BASE_URL",
++                expectedType: "URL",
++                value: urlString
++            )
++        }
++        return url
++    }
++
++    public mutating func setBaseUrl(_ url: Foundation.URL) {
++        self["BASE_URL"] = url.absoluteString
++    }
++
++    public var allowedInsecureHosts: [Swift::String]? {
++        get {
++            self["ALLOWED_INSECURE_HOSTS"]?.components(separatedBy: ",").map {
++                $0.trimmingCharacters(in: .whitespaces)
++            }
++        }
++        set { self["ALLOWED_INSECURE_HOSTS"] = newValue?.joined(separator: ",") }
++    }
++}
+diff --git a/Sources/Dependencies/Dependency.Error.swift b/Sources/Dependencies/Dependency.Error.swift
+deleted file mode 100644
+index a7fa85d..0000000
+--- a/Sources/Dependencies/Dependency.Error.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Witnesses
+-
+-extension Dependency {
+-
+-    public typealias Error = Witness.Unimplemented.Error
+-}
+diff --git a/Sources/Dependencies/Dependency.Key.swift b/Sources/Dependencies/Dependency.Key.swift
+deleted file mode 100644
+index b9a8014..0000000
+--- a/Sources/Dependencies/Dependency.Key.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Witnesses
+-
+-extension Dependency {
+-
+-    public typealias Key = Witness.Key
+-}
+diff --git a/Sources/Dependencies/Dependency.swift b/Sources/Dependencies/Dependency.swift
+index e972cfc..1ed11c6 100644
+--- a/Sources/Dependencies/Dependency.swift
++++ b/Sources/Dependencies/Dependency.swift
+@@ -46,26 +46,20 @@ public struct Dependency<Value: Sendable>: Sendable {
+     }
+ }
+ 
+-@usableFromInline
+-internal enum _Accessor<Value: Sendable>: @unchecked Sendable {
+-    case keyPath(KeyPath<__DependencyValues, Value>)
+-    case closure(@Sendable (__DependencyValues) -> Value)
+ 
+-    @usableFromInline
+-    func getValue(from values: __DependencyValues) -> Value {
+-        switch self {
+-        case .keyPath(let keyPath):
+-            return values[keyPath: keyPath]
++extension Dependency {
+ 
+-        case .closure(let getter):
+-            return getter(values)
+-        }
+-    }
++    public typealias Values = __DependencyValues
++
++    public typealias Context = __DependencyContext
+ }
+ 
+ extension Dependency {
+ 
+-    public typealias Values = __DependencyValues
++    public typealias Error = Witness.Unimplemented.Error
++}
+ 
+-    public typealias Context = __DependencyContext
++extension Dependency {
++
++    public typealias Key = Witness.Key
+ }
+diff --git a/Sources/Dependencies/_Accessor.swift b/Sources/Dependencies/_Accessor.swift
+new file mode 100644
+index 0000000..e647f2a
+--- /dev/null
++++ b/Sources/Dependencies/_Accessor.swift
+@@ -0,0 +1,18 @@
++public import Witnesses
++
++@usableFromInline
++internal enum _Accessor<Value: Sendable>: @unchecked Sendable {
++    case keyPath(KeyPath<__DependencyValues, Value>)
++    case closure(@Sendable (__DependencyValues) -> Value)
++
++    @usableFromInline
++    func getValue(from values: __DependencyValues) -> Value {
++        switch self {
++        case .keyPath(let keyPath):
++            return values[keyPath: keyPath]
++
++        case .closure(let getter):
++            return getter(values)
++        }
++    }
++}
+-- 
+2.43.0
+

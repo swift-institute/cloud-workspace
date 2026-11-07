@@ -1,0 +1,250 @@
+From 8ef3b765081ead1569f20431cb8fcbeecf7403b8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:48 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ .../Cyclic/Sector.Quadrant+Cyclic.swift       | 30 ----------
+ .../Orthant/Sector.Octant+Orthant.swift       | 39 -------------
+ .../Orthant/Sector.Quadrant+Orthant.swift     | 26 ---------
+ Sources/Sector/Sector.Octant.swift            | 40 +++++++++++++
+ Sources/Sector/Sector.Quadrant.swift          | 58 +++++++++++++++++++
+ 5 files changed, 98 insertions(+), 95 deletions(-)
+ delete mode 100644 Sources/Sector/Integrations/Cyclic/Sector.Quadrant+Cyclic.swift
+ delete mode 100644 Sources/Sector/Integrations/Orthant/Sector.Octant+Orthant.swift
+ delete mode 100644 Sources/Sector/Integrations/Orthant/Sector.Quadrant+Orthant.swift
+
+diff --git a/Sources/Sector/Integrations/Cyclic/Sector.Quadrant+Cyclic.swift b/Sources/Sector/Integrations/Cyclic/Sector.Quadrant+Cyclic.swift
+deleted file mode 100644
+index 7ab0b0c..0000000
+--- a/Sources/Sector/Integrations/Cyclic/Sector.Quadrant+Cyclic.swift
++++ /dev/null
+@@ -1,30 +0,0 @@
+-#if Cyclic
+-    public import Cyclic
+-    public import Ordinal
+-
+-    extension Sector.Quadrant {
+-
+-        @inlinable
+-        public var cyclic: Cyclic.Group.Static<4>.Element {
+-            let rank: UInt =
+-                switch self {
+-                case .I: 0
+-                case .II: 1
+-                case .III: 2
+-                case .IV: 3
+-                }
+-
+-            return Cyclic.Group.Static<4>.Element(wrapping: Ordinal(rank))
+-        }
+-
+-        @inlinable
+-        public init(cyclic: Cyclic.Group.Static<4>.Element) {
+-            switch cyclic.position.rawValue {
+-            case 0: self = .I
+-            case 1: self = .II
+-            case 2: self = .III
+-            default: self = .IV
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Sector/Integrations/Orthant/Sector.Octant+Orthant.swift b/Sources/Sector/Integrations/Orthant/Sector.Octant+Orthant.swift
+deleted file mode 100644
+index c707fe8..0000000
+--- a/Sources/Sector/Integrations/Orthant/Sector.Octant+Orthant.swift
++++ /dev/null
+@@ -1,39 +0,0 @@
+-#if Orthant
+-    public import Orthant
+-
+-    extension Sector.Octant {
+-
+-        @inlinable
+-        public var orthant: Orthant<3> {
+-            let signs: (Direction, Direction, Direction) =
+-                switch self {
+-                case .ppp: (.positive, .positive, .positive)
+-                case .ppn: (.positive, .positive, .negative)
+-                case .pnp: (.positive, .negative, .positive)
+-                case .pnn: (.positive, .negative, .negative)
+-                case .npp: (.negative, .positive, .positive)
+-                case .npn: (.negative, .positive, .negative)
+-                case .nnp: (.negative, .negative, .positive)
+-                case .nnn: (.negative, .negative, .negative)
+-                }
+-            return Orthant { index in index == 0 ? signs.0 : (index == 1 ? signs.1 : signs.2) }
+-        }
+-
+-        @inlinable
+-        public init(orthant: Orthant<3>) {
+-            let x = orthant.directions[0] == .positive
+-            let y = orthant.directions[1] == .positive
+-            let z = orthant.directions[2] == .positive
+-            switch (x, y, z) {
+-            case (true, true, true): self = .ppp
+-            case (true, true, false): self = .ppn
+-            case (true, false, true): self = .pnp
+-            case (true, false, false): self = .pnn
+-            case (false, true, true): self = .npp
+-            case (false, true, false): self = .npn
+-            case (false, false, true): self = .nnp
+-            default: self = .nnn
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Sector/Integrations/Orthant/Sector.Quadrant+Orthant.swift b/Sources/Sector/Integrations/Orthant/Sector.Quadrant+Orthant.swift
+deleted file mode 100644
+index ed8dcea..0000000
+--- a/Sources/Sector/Integrations/Orthant/Sector.Quadrant+Orthant.swift
++++ /dev/null
+@@ -1,26 +0,0 @@
+-#if Orthant
+-    public import Orthant
+-
+-    extension Sector.Quadrant {
+-
+-        @inlinable
+-        public var orthant: Orthant<2> {
+-            switch self {
+-            case .I: Orthant { _ in .positive }
+-            case .II: Orthant { $0 == 0 ? .negative : .positive }
+-            case .III: Orthant { _ in .negative }
+-            case .IV: Orthant { $0 == 0 ? .positive : .negative }
+-            }
+-        }
+-
+-        @inlinable
+-        public init(orthant: Orthant<2>) {
+-            switch (orthant.directions[0], orthant.directions[1]) {
+-            case (.positive, .positive): self = .I
+-            case (.negative, .positive): self = .II
+-            case (.negative, .negative): self = .III
+-            default: self = .IV
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Sector/Sector.Octant.swift b/Sources/Sector/Sector.Octant.swift
+index 51a8c03..c2de6d9 100644
+--- a/Sources/Sector/Sector.Octant.swift
++++ b/Sources/Sector/Sector.Octant.swift
+@@ -78,3 +78,43 @@ extension Sector.Octant {
+ #if !hasFeature(Embedded)
+     extension Sector.Octant: Swift::Codable {}
+ #endif
++
++#if Orthant
++    public import Orthant
++
++    extension Sector.Octant {
++
++        @inlinable
++        public var orthant: Orthant<3> {
++            let signs: (Direction, Direction, Direction) =
++                switch self {
++                case .ppp: (.positive, .positive, .positive)
++                case .ppn: (.positive, .positive, .negative)
++                case .pnp: (.positive, .negative, .positive)
++                case .pnn: (.positive, .negative, .negative)
++                case .npp: (.negative, .positive, .positive)
++                case .npn: (.negative, .positive, .negative)
++                case .nnp: (.negative, .negative, .positive)
++                case .nnn: (.negative, .negative, .negative)
++                }
++            return Orthant { index in index == 0 ? signs.0 : (index == 1 ? signs.1 : signs.2) }
++        }
++
++        @inlinable
++        public init(orthant: Orthant<3>) {
++            let x = orthant.directions[0] == .positive
++            let y = orthant.directions[1] == .positive
++            let z = orthant.directions[2] == .positive
++            switch (x, y, z) {
++            case (true, true, true): self = .ppp
++            case (true, true, false): self = .ppn
++            case (true, false, true): self = .pnp
++            case (true, false, false): self = .pnn
++            case (false, true, true): self = .npp
++            case (false, true, false): self = .npn
++            case (false, false, true): self = .nnp
++            default: self = .nnn
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Sector/Sector.Quadrant.swift b/Sources/Sector/Sector.Quadrant.swift
+index e2e75ad..7a5c886 100644
+--- a/Sources/Sector/Sector.Quadrant.swift
++++ b/Sources/Sector/Sector.Quadrant.swift
+@@ -62,3 +62,61 @@ extension Sector.Quadrant {
+ #if !hasFeature(Embedded)
+     extension Sector.Quadrant: Swift::Codable {}
+ #endif
++
++#if Cyclic
++    public import Cyclic
++    public import Ordinal
++
++    extension Sector.Quadrant {
++
++        @inlinable
++        public var cyclic: Cyclic.Group.Static<4>.Element {
++            let rank: UInt =
++                switch self {
++                case .I: 0
++                case .II: 1
++                case .III: 2
++                case .IV: 3
++                }
++
++            return Cyclic.Group.Static<4>.Element(wrapping: Ordinal(rank))
++        }
++
++        @inlinable
++        public init(cyclic: Cyclic.Group.Static<4>.Element) {
++            switch cyclic.position.rawValue {
++            case 0: self = .I
++            case 1: self = .II
++            case 2: self = .III
++            default: self = .IV
++            }
++        }
++    }
++#endif
++
++#if Orthant
++    public import Orthant
++
++    extension Sector.Quadrant {
++
++        @inlinable
++        public var orthant: Orthant<2> {
++            switch self {
++            case .I: Orthant { _ in .positive }
++            case .II: Orthant { $0 == 0 ? .negative : .positive }
++            case .III: Orthant { _ in .negative }
++            case .IV: Orthant { $0 == 0 ? .positive : .negative }
++            }
++        }
++
++        @inlinable
++        public init(orthant: Orthant<2>) {
++            switch (orthant.directions[0], orthant.directions[1]) {
++            case (.positive, .positive): self = .I
++            case (.negative, .positive): self = .II
++            case (.negative, .negative): self = .III
++            default: self = .IV
++            }
++        }
++    }
++#endif
+-- 
+2.43.0
+

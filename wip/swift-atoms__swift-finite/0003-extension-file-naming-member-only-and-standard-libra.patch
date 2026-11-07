@@ -1,0 +1,910 @@
+From f540d8968094a2fd64d5891a8d7c5f3e7ca8633b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:43 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Finite/Finite+Cardinality.swift       |  30 ---
+ Sources/Finite/Finite.Bound.swift             |   8 +
+ ...ration+Swift.BidirectionalCollection.swift |  19 --
+ .../Finite.Enumeration+Swift.Collection.swift |  78 -------
+ ...eration+Swift.RandomAccessCollection.swift |  60 ------
+ Sources/Finite/Finite.Enumeration.swift       | 160 +++++++++++++++
+ Sources/Finite/Finite.swift                   |  33 ++-
+ .../Finite/Ordinal.Finite+Operations.swift    | 138 -------------
+ .../Ordinal.Finite+Swift.CaseIterable.swift   |   3 -
+ .../Ordinal.Finite+Swift.Comparable.swift     |  19 --
+ ...Finite+Swift.CustomStringConvertible.swift |   6 -
+ ...te+Swift.ExpressibleByIntegerLiteral.swift |  10 -
+ Sources/Finite/Ordinal.Finite+Types.swift     |  18 --
+ Sources/Finite/Ordinal.Finite.swift           | 190 ++++++++++++++++++
+ 14 files changed, 387 insertions(+), 385 deletions(-)
+ delete mode 100644 Sources/Finite/Finite+Cardinality.swift
+ create mode 100644 Sources/Finite/Finite.Bound.swift
+ delete mode 100644 Sources/Finite/Finite.Enumeration+Swift.BidirectionalCollection.swift
+ delete mode 100644 Sources/Finite/Finite.Enumeration+Swift.Collection.swift
+ delete mode 100644 Sources/Finite/Finite.Enumeration+Swift.RandomAccessCollection.swift
+ delete mode 100644 Sources/Finite/Ordinal.Finite+Operations.swift
+ delete mode 100644 Sources/Finite/Ordinal.Finite+Swift.CaseIterable.swift
+ delete mode 100644 Sources/Finite/Ordinal.Finite+Swift.Comparable.swift
+ delete mode 100644 Sources/Finite/Ordinal.Finite+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Finite/Ordinal.Finite+Swift.ExpressibleByIntegerLiteral.swift
+ delete mode 100644 Sources/Finite/Ordinal.Finite+Types.swift
+
+diff --git a/Sources/Finite/Finite+Cardinality.swift b/Sources/Finite/Finite+Cardinality.swift
+deleted file mode 100644
+index 2ebdf26..0000000
+--- a/Sources/Finite/Finite+Cardinality.swift
++++ /dev/null
+@@ -1,30 +0,0 @@
+-extension Finite {
+-    /// A zero factor makes a product empty even when another partial product would overflow.
+-    public static func productCardinalityIfRepresentable(_ factors: [UInt]) -> UInt? {
+-        if factors.contains(0) { return 0 }
+-        var accumulated: UInt = 1
+-        for next in factors {
+-            let result = accumulated.multipliedReportingOverflow(by: next)
+-            guard !result.overflow else { return nil }
+-            accumulated = result.partialValue
+-        }
+-        return accumulated
+-    }
+-    public static func sumCardinalityIfRepresentable(_ summands: [UInt]) -> UInt? {
+-        var accumulated: UInt = 0
+-        for next in summands {
+-            let result = accumulated.addingReportingOverflow(next)
+-            guard !result.overflow else { return nil }
+-            accumulated = result.partialValue
+-        }
+-        return accumulated
+-    }
+-    public static func productCardinality(_ factors: [UInt]) -> UInt {
+-        guard let value = productCardinalityIfRepresentable(factors) else { preconditionFailure("Finite product cardinality exceeds UInt") }
+-        return value
+-    }
+-    public static func sumCardinality(_ summands: [UInt]) -> UInt {
+-        guard let value = sumCardinalityIfRepresentable(summands) else { preconditionFailure("Finite sum cardinality exceeds UInt") }
+-        return value
+-    }
+-}
+diff --git a/Sources/Finite/Finite.Bound.swift b/Sources/Finite/Finite.Bound.swift
+new file mode 100644
+index 0000000..22d6c39
+--- /dev/null
++++ b/Sources/Finite/Finite.Bound.swift
+@@ -0,0 +1,8 @@
++
++extension Finite {
++    public struct Bound<let N: Int>: Hashable, Sendable {
++
++        @inlinable
++        public init() {}
++    }
++}
+diff --git a/Sources/Finite/Finite.Enumeration+Swift.BidirectionalCollection.swift b/Sources/Finite/Finite.Enumeration+Swift.BidirectionalCollection.swift
+deleted file mode 100644
+index 508cf23..0000000
+--- a/Sources/Finite/Finite.Enumeration+Swift.BidirectionalCollection.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-#if Tagged
+-    public import Cardinal
+-    import Index
+-    public import Ordinal
+-    public import Tagged
+-
+-    extension Finite::Finite.Enumeration: Swift::BidirectionalCollection {
+-
+-        @inlinable
+-        public func index(before i: Index) -> Index {
+-            precondition(
+-                i.underlying.rawValue > 0 && i.underlying.rawValue <= Element.count.rawValue,
+-                "Cannot retreat from this enumeration index"
+-            )
+-            return Index(_unchecked: Ordinal::Ordinal(i.underlying.rawValue - 1))
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Finite/Finite.Enumeration+Swift.Collection.swift b/Sources/Finite/Finite.Enumeration+Swift.Collection.swift
+deleted file mode 100644
+index 0b0586c..0000000
+--- a/Sources/Finite/Finite.Enumeration+Swift.Collection.swift
++++ /dev/null
+@@ -1,78 +0,0 @@
+-#if Tagged
+-    public import Cardinal
+-    public import Index
+-    public import Ordinal
+-    public import Tagged
+-
+-    extension Finite::Finite.Enumeration: Swift::Collection {
+-
+-        public typealias Index = Index::Index<Element>
+-
+-        @inlinable
+-        public var startIndex: Index { Index(_unchecked: .zero) }
+-
+-        @inlinable
+-        public var endIndex: Index {
+-            Index(_unchecked: Ordinal::Ordinal(Element.count.rawValue))
+-        }
+-
+-        @inlinable
+-        public subscript(position: Index) -> Element {
+-            precondition(position.underlying.rawValue < Element.count.rawValue, "Index lies outside the enumeration")
+-            return Element(_unchecked: (), ordinal: position.underlying)
+-        }
+-
+-        @inlinable
+-        public func index(after i: Index) -> Index {
+-            precondition(i.underlying.rawValue < Element.count.rawValue, "Cannot advance past the enumeration end")
+-            return Index(_unchecked: Ordinal::Ordinal(i.underlying.rawValue + 1))
+-        }
+-    }
+-
+-#endif
+-
+-#if !Tagged
+-    extension Finite::Finite.Enumeration: Swift::RandomAccessCollection {
+-        public typealias Index = Int
+-        public var startIndex: Int { 0 }
+-        public var endIndex: Int {
+-            guard let count = Int(exactly: Element.count.rawValue) else {
+-                preconditionFailure("Enumeration count is not representable as Int")
+-            }
+-            return count
+-        }
+-        public subscript(position: Int) -> Element {
+-            precondition(position >= startIndex && position < endIndex, "Index lies outside the enumeration")
+-            guard let value = element(at: position) else {
+-                preconditionFailure("Index lies outside the enumeration")
+-            }
+-            return value
+-        }
+-        public func index(after index: Int) -> Int {
+-            precondition(index >= startIndex && index < endIndex, "Cannot advance past the enumeration end")
+-            return index + 1
+-        }
+-        public func index(before index: Int) -> Int {
+-            precondition(index > startIndex && index <= endIndex, "Cannot retreat before the enumeration start")
+-            return index - 1
+-        }
+-        public func distance(from start: Int, to end: Int) -> Int {
+-            precondition((startIndex...endIndex).contains(start) && (startIndex...endIndex).contains(end))
+-            return end - start
+-        }
+-        public func index(_ index: Int, offsetBy distance: Int) -> Int {
+-            precondition((startIndex...endIndex).contains(index))
+-            let result = index.addingReportingOverflow(distance)
+-            precondition(!result.overflow && (startIndex...endIndex).contains(result.partialValue))
+-            return result.partialValue
+-        }
+-        public func index(_ index: Int, offsetBy distance: Int, limitedBy limit: Int) -> Int? {
+-            precondition((startIndex...endIndex).contains(index) && (startIndex...endIndex).contains(limit))
+-            let available = limit - index
+-            if distance >= 0, limit >= index, distance > available { return nil }
+-            if distance < 0, limit <= index, distance < available { return nil }
+-            return self.index(index, offsetBy: distance)
+-        }
+-
+-    }
+-#endif
+diff --git a/Sources/Finite/Finite.Enumeration+Swift.RandomAccessCollection.swift b/Sources/Finite/Finite.Enumeration+Swift.RandomAccessCollection.swift
+deleted file mode 100644
+index b99abe4..0000000
+--- a/Sources/Finite/Finite.Enumeration+Swift.RandomAccessCollection.swift
++++ /dev/null
+@@ -1,60 +0,0 @@
+-#if Tagged
+-    public import Cardinal
+-    public import Difference
+-    import Index
+-    public import Ordinal
+-    public import Tagged
+-
+-    extension Finite::Finite.Enumeration: Swift::RandomAccessCollection {
+-
+-        @inlinable
+-        public var count: Int {
+-            guard let count = Int(exactly: Element.count.rawValue) else {
+-                preconditionFailure("Enumeration count is not representable as Int")
+-            }
+-            return count
+-        }
+-
+-        @inlinable
+-        public func distance(from start: Index, to end: Index) -> Int {
+-            precondition(
+-                start.underlying.rawValue <= Element.count.rawValue
+-                    && end.underlying.rawValue <= Element.count.rawValue,
+-                "Distance requires valid enumeration indices"
+-            )
+-            guard let distance = Int(exactly: end.underlying - start.underlying) else {
+-                preconditionFailure("Enumeration distance is not representable as Int")
+-            }
+-            return distance
+-        }
+-
+-        @inlinable
+-        public func index(_ i: Index, offsetBy distance: Int) -> Index {
+-            precondition(i.underlying.rawValue <= Element.count.rawValue, "Offset requires a valid enumeration index")
+-            guard let position = try? i.underlying + Difference(distance),
+-                position.rawValue <= Element.count.rawValue
+-            else {
+-                preconditionFailure("Offset lies outside the enumeration")
+-            }
+-            return Index(_unchecked: position)
+-        }
+-
+-        @inlinable
+-        public func index(_ i: Index, offsetBy distance: Int, limitedBy limit: Index) -> Index? {
+-            precondition(
+-                i.underlying.rawValue <= Element.count.rawValue
+-                    && limit.underlying.rawValue <= Element.count.rawValue,
+-                "Limited offset requires valid enumeration indices"
+-            )
+-            let offset = Difference(distance)
+-            let available = limit.underlying - i.underlying
+-            if distance >= 0 {
+-                if i.underlying <= limit.underlying && offset > available { return nil }
+-            } else {
+-                if limit.underlying <= i.underlying && offset < available { return nil }
+-            }
+-            return index(i, offsetBy: distance)
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Finite/Finite.Enumeration.swift b/Sources/Finite/Finite.Enumeration.swift
+index 6202124..e54fc30 100644
+--- a/Sources/Finite/Finite.Enumeration.swift
++++ b/Sources/Finite/Finite.Enumeration.swift
+@@ -46,3 +46,163 @@ extension Finite::Finite.Enumeration {
+     public import Iterator
+     extension Finite::Finite.Enumeration.Iterator: Iterator::Iterator.`Protocol` {}
+ #endif
++
++#if Tagged
++    public import Cardinal
++    import Index
++    public import Ordinal
++    public import Tagged
++
++    extension Finite::Finite.Enumeration: Swift::BidirectionalCollection {
++
++        @inlinable
++        public func index(before i: Index) -> Index {
++            precondition(
++                i.underlying.rawValue > 0 && i.underlying.rawValue <= Element.count.rawValue,
++                "Cannot retreat from this enumeration index"
++            )
++            return Index(_unchecked: Ordinal::Ordinal(i.underlying.rawValue - 1))
++        }
++    }
++
++#endif
++
++#if Tagged
++    public import Cardinal
++    public import Index
++    public import Ordinal
++    public import Tagged
++
++    extension Finite::Finite.Enumeration: Swift::Collection {
++
++        public typealias Index = Index::Index<Element>
++
++        @inlinable
++        public var startIndex: Index { Index(_unchecked: .zero) }
++
++        @inlinable
++        public var endIndex: Index {
++            Index(_unchecked: Ordinal::Ordinal(Element.count.rawValue))
++        }
++
++        @inlinable
++        public subscript(position: Index) -> Element {
++            precondition(position.underlying.rawValue < Element.count.rawValue, "Index lies outside the enumeration")
++            return Element(_unchecked: (), ordinal: position.underlying)
++        }
++
++        @inlinable
++        public func index(after i: Index) -> Index {
++            precondition(i.underlying.rawValue < Element.count.rawValue, "Cannot advance past the enumeration end")
++            return Index(_unchecked: Ordinal::Ordinal(i.underlying.rawValue + 1))
++        }
++    }
++
++#endif
++
++#if !Tagged
++    extension Finite::Finite.Enumeration: Swift::RandomAccessCollection {
++        public typealias Index = Int
++        public var startIndex: Int { 0 }
++        public var endIndex: Int {
++            guard let count = Int(exactly: Element.count.rawValue) else {
++                preconditionFailure("Enumeration count is not representable as Int")
++            }
++            return count
++        }
++        public subscript(position: Int) -> Element {
++            precondition(position >= startIndex && position < endIndex, "Index lies outside the enumeration")
++            guard let value = element(at: position) else {
++                preconditionFailure("Index lies outside the enumeration")
++            }
++            return value
++        }
++        public func index(after index: Int) -> Int {
++            precondition(index >= startIndex && index < endIndex, "Cannot advance past the enumeration end")
++            return index + 1
++        }
++        public func index(before index: Int) -> Int {
++            precondition(index > startIndex && index <= endIndex, "Cannot retreat before the enumeration start")
++            return index - 1
++        }
++        public func distance(from start: Int, to end: Int) -> Int {
++            precondition((startIndex...endIndex).contains(start) && (startIndex...endIndex).contains(end))
++            return end - start
++        }
++        public func index(_ index: Int, offsetBy distance: Int) -> Int {
++            precondition((startIndex...endIndex).contains(index))
++            let result = index.addingReportingOverflow(distance)
++            precondition(!result.overflow && (startIndex...endIndex).contains(result.partialValue))
++            return result.partialValue
++        }
++        public func index(_ index: Int, offsetBy distance: Int, limitedBy limit: Int) -> Int? {
++            precondition((startIndex...endIndex).contains(index) && (startIndex...endIndex).contains(limit))
++            let available = limit - index
++            if distance >= 0, limit >= index, distance > available { return nil }
++            if distance < 0, limit <= index, distance < available { return nil }
++            return self.index(index, offsetBy: distance)
++        }
++
++    }
++#endif
++
++#if Tagged
++    public import Cardinal
++    public import Difference
++    import Index
++    public import Ordinal
++    public import Tagged
++
++    extension Finite::Finite.Enumeration: Swift::RandomAccessCollection {
++
++        @inlinable
++        public var count: Int {
++            guard let count = Int(exactly: Element.count.rawValue) else {
++                preconditionFailure("Enumeration count is not representable as Int")
++            }
++            return count
++        }
++
++        @inlinable
++        public func distance(from start: Index, to end: Index) -> Int {
++            precondition(
++                start.underlying.rawValue <= Element.count.rawValue
++                    && end.underlying.rawValue <= Element.count.rawValue,
++                "Distance requires valid enumeration indices"
++            )
++            guard let distance = Int(exactly: end.underlying - start.underlying) else {
++                preconditionFailure("Enumeration distance is not representable as Int")
++            }
++            return distance
++        }
++
++        @inlinable
++        public func index(_ i: Index, offsetBy distance: Int) -> Index {
++            precondition(i.underlying.rawValue <= Element.count.rawValue, "Offset requires a valid enumeration index")
++            guard let position = try? i.underlying + Difference(distance),
++                position.rawValue <= Element.count.rawValue
++            else {
++                preconditionFailure("Offset lies outside the enumeration")
++            }
++            return Index(_unchecked: position)
++        }
++
++        @inlinable
++        public func index(_ i: Index, offsetBy distance: Int, limitedBy limit: Index) -> Index? {
++            precondition(
++                i.underlying.rawValue <= Element.count.rawValue
++                    && limit.underlying.rawValue <= Element.count.rawValue,
++                "Limited offset requires valid enumeration indices"
++            )
++            let offset = Difference(distance)
++            let available = limit.underlying - i.underlying
++            if distance >= 0 {
++                if i.underlying <= limit.underlying && offset > available { return nil }
++            } else {
++                if limit.underlying <= i.underlying && offset < available { return nil }
++            }
++            return index(i, offsetBy: distance)
++        }
++    }
++
++#endif
+diff --git a/Sources/Finite/Finite.swift b/Sources/Finite/Finite.swift
+index 8eef791..dfa6b1d 100644
+--- a/Sources/Finite/Finite.swift
++++ b/Sources/Finite/Finite.swift
+@@ -1,10 +1,35 @@
+ public enum Finite: Sendable {}
+ 
+ extension Finite {
++}
+ 
+-    public struct Bound<let N: Int>: Hashable, Sendable {
+-
+-        @inlinable
+-        public init() {}
++extension Finite {
++    /// A zero factor makes a product empty even when another partial product would overflow.
++    public static func productCardinalityIfRepresentable(_ factors: [UInt]) -> UInt? {
++        if factors.contains(0) { return 0 }
++        var accumulated: UInt = 1
++        for next in factors {
++            let result = accumulated.multipliedReportingOverflow(by: next)
++            guard !result.overflow else { return nil }
++            accumulated = result.partialValue
++        }
++        return accumulated
++    }
++    public static func sumCardinalityIfRepresentable(_ summands: [UInt]) -> UInt? {
++        var accumulated: UInt = 0
++        for next in summands {
++            let result = accumulated.addingReportingOverflow(next)
++            guard !result.overflow else { return nil }
++            accumulated = result.partialValue
++        }
++        return accumulated
++    }
++    public static func productCardinality(_ factors: [UInt]) -> UInt {
++        guard let value = productCardinalityIfRepresentable(factors) else { preconditionFailure("Finite product cardinality exceeds UInt") }
++        return value
++    }
++    public static func sumCardinality(_ summands: [UInt]) -> UInt {
++        guard let value = sumCardinalityIfRepresentable(summands) else { preconditionFailure("Finite sum cardinality exceeds UInt") }
++        return value
+     }
+ }
+diff --git a/Sources/Finite/Ordinal.Finite+Operations.swift b/Sources/Finite/Ordinal.Finite+Operations.swift
+deleted file mode 100644
+index b86357a..0000000
+--- a/Sources/Finite/Ordinal.Finite+Operations.swift
++++ /dev/null
+@@ -1,138 +0,0 @@
+-public import Cardinal
+-public import Ordinal
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public static func capacity() -> Cardinal::Cardinal {
+-        Finite::Finite.Bound<N>.capacity
+-    }
+-
+-    @inlinable
+-    public static func max() -> Self? {
+-        guard N > 0 else { return nil }
+-        return Self(_unchecked: N - 1)
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public func successor() -> Self? {
+-        let next = underlying.rawValue + 1
+-        guard next < Finite::Finite.Bound<N>.capacity.rawValue else { return nil }
+-        return Self(_unchecked: Ordinal::Ordinal(next))
+-    }
+-
+-    @inlinable
+-    public func predecessor() -> Self? {
+-        guard underlying.rawValue > 0 else { return nil }
+-        return Self(_unchecked: Ordinal::Ordinal(underlying.rawValue - 1))
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public func offset(by delta: Int) -> Self? {
+-        let result = Int(underlying.rawValue).addingReportingOverflow(delta)
+-        guard N > 0, !result.overflow, result.partialValue >= 0, result.partialValue < N else { return nil }
+-        return Self(_unchecked: result.partialValue)
+-    }
+-
+-    @inlinable
+-    public func clamped(offsetBy delta: Int) -> Self {
+-        precondition(N > 0 && underlying.rawValue < UInt(N), "Clamping requires a valid bounded ordinal")
+-        if let result = offset(by: delta) { return result }
+-        return delta < 0 ? Self(_unchecked: .zero) : Self(_unchecked: N - 1)
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public func distance(to other: Self) -> Int {
+-        let otherPosition = Int(bitPattern: other.underlying.rawValue)
+-        let selfPosition = Int(bitPattern: underlying.rawValue)
+-        return otherPosition - selfPosition
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public func complement() -> Self {
+-        Self(_unchecked: N - 1 - Int(bitPattern: underlying.rawValue))
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public func injected<let M: Int>()
+-        -> Ordinal::Ordinal.Finite<M>
+-    {
+-        precondition(
+-            N > 0 && M >= N && underlying.rawValue < UInt(N),
+-            "Injection requires a valid source ordinal and an equal or larger destination domain"
+-        )
+-        return Ordinal::Ordinal.Finite<M>(_unchecked: underlying)
+-    }
+-
+-    @inlinable
+-    public func projected<let M: Int>()
+-        -> Ordinal::Ordinal.Finite<M>?
+-    {
+-        guard M > 0, underlying.rawValue < UInt(M) else { return nil }
+-        return Ordinal::Ordinal.Finite<M>(_unchecked: underlying)
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public func decomposed<let Rows: Int, let Columns: Int>()
+-        -> (
+-            row: Ordinal::Ordinal.Finite<Rows>,
+-            column: Ordinal::Ordinal.Finite<Columns>
+-        )?
+-    {
+-        guard Rows > 0, Columns > 0 else { return nil }
+-        let capacity = Rows.multipliedReportingOverflow(by: Columns)
+-        guard !capacity.overflow, capacity.partialValue == N else { return nil }
+-        let position = Int(underlying.rawValue)
+-        let row = position / Columns
+-        let column = position % Columns
+-        return (
+-            Ordinal::Ordinal.Finite<Rows>(
+-                _unchecked: Ordinal::Ordinal(UInt(row))
+-            ),
+-            Ordinal::Ordinal.Finite<Columns>(
+-                _unchecked: Ordinal::Ordinal(UInt(column))
+-            )
+-        )
+-    }
+-
+-    @inlinable
+-    public static func composed<let Rows: Int, let Columns: Int>(
+-        row: Ordinal::Ordinal.Finite<Rows>,
+-        column: Ordinal::Ordinal.Finite<Columns>
+-    ) -> Self? {
+-        guard Rows > 0, Columns > 0 else { return nil }
+-        let capacity = Rows.multipliedReportingOverflow(by: Columns)
+-        guard !capacity.overflow, capacity.partialValue == N else { return nil }
+-        let rowPosition = Int(row.underlying.rawValue)
+-        let columnPosition = Int(column.underlying.rawValue)
+-        let position = rowPosition * Columns + columnPosition
+-        return Self(_unchecked: position)
+-    }
+-}
+-
+-extension Ordinal::Ordinal.Finite {
+-
+-    @inlinable
+-    public static var zero: Self { Self(_unchecked: Ordinal::Ordinal.zero) }
+-
+-    @inlinable
+-    public var position: Ordinal::Ordinal { underlying }
+-}
+diff --git a/Sources/Finite/Ordinal.Finite+Swift.CaseIterable.swift b/Sources/Finite/Ordinal.Finite+Swift.CaseIterable.swift
+deleted file mode 100644
+index d695f4c..0000000
+--- a/Sources/Finite/Ordinal.Finite+Swift.CaseIterable.swift
++++ /dev/null
+@@ -1,3 +0,0 @@
+-public import Ordinal
+-
+-extension Ordinal::Ordinal.Finite: Swift::CaseIterable {}
+diff --git a/Sources/Finite/Ordinal.Finite+Swift.Comparable.swift b/Sources/Finite/Ordinal.Finite+Swift.Comparable.swift
+deleted file mode 100644
+index 1fdd41c..0000000
+--- a/Sources/Finite/Ordinal.Finite+Swift.Comparable.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-public import Ordinal
+-
+-extension Ordinal::Ordinal.Finite: Swift::Comparable {
+-
+-    @inlinable
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        lhs.underlying < rhs.underlying
+-    }
+-
+-    @inlinable
+-    public static func min(_ a: Self, _ b: Self) -> Self {
+-        a.underlying <= b.underlying ? a : b
+-    }
+-
+-    @inlinable
+-    public static func max(_ a: Self, _ b: Self) -> Self {
+-        a.underlying >= b.underlying ? a : b
+-    }
+-}
+diff --git a/Sources/Finite/Ordinal.Finite+Swift.CustomStringConvertible.swift b/Sources/Finite/Ordinal.Finite+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index d9ce281..0000000
+--- a/Sources/Finite/Ordinal.Finite+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Ordinal
+-
+-extension Ordinal::Ordinal.Finite: Swift::CustomStringConvertible {
+-
+-    public var description: String { underlying.description }
+-}
+diff --git a/Sources/Finite/Ordinal.Finite+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Finite/Ordinal.Finite+Swift.ExpressibleByIntegerLiteral.swift
+deleted file mode 100644
+index 3503dce..0000000
+--- a/Sources/Finite/Ordinal.Finite+Swift.ExpressibleByIntegerLiteral.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-public import Ordinal
+-
+-extension Ordinal::Ordinal.Finite: Swift::ExpressibleByIntegerLiteral {
+-
+-    @_disfavoredOverload
+-    @inlinable
+-    public init(integerLiteral value: UInt) {
+-        self.init(_unchecked: Ordinal::Ordinal(value))
+-    }
+-}
+diff --git a/Sources/Finite/Ordinal.Finite+Types.swift b/Sources/Finite/Ordinal.Finite+Types.swift
+deleted file mode 100644
+index 8ffc1a7..0000000
+--- a/Sources/Finite/Ordinal.Finite+Types.swift
++++ /dev/null
+@@ -1,18 +0,0 @@
+-#if Tagged
+-    public import Cardinal
+-    public import Difference
+-    public import Ordinal
+-    public import Tagged
+-
+-    extension Ordinal::Ordinal.Finite {
+-
+-        public typealias Domain = Finite::Finite.Bound<N>
+-
+-        public typealias Underlying = Ordinal::Ordinal
+-
+-        public typealias Count = Tagged::Tagged<Domain, Cardinal::Cardinal>
+-
+-        public typealias Offset = Tagged::Tagged<Domain, Difference::Difference>
+-    }
+-
+-#endif
+diff --git a/Sources/Finite/Ordinal.Finite.swift b/Sources/Finite/Ordinal.Finite.swift
+index 69b94c8..43e0bed 100644
+--- a/Sources/Finite/Ordinal.Finite.swift
++++ b/Sources/Finite/Ordinal.Finite.swift
+@@ -1,4 +1,5 @@
+ public import Ordinal
++public import Cardinal
+ 
+ extension Ordinal::Ordinal {
+ 
+@@ -39,3 +40,192 @@ extension Ordinal::Ordinal {
+ extension Ordinal::Ordinal.Finite: Swift::Hashable {}
+ 
+ extension Ordinal::Ordinal.Finite: Swift::Sendable {}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public static func capacity() -> Cardinal::Cardinal {
++        Finite::Finite.Bound<N>.capacity
++    }
++
++    @inlinable
++    public static func max() -> Self? {
++        guard N > 0 else { return nil }
++        return Self(_unchecked: N - 1)
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public func successor() -> Self? {
++        let next = underlying.rawValue + 1
++        guard next < Finite::Finite.Bound<N>.capacity.rawValue else { return nil }
++        return Self(_unchecked: Ordinal::Ordinal(next))
++    }
++
++    @inlinable
++    public func predecessor() -> Self? {
++        guard underlying.rawValue > 0 else { return nil }
++        return Self(_unchecked: Ordinal::Ordinal(underlying.rawValue - 1))
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public func offset(by delta: Int) -> Self? {
++        let result = Int(underlying.rawValue).addingReportingOverflow(delta)
++        guard N > 0, !result.overflow, result.partialValue >= 0, result.partialValue < N else { return nil }
++        return Self(_unchecked: result.partialValue)
++    }
++
++    @inlinable
++    public func clamped(offsetBy delta: Int) -> Self {
++        precondition(N > 0 && underlying.rawValue < UInt(N), "Clamping requires a valid bounded ordinal")
++        if let result = offset(by: delta) { return result }
++        return delta < 0 ? Self(_unchecked: .zero) : Self(_unchecked: N - 1)
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public func distance(to other: Self) -> Int {
++        let otherPosition = Int(bitPattern: other.underlying.rawValue)
++        let selfPosition = Int(bitPattern: underlying.rawValue)
++        return otherPosition - selfPosition
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public func complement() -> Self {
++        Self(_unchecked: N - 1 - Int(bitPattern: underlying.rawValue))
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public func injected<let M: Int>()
++        -> Ordinal::Ordinal.Finite<M>
++    {
++        precondition(
++            N > 0 && M >= N && underlying.rawValue < UInt(N),
++            "Injection requires a valid source ordinal and an equal or larger destination domain"
++        )
++        return Ordinal::Ordinal.Finite<M>(_unchecked: underlying)
++    }
++
++    @inlinable
++    public func projected<let M: Int>()
++        -> Ordinal::Ordinal.Finite<M>?
++    {
++        guard M > 0, underlying.rawValue < UInt(M) else { return nil }
++        return Ordinal::Ordinal.Finite<M>(_unchecked: underlying)
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public func decomposed<let Rows: Int, let Columns: Int>()
++        -> (
++            row: Ordinal::Ordinal.Finite<Rows>,
++            column: Ordinal::Ordinal.Finite<Columns>
++        )?
++    {
++        guard Rows > 0, Columns > 0 else { return nil }
++        let capacity = Rows.multipliedReportingOverflow(by: Columns)
++        guard !capacity.overflow, capacity.partialValue == N else { return nil }
++        let position = Int(underlying.rawValue)
++        let row = position / Columns
++        let column = position % Columns
++        return (
++            Ordinal::Ordinal.Finite<Rows>(
++                _unchecked: Ordinal::Ordinal(UInt(row))
++            ),
++            Ordinal::Ordinal.Finite<Columns>(
++                _unchecked: Ordinal::Ordinal(UInt(column))
++            )
++        )
++    }
++
++    @inlinable
++    public static func composed<let Rows: Int, let Columns: Int>(
++        row: Ordinal::Ordinal.Finite<Rows>,
++        column: Ordinal::Ordinal.Finite<Columns>
++    ) -> Self? {
++        guard Rows > 0, Columns > 0 else { return nil }
++        let capacity = Rows.multipliedReportingOverflow(by: Columns)
++        guard !capacity.overflow, capacity.partialValue == N else { return nil }
++        let rowPosition = Int(row.underlying.rawValue)
++        let columnPosition = Int(column.underlying.rawValue)
++        let position = rowPosition * Columns + columnPosition
++        return Self(_unchecked: position)
++    }
++}
++
++extension Ordinal::Ordinal.Finite {
++
++    @inlinable
++    public static var zero: Self { Self(_unchecked: Ordinal::Ordinal.zero) }
++
++    @inlinable
++    public var position: Ordinal::Ordinal { underlying }
++}
++
++extension Ordinal::Ordinal.Finite: Swift::CaseIterable {}
++
++extension Ordinal::Ordinal.Finite: Swift::Comparable {
++
++    @inlinable
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs.underlying < rhs.underlying
++    }
++
++    @inlinable
++    public static func min(_ a: Self, _ b: Self) -> Self {
++        a.underlying <= b.underlying ? a : b
++    }
++
++    @inlinable
++    public static func max(_ a: Self, _ b: Self) -> Self {
++        a.underlying >= b.underlying ? a : b
++    }
++}
++
++extension Ordinal::Ordinal.Finite: Swift::CustomStringConvertible {
++
++    public var description: String { underlying.description }
++}
++
++extension Ordinal::Ordinal.Finite: Swift::ExpressibleByIntegerLiteral {
++
++    @_disfavoredOverload
++    @inlinable
++    public init(integerLiteral value: UInt) {
++        self.init(_unchecked: Ordinal::Ordinal(value))
++    }
++}
++
++#if Tagged
++    public import Cardinal
++    public import Difference
++    public import Ordinal
++    public import Tagged
++
++    extension Ordinal::Ordinal.Finite {
++
++        public typealias Domain = Finite::Finite.Bound<N>
++
++        public typealias Underlying = Ordinal::Ordinal
++
++        public typealias Count = Tagged::Tagged<Domain, Cardinal::Cardinal>
++
++        public typealias Offset = Tagged::Tagged<Domain, Difference::Difference>
++    }
++
++#endif
+-- 
+2.43.0
+

@@ -1,0 +1,148 @@
+From 71f268cfc7c82c6fbf75df927b0f6efa094e2e17 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:46 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Ownership/Ownership.Slot+Store.swift | 27 ----------
+ Sources/Ownership/Ownership.Slot+Take.swift  | 28 -----------
+ Sources/Ownership/Ownership.Slot.swift       | 53 ++++++++++++++++++++
+ 3 files changed, 53 insertions(+), 55 deletions(-)
+ delete mode 100644 Sources/Ownership/Ownership.Slot+Store.swift
+ delete mode 100644 Sources/Ownership/Ownership.Slot+Take.swift
+
+diff --git a/Sources/Ownership/Ownership.Slot+Store.swift b/Sources/Ownership/Ownership.Slot+Store.swift
+deleted file mode 100644
+index 577fc87..0000000
+--- a/Sources/Ownership/Ownership.Slot+Store.swift
++++ /dev/null
+@@ -1,27 +0,0 @@
+-internal import Synchronization
+-
+-extension Ownership.Slot where Value: ~Copyable {
+-
+-    public func store(_ value: consuming sending Value) -> Value? {
+-
+-        let (reserved, _) = _state.compareExchange(
+-            expected: State.empty,
+-            desired: State.initializing,
+-            ordering: .acquiringAndReleasing
+-        )
+-        guard reserved else {
+-            return value
+-        }
+-
+-        unsafe _storage.initialize(to: value)
+-
+-        _state.store(State.full, ordering: .releasing)
+-        return nil
+-    }
+-
+-    public func store(__unchecked value: consuming sending Value) {
+-        if case .some = store(value) {
+-            preconditionFailure("Ownership.Slot.store(__unchecked:): already occupied")
+-        }
+-    }
+-}
+diff --git a/Sources/Ownership/Ownership.Slot+Take.swift b/Sources/Ownership/Ownership.Slot+Take.swift
+deleted file mode 100644
+index 7fec09b..0000000
+--- a/Sources/Ownership/Ownership.Slot+Take.swift
++++ /dev/null
+@@ -1,28 +0,0 @@
+-internal import Synchronization
+-
+-extension Ownership.Slot where Value: ~Copyable {
+-
+-    public func take() -> sending Value? {
+-
+-        let (exchanged, _) = _state.compareExchange(
+-            expected: State.full,
+-            desired: State.draining,
+-            ordering: .acquiringAndReleasing
+-        )
+-        guard exchanged else {
+-            return nil
+-        }
+-
+-        let value = unsafe _storage.move()
+-
+-        _state.store(State.empty, ordering: .releasing)
+-        return value
+-    }
+-
+-    public func take(__unchecked: Void) -> sending Value {
+-        guard let value = take() else {
+-            preconditionFailure("Ownership.Slot.take(__unchecked:): already empty")
+-        }
+-        return value
+-    }
+-}
+diff --git a/Sources/Ownership/Ownership.Slot.swift b/Sources/Ownership/Ownership.Slot.swift
+index 523d45a..e6479af 100644
+--- a/Sources/Ownership/Ownership.Slot.swift
++++ b/Sources/Ownership/Ownership.Slot.swift
+@@ -50,3 +50,56 @@ extension Ownership.Slot where Value: ~Copyable {
+         _state.load(ordering: .acquiring) == State.full
+     }
+ }
++
++extension Ownership.Slot where Value: ~Copyable {
++
++    public func store(_ value: consuming sending Value) -> Value? {
++
++        let (reserved, _) = _state.compareExchange(
++            expected: State.empty,
++            desired: State.initializing,
++            ordering: .acquiringAndReleasing
++        )
++        guard reserved else {
++            return value
++        }
++
++        unsafe _storage.initialize(to: value)
++
++        _state.store(State.full, ordering: .releasing)
++        return nil
++    }
++
++    public func store(__unchecked value: consuming sending Value) {
++        if case .some = store(value) {
++            preconditionFailure("Ownership.Slot.store(__unchecked:): already occupied")
++        }
++    }
++}
++
++extension Ownership.Slot where Value: ~Copyable {
++
++    public func take() -> sending Value? {
++
++        let (exchanged, _) = _state.compareExchange(
++            expected: State.full,
++            desired: State.draining,
++            ordering: .acquiringAndReleasing
++        )
++        guard exchanged else {
++            return nil
++        }
++
++        let value = unsafe _storage.move()
++
++        _state.store(State.empty, ordering: .releasing)
++        return value
++    }
++
++    public func take(__unchecked: Void) -> sending Value {
++        guard let value = take() else {
++            preconditionFailure("Ownership.Slot.take(__unchecked:): already empty")
++        }
++        return value
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,111 @@
+From b3123464297cbe50ac7df9ecd531ce0f0b76b020 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:43 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Division/Division.Rounded.swift | 36 -------------------------
+ Sources/Division/Division.swift         | 36 +++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+), 36 deletions(-)
+ delete mode 100644 Sources/Division/Division.Rounded.swift
+
+diff --git a/Sources/Division/Division.Rounded.swift b/Sources/Division/Division.Rounded.swift
+deleted file mode 100644
+index cc6bb2c..0000000
+--- a/Sources/Division/Division.Rounded.swift
++++ /dev/null
+@@ -1,36 +0,0 @@
+-public import Rounding
+-
+-extension Division {
+-
+-    public static func rounded<Value: FixedWidthInteger & SignedInteger>(
+-        _ dividend: Value,
+-        by divisor: Value,
+-        rounding: Rounding = .down
+-    ) throws(Error) -> (quotient: Value, remainder: Value) {
+-        let result = try quotient(dividend, by: divisor)
+-        let remainder = result.remainder.magnitude
+-        guard remainder != 0 else { return result }
+-        let complement = divisor.magnitude - remainder
+-        let comparison: Order.Comparison = remainder < complement ? .less : (remainder > complement ? .greater : .equal)
+-        let negative = (dividend < 0) != (divisor < 0)
+-        let increment: Bool
+-        do {
+-            increment = try rounding.incrementsMagnitude(
+-                isNegative: negative,
+-                integralPartIsOdd: result.quotient % 2 != 0,
+-                fractionComparedToHalf: comparison
+-            )
+-        } catch { throw .inexact }
+-        guard increment else { return result }
+-        let roundedQuotient =
+-            negative
+-            ? result.quotient.subtractingReportingOverflow(1)
+-            : result.quotient.addingReportingOverflow(1)
+-        let residual =
+-            negative
+-            ? result.remainder.addingReportingOverflow(divisor)
+-            : result.remainder.subtractingReportingOverflow(divisor)
+-        guard !roundedQuotient.overflow, !residual.overflow else { throw .overflow }
+-        return (roundedQuotient.partialValue, residual.partialValue)
+-    }
+-}
+diff --git a/Sources/Division/Division.swift b/Sources/Division/Division.swift
+index 005e6aa..3df5d9f 100644
+--- a/Sources/Division/Division.swift
++++ b/Sources/Division/Division.swift
+@@ -1,6 +1,7 @@
+ public import Addition
+ public import Polarity
+ public import Subtraction
++public import Rounding
+ 
+ public enum Division {}
+ 
+@@ -76,3 +77,38 @@ extension Division.Signed {
+         } catch { throw .overflow }
+     }
+ }
++
++extension Division {
++
++    public static func rounded<Value: FixedWidthInteger & SignedInteger>(
++        _ dividend: Value,
++        by divisor: Value,
++        rounding: Rounding = .down
++    ) throws(Error) -> (quotient: Value, remainder: Value) {
++        let result = try quotient(dividend, by: divisor)
++        let remainder = result.remainder.magnitude
++        guard remainder != 0 else { return result }
++        let complement = divisor.magnitude - remainder
++        let comparison: Order.Comparison = remainder < complement ? .less : (remainder > complement ? .greater : .equal)
++        let negative = (dividend < 0) != (divisor < 0)
++        let increment: Bool
++        do {
++            increment = try rounding.incrementsMagnitude(
++                isNegative: negative,
++                integralPartIsOdd: result.quotient % 2 != 0,
++                fractionComparedToHalf: comparison
++            )
++        } catch { throw .inexact }
++        guard increment else { return result }
++        let roundedQuotient =
++            negative
++            ? result.quotient.subtractingReportingOverflow(1)
++            : result.quotient.addingReportingOverflow(1)
++        let residual =
++            negative
++            ? result.remainder.addingReportingOverflow(divisor)
++            : result.remainder.subtractingReportingOverflow(divisor)
++        guard !roundedQuotient.overflow, !residual.overflow else { throw .overflow }
++        return (roundedQuotient.partialValue, residual.partialValue)
++    }
++}
+-- 
+2.43.0
+

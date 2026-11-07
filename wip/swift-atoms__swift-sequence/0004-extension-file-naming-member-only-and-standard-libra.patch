@@ -1,0 +1,609 @@
+From d0bc98b877154694ba03d1b2bc71e7f16ae040c9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:48 +0000
+Subject: [PATCH 4/4] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Sequence/Sequence.CompactMap.swift    |   7 -
+ .../Sequence/Sequence.Difference+core.swift   | 111 -------------
+ .../Sequence/Sequence.Difference+diff.swift   |  41 -----
+ ...Change+Swift.CustomStringConvertible.swift |  13 --
+ .../Sequence/Sequence.Difference.Change.swift |  11 ++
+ Sources/Sequence/Sequence.Difference.swift    | 151 ++++++++++++++++++
+ Sources/Sequence/Sequence.FlatMap.swift       |  11 --
+ Sources/Sequence/Sequence.swift               |  20 +++
+ Sources/Sequence/Sequenceable+Contains.swift  |  15 --
+ Sources/Sequence/Sequenceable+Hint.swift      |  15 --
+ Sources/Sequence/Sequenceable+Reduce.swift    |  15 --
+ Sources/Sequence/Sequenceable+Satisfies.swift |  15 --
+ Sources/Sequence/Sequenceable.swift           |  57 +++++++
+ 13 files changed, 239 insertions(+), 243 deletions(-)
+ delete mode 100644 Sources/Sequence/Sequence.CompactMap.swift
+ delete mode 100644 Sources/Sequence/Sequence.Difference+core.swift
+ delete mode 100644 Sources/Sequence/Sequence.Difference+diff.swift
+ delete mode 100644 Sources/Sequence/Sequence.Difference.Change+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Sequence/Sequence.FlatMap.swift
+ delete mode 100644 Sources/Sequence/Sequenceable+Contains.swift
+ delete mode 100644 Sources/Sequence/Sequenceable+Hint.swift
+ delete mode 100644 Sources/Sequence/Sequenceable+Reduce.swift
+ delete mode 100644 Sources/Sequence/Sequenceable+Satisfies.swift
+
+diff --git a/Sources/Sequence/Sequence.CompactMap.swift b/Sources/Sequence/Sequence.CompactMap.swift
+deleted file mode 100644
+index c0bad42..0000000
+--- a/Sources/Sequence/Sequence.CompactMap.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Sequence {
+-
+-    public typealias CompactMap<
+-        Base: Sequenceable & ~Copyable & ~Escapable,
+-        Output
+-    > = Sequence.Map<Base>.Compact<Output> where Base.Element: Copyable
+-}
+diff --git a/Sources/Sequence/Sequence.Difference+core.swift b/Sources/Sequence/Sequence.Difference+core.swift
+deleted file mode 100644
+index cc85675..0000000
+--- a/Sources/Sequence/Sequence.Difference+core.swift
++++ /dev/null
+@@ -1,111 +0,0 @@
+-public import Cardinal
+-public import Ordinal
+-
+-extension Sequence.Difference {
+-
+-    @inlinable
+-    public static func diff(
+-        oldCount: Cardinal,
+-        newCount: Cardinal,
+-        equals: (Ordinal, Ordinal) -> Bool
+-    ) -> Steps {
+-
+-        let n = Int(bitPattern: oldCount)
+-        let m = Int(bitPattern: newCount)
+-
+-        if n == 0 {
+-            return Steps([Step](repeating: .second, count: m))
+-        }
+-        if m == 0 {
+-            return Steps([Step](repeating: .first, count: n))
+-        }
+-
+-        let max = n + m
+-        let size = 2 * max + 1
+-        let offset = max
+-
+-        var v = [Int](repeating: 0, count: size)
+-        v[1 + offset] = 0
+-
+-        var trace: [[Int]] = []
+-
+-        var d = 0
+-        while d <= max {
+-            trace.append(v)
+-
+-            for k in stride(from: -d, through: d, by: 2) {
+-                var x: Int
+-                if k == -d || (k != d && v[k - 1 + offset] < v[k + 1 + offset]) {
+-                    x = v[k + 1 + offset]
+-                } else {
+-                    x = v[k - 1 + offset] + 1
+-                }
+-
+-                var y = x - k
+-
+-                while x < n && y < m && equals(Ordinal(UInt(x)), Ordinal(UInt(y))) {
+-                    x += 1
+-                    y += 1
+-                }
+-
+-                v[k + offset] = x
+-
+-                if x >= n && y >= m {
+-                    return backtrack(trace: trace, n: n, m: m, offset: offset)
+-                }
+-            }
+-            d += 1
+-        }
+-
+-        return Steps([Step](repeating: .first, count: n) + [Step](repeating: .second, count: m))
+-    }
+-}
+-
+-extension Sequence.Difference {
+-
+-    @inlinable
+-    package static func backtrack(
+-        trace: [[Int]],
+-        n: Int,
+-        m: Int,
+-        offset: Int
+-    ) -> Steps {
+-        var x = n
+-        var y = m
+-        var steps: [Step] = []
+-
+-        (0..<trace.count).reversed().forEach { d in
+-            let v = trace[d]
+-            let k = x - y
+-
+-            let prevK: Int
+-            if k == -d || (k != d && v[k - 1 + offset] < v[k + 1 + offset]) {
+-                prevK = k + 1
+-            } else {
+-                prevK = k - 1
+-            }
+-
+-            let prevX = v[prevK + offset]
+-            let prevY = prevX - prevK
+-
+-            while x > prevX && y > prevY {
+-                x -= 1
+-                y -= 1
+-                steps.append(.both)
+-            }
+-
+-            if d > 0 {
+-                if x == prevX {
+-                    y -= 1
+-                    steps.append(.second)
+-                } else {
+-                    x -= 1
+-                    steps.append(.first)
+-                }
+-            }
+-        }
+-
+-        steps.reverse()
+-        return Steps(steps)
+-    }
+-}
+diff --git a/Sources/Sequence/Sequence.Difference+diff.swift b/Sources/Sequence/Sequence.Difference+diff.swift
+deleted file mode 100644
+index 419f443..0000000
+--- a/Sources/Sequence/Sequence.Difference+diff.swift
++++ /dev/null
+@@ -1,41 +0,0 @@
+-internal import Cardinal
+-internal import Ordinal
+-
+-extension Sequence.Difference {
+-
+-    public static func diff<Element: Equatable>(
+-        _ old: [Element],
+-        _ new: [Element]
+-    ) -> Changes<Element> {
+-        let steps = diff(
+-            oldCount: Cardinal(UInt(old.count)),
+-            newCount: Cardinal(UInt(new.count)),
+-            equals: { old[$0] == new[$1] }
+-        )
+-
+-        var changes: [Change<Element>] = []
+-        changes.reserveCapacity(steps._storage.count)
+-
+-        var oldPosition: Ordinal = .zero
+-        var newPosition: Ordinal = .zero
+-
+-        for step in steps._storage {
+-            switch step {
+-            case .first:
+-                changes.append(.first(old[oldPosition]))
+-                oldPosition = oldPosition.successor.saturating()
+-
+-            case .second:
+-                changes.append(.second(new[newPosition]))
+-                newPosition = newPosition.successor.saturating()
+-
+-            case .both:
+-                changes.append(.both(old[oldPosition]))
+-                oldPosition = oldPosition.successor.saturating()
+-                newPosition = newPosition.successor.saturating()
+-            }
+-        }
+-
+-        return Changes(changes)
+-    }
+-}
+diff --git a/Sources/Sequence/Sequence.Difference.Change+Swift.CustomStringConvertible.swift b/Sources/Sequence/Sequence.Difference.Change+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 68bae56..0000000
+--- a/Sources/Sequence/Sequence.Difference.Change+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,13 +0,0 @@
+-internal import Cardinal
+-import Ordinal
+-
+-extension Sequence.Difference.Change: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        switch self {
+-        case .first(let e): ".first(\(e))"
+-        case .second(let e): ".second(\(e))"
+-        case .both(let e): ".both(\(e))"
+-        }
+-    }
+-}
+diff --git a/Sources/Sequence/Sequence.Difference.Change.swift b/Sources/Sequence/Sequence.Difference.Change.swift
+index 4d6893b..1c2b1d6 100644
+--- a/Sources/Sequence/Sequence.Difference.Change.swift
++++ b/Sources/Sequence/Sequence.Difference.Change.swift
+@@ -65,3 +65,14 @@ extension Sequence.Difference.Change: Swift::Sendable where Element: Swift::Send
+ extension Sequence.Difference.Change: Swift::Equatable where Element: Swift::Equatable {}
+ 
+ extension Sequence.Difference.Change: Swift::Hashable where Element: Swift::Hashable {}
++
++extension Sequence.Difference.Change: Swift::CustomStringConvertible {
++
++    public var description: String {
++        switch self {
++        case .first(let e): ".first(\(e))"
++        case .second(let e): ".second(\(e))"
++        case .both(let e): ".both(\(e))"
++        }
++    }
++}
+diff --git a/Sources/Sequence/Sequence.Difference.swift b/Sources/Sequence/Sequence.Difference.swift
+index e33297d..51561a8 100644
+--- a/Sources/Sequence/Sequence.Difference.swift
++++ b/Sources/Sequence/Sequence.Difference.swift
+@@ -1,4 +1,155 @@
++public import Cardinal
++public import Ordinal
++
+ extension Sequence {
+ 
+     public enum Difference: Sendable {}
+ }
++
++extension Sequence.Difference {
++
++    @inlinable
++    public static func diff(
++        oldCount: Cardinal,
++        newCount: Cardinal,
++        equals: (Ordinal, Ordinal) -> Bool
++    ) -> Steps {
++
++        let n = Int(bitPattern: oldCount)
++        let m = Int(bitPattern: newCount)
++
++        if n == 0 {
++            return Steps([Step](repeating: .second, count: m))
++        }
++        if m == 0 {
++            return Steps([Step](repeating: .first, count: n))
++        }
++
++        let max = n + m
++        let size = 2 * max + 1
++        let offset = max
++
++        var v = [Int](repeating: 0, count: size)
++        v[1 + offset] = 0
++
++        var trace: [[Int]] = []
++
++        var d = 0
++        while d <= max {
++            trace.append(v)
++
++            for k in stride(from: -d, through: d, by: 2) {
++                var x: Int
++                if k == -d || (k != d && v[k - 1 + offset] < v[k + 1 + offset]) {
++                    x = v[k + 1 + offset]
++                } else {
++                    x = v[k - 1 + offset] + 1
++                }
++
++                var y = x - k
++
++                while x < n && y < m && equals(Ordinal(UInt(x)), Ordinal(UInt(y))) {
++                    x += 1
++                    y += 1
++                }
++
++                v[k + offset] = x
++
++                if x >= n && y >= m {
++                    return backtrack(trace: trace, n: n, m: m, offset: offset)
++                }
++            }
++            d += 1
++        }
++
++        return Steps([Step](repeating: .first, count: n) + [Step](repeating: .second, count: m))
++    }
++}
++
++extension Sequence.Difference {
++
++    @inlinable
++    package static func backtrack(
++        trace: [[Int]],
++        n: Int,
++        m: Int,
++        offset: Int
++    ) -> Steps {
++        var x = n
++        var y = m
++        var steps: [Step] = []
++
++        (0..<trace.count).reversed().forEach { d in
++            let v = trace[d]
++            let k = x - y
++
++            let prevK: Int
++            if k == -d || (k != d && v[k - 1 + offset] < v[k + 1 + offset]) {
++                prevK = k + 1
++            } else {
++                prevK = k - 1
++            }
++
++            let prevX = v[prevK + offset]
++            let prevY = prevX - prevK
++
++            while x > prevX && y > prevY {
++                x -= 1
++                y -= 1
++                steps.append(.both)
++            }
++
++            if d > 0 {
++                if x == prevX {
++                    y -= 1
++                    steps.append(.second)
++                } else {
++                    x -= 1
++                    steps.append(.first)
++                }
++            }
++        }
++
++        steps.reverse()
++        return Steps(steps)
++    }
++}
++
++extension Sequence.Difference {
++
++    public static func diff<Element: Equatable>(
++        _ old: [Element],
++        _ new: [Element]
++    ) -> Changes<Element> {
++        let steps = diff(
++            oldCount: Cardinal(UInt(old.count)),
++            newCount: Cardinal(UInt(new.count)),
++            equals: { old[$0] == new[$1] }
++        )
++
++        var changes: [Change<Element>] = []
++        changes.reserveCapacity(steps._storage.count)
++
++        var oldPosition: Ordinal = .zero
++        var newPosition: Ordinal = .zero
++
++        for step in steps._storage {
++            switch step {
++            case .first:
++                changes.append(.first(old[oldPosition]))
++                oldPosition = oldPosition.successor.saturating()
++
++            case .second:
++                changes.append(.second(new[newPosition]))
++                newPosition = newPosition.successor.saturating()
++
++            case .both:
++                changes.append(.both(old[oldPosition]))
++                oldPosition = oldPosition.successor.saturating()
++                newPosition = newPosition.successor.saturating()
++            }
++        }
++
++        return Changes(changes)
++    }
++}
+diff --git a/Sources/Sequence/Sequence.FlatMap.swift b/Sources/Sequence/Sequence.FlatMap.swift
+deleted file mode 100644
+index 28d0003..0000000
+--- a/Sources/Sequence/Sequence.FlatMap.swift
++++ /dev/null
+@@ -1,11 +0,0 @@
+-extension Sequence {
+-
+-    public typealias FlatMap<
+-        Base: Sequenceable & ~Copyable & ~Escapable,
+-        InnerSequence: Sequenceable<InnerSequence.Element>
+-    > = Sequence.Map<Base>.Flat<InnerSequence>
+-    where
+-        Base.Element: Copyable,
+-        InnerSequence.Element: Copyable & Escapable,
+-        InnerSequence.Iterator: Escapable
+-}
+diff --git a/Sources/Sequence/Sequence.swift b/Sources/Sequence/Sequence.swift
+index d54f2bd..21cacc0 100644
+--- a/Sources/Sequence/Sequence.swift
++++ b/Sources/Sequence/Sequence.swift
+@@ -1 +1,21 @@
+ public struct Sequence: Sendable {}
++
++extension Sequence {
++
++    public typealias CompactMap<
++        Base: Sequenceable & ~Copyable & ~Escapable,
++        Output
++    > = Sequence.Map<Base>.Compact<Output> where Base.Element: Copyable
++}
++
++extension Sequence {
++
++    public typealias FlatMap<
++        Base: Sequenceable & ~Copyable & ~Escapable,
++        InnerSequence: Sequenceable<InnerSequence.Element>
++    > = Sequence.Map<Base>.Flat<InnerSequence>
++    where
++        Base.Element: Copyable,
++        InnerSequence.Element: Copyable & Escapable,
++        InnerSequence.Iterator: Escapable
++}
+diff --git a/Sources/Sequence/Sequenceable+Contains.swift b/Sources/Sequence/Sequenceable+Contains.swift
+deleted file mode 100644
+index 19c594b..0000000
+--- a/Sources/Sequence/Sequenceable+Contains.swift
++++ /dev/null
+@@ -1,15 +0,0 @@
+-public import Property
+-
+-extension Sequenceable where Self: ~Copyable {
+-
+-    @inlinable
+-    public var contains: Property<Sequence.Contains, Self>.Inout {
+-        mutating _read {
+-            yield Property<Sequence.Contains, Self>.Inout(&self)
+-        }
+-        mutating _modify {
+-            var accessor = Property<Sequence.Contains, Self>.Inout(&self)
+-            yield &accessor
+-        }
+-    }
+-}
+diff --git a/Sources/Sequence/Sequenceable+Hint.swift b/Sources/Sequence/Sequenceable+Hint.swift
+deleted file mode 100644
+index 9bcd44e..0000000
+--- a/Sources/Sequence/Sequenceable+Hint.swift
++++ /dev/null
+@@ -1,15 +0,0 @@
+-public import Property
+-
+-extension Sequenceable where Self: ~Copyable {
+-
+-    @inlinable
+-    public var hint: Property<Sequence.Hint, Self>.Inout {
+-        mutating _read {
+-            yield Property<Sequence.Hint, Self>.Inout(&self)
+-        }
+-        mutating _modify {
+-            var accessor = Property<Sequence.Hint, Self>.Inout(&self)
+-            yield &accessor
+-        }
+-    }
+-}
+diff --git a/Sources/Sequence/Sequenceable+Reduce.swift b/Sources/Sequence/Sequenceable+Reduce.swift
+deleted file mode 100644
+index 5525721..0000000
+--- a/Sources/Sequence/Sequenceable+Reduce.swift
++++ /dev/null
+@@ -1,15 +0,0 @@
+-public import Property
+-
+-extension Sequenceable where Self: ~Copyable {
+-
+-    @inlinable
+-    public var reduce: Property<Sequence.Reduce, Self>.Inout {
+-        mutating _read {
+-            yield Property<Sequence.Reduce, Self>.Inout(&self)
+-        }
+-        mutating _modify {
+-            var accessor = Property<Sequence.Reduce, Self>.Inout(&self)
+-            yield &accessor
+-        }
+-    }
+-}
+diff --git a/Sources/Sequence/Sequenceable+Satisfies.swift b/Sources/Sequence/Sequenceable+Satisfies.swift
+deleted file mode 100644
+index 8a65ffb..0000000
+--- a/Sources/Sequence/Sequenceable+Satisfies.swift
++++ /dev/null
+@@ -1,15 +0,0 @@
+-public import Property
+-
+-extension Sequenceable where Self: ~Copyable {
+-
+-    @inlinable
+-    public var satisfies: Property<Sequence.Satisfies, Self>.Inout {
+-        mutating _read {
+-            yield Property<Sequence.Satisfies, Self>.Inout(&self)
+-        }
+-        mutating _modify {
+-            var accessor = Property<Sequence.Satisfies, Self>.Inout(&self)
+-            yield &accessor
+-        }
+-    }
+-}
+diff --git a/Sources/Sequence/Sequenceable.swift b/Sources/Sequence/Sequenceable.swift
+index 0c690f0..ad00dd8 100644
+--- a/Sources/Sequence/Sequenceable.swift
++++ b/Sources/Sequence/Sequenceable.swift
+@@ -1,4 +1,5 @@
+ public import Iterator
++public import Property
+ 
+ public protocol Sequenceable<Element>: ~Copyable, ~Escapable {
+ 
+@@ -10,3 +11,59 @@ public protocol Sequenceable<Element>: ~Copyable, ~Escapable {
+     @_lifetime(copy self)
+     consuming func makeIterator() -> Iterator
+ }
++
++extension Sequenceable where Self: ~Copyable {
++
++    @inlinable
++    public var contains: Property<Sequence.Contains, Self>.Inout {
++        mutating _read {
++            yield Property<Sequence.Contains, Self>.Inout(&self)
++        }
++        mutating _modify {
++            var accessor = Property<Sequence.Contains, Self>.Inout(&self)
++            yield &accessor
++        }
++    }
++}
++
++extension Sequenceable where Self: ~Copyable {
++
++    @inlinable
++    public var hint: Property<Sequence.Hint, Self>.Inout {
++        mutating _read {
++            yield Property<Sequence.Hint, Self>.Inout(&self)
++        }
++        mutating _modify {
++            var accessor = Property<Sequence.Hint, Self>.Inout(&self)
++            yield &accessor
++        }
++    }
++}
++
++extension Sequenceable where Self: ~Copyable {
++
++    @inlinable
++    public var reduce: Property<Sequence.Reduce, Self>.Inout {
++        mutating _read {
++            yield Property<Sequence.Reduce, Self>.Inout(&self)
++        }
++        mutating _modify {
++            var accessor = Property<Sequence.Reduce, Self>.Inout(&self)
++            yield &accessor
++        }
++    }
++}
++
++extension Sequenceable where Self: ~Copyable {
++
++    @inlinable
++    public var satisfies: Property<Sequence.Satisfies, Self>.Inout {
++        mutating _read {
++            yield Property<Sequence.Satisfies, Self>.Inout(&self)
++        }
++        mutating _modify {
++            var accessor = Property<Sequence.Satisfies, Self>.Inout(&self)
++            yield &accessor
++        }
++    }
++}
+-- 
+2.43.0
+

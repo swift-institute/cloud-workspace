@@ -1,0 +1,164 @@
+From b6552ee2e42da81d614027406a98c5c1e89f23a2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:57 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/MCP Server/MCP.Server+Respond.swift | 64 ---------------------
+ Sources/MCP Server/MCP.Server.swift         | 63 ++++++++++++++++++++
+ 2 files changed, 63 insertions(+), 64 deletions(-)
+ delete mode 100644 Sources/MCP Server/MCP.Server+Respond.swift
+
+diff --git a/Sources/MCP Server/MCP.Server+Respond.swift b/Sources/MCP Server/MCP.Server+Respond.swift
+deleted file mode 100644
+index 38e6303..0000000
+--- a/Sources/MCP Server/MCP.Server+Respond.swift	
++++ /dev/null
+@@ -1,64 +0,0 @@
+-import JSON
+-import JSON_RPC_Standard
+-public import Model_Context_Protocol
+-import RFC_8259
+-
+-extension MCP.Server {
+-    public func respond(to line: String) async -> String? {
+-        let message: RFC_8259.Value
+-        do throws(RFC_8259.Error) {
+-            message = try JSON.Decode.parse(line)
+-        } catch {
+-            return Self.line(
+-                JSON_RPC.Response(
+-                    id: .null,
+-                    result: .failure(JSON_RPC.Error(code: .parseError, message: "Parse error"))
+-                )
+-            )
+-        }
+-        if message.object != nil, message["method"] == nil { return nil }
+-        let request: JSON_RPC.Request
+-        do throws(JSON_RPC.Error) {
+-            request = try JSON_RPC.Request(message)
+-        } catch {
+-            return Self.line(JSON_RPC.Response(id: .null, result: .failure(error)))
+-        }
+-        guard let id = request.id else { return nil }
+-        let result: Swift::Result<RFC_8259.Value, JSON_RPC.Error>
+-        do throws(JSON_RPC.Error) {
+-            result = .success(try await answer(request))
+-        } catch {
+-            result = .failure(error)
+-        }
+-        return Self.line(JSON_RPC.Response(id: id, result: result))
+-    }
+-
+-    func answer(_ request: JSON_RPC.Request) async throws(JSON_RPC.Error) -> RFC_8259.Value {
+-        switch MCP.Method(rawValue: request.method) {
+-        case .initialize:
+-            let requested = try MCP.Initialize.Parameters(request.params).protocolVersion
+-            return MCP.Initialize.Result(
+-                protocolVersion: versions.contains(requested) ? requested : versions[0],
+-                capabilities: MCP.Capabilities(tools: MCP.Capabilities.Tools()),
+-                serverInfo: info,
+-                instructions: instructions
+-            ).value
+-        case .ping:
+-            return .object(RFC_8259.Object())
+-        case .toolsList:
+-            return MCP.Tool.List.Result(tools: tools.map(\.definition)).value
+-        case .toolsCall:
+-            let call = try MCP.Tool.Call(request.params)
+-            guard let tool = tools.first(where: { $0.definition.name == call.name }) else {
+-                throw JSON_RPC.Error(code: .invalidParams, message: "Unknown tool: \(call.name)")
+-            }
+-            return await tool.call(JSON(.object(call.arguments))).value
+-        default:
+-            throw JSON_RPC.Error(code: .methodNotFound, message: "Method not found")
+-        }
+-    }
+-
+-    static func line(_ response: JSON_RPC.Response) -> String {
+-        JSON(response.value).serialize()
+-    }
+-}
+diff --git a/Sources/MCP Server/MCP.Server.swift b/Sources/MCP Server/MCP.Server.swift
+index 5018dae..30503c5 100644
+--- a/Sources/MCP Server/MCP.Server.swift	
++++ b/Sources/MCP Server/MCP.Server.swift	
+@@ -1,4 +1,7 @@
+ public import Model_Context_Protocol
++import JSON
++import JSON_RPC_Standard
++import RFC_8259
+ 
+ extension MCP {
+     public struct Server: Sendable {
+@@ -37,3 +40,63 @@ extension MCP.Server {
+         )
+     }
+ }
++
++extension MCP.Server {
++    public func respond(to line: String) async -> String? {
++        let message: RFC_8259.Value
++        do throws(RFC_8259.Error) {
++            message = try JSON.Decode.parse(line)
++        } catch {
++            return Self.line(
++                JSON_RPC.Response(
++                    id: .null,
++                    result: .failure(JSON_RPC.Error(code: .parseError, message: "Parse error"))
++                )
++            )
++        }
++        if message.object != nil, message["method"] == nil { return nil }
++        let request: JSON_RPC.Request
++        do throws(JSON_RPC.Error) {
++            request = try JSON_RPC.Request(message)
++        } catch {
++            return Self.line(JSON_RPC.Response(id: .null, result: .failure(error)))
++        }
++        guard let id = request.id else { return nil }
++        let result: Swift::Result<RFC_8259.Value, JSON_RPC.Error>
++        do throws(JSON_RPC.Error) {
++            result = .success(try await answer(request))
++        } catch {
++            result = .failure(error)
++        }
++        return Self.line(JSON_RPC.Response(id: id, result: result))
++    }
++
++    func answer(_ request: JSON_RPC.Request) async throws(JSON_RPC.Error) -> RFC_8259.Value {
++        switch MCP.Method(rawValue: request.method) {
++        case .initialize:
++            let requested = try MCP.Initialize.Parameters(request.params).protocolVersion
++            return MCP.Initialize.Result(
++                protocolVersion: versions.contains(requested) ? requested : versions[0],
++                capabilities: MCP.Capabilities(tools: MCP.Capabilities.Tools()),
++                serverInfo: info,
++                instructions: instructions
++            ).value
++        case .ping:
++            return .object(RFC_8259.Object())
++        case .toolsList:
++            return MCP.Tool.List.Result(tools: tools.map(\.definition)).value
++        case .toolsCall:
++            let call = try MCP.Tool.Call(request.params)
++            guard let tool = tools.first(where: { $0.definition.name == call.name }) else {
++                throw JSON_RPC.Error(code: .invalidParams, message: "Unknown tool: \(call.name)")
++            }
++            return await tool.call(JSON(.object(call.arguments))).value
++        default:
++            throw JSON_RPC.Error(code: .methodNotFound, message: "Method not found")
++        }
++    }
++
++    static func line(_ response: JSON_RPC.Response) -> String {
++        JSON(response.value).serialize()
++    }
++}
+-- 
+2.43.0
+

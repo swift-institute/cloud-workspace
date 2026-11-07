@@ -1,0 +1,371 @@
+From 67061725a34d780f428444255a33f09d99ee1fc4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:50 +0000
+Subject: [PATCH 3/3] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Benchmark/Benchmark+Run.swift       | 111 -------------------
+ Sources/Benchmark/Benchmark.Probe+Zip.swift |  47 --------
+ Sources/Benchmark/Benchmark.Probe.swift     |  48 +++++++++
+ Sources/Benchmark/Benchmark.swift           | 112 ++++++++++++++++++++
+ 4 files changed, 160 insertions(+), 158 deletions(-)
+ delete mode 100644 Sources/Benchmark/Benchmark+Run.swift
+ delete mode 100644 Sources/Benchmark/Benchmark.Probe+Zip.swift
+
+diff --git a/Sources/Benchmark/Benchmark+Run.swift b/Sources/Benchmark/Benchmark+Run.swift
+deleted file mode 100644
+index 82b890a..0000000
+--- a/Sources/Benchmark/Benchmark+Run.swift
++++ /dev/null
+@@ -1,111 +0,0 @@
+-import Cardinal
+-
+-extension Benchmark {
+-
+-    public static func run<
+-        WorkloadState: Sendable,
+-        WorkloadFailure: Swift::Error,
+-        ProbeState: Sendable,
+-        Observation: Sendable,
+-        ProbeFailure: Swift::Error
+-    >(
+-        plan: Benchmark.Plan,
+-        workload: Benchmark.Workload<WorkloadState, WorkloadFailure>,
+-        probe: Benchmark.Probe<ProbeState, Observation, ProbeFailure>
+-    ) throws(Benchmark.Execution.Failure<WorkloadFailure, ProbeFailure>) -> Benchmark.Receipt<Observation> {
+-        var iterations: [Benchmark.Iteration] = []
+-        var observations: [Observation] = []
+-        let warmupCount = Int(clamping: plan.warmup)
+-        let measurementCount = Int(clamping: plan.measurements)
+-        let batchCount = Int(clamping: plan.batch)
+-        iterations.reserveCapacity(warmupCount + measurementCount)
+-        observations.reserveCapacity(measurementCount)
+-
+-        for index in 0..<warmupCount {
+-            let iteration = Benchmark.Iteration(
+-                phase: .warmup,
+-                index: Cardinal(UInt(index)),
+-                batch: plan.batch
+-            )
+-            iterations.append(iteration)
+-            var state: WorkloadState
+-            do throws(WorkloadFailure) { state = try workload.setup() } catch {
+-                throw .workload(error)
+-            }
+-
+-            do throws(WorkloadFailure) {
+-                for _ in 0..<batchCount { try workload.operation(&state) }
+-            } catch {
+-                do throws(WorkloadFailure) {
+-                    try workload.teardown(state)
+-                } catch {}
+-                throw .workload(error)
+-            }
+-
+-            do throws(WorkloadFailure) {
+-                try workload.teardown(state)
+-            } catch {
+-                throw .workload(error)
+-            }
+-        }
+-
+-        for index in 0..<measurementCount {
+-            let iteration = Benchmark.Iteration(
+-                phase: .measurement,
+-                index: Cardinal(UInt(index)),
+-                batch: plan.batch
+-            )
+-            iterations.append(iteration)
+-
+-            var state: WorkloadState
+-            do throws(WorkloadFailure) { state = try workload.setup() } catch {
+-                throw .workload(error)
+-            }
+-
+-            let probeState: ProbeState
+-            switch probe.start() {
+-            case .success(let value):
+-                probeState = value
+-            case .failure(let failure):
+-                do throws(WorkloadFailure) {
+-                    try workload.teardown(state)
+-                } catch {
+-                    throw .workload(error)
+-                }
+-                throw .probe(failure)
+-            }
+-
+-            do throws(WorkloadFailure) {
+-                for _ in 0..<batchCount { try workload.operation(&state) }
+-            } catch {
+-                probe.cancel(probeState)
+-                do throws(WorkloadFailure) {
+-                    try workload.teardown(state)
+-                } catch {}
+-                throw .workload(error)
+-            }
+-
+-            let observation: Observation
+-            switch probe.stop(probeState) {
+-            case .success(let value):
+-                observation = value
+-            case .failure(let failure):
+-                do throws(WorkloadFailure) {
+-                    try workload.teardown(state)
+-                } catch {
+-                    throw .workload(error)
+-                }
+-                throw .probe(failure)
+-            }
+-
+-            do throws(WorkloadFailure) {
+-                try workload.teardown(state)
+-            } catch {
+-                throw .workload(error)
+-            }
+-            observations.append(observation)
+-        }
+-
+-        return .init(measurement: .init(observations), iterations: iterations)
+-    }
+-}
+diff --git a/Sources/Benchmark/Benchmark.Probe+Zip.swift b/Sources/Benchmark/Benchmark.Probe+Zip.swift
+deleted file mode 100644
+index af35b69..0000000
+--- a/Sources/Benchmark/Benchmark.Probe+Zip.swift
++++ /dev/null
+@@ -1,47 +0,0 @@
+-extension Benchmark.Probe {
+-
+-    public func zip<OtherState: Sendable, OtherObservation: Sendable, OtherFailure: Swift::Error>(
+-        _ other: Benchmark.Probe<OtherState, OtherObservation, OtherFailure>
+-    )
+-        -> Benchmark.Probe<
+-            (State, OtherState),
+-            (Observation, OtherObservation),
+-            Benchmark.Failure<Failure, OtherFailure>
+-        >
+-    {
+-        .init(
+-            start: {
+-                switch self.start() {
+-                case .failure(let failure):
+-                    return .failure(.first(failure))
+-                case .success(let first):
+-                    switch other.start() {
+-                    case .failure(let failure):
+-                        self.cancel(first)
+-                        return .failure(.second(failure))
+-                    case .success(let second):
+-                        return .success((first, second))
+-                    }
+-                }
+-            },
+-            stop: { state in
+-                switch other.stop(state.1) {
+-                case .failure(let failure):
+-                    self.cancel(state.0)
+-                    return .failure(.second(failure))
+-                case .success(let second):
+-                    switch self.stop(state.0) {
+-                    case .failure(let failure):
+-                        return .failure(.first(failure))
+-                    case .success(let first):
+-                        return .success((first, second))
+-                    }
+-                }
+-            },
+-            cancel: { state in
+-                other.cancel(state.1)
+-                self.cancel(state.0)
+-            }
+-        )
+-    }
+-}
+diff --git a/Sources/Benchmark/Benchmark.Probe.swift b/Sources/Benchmark/Benchmark.Probe.swift
+index 2eb9e85..584e38c 100644
+--- a/Sources/Benchmark/Benchmark.Probe.swift
++++ b/Sources/Benchmark/Benchmark.Probe.swift
+@@ -17,3 +17,51 @@ extension Benchmark {
+ 
+     }
+ }
++
++extension Benchmark.Probe {
++
++    public func zip<OtherState: Sendable, OtherObservation: Sendable, OtherFailure: Swift::Error>(
++        _ other: Benchmark.Probe<OtherState, OtherObservation, OtherFailure>
++    )
++        -> Benchmark.Probe<
++            (State, OtherState),
++            (Observation, OtherObservation),
++            Benchmark.Failure<Failure, OtherFailure>
++        >
++    {
++        .init(
++            start: {
++                switch self.start() {
++                case .failure(let failure):
++                    return .failure(.first(failure))
++                case .success(let first):
++                    switch other.start() {
++                    case .failure(let failure):
++                        self.cancel(first)
++                        return .failure(.second(failure))
++                    case .success(let second):
++                        return .success((first, second))
++                    }
++                }
++            },
++            stop: { state in
++                switch other.stop(state.1) {
++                case .failure(let failure):
++                    self.cancel(state.0)
++                    return .failure(.second(failure))
++                case .success(let second):
++                    switch self.stop(state.0) {
++                    case .failure(let failure):
++                        return .failure(.first(failure))
++                    case .success(let first):
++                        return .success((first, second))
++                    }
++                }
++            },
++            cancel: { state in
++                other.cancel(state.1)
++                self.cancel(state.0)
++            }
++        )
++    }
++}
+diff --git a/Sources/Benchmark/Benchmark.swift b/Sources/Benchmark/Benchmark.swift
+index c6bbcf0..602146f 100644
+--- a/Sources/Benchmark/Benchmark.swift
++++ b/Sources/Benchmark/Benchmark.swift
+@@ -1,3 +1,5 @@
++import Cardinal
++
+ public enum Benchmark {}
+ 
+ extension Benchmark {
+@@ -7,3 +9,113 @@ extension Benchmark {
+         _fixLifetime(value)
+     }
+ }
++
++extension Benchmark {
++
++    public static func run<
++        WorkloadState: Sendable,
++        WorkloadFailure: Swift::Error,
++        ProbeState: Sendable,
++        Observation: Sendable,
++        ProbeFailure: Swift::Error
++    >(
++        plan: Benchmark.Plan,
++        workload: Benchmark.Workload<WorkloadState, WorkloadFailure>,
++        probe: Benchmark.Probe<ProbeState, Observation, ProbeFailure>
++    ) throws(Benchmark.Execution.Failure<WorkloadFailure, ProbeFailure>) -> Benchmark.Receipt<Observation> {
++        var iterations: [Benchmark.Iteration] = []
++        var observations: [Observation] = []
++        let warmupCount = Int(clamping: plan.warmup)
++        let measurementCount = Int(clamping: plan.measurements)
++        let batchCount = Int(clamping: plan.batch)
++        iterations.reserveCapacity(warmupCount + measurementCount)
++        observations.reserveCapacity(measurementCount)
++
++        for index in 0..<warmupCount {
++            let iteration = Benchmark.Iteration(
++                phase: .warmup,
++                index: Cardinal(UInt(index)),
++                batch: plan.batch
++            )
++            iterations.append(iteration)
++            var state: WorkloadState
++            do throws(WorkloadFailure) { state = try workload.setup() } catch {
++                throw .workload(error)
++            }
++
++            do throws(WorkloadFailure) {
++                for _ in 0..<batchCount { try workload.operation(&state) }
++            } catch {
++                do throws(WorkloadFailure) {
++                    try workload.teardown(state)
++                } catch {}
++                throw .workload(error)
++            }
++
++            do throws(WorkloadFailure) {
++                try workload.teardown(state)
++            } catch {
++                throw .workload(error)
++            }
++        }
++
++        for index in 0..<measurementCount {
++            let iteration = Benchmark.Iteration(
++                phase: .measurement,
++                index: Cardinal(UInt(index)),
++                batch: plan.batch
++            )
++            iterations.append(iteration)
++
++            var state: WorkloadState
++            do throws(WorkloadFailure) { state = try workload.setup() } catch {
++                throw .workload(error)
++            }
++
++            let probeState: ProbeState
++            switch probe.start() {
++            case .success(let value):
++                probeState = value
++            case .failure(let failure):
++                do throws(WorkloadFailure) {
++                    try workload.teardown(state)
++                } catch {
++                    throw .workload(error)
++                }
++                throw .probe(failure)
++            }
++
++            do throws(WorkloadFailure) {
++                for _ in 0..<batchCount { try workload.operation(&state) }
++            } catch {
++                probe.cancel(probeState)
++                do throws(WorkloadFailure) {
++                    try workload.teardown(state)
++                } catch {}
++                throw .workload(error)
++            }
++
++            let observation: Observation
++            switch probe.stop(probeState) {
++            case .success(let value):
++                observation = value
++            case .failure(let failure):
++                do throws(WorkloadFailure) {
++                    try workload.teardown(state)
++                } catch {
++                    throw .workload(error)
++                }
++                throw .probe(failure)
++            }
++
++            do throws(WorkloadFailure) {
++                try workload.teardown(state)
++            } catch {
++                throw .workload(error)
++            }
++            observations.append(observation)
++        }
++
++        return .init(measurement: .init(observations), iterations: iterations)
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,520 @@
+From 7353f8b04498596d3ace6229b4adcac46772b4ab Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:51 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Tensor/Tensor.Broadcast+Align.swift   | 38 ---------
+ .../Tensor/Tensor.Broadcast+Position.swift    | 24 ------
+ Sources/Tensor/Tensor.Broadcast+Strides.swift | 20 -----
+ Sources/Tensor/Tensor.Broadcast.swift         | 81 +++++++++++++++++++
+ Sources/Tensor/Tensor.Index+Linearize.swift   | 48 -----------
+ Sources/Tensor/Tensor.Index.Position.swift    | 47 +++++++++++
+ Sources/Tensor/Tensor.Shape+Product.swift     | 18 -----
+ Sources/Tensor/Tensor.Shape.swift             | 17 ++++
+ Sources/Tensor/Tensor.Strides+Order.swift     | 38 ---------
+ Sources/Tensor/Tensor.Strides.swift           | 37 +++++++++
+ Sources/Tensor/Tensor.Value+Init.swift        | 12 ---
+ Sources/Tensor/Tensor.Value.swift             | 13 +++
+ 12 files changed, 195 insertions(+), 198 deletions(-)
+ delete mode 100644 Sources/Tensor/Tensor.Broadcast+Align.swift
+ delete mode 100644 Sources/Tensor/Tensor.Broadcast+Position.swift
+ delete mode 100644 Sources/Tensor/Tensor.Broadcast+Strides.swift
+ delete mode 100644 Sources/Tensor/Tensor.Index+Linearize.swift
+ delete mode 100644 Sources/Tensor/Tensor.Shape+Product.swift
+ delete mode 100644 Sources/Tensor/Tensor.Strides+Order.swift
+ delete mode 100644 Sources/Tensor/Tensor.Value+Init.swift
+
+diff --git a/Sources/Tensor/Tensor.Broadcast+Align.swift b/Sources/Tensor/Tensor.Broadcast+Align.swift
+deleted file mode 100644
+index 588e723..0000000
+--- a/Sources/Tensor/Tensor.Broadcast+Align.swift
++++ /dev/null
+@@ -1,38 +0,0 @@
+-public import Cardinal
+-
+-extension Tensor.Broadcast {
+-
+-    @inlinable
+-    public static func align<let Rank: Int>(
+-        _ lhs: Tensor.Shape<Rank>,
+-        _ rhs: Tensor.Shape<Rank>
+-    ) throws(Error) -> Tensor.Shape<Rank> {
+-        var dims = InlineArray<Rank, Cardinal>(repeating: .zero)
+-
+-        for axis in 0..<Rank {
+-            let a = lhs.dims[axis]
+-            let b = rhs.dims[axis]
+-            if a == b {
+-                dims[axis] = a
+-            } else if a == .one {
+-                dims[axis] = b
+-            } else if b == .one {
+-                dims[axis] = a
+-            } else {
+-
+-                let axisCardinal: Cardinal
+-                do throws(Cardinal.Error) {
+-                    axisCardinal = try Cardinal(axis)
+-                } catch {
+-                    preconditionFailure("axis ≥ 0 by construction: \(error)")
+-                }
+-                throw .incompatibleShapes(
+-                    axis: axisCardinal,
+-                    lhs: a,
+-                    rhs: b
+-                )
+-            }
+-        }
+-        return Tensor.Shape<Rank>(dims)
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Broadcast+Position.swift b/Sources/Tensor/Tensor.Broadcast+Position.swift
+deleted file mode 100644
+index 725fc13..0000000
+--- a/Sources/Tensor/Tensor.Broadcast+Position.swift
++++ /dev/null
+@@ -1,24 +0,0 @@
+-public import Cardinal
+-public import Ordinal
+-
+-extension Tensor.Broadcast {
+-
+-    @inlinable
+-    public static func position<let Rank: Int>(
+-        ofLinearIndex linearIndex: Int,
+-        in shape: Tensor.Shape<Rank>
+-    ) -> Tensor.Index.Position<Rank> {
+-        precondition(linearIndex >= 0)
+-        var positions = InlineArray<Rank, Ordinal>(repeating: .zero)
+-        var remaining = linearIndex
+-
+-        stride(from: Rank - 1, through: 0, by: -1).forEach { axis in
+-            guard let dim = Int(exactly: shape.dims[axis].rawValue) else {
+-                preconditionFailure("Tensor extent exceeds Int.max")
+-            }
+-            positions[axis] = Ordinal(UInt(remaining % dim))
+-            remaining /= dim
+-        }
+-        return Tensor.Index.Position<Rank>(positions)
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Broadcast+Strides.swift b/Sources/Tensor/Tensor.Broadcast+Strides.swift
+deleted file mode 100644
+index da8e6fe..0000000
+--- a/Sources/Tensor/Tensor.Broadcast+Strides.swift
++++ /dev/null
+@@ -1,20 +0,0 @@
+-public import Cardinal
+-public import Difference
+-
+-extension Tensor.Broadcast {
+-
+-    @inlinable
+-    public static func strides<let Rank: Int>(
+-        of shape: Tensor.Shape<Rank>,
+-        aligned: Tensor.Shape<Rank>
+-    ) -> Tensor.Strides<Rank> {
+-        var strides = Tensor.Strides<Rank>(rowMajor: shape)
+-
+-        (0..<Rank).forEach { axis in
+-            if shape.dims[axis] == .one && aligned.dims[axis] != .one {
+-                strides.values[axis] = .zero
+-            }
+-        }
+-        return strides
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Broadcast.swift b/Sources/Tensor/Tensor.Broadcast.swift
+index 661a3ab..8872996 100644
+--- a/Sources/Tensor/Tensor.Broadcast.swift
++++ b/Sources/Tensor/Tensor.Broadcast.swift
+@@ -1,4 +1,85 @@
++public import Cardinal
++public import Ordinal
++public import Difference
++
+ extension Tensor {
+ 
+     public enum Broadcast {}
+ }
++
++extension Tensor.Broadcast {
++
++    @inlinable
++    public static func align<let Rank: Int>(
++        _ lhs: Tensor.Shape<Rank>,
++        _ rhs: Tensor.Shape<Rank>
++    ) throws(Error) -> Tensor.Shape<Rank> {
++        var dims = InlineArray<Rank, Cardinal>(repeating: .zero)
++
++        for axis in 0..<Rank {
++            let a = lhs.dims[axis]
++            let b = rhs.dims[axis]
++            if a == b {
++                dims[axis] = a
++            } else if a == .one {
++                dims[axis] = b
++            } else if b == .one {
++                dims[axis] = a
++            } else {
++
++                let axisCardinal: Cardinal
++                do throws(Cardinal.Error) {
++                    axisCardinal = try Cardinal(axis)
++                } catch {
++                    preconditionFailure("axis ≥ 0 by construction: \(error)")
++                }
++                throw .incompatibleShapes(
++                    axis: axisCardinal,
++                    lhs: a,
++                    rhs: b
++                )
++            }
++        }
++        return Tensor.Shape<Rank>(dims)
++    }
++}
++
++extension Tensor.Broadcast {
++
++    @inlinable
++    public static func position<let Rank: Int>(
++        ofLinearIndex linearIndex: Int,
++        in shape: Tensor.Shape<Rank>
++    ) -> Tensor.Index.Position<Rank> {
++        precondition(linearIndex >= 0)
++        var positions = InlineArray<Rank, Ordinal>(repeating: .zero)
++        var remaining = linearIndex
++
++        stride(from: Rank - 1, through: 0, by: -1).forEach { axis in
++            guard let dim = Int(exactly: shape.dims[axis].rawValue) else {
++                preconditionFailure("Tensor extent exceeds Int.max")
++            }
++            positions[axis] = Ordinal(UInt(remaining % dim))
++            remaining /= dim
++        }
++        return Tensor.Index.Position<Rank>(positions)
++    }
++}
++
++extension Tensor.Broadcast {
++
++    @inlinable
++    public static func strides<let Rank: Int>(
++        of shape: Tensor.Shape<Rank>,
++        aligned: Tensor.Shape<Rank>
++    ) -> Tensor.Strides<Rank> {
++        var strides = Tensor.Strides<Rank>(rowMajor: shape)
++
++        (0..<Rank).forEach { axis in
++            if shape.dims[axis] == .one && aligned.dims[axis] != .one {
++                strides.values[axis] = .zero
++            }
++        }
++        return strides
++    }
++}
+diff --git a/Sources/Tensor/Tensor.Index+Linearize.swift b/Sources/Tensor/Tensor.Index+Linearize.swift
+deleted file mode 100644
+index 7c543fa..0000000
+--- a/Sources/Tensor/Tensor.Index+Linearize.swift
++++ /dev/null
+@@ -1,48 +0,0 @@
+-public import Cardinal
+-public import Difference
+-public import Ordinal
+-public import Polarity
+-
+-extension Tensor.Index.Position {
+-
+-    @inlinable
+-    public func linearize(strides: Tensor.Strides<Rank>) -> Difference {
+-        var total = Difference.zero
+-        (0..<Rank).forEach { k in
+-            let stride = strides.values[k]
+-            let (magnitude, overflow) = positions[k].rawValue.multipliedReportingOverflow(
+-                by: stride.magnitude.value.rawValue
+-            )
+-            precondition(!overflow, "Tensor linear offset overflow")
+-            let component =
+-                stride.polarity == .negative
+-                ? Difference.negative(Difference.Magnitude(Cardinal(magnitude)))
+-                : Difference.positive(Difference.Magnitude(Cardinal(magnitude)))
+-            total += component
+-        }
+-        return total
+-    }
+-
+-    @inlinable
+-    public func validate(against shape: Tensor.Shape<Rank>) throws(Tensor.Index.Error) {
+-
+-        for k in 0..<Rank {
+-            let position = positions[k]
+-            let bound = shape.dims[k]
+-            if position >= bound {
+-
+-                let axisCardinal: Cardinal
+-                do throws(Cardinal.Error) {
+-                    axisCardinal = try Cardinal(k)
+-                } catch {
+-                    preconditionFailure("k ranges over 0..<Rank, always non-negative: \(error)")
+-                }
+-                throw .outOfBounds(
+-                    axis: axisCardinal,
+-                    position: position,
+-                    bound: bound
+-                )
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Index.Position.swift b/Sources/Tensor/Tensor.Index.Position.swift
+index 895c3af..8cef96f 100644
+--- a/Sources/Tensor/Tensor.Index.Position.swift
++++ b/Sources/Tensor/Tensor.Index.Position.swift
+@@ -1,4 +1,7 @@
+ public import Ordinal
++public import Cardinal
++public import Difference
++public import Polarity
+ 
+ extension Tensor.Index {
+ 
+@@ -12,3 +15,47 @@ extension Tensor.Index {
+         }
+     }
+ }
++
++extension Tensor.Index.Position {
++
++    @inlinable
++    public func linearize(strides: Tensor.Strides<Rank>) -> Difference {
++        var total = Difference.zero
++        (0..<Rank).forEach { k in
++            let stride = strides.values[k]
++            let (magnitude, overflow) = positions[k].rawValue.multipliedReportingOverflow(
++                by: stride.magnitude.value.rawValue
++            )
++            precondition(!overflow, "Tensor linear offset overflow")
++            let component =
++                stride.polarity == .negative
++                ? Difference.negative(Difference.Magnitude(Cardinal(magnitude)))
++                : Difference.positive(Difference.Magnitude(Cardinal(magnitude)))
++            total += component
++        }
++        return total
++    }
++
++    @inlinable
++    public func validate(against shape: Tensor.Shape<Rank>) throws(Tensor.Index.Error) {
++
++        for k in 0..<Rank {
++            let position = positions[k]
++            let bound = shape.dims[k]
++            if position >= bound {
++
++                let axisCardinal: Cardinal
++                do throws(Cardinal.Error) {
++                    axisCardinal = try Cardinal(k)
++                } catch {
++                    preconditionFailure("k ranges over 0..<Rank, always non-negative: \(error)")
++                }
++                throw .outOfBounds(
++                    axis: axisCardinal,
++                    position: position,
++                    bound: bound
++                )
++            }
++        }
++    }
++}
+diff --git a/Sources/Tensor/Tensor.Shape+Product.swift b/Sources/Tensor/Tensor.Shape+Product.swift
+deleted file mode 100644
+index eefb41c..0000000
+--- a/Sources/Tensor/Tensor.Shape+Product.swift
++++ /dev/null
+@@ -1,18 +0,0 @@
+-public import Cardinal
+-
+-extension Tensor.Shape {
+-
+-    @inlinable
+-    public var count: Cardinal {
+-        var total: UInt = 1
+-
+-        (0..<Rank).forEach { axis in
+-            let (product, overflow) = total.multipliedReportingOverflow(
+-                by: dims[axis].rawValue
+-            )
+-            precondition(!overflow, "Tensor shape element count overflow")
+-            total = product
+-        }
+-        return Cardinal(total)
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Shape.swift b/Sources/Tensor/Tensor.Shape.swift
+index 1e92722..2a89975 100644
+--- a/Sources/Tensor/Tensor.Shape.swift
++++ b/Sources/Tensor/Tensor.Shape.swift
+@@ -12,3 +12,20 @@ extension Tensor {
+         }
+     }
+ }
++
++extension Tensor.Shape {
++
++    @inlinable
++    public var count: Cardinal {
++        var total: UInt = 1
++
++        (0..<Rank).forEach { axis in
++            let (product, overflow) = total.multipliedReportingOverflow(
++                by: dims[axis].rawValue
++            )
++            precondition(!overflow, "Tensor shape element count overflow")
++            total = product
++        }
++        return Cardinal(total)
++    }
++}
+diff --git a/Sources/Tensor/Tensor.Strides+Order.swift b/Sources/Tensor/Tensor.Strides+Order.swift
+deleted file mode 100644
+index f7c7dc6..0000000
+--- a/Sources/Tensor/Tensor.Strides+Order.swift
++++ /dev/null
+@@ -1,38 +0,0 @@
+-public import Cardinal
+-public import Difference
+-
+-extension Tensor.Strides {
+-
+-    @inlinable
+-    public init(rowMajor shape: Tensor.Shape<Rank>) {
+-        var values = InlineArray<Rank, Difference>(repeating: .zero)
+-        if Rank == 0 {
+-            self.init(values)
+-            return
+-        }
+-        var running: UInt = 1
+-
+-        stride(from: Rank - 1, through: 0, by: -1).forEach { k in
+-            values[k] = .positive(Difference.Magnitude(Cardinal(running)))
+-
+-            running = running &* shape.dims[k].rawValue
+-        }
+-        self.init(values)
+-    }
+-
+-    @inlinable
+-    public init(columnMajor shape: Tensor.Shape<Rank>) {
+-        var values = InlineArray<Rank, Difference>(repeating: .zero)
+-        if Rank == 0 {
+-            self.init(values)
+-            return
+-        }
+-        var running: UInt = 1
+-        (0..<Rank).forEach { k in
+-            values[k] = .positive(Difference.Magnitude(Cardinal(running)))
+-
+-            running = running &* shape.dims[k].rawValue
+-        }
+-        self.init(values)
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Strides.swift b/Sources/Tensor/Tensor.Strides.swift
+index 2aaae42..7d430fc 100644
+--- a/Sources/Tensor/Tensor.Strides.swift
++++ b/Sources/Tensor/Tensor.Strides.swift
+@@ -1,4 +1,5 @@
+ public import Difference
++public import Cardinal
+ 
+ extension Tensor {
+ 
+@@ -12,3 +13,39 @@ extension Tensor {
+         }
+     }
+ }
++
++extension Tensor.Strides {
++
++    @inlinable
++    public init(rowMajor shape: Tensor.Shape<Rank>) {
++        var values = InlineArray<Rank, Difference>(repeating: .zero)
++        if Rank == 0 {
++            self.init(values)
++            return
++        }
++        var running: UInt = 1
++
++        stride(from: Rank - 1, through: 0, by: -1).forEach { k in
++            values[k] = .positive(Difference.Magnitude(Cardinal(running)))
++
++            running = running &* shape.dims[k].rawValue
++        }
++        self.init(values)
++    }
++
++    @inlinable
++    public init(columnMajor shape: Tensor.Shape<Rank>) {
++        var values = InlineArray<Rank, Difference>(repeating: .zero)
++        if Rank == 0 {
++            self.init(values)
++            return
++        }
++        var running: UInt = 1
++        (0..<Rank).forEach { k in
++            values[k] = .positive(Difference.Magnitude(Cardinal(running)))
++
++            running = running &* shape.dims[k].rawValue
++        }
++        self.init(values)
++    }
++}
+diff --git a/Sources/Tensor/Tensor.Value+Init.swift b/Sources/Tensor/Tensor.Value+Init.swift
+deleted file mode 100644
+index da815fb..0000000
+--- a/Sources/Tensor/Tensor.Value+Init.swift
++++ /dev/null
+@@ -1,12 +0,0 @@
+-extension Tensor.Value {
+-
+-    @inlinable
+-    public var shape: Tensor.Shape<Rank> {
+-        _shape
+-    }
+-
+-    @inlinable
+-    public var strides: Tensor.Strides<Rank> {
+-        _strides
+-    }
+-}
+diff --git a/Sources/Tensor/Tensor.Value.swift b/Sources/Tensor/Tensor.Value.swift
+index a50ecea..4821a80 100644
+--- a/Sources/Tensor/Tensor.Value.swift
++++ b/Sources/Tensor/Tensor.Value.swift
+@@ -38,3 +38,16 @@ extension Tensor {
+         }
+     }
+ }
++
++extension Tensor.Value {
++
++    @inlinable
++    public var shape: Tensor.Shape<Rank> {
++        _shape
++    }
++
++    @inlinable
++    public var strides: Tensor.Strides<Rank> {
++        _strides
++    }
++}
+-- 
+2.43.0
+

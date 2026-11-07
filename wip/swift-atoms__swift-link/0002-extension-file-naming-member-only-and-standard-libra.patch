@@ -1,0 +1,486 @@
+From 9512bc7ca3c8e2660f05b3e81613e791b8cd3bc3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:44 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Link/Link+Topology.swift | 219 ------------------------------
+ Sources/Link/Link.Node.swift     |   4 -
+ Sources/Link/Link.swift          | 225 +++++++++++++++++++++++++++++++
+ 3 files changed, 225 insertions(+), 223 deletions(-)
+ delete mode 100644 Sources/Link/Link+Topology.swift
+ delete mode 100644 Sources/Link/Link.Node.swift
+
+diff --git a/Sources/Link/Link+Topology.swift b/Sources/Link/Link+Topology.swift
+deleted file mode 100644
+index 0ecc3d8..0000000
+--- a/Sources/Link/Link+Topology.swift
++++ /dev/null
+@@ -1,219 +0,0 @@
+-public import Cardinal
+-public import Index
+-import Indexed
+-public import Ordinal
+-public import Tagged
+-
+-extension Link {
+-
+-    @inlinable
+-    public static func append<Tag: ~Copyable & ~Escapable>(
+-        _ index: Index<Tag>,
+-        header: inout Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
+-    ) {
+-        precondition(N >= 1, "Link topology requires at least one link slot")
+-        let sentinel = header.sentinel
+-
+-        if header.tail != sentinel {
+-            setLink(header.tail, 0, index)
+-            if N >= 2 {
+-                setLink(index, 1, header.tail)
+-            }
+-        } else {
+-            header.head = index
+-        }
+-
+-        header.tail = index
+-        setLink(index, 0, sentinel)
+-        header.count += .one
+-    }
+-
+-    @inlinable
+-    public static func prepend<Tag: ~Copyable & ~Escapable>(
+-        _ index: Index<Tag>,
+-        header: inout Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
+-    ) {
+-        precondition(N >= 1, "Link topology requires at least one link slot")
+-        let sentinel = header.sentinel
+-
+-        if header.head != sentinel {
+-            setLink(index, 0, header.head)
+-            if N >= 2 {
+-                setLink(header.head, 1, index)
+-            }
+-        } else {
+-            header.tail = index
+-            setLink(index, 0, sentinel)
+-        }
+-
+-        if N >= 2 {
+-            setLink(index, 1, sentinel)
+-        }
+-
+-        header.head = index
+-        header.count += .one
+-    }
+-
+-    @inlinable
+-    public static func unlink<Tag: ~Copyable & ~Escapable>(
+-        _ index: Index<Tag>,
+-        header: inout Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
+-    ) {
+-        precondition(N >= 2, "Arbitrary unlink requires at least two link slots")
+-        let sentinel = header.sentinel
+-        let prevIndex = getLink(index, 1)
+-        let nextIndex = getLink(index, 0)
+-
+-        if prevIndex != sentinel {
+-            setLink(prevIndex, 0, nextIndex)
+-        } else {
+-            header.head = nextIndex
+-        }
+-
+-        if nextIndex != sentinel {
+-            setLink(nextIndex, 1, prevIndex)
+-        } else {
+-            header.tail = prevIndex
+-        }
+-
+-        setLink(index, 0, sentinel)
+-        setLink(index, 1, sentinel)
+-
+-        header.count = header.count.subtract.saturating(.one)
+-    }
+-
+-    @inlinable
+-    public static func unlinkFirst<Tag: ~Copyable & ~Escapable>(
+-        header: inout Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
+-    ) -> Index<Tag>? {
+-        precondition(N >= 1, "Link topology requires at least one link slot")
+-        let sentinel = header.sentinel
+-        guard header.head != sentinel else { return nil }
+-
+-        let slot = header.head
+-        let nextSlot = getLink(slot, 0)
+-
+-        header.head = nextSlot
+-        if nextSlot != sentinel {
+-            if N >= 2 {
+-                setLink(nextSlot, 1, sentinel)
+-            }
+-        } else {
+-            header.tail = sentinel
+-        }
+-
+-        setLink(slot, 0, sentinel)
+-        if N >= 2 {
+-            setLink(slot, 1, sentinel)
+-        }
+-
+-        header.count = header.count.subtract.saturating(.one)
+-        return slot
+-    }
+-
+-    @inlinable
+-    public static func unlinkLast<Tag: ~Copyable & ~Escapable>(
+-        header: inout Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
+-    ) -> Index<Tag>? {
+-        precondition(N >= 1, "Link topology requires at least one link slot")
+-        let sentinel = header.sentinel
+-        guard header.tail != sentinel else { return nil }
+-
+-        let slot = header.tail
+-
+-        if N >= 2 {
+-            let prevSlot = getLink(slot, 1)
+-
+-            header.tail = prevSlot
+-            if prevSlot != sentinel {
+-                setLink(prevSlot, 0, sentinel)
+-            } else {
+-                header.head = sentinel
+-            }
+-
+-            setLink(slot, 0, sentinel)
+-            setLink(slot, 1, sentinel)
+-        } else {
+-
+-            var prevSlot = sentinel
+-            if header.head != slot {
+-                var current = header.head
+-                while current != sentinel {
+-                    let nextSlot = getLink(current, 0)
+-                    if nextSlot == slot {
+-                        prevSlot = current
+-                        break
+-                    }
+-                    current = nextSlot
+-                }
+-            }
+-
+-            header.tail = prevSlot
+-            if prevSlot != sentinel {
+-                setLink(prevSlot, 0, sentinel)
+-            } else {
+-                header.head = sentinel
+-            }
+-
+-            setLink(slot, 0, sentinel)
+-        }
+-
+-        header.count = header.count.subtract.saturating(.one)
+-        return slot
+-    }
+-
+-    @inlinable
+-    public static func insert<Tag: ~Copyable & ~Escapable>(
+-        _ index: Index<Tag>,
+-        after position: Index<Tag>,
+-        header: inout Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
+-    ) {
+-        precondition(N >= 1, "Link topology requires at least one link slot")
+-        let sentinel = header.sentinel
+-        let nextSlot = getLink(position, 0)
+-
+-        setLink(position, 0, index)
+-        setLink(index, 0, nextSlot)
+-
+-        if N >= 2 {
+-            setLink(index, 1, position)
+-            if nextSlot != sentinel {
+-                setLink(nextSlot, 1, index)
+-            }
+-        }
+-
+-        if nextSlot == sentinel {
+-            header.tail = index
+-        }
+-
+-        header.count += .one
+-    }
+-
+-    @inlinable
+-    public static func forEach<Tag: ~Copyable & ~Escapable>(
+-        header: Header<Tag>,
+-        getLink: (Index<Tag>, Int) -> Index<Tag>,
+-        _ body: (Index<Tag>) -> Void
+-    ) {
+-        precondition(N >= 1, "Link topology requires at least one link slot")
+-        let sentinel = header.sentinel
+-        var current = header.head
+-        while current != sentinel {
+-            let nextSlot = getLink(current, 0)
+-            body(current)
+-            current = nextSlot
+-        }
+-    }
+-}
+diff --git a/Sources/Link/Link.Node.swift b/Sources/Link/Link.Node.swift
+deleted file mode 100644
+index cfd2c62..0000000
+--- a/Sources/Link/Link.Node.swift
++++ /dev/null
+@@ -1,4 +0,0 @@
+-extension Link {
+-
+-    public typealias Node<Element: ~Copyable> = __LinkNode<N, Element>
+-}
+diff --git a/Sources/Link/Link.swift b/Sources/Link/Link.swift
+index 01fcec1..8c05a9d 100644
+--- a/Sources/Link/Link.swift
++++ b/Sources/Link/Link.swift
+@@ -1 +1,226 @@
++public import Cardinal
++public import Index
++import Indexed
++public import Ordinal
++public import Tagged
++
+ public enum Link<let N: Int> {}
++
++extension Link {
++
++    @inlinable
++    public static func append<Tag: ~Copyable & ~Escapable>(
++        _ index: Index<Tag>,
++        header: inout Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
++    ) {
++        precondition(N >= 1, "Link topology requires at least one link slot")
++        let sentinel = header.sentinel
++
++        if header.tail != sentinel {
++            setLink(header.tail, 0, index)
++            if N >= 2 {
++                setLink(index, 1, header.tail)
++            }
++        } else {
++            header.head = index
++        }
++
++        header.tail = index
++        setLink(index, 0, sentinel)
++        header.count += .one
++    }
++
++    @inlinable
++    public static func prepend<Tag: ~Copyable & ~Escapable>(
++        _ index: Index<Tag>,
++        header: inout Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
++    ) {
++        precondition(N >= 1, "Link topology requires at least one link slot")
++        let sentinel = header.sentinel
++
++        if header.head != sentinel {
++            setLink(index, 0, header.head)
++            if N >= 2 {
++                setLink(header.head, 1, index)
++            }
++        } else {
++            header.tail = index
++            setLink(index, 0, sentinel)
++        }
++
++        if N >= 2 {
++            setLink(index, 1, sentinel)
++        }
++
++        header.head = index
++        header.count += .one
++    }
++
++    @inlinable
++    public static func unlink<Tag: ~Copyable & ~Escapable>(
++        _ index: Index<Tag>,
++        header: inout Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
++    ) {
++        precondition(N >= 2, "Arbitrary unlink requires at least two link slots")
++        let sentinel = header.sentinel
++        let prevIndex = getLink(index, 1)
++        let nextIndex = getLink(index, 0)
++
++        if prevIndex != sentinel {
++            setLink(prevIndex, 0, nextIndex)
++        } else {
++            header.head = nextIndex
++        }
++
++        if nextIndex != sentinel {
++            setLink(nextIndex, 1, prevIndex)
++        } else {
++            header.tail = prevIndex
++        }
++
++        setLink(index, 0, sentinel)
++        setLink(index, 1, sentinel)
++
++        header.count = header.count.subtract.saturating(.one)
++    }
++
++    @inlinable
++    public static func unlinkFirst<Tag: ~Copyable & ~Escapable>(
++        header: inout Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
++    ) -> Index<Tag>? {
++        precondition(N >= 1, "Link topology requires at least one link slot")
++        let sentinel = header.sentinel
++        guard header.head != sentinel else { return nil }
++
++        let slot = header.head
++        let nextSlot = getLink(slot, 0)
++
++        header.head = nextSlot
++        if nextSlot != sentinel {
++            if N >= 2 {
++                setLink(nextSlot, 1, sentinel)
++            }
++        } else {
++            header.tail = sentinel
++        }
++
++        setLink(slot, 0, sentinel)
++        if N >= 2 {
++            setLink(slot, 1, sentinel)
++        }
++
++        header.count = header.count.subtract.saturating(.one)
++        return slot
++    }
++
++    @inlinable
++    public static func unlinkLast<Tag: ~Copyable & ~Escapable>(
++        header: inout Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
++    ) -> Index<Tag>? {
++        precondition(N >= 1, "Link topology requires at least one link slot")
++        let sentinel = header.sentinel
++        guard header.tail != sentinel else { return nil }
++
++        let slot = header.tail
++
++        if N >= 2 {
++            let prevSlot = getLink(slot, 1)
++
++            header.tail = prevSlot
++            if prevSlot != sentinel {
++                setLink(prevSlot, 0, sentinel)
++            } else {
++                header.head = sentinel
++            }
++
++            setLink(slot, 0, sentinel)
++            setLink(slot, 1, sentinel)
++        } else {
++
++            var prevSlot = sentinel
++            if header.head != slot {
++                var current = header.head
++                while current != sentinel {
++                    let nextSlot = getLink(current, 0)
++                    if nextSlot == slot {
++                        prevSlot = current
++                        break
++                    }
++                    current = nextSlot
++                }
++            }
++
++            header.tail = prevSlot
++            if prevSlot != sentinel {
++                setLink(prevSlot, 0, sentinel)
++            } else {
++                header.head = sentinel
++            }
++
++            setLink(slot, 0, sentinel)
++        }
++
++        header.count = header.count.subtract.saturating(.one)
++        return slot
++    }
++
++    @inlinable
++    public static func insert<Tag: ~Copyable & ~Escapable>(
++        _ index: Index<Tag>,
++        after position: Index<Tag>,
++        header: inout Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        setLink: (Index<Tag>, Int, Index<Tag>) -> Void
++    ) {
++        precondition(N >= 1, "Link topology requires at least one link slot")
++        let sentinel = header.sentinel
++        let nextSlot = getLink(position, 0)
++
++        setLink(position, 0, index)
++        setLink(index, 0, nextSlot)
++
++        if N >= 2 {
++            setLink(index, 1, position)
++            if nextSlot != sentinel {
++                setLink(nextSlot, 1, index)
++            }
++        }
++
++        if nextSlot == sentinel {
++            header.tail = index
++        }
++
++        header.count += .one
++    }
++
++    @inlinable
++    public static func forEach<Tag: ~Copyable & ~Escapable>(
++        header: Header<Tag>,
++        getLink: (Index<Tag>, Int) -> Index<Tag>,
++        _ body: (Index<Tag>) -> Void
++    ) {
++        precondition(N >= 1, "Link topology requires at least one link slot")
++        let sentinel = header.sentinel
++        var current = header.head
++        while current != sentinel {
++            let nextSlot = getLink(current, 0)
++            body(current)
++            current = nextSlot
++        }
++    }
++}
++
++extension Link {
++
++    public typealias Node<Element: ~Copyable> = __LinkNode<N, Element>
++}
+-- 
+2.43.0
+

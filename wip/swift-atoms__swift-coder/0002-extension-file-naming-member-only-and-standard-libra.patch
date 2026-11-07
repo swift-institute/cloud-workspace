@@ -1,0 +1,1158 @@
+From 2d94031b1dac4da8418bc6ff202bbec34ad8908f Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:42 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Coder/Builder.swift                 | 546 ++++++++++++++++++++
+ Sources/Coder/Either/Builder+Either.swift   |  74 ---
+ Sources/Coder/Either/Builder+Optional.swift |  16 -
+ Sources/Coder/Pair/Builder+Pair.Never.swift |  68 ---
+ Sources/Coder/Pair/Builder+Pair.swift       |  47 --
+ Sources/Coder/Skip/Builder+Skip.Never.swift | 202 --------
+ Sources/Coder/Skip/Builder+Skip.swift       | 133 -----
+ 7 files changed, 546 insertions(+), 540 deletions(-)
+ delete mode 100644 Sources/Coder/Either/Builder+Either.swift
+ delete mode 100644 Sources/Coder/Either/Builder+Optional.swift
+ delete mode 100644 Sources/Coder/Pair/Builder+Pair.Never.swift
+ delete mode 100644 Sources/Coder/Pair/Builder+Pair.swift
+ delete mode 100644 Sources/Coder/Skip/Builder+Skip.Never.swift
+ delete mode 100644 Sources/Coder/Skip/Builder+Skip.swift
+
+diff --git a/Sources/Coder/Builder.swift b/Sources/Coder/Builder.swift
+index 60e7a82..62c99bf 100644
+--- a/Sources/Coder/Builder.swift
++++ b/Sources/Coder/Builder.swift
+@@ -2,3 +2,549 @@ public import Coder_Core
+ 
+ public typealias Builder<Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable> =
+     Coder_Core::Builder<Input, Buffer>
++
++#if Either
++    public import Coder_Core
++    public import Either
++
++    extension Coder_Core::Builder
++    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildExpression<L: Coding & ~Copyable, R: Coding & ~Copyable>(
++            _ either: consuming Either<L, R>
++        ) -> Either<L, R>.Coder
++        where
++            L.Buffer == Buffer,
++            R.Buffer == Buffer,
++            L.Buffer: ~Copyable & ~Escapable,
++            R.Buffer: ~Copyable & ~Escapable,
++            L.Input == Input,
++            R.Input == Input,
++            L.Output == R.Output,
++            L.Input: ~Copyable & ~Escapable,
++            R.Input: ~Copyable & ~Escapable,
++            L.Output: ~Copyable & ~Escapable,
++            R.Output: ~Copyable & ~Escapable
++        {
++            .init(either)
++        }
++
++        @inlinable
++        public static func buildEither<
++            First: Coding & ~Copyable,
++            Second: Coding & ~Copyable
++        >(
++            first: consuming First
++        ) -> Either<First, Second>.Coder
++        where
++            First.Buffer == Buffer,
++            Second.Buffer == Buffer,
++            First.Buffer: ~Copyable & ~Escapable,
++            Second.Buffer: ~Copyable & ~Escapable,
++            First.Input == Input,
++            Second.Input == Input,
++            First.Input: ~Copyable & ~Escapable,
++            Second.Input: ~Copyable & ~Escapable,
++            First.Output == Second.Output,
++            First.Output: ~Copyable & ~Escapable,
++            Second.Output: ~Copyable & ~Escapable
++        {
++            .init(.left(first))
++        }
++
++        @inlinable
++        public static func buildEither<
++            First: Coding & ~Copyable,
++            Second: Coding & ~Copyable
++        >(
++            second: consuming Second
++        ) -> Either<First, Second>.Coder
++        where
++            First.Buffer == Buffer,
++            Second.Buffer == Buffer,
++            First.Buffer: ~Copyable & ~Escapable,
++            Second.Buffer: ~Copyable & ~Escapable,
++            First.Input == Input,
++            Second.Input == Input,
++            First.Input: ~Copyable & ~Escapable,
++            Second.Input: ~Copyable & ~Escapable,
++            First.Output == Second.Output,
++            First.Output: ~Copyable & ~Escapable,
++            Second.Output: ~Copyable & ~Escapable
++        {
++            .init(.right(second))
++        }
++    }
++
++#endif
++
++#if Either
++    public import Coder_Core
++    extension Coder_Core::Builder
++    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
++        @inlinable public static func buildOptional<C: Coding>(
++            _ coder: C?
++        ) -> Swift::Optional<C>.Coder
++        where
++            C.Input == Input,
++            C.Buffer == Buffer,
++            C.Input: ~Copyable & ~Escapable,
++            C.Output: ~Copyable & Escapable,
++            C.Buffer: ~Copyable & ~Escapable
++        { .init(coder) }
++    }
++#endif
++
++#if Pair
++    public import Coder_Core
++    public import Pair
++    extension Coder_Core::Builder
++    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Coder<N.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Failure == Never
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Coder<A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            N.Failure == Never
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Coder<Never>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Failure == Never,
++            N.Failure == Never
++        {
++            .init(accumulated, next, \.self, \.self)
++        }
++    }
++#endif
++
++#if Pair
++    public import Coder_Core
++    public import Pair
++    public import Either
++    extension Coder_Core::Builder
++    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Coder<Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable
++        {
++            .init(accumulated, next, { .left($0) }, { .right($0) })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Coder<A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Failure == N.Failure
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++    }
++#endif
++
++#if Skip
++    public import Coder_Core
++    public import Skip
++    extension Coder_Core::Builder
++    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<A.Output, Void>.Coder<A, N, N.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            N.Output == Void,
++            A.Failure == Never
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<A.Output, Void>.Coder<A, N, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            N.Output == Void,
++            N.Failure == Never
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<A.Output, Void>.Coder<A, N, Never>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            N.Output == Void,
++            A.Failure == Never,
++            N.Failure == Never
++        {
++            .init(accumulated, next, \.self, \.self)
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<N.Output, Void>.Coder<N, A, N.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            A.Failure == Never
++        {
++            .init(next, accumulated, leading: true, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<N.Output, Void>.Coder<N, A, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            N.Failure == Never
++        {
++            .init(next, accumulated, leading: true, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<N.Output, Void>.Coder<N, A, Never>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            A.Failure == Never,
++            N.Failure == Never
++        {
++            .init(next, accumulated, leading: true, \.self, \.self)
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<Void, Void>.Coder<A, N, N.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            N.Output == Void,
++            A.Failure == Never
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<Void, Void>.Coder<A, N, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            N.Output == Void,
++            N.Failure == Never
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<Void, Void>.Coder<A, N, Never>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            N.Output == Void,
++            A.Failure == Never,
++            N.Failure == Never
++        {
++            .init(accumulated, next, \.self, \.self)
++        }
++    }
++#endif
++
++#if Skip
++    public import Coder_Core
++    public import Skip
++    public import Either
++    extension Coder_Core::Builder
++    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<A.Output, Void>.Coder<A, N, Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            N.Output == Void
++        {
++            .init(accumulated, next, leading: false, { .left($0) }, { .right($0) })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<A.Output, Void>.Coder<A, N, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            N.Output == Void,
++            A.Failure == N.Failure
++        {
++            .init(accumulated, next, leading: false, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<N.Output, Void>.Coder<N, A, Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void
++        {
++            .init(next, accumulated, leading: true, { .right($0) }, { .left($0) })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<N.Output, Void>.Coder<N, A, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            A.Failure == N.Failure
++        {
++            .init(next, accumulated, leading: true, { $0 }, { $0 })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<Void, Void>.Coder<A, N, Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            N.Output == Void
++        {
++            .init(accumulated, next, { .left($0) }, { .right($0) })
++        }
++        @inlinable
++        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip<Void, Void>.Coder<A, N, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output == Void,
++            N.Output == Void,
++            A.Failure == N.Failure
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++    }
++#endif
+diff --git a/Sources/Coder/Either/Builder+Either.swift b/Sources/Coder/Either/Builder+Either.swift
+deleted file mode 100644
+index 154238c..0000000
+--- a/Sources/Coder/Either/Builder+Either.swift
++++ /dev/null
+@@ -1,74 +0,0 @@
+-#if Either
+-    public import Coder_Core
+-    public import Either
+-
+-    extension Coder_Core::Builder
+-    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildExpression<L: Coding & ~Copyable, R: Coding & ~Copyable>(
+-            _ either: consuming Either<L, R>
+-        ) -> Either<L, R>.Coder
+-        where
+-            L.Buffer == Buffer,
+-            R.Buffer == Buffer,
+-            L.Buffer: ~Copyable & ~Escapable,
+-            R.Buffer: ~Copyable & ~Escapable,
+-            L.Input == Input,
+-            R.Input == Input,
+-            L.Output == R.Output,
+-            L.Input: ~Copyable & ~Escapable,
+-            R.Input: ~Copyable & ~Escapable,
+-            L.Output: ~Copyable & ~Escapable,
+-            R.Output: ~Copyable & ~Escapable
+-        {
+-            .init(either)
+-        }
+-
+-        @inlinable
+-        public static func buildEither<
+-            First: Coding & ~Copyable,
+-            Second: Coding & ~Copyable
+-        >(
+-            first: consuming First
+-        ) -> Either<First, Second>.Coder
+-        where
+-            First.Buffer == Buffer,
+-            Second.Buffer == Buffer,
+-            First.Buffer: ~Copyable & ~Escapable,
+-            Second.Buffer: ~Copyable & ~Escapable,
+-            First.Input == Input,
+-            Second.Input == Input,
+-            First.Input: ~Copyable & ~Escapable,
+-            Second.Input: ~Copyable & ~Escapable,
+-            First.Output == Second.Output,
+-            First.Output: ~Copyable & ~Escapable,
+-            Second.Output: ~Copyable & ~Escapable
+-        {
+-            .init(.left(first))
+-        }
+-
+-        @inlinable
+-        public static func buildEither<
+-            First: Coding & ~Copyable,
+-            Second: Coding & ~Copyable
+-        >(
+-            second: consuming Second
+-        ) -> Either<First, Second>.Coder
+-        where
+-            First.Buffer == Buffer,
+-            Second.Buffer == Buffer,
+-            First.Buffer: ~Copyable & ~Escapable,
+-            Second.Buffer: ~Copyable & ~Escapable,
+-            First.Input == Input,
+-            Second.Input == Input,
+-            First.Input: ~Copyable & ~Escapable,
+-            Second.Input: ~Copyable & ~Escapable,
+-            First.Output == Second.Output,
+-            First.Output: ~Copyable & ~Escapable,
+-            Second.Output: ~Copyable & ~Escapable
+-        {
+-            .init(.right(second))
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Coder/Either/Builder+Optional.swift b/Sources/Coder/Either/Builder+Optional.swift
+deleted file mode 100644
+index f2ebd60..0000000
+--- a/Sources/Coder/Either/Builder+Optional.swift
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#if Either
+-    public import Coder_Core
+-    extension Coder_Core::Builder
+-    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
+-        @inlinable public static func buildOptional<C: Coding>(
+-            _ coder: C?
+-        ) -> Swift::Optional<C>.Coder
+-        where
+-            C.Input == Input,
+-            C.Buffer == Buffer,
+-            C.Input: ~Copyable & ~Escapable,
+-            C.Output: ~Copyable & Escapable,
+-            C.Buffer: ~Copyable & ~Escapable
+-        { .init(coder) }
+-    }
+-#endif
+diff --git a/Sources/Coder/Pair/Builder+Pair.Never.swift b/Sources/Coder/Pair/Builder+Pair.Never.swift
+deleted file mode 100644
+index 9a976a8..0000000
+--- a/Sources/Coder/Pair/Builder+Pair.Never.swift
++++ /dev/null
+@@ -1,68 +0,0 @@
+-#if Pair
+-    public import Coder_Core
+-    public import Pair
+-    extension Coder_Core::Builder
+-    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Coder<N.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Failure == Never
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Coder<A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            N.Failure == Never
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Coder<Never>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Failure == Never,
+-            N.Failure == Never
+-        {
+-            .init(accumulated, next, \.self, \.self)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Coder/Pair/Builder+Pair.swift b/Sources/Coder/Pair/Builder+Pair.swift
+deleted file mode 100644
+index 5681f50..0000000
+--- a/Sources/Coder/Pair/Builder+Pair.swift
++++ /dev/null
+@@ -1,47 +0,0 @@
+-#if Pair
+-    public import Coder_Core
+-    public import Pair
+-    public import Either
+-    extension Coder_Core::Builder
+-    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Coder<Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable
+-        {
+-            .init(accumulated, next, { .left($0) }, { .right($0) })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Coder<A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Failure == N.Failure
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-    }
+-#endif
+diff --git a/Sources/Coder/Skip/Builder+Skip.Never.swift b/Sources/Coder/Skip/Builder+Skip.Never.swift
+deleted file mode 100644
+index 0a6cdb3..0000000
+--- a/Sources/Coder/Skip/Builder+Skip.Never.swift
++++ /dev/null
+@@ -1,202 +0,0 @@
+-#if Skip
+-    public import Coder_Core
+-    public import Skip
+-    extension Coder_Core::Builder
+-    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<A.Output, Void>.Coder<A, N, N.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            N.Output == Void,
+-            A.Failure == Never
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<A.Output, Void>.Coder<A, N, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            N.Output == Void,
+-            N.Failure == Never
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<A.Output, Void>.Coder<A, N, Never>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            N.Output == Void,
+-            A.Failure == Never,
+-            N.Failure == Never
+-        {
+-            .init(accumulated, next, \.self, \.self)
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<N.Output, Void>.Coder<N, A, N.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            A.Failure == Never
+-        {
+-            .init(next, accumulated, leading: true, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<N.Output, Void>.Coder<N, A, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            N.Failure == Never
+-        {
+-            .init(next, accumulated, leading: true, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<N.Output, Void>.Coder<N, A, Never>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            A.Failure == Never,
+-            N.Failure == Never
+-        {
+-            .init(next, accumulated, leading: true, \.self, \.self)
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<Void, Void>.Coder<A, N, N.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            N.Output == Void,
+-            A.Failure == Never
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<Void, Void>.Coder<A, N, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            N.Output == Void,
+-            N.Failure == Never
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<Void, Void>.Coder<A, N, Never>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            N.Output == Void,
+-            A.Failure == Never,
+-            N.Failure == Never
+-        {
+-            .init(accumulated, next, \.self, \.self)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Coder/Skip/Builder+Skip.swift b/Sources/Coder/Skip/Builder+Skip.swift
+deleted file mode 100644
+index 7c1d09c..0000000
+--- a/Sources/Coder/Skip/Builder+Skip.swift
++++ /dev/null
+@@ -1,133 +0,0 @@
+-#if Skip
+-    public import Coder_Core
+-    public import Skip
+-    public import Either
+-    extension Coder_Core::Builder
+-    where Input: ~Copyable & ~Escapable, Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<A.Output, Void>.Coder<A, N, Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            N.Output == Void
+-        {
+-            .init(accumulated, next, leading: false, { .left($0) }, { .right($0) })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<A.Output, Void>.Coder<A, N, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            N.Output == Void,
+-            A.Failure == N.Failure
+-        {
+-            .init(accumulated, next, leading: false, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<N.Output, Void>.Coder<N, A, Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void
+-        {
+-            .init(next, accumulated, leading: true, { .right($0) }, { .left($0) })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<N.Output, Void>.Coder<N, A, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            A.Failure == N.Failure
+-        {
+-            .init(next, accumulated, leading: true, { $0 }, { $0 })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<Void, Void>.Coder<A, N, Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            N.Output == Void
+-        {
+-            .init(accumulated, next, { .left($0) }, { .right($0) })
+-        }
+-        @inlinable
+-        public static func buildPartialBlock<A: Coding & ~Copyable, N: Coding & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip<Void, Void>.Coder<A, N, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output == Void,
+-            N.Output == Void,
+-            A.Failure == N.Failure
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-    }
+-#endif
+-- 
+2.43.0
+

@@ -1,0 +1,151 @@
+From 3294bcdcf8cb5f2e7b76f8211ca85dad6239f716 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:47 +0000
+Subject: [PATCH 2/2] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Ratio/Ordinal/Ordinal+Ratio.swift     | 35 ---------------
+ .../Ratio+Swift.CustomStringConvertible.swift | 11 -----
+ ...io+Swift.ExpressibleByIntegerLiteral.swift | 12 -----
+ Sources/Ratio/Ratio.swift                     | 45 +++++++++++++++++++
+ 4 files changed, 45 insertions(+), 58 deletions(-)
+ delete mode 100644 Sources/Ratio/Ordinal/Ordinal+Ratio.swift
+ delete mode 100644 Sources/Ratio/Ratio+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Ratio/Ratio+Swift.ExpressibleByIntegerLiteral.swift
+
+diff --git a/Sources/Ratio/Ordinal/Ordinal+Ratio.swift b/Sources/Ratio/Ordinal/Ordinal+Ratio.swift
+deleted file mode 100644
+index 52cba7a..0000000
+--- a/Sources/Ratio/Ordinal/Ordinal+Ratio.swift
++++ /dev/null
+@@ -1,35 +0,0 @@
+-#if Ordinal
+-    @_exported public import Cardinal
+-    @_exported public import Carrier
+-    @_exported public import Difference
+-    import Magnitude
+-    @_exported public import Ordinal
+-    @_exported public import Tagged
+-
+-    extension Ratio where From: ~Copyable & ~Escapable, To: ~Copyable & ~Escapable {
+-
+-        public func applying<Input: Carrier.`Protocol`>(
+-            to index: Input
+-        ) throws(Error) -> Tagged<To, Ordinal>
+-        where Input.Domain == From, Input.Underlying == Ordinal {
+-            let count = Tagged<From, Cardinal>(_unchecked: Cardinal(index.underlying.rawValue))
+-            let converted = try applying(to: count)
+-            return Tagged<To, Ordinal>(_unchecked: Ordinal(converted.underlying.rawValue))
+-        }
+-
+-        public func quotientAndRemainder(
+-            dividing index: Tagged<To, Ordinal>
+-        ) throws(Error) -> (
+-            quotient: Tagged<From, Ordinal>, remainder: Tagged<To, Difference>
+-        ) {
+-            let count = Tagged<To, Cardinal>(_unchecked: Cardinal(index.underlying.rawValue))
+-            let result = try quotientAndRemainder(dividing: count)
+-            return (
+-                Tagged<From, Ordinal>(_unchecked: Ordinal(result.quotient.underlying.rawValue)),
+-                Tagged<To, Difference>(
+-                    _unchecked: .positive(Difference.Magnitude(result.remainder.underlying))
+-                )
+-            )
+-        }
+-    }
+-#endif
+diff --git a/Sources/Ratio/Ratio+Swift.CustomStringConvertible.swift b/Sources/Ratio/Ratio+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 2701794..0000000
+--- a/Sources/Ratio/Ratio+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,11 +0,0 @@
+-@_exported public import Cardinal
+-@_exported public import Carrier
+-import Magnitude
+-@_exported public import Polarity
+-@_exported public import Property
+-import Rational
+-@_exported public import Tagged
+-
+-extension Ratio: Swift::CustomStringConvertible {
+-    public var description: String { "Ratio<\(From.self), \(To.self)>(\(value))" }
+-}
+diff --git a/Sources/Ratio/Ratio+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Ratio/Ratio+Swift.ExpressibleByIntegerLiteral.swift
+deleted file mode 100644
+index a1e6d3d..0000000
+--- a/Sources/Ratio/Ratio+Swift.ExpressibleByIntegerLiteral.swift
++++ /dev/null
+@@ -1,12 +0,0 @@
+-@_exported public import Cardinal
+-@_exported public import Carrier
+-import Magnitude
+-@_exported public import Polarity
+-@_exported public import Property
+-import Rational
+-@_exported public import Tagged
+-
+-extension Ratio: Swift::ExpressibleByIntegerLiteral where From == To {
+-    @_disfavoredOverload
+-    public init(integerLiteral value: Int) { self.init(value) }
+-}
+diff --git a/Sources/Ratio/Ratio.swift b/Sources/Ratio/Ratio.swift
+index c673993..f32cfbd 100644
+--- a/Sources/Ratio/Ratio.swift
++++ b/Sources/Ratio/Ratio.swift
+@@ -108,3 +108,48 @@ extension Ratio: Magnitude::Representable where From: ~Copyable & ~Escapable, To
+ #if !hasFeature(Embedded)
+     extension Ratio: Swift::Codable where From: ~Copyable & ~Escapable, To: ~Copyable & ~Escapable {}
+ #endif
++
++#if Ordinal
++    @_exported public import Cardinal
++    @_exported public import Carrier
++    @_exported public import Difference
++    import Magnitude
++    @_exported public import Ordinal
++    @_exported public import Tagged
++
++    extension Ratio where From: ~Copyable & ~Escapable, To: ~Copyable & ~Escapable {
++
++        public func applying<Input: Carrier.`Protocol`>(
++            to index: Input
++        ) throws(Error) -> Tagged<To, Ordinal>
++        where Input.Domain == From, Input.Underlying == Ordinal {
++            let count = Tagged<From, Cardinal>(_unchecked: Cardinal(index.underlying.rawValue))
++            let converted = try applying(to: count)
++            return Tagged<To, Ordinal>(_unchecked: Ordinal(converted.underlying.rawValue))
++        }
++
++        public func quotientAndRemainder(
++            dividing index: Tagged<To, Ordinal>
++        ) throws(Error) -> (
++            quotient: Tagged<From, Ordinal>, remainder: Tagged<To, Difference>
++        ) {
++            let count = Tagged<To, Cardinal>(_unchecked: Cardinal(index.underlying.rawValue))
++            let result = try quotientAndRemainder(dividing: count)
++            return (
++                Tagged<From, Ordinal>(_unchecked: Ordinal(result.quotient.underlying.rawValue)),
++                Tagged<To, Difference>(
++                    _unchecked: .positive(Difference.Magnitude(result.remainder.underlying))
++                )
++            )
++        }
++    }
++#endif
++
++extension Ratio: Swift::CustomStringConvertible {
++    public var description: String { "Ratio<\(From.self), \(To.self)>(\(value))" }
++}
++
++extension Ratio: Swift::ExpressibleByIntegerLiteral where From == To {
++    @_disfavoredOverload
++    public init(integerLiteral value: Int) { self.init(value) }
++}
+-- 
+2.43.0
+

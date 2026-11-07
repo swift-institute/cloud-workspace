@@ -1,0 +1,387 @@
+From 7940dd6eb3b9dbf7760daeccb8fd20fbaa7d3d41 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 20:52:57 +0000
+Subject: [PATCH] extension file naming: member-only and
+ standard-library-conformance extension files merge into their type's own file
+ (overnight/merge-extension-files.py); single type per file: additional types
+ move to their own <Parent>.<Name>.swift inside the container's extension
+ (overnight/split-types.py); parse-checked; builds pending (coenttb/work#242)
+
+---
+ Sources/Motion Encoding/Encoding+Write.swift | 145 -------------------
+ Sources/Motion Encoding/Encoding.swift       | 144 ++++++++++++++++++
+ Sources/Motion/Raster+PSNR.swift             |  18 ---
+ Sources/Motion/Raster.swift                  |  19 +++
+ 4 files changed, 163 insertions(+), 163 deletions(-)
+ delete mode 100644 Sources/Motion Encoding/Encoding+Write.swift
+ delete mode 100644 Sources/Motion/Raster+PSNR.swift
+
+diff --git a/Sources/Motion Encoding/Encoding+Write.swift b/Sources/Motion Encoding/Encoding+Write.swift
+deleted file mode 100644
+index 525cfa5..0000000
+--- a/Sources/Motion Encoding/Encoding+Write.swift	
++++ /dev/null
+@@ -1,145 +0,0 @@
+-public import AVFoundation
+-public import Motion
+-
+-extension Encoding {
+-    /// AVFoundation's colour properties for the signal, or nil where it has no name for a code point.
+-    var properties: [String: String]? {
+-        let primaries: String? =
+-            switch signal.primaries {
+-            case .bt709: AVVideoColorPrimaries_ITU_R_709_2
+-            case .bt2020: AVVideoColorPrimaries_ITU_R_2020
+-            case .displayP3: AVVideoColorPrimaries_P3_D65
+-            default: nil
+-            }
+-        let transfer: String? =
+-            switch signal.transfer {
+-            case .bt709, .bt601: AVVideoTransferFunction_ITU_R_709_2
+-            case .sRGB: AVVideoTransferFunction_IEC_sRGB
+-            case .pq: AVVideoTransferFunction_SMPTE_ST_2084_PQ
+-            case .hlg: AVVideoTransferFunction_ITU_R_2100_HLG
+-            case .linear: AVVideoTransferFunction_Linear
+-            default: nil
+-            }
+-        let matrix: String? =
+-            switch signal.matrix {
+-            case .bt709: AVVideoYCbCrMatrix_ITU_R_709_2
+-            case .bt601: AVVideoYCbCrMatrix_ITU_R_601_4
+-            case .bt2020: AVVideoYCbCrMatrix_ITU_R_2020
+-            default: nil
+-            }
+-        guard let primaries, let transfer, let matrix, signal.range == .limited else { return nil }
+-        return [AVVideoColorPrimariesKey: primaries, AVVideoTransferFunctionKey: transfer, AVVideoYCbCrMatrixKey: matrix]
+-    }
+-
+-    /// Encodes `count` frames, asking `raster` for each in order.
+-    public func write(frames count: Int, to url: URL, raster: (Int) async -> Raster?) async throws(Encoding.Error) {
+-        guard let properties else { throw .signal(signal) }
+-        // swift-linter:disable:next do throws for typed catch
+-        // REASON: AVAssetWriter, its pixel buffer receiver and CVMutablePixelBuffer throw untyped; their errors become Error.writer.
+-        do {
+-            try await encode(frames: count, to: url, properties: properties, raster: raster)
+-        } catch let failure as Encoding.Error {
+-            throw failure
+-        } catch {
+-            throw .writer("\(error)")
+-        }
+-    }
+-
+-    // swift-linter:disable:next untyped throws
+-    // REASON: it calls AVAssetWriter, its pixel buffer receiver and CVMutablePixelBuffer, which throw untyped; write(frames:to:raster:) types them.
+-    func encode(frames count: Int, to url: URL, properties: [String: String], raster: (Int) async -> Raster?) async throws {
+-        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+-        writer.movieTimeScale = CMTimeScale(rate.numerator)
+-        let input = AVAssetWriterInput(
+-            mediaType: .video,
+-            outputSettings: [
+-                AVVideoCodecKey: AVVideoCodecType.h264,
+-                AVVideoWidthKey: width,
+-                AVVideoHeightKey: height,
+-                AVVideoColorPropertiesKey: properties,
+-                AVVideoCompressionPropertiesKey: [
+-                    AVVideoAverageBitRateKey: bitRate,
+-                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+-                ],
+-            ]
+-        )
+-        input.mediaTimeScale = CMTimeScale(rate.numerator)
+-        let attributes = CVPixelBufferCreationAttributes(
+-            pixelFormatType: CVPixelFormatType(rawValue: kCVPixelFormatType_32BGRA),
+-            size: CVImageSize(width: width, height: height),
+-            compatibility: [.cgBitmapContext, .cgImage]
+-        )
+-        let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: attributes)
+-        try writer.start()
+-        writer.startSession(atSourceTime: .zero)
+-        for index in 0..<count {
+-            guard let frame = await raster(index), frame.width == width, frame.height == height else { throw Encoding.Error.frame(index) }
+-            var buffer = if let pool = receiver.pixelBufferPool { try pool.makeMutablePixelBuffer() } else { try CVMutablePixelBuffer(attributes) }
+-            Self.copy(frame, into: &buffer)
+-            try await receiver.append(CVReadOnlyPixelBuffer(buffer), with: time(of: index))
+-        }
+-        receiver.finish()
+-        writer.endSession(atSourceTime: time(of: count))
+-        await writer.finishWriting()
+-        guard writer.status == .completed else { throw Encoding.Error.writer(writer.error?.localizedDescription ?? "not completed") }
+-    }
+-
+-    /// When frame `index` starts, exactly, in the movie's timescale.
+-    func time(of index: Int) -> CMTime {
+-        CMTime(value: CMTimeValue(index * rate.denominator), timescale: CMTimeScale(rate.numerator))
+-    }
+-
+-    static func copy(_ raster: Raster, into buffer: inout CVMutablePixelBuffer) {
+-        unsafe buffer.accessUnsafeMutableRawPlaneBytes { planes in
+-            guard let plane = unsafe planes.first else { return }
+-            let row = raster.width * 4
+-            let stride = unsafe plane.properties.bytesPerRow
+-            raster.bytes.withUnsafeBytes { source in
+-                for line in 0..<raster.height {
+-                    let start = line * raster.stride
+-                    unsafe UnsafeMutableRawBufferPointer(rebasing: plane.bytes[(line * stride)..<(line * stride + row)])
+-                        .copyMemory(from: UnsafeRawBufferPointer(rebasing: source[start..<(start + row)]))
+-                }
+-            }
+-        }
+-    }
+-}
+-
+-extension Encoding {
+-    /// Joins a silent picture and a sound into one MP4 without re-encoding either.
+-    public static func mux(_ silent: URL, _ sound: URL, to url: URL) async throws(Encoding.Error) {
+-        // swift-linter:disable:next do throws for typed catch
+-        // REASON: AVMutableComposition and AVAssetExportSession throw untyped; their errors become Error.writer.
+-        do {
+-            try await join(silent, sound, to: url)
+-        } catch let failure as Encoding.Error {
+-            throw failure
+-        } catch {
+-            throw .writer("\(error)")
+-        }
+-    }
+-
+-    // swift-linter:disable:next untyped throws
+-    // REASON: loadTracks, insertTimeRange and export(to:as:) throw untyped; mux(_:_:to:) types them.
+-    static func join(_ silent: URL, _ sound: URL, to url: URL) async throws {
+-        let picture = AVURLAsset(url: silent)
+-        let audio = AVURLAsset(url: sound)
+-        let composition = AVMutableComposition()
+-        let duration = try await picture.load(.duration)
+-        guard
+-            let frames = try await picture.loadTracks(withMediaType: .video).first,
+-            let samples = try await audio.loadTracks(withMediaType: .audio).first,
+-            let video = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+-            let sound = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+-        else { throw Encoding.Error.writer("\(silent.lastPathComponent) or \(sound.lastPathComponent) has no track") }
+-        video.naturalTimeScale = try await frames.load(.naturalTimeScale)
+-        try video.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: frames, at: .zero)
+-        let length = min(duration, try await audio.load(.duration))
+-        try sound.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: samples, at: .zero)
+-        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+-            throw Encoding.Error.writer("no passthrough export session")
+-        }
+-        session.shouldOptimizeForNetworkUse = true
+-        try await session.export(to: url, as: .mp4)
+-    }
+-}
+diff --git a/Sources/Motion Encoding/Encoding.swift b/Sources/Motion Encoding/Encoding.swift
+index 696f22c..ee8d522 100644
+--- a/Sources/Motion Encoding/Encoding.swift	
++++ b/Sources/Motion Encoding/Encoding.swift	
+@@ -1,4 +1,5 @@
+ public import Motion
++public import AVFoundation
+ 
+ /// How frames become an H.264 MP4: size, exact rate, colour signal and bit rate.
+ ///
+@@ -26,3 +27,146 @@ public struct Encoding: Sendable, Hashable {
+         self.bitRate = bitRate ?? width * height * 4
+     }
+ }
++
++extension Encoding {
++    /// AVFoundation's colour properties for the signal, or nil where it has no name for a code point.
++    var properties: [String: String]? {
++        let primaries: String? =
++            switch signal.primaries {
++            case .bt709: AVVideoColorPrimaries_ITU_R_709_2
++            case .bt2020: AVVideoColorPrimaries_ITU_R_2020
++            case .displayP3: AVVideoColorPrimaries_P3_D65
++            default: nil
++            }
++        let transfer: String? =
++            switch signal.transfer {
++            case .bt709, .bt601: AVVideoTransferFunction_ITU_R_709_2
++            case .sRGB: AVVideoTransferFunction_IEC_sRGB
++            case .pq: AVVideoTransferFunction_SMPTE_ST_2084_PQ
++            case .hlg: AVVideoTransferFunction_ITU_R_2100_HLG
++            case .linear: AVVideoTransferFunction_Linear
++            default: nil
++            }
++        let matrix: String? =
++            switch signal.matrix {
++            case .bt709: AVVideoYCbCrMatrix_ITU_R_709_2
++            case .bt601: AVVideoYCbCrMatrix_ITU_R_601_4
++            case .bt2020: AVVideoYCbCrMatrix_ITU_R_2020
++            default: nil
++            }
++        guard let primaries, let transfer, let matrix, signal.range == .limited else { return nil }
++        return [AVVideoColorPrimariesKey: primaries, AVVideoTransferFunctionKey: transfer, AVVideoYCbCrMatrixKey: matrix]
++    }
++
++    /// Encodes `count` frames, asking `raster` for each in order.
++    public func write(frames count: Int, to url: URL, raster: (Int) async -> Raster?) async throws(Encoding.Error) {
++        guard let properties else { throw .signal(signal) }
++        // swift-linter:disable:next do throws for typed catch
++        // REASON: AVAssetWriter, its pixel buffer receiver and CVMutablePixelBuffer throw untyped; their errors become Error.writer.
++        do {
++            try await encode(frames: count, to: url, properties: properties, raster: raster)
++        } catch let failure as Encoding.Error {
++            throw failure
++        } catch {
++            throw .writer("\(error)")
++        }
++    }
++
++    // swift-linter:disable:next untyped throws
++    // REASON: it calls AVAssetWriter, its pixel buffer receiver and CVMutablePixelBuffer, which throw untyped; write(frames:to:raster:) types them.
++    func encode(frames count: Int, to url: URL, properties: [String: String], raster: (Int) async -> Raster?) async throws {
++        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
++        writer.movieTimeScale = CMTimeScale(rate.numerator)
++        let input = AVAssetWriterInput(
++            mediaType: .video,
++            outputSettings: [
++                AVVideoCodecKey: AVVideoCodecType.h264,
++                AVVideoWidthKey: width,
++                AVVideoHeightKey: height,
++                AVVideoColorPropertiesKey: properties,
++                AVVideoCompressionPropertiesKey: [
++                    AVVideoAverageBitRateKey: bitRate,
++                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
++                ],
++            ]
++        )
++        input.mediaTimeScale = CMTimeScale(rate.numerator)
++        let attributes = CVPixelBufferCreationAttributes(
++            pixelFormatType: CVPixelFormatType(rawValue: kCVPixelFormatType_32BGRA),
++            size: CVImageSize(width: width, height: height),
++            compatibility: [.cgBitmapContext, .cgImage]
++        )
++        let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: attributes)
++        try writer.start()
++        writer.startSession(atSourceTime: .zero)
++        for index in 0..<count {
++            guard let frame = await raster(index), frame.width == width, frame.height == height else { throw Encoding.Error.frame(index) }
++            var buffer = if let pool = receiver.pixelBufferPool { try pool.makeMutablePixelBuffer() } else { try CVMutablePixelBuffer(attributes) }
++            Self.copy(frame, into: &buffer)
++            try await receiver.append(CVReadOnlyPixelBuffer(buffer), with: time(of: index))
++        }
++        receiver.finish()
++        writer.endSession(atSourceTime: time(of: count))
++        await writer.finishWriting()
++        guard writer.status == .completed else { throw Encoding.Error.writer(writer.error?.localizedDescription ?? "not completed") }
++    }
++
++    /// When frame `index` starts, exactly, in the movie's timescale.
++    func time(of index: Int) -> CMTime {
++        CMTime(value: CMTimeValue(index * rate.denominator), timescale: CMTimeScale(rate.numerator))
++    }
++
++    static func copy(_ raster: Raster, into buffer: inout CVMutablePixelBuffer) {
++        unsafe buffer.accessUnsafeMutableRawPlaneBytes { planes in
++            guard let plane = unsafe planes.first else { return }
++            let row = raster.width * 4
++            let stride = unsafe plane.properties.bytesPerRow
++            raster.bytes.withUnsafeBytes { source in
++                for line in 0..<raster.height {
++                    let start = line * raster.stride
++                    unsafe UnsafeMutableRawBufferPointer(rebasing: plane.bytes[(line * stride)..<(line * stride + row)])
++                        .copyMemory(from: UnsafeRawBufferPointer(rebasing: source[start..<(start + row)]))
++                }
++            }
++        }
++    }
++}
++
++extension Encoding {
++    /// Joins a silent picture and a sound into one MP4 without re-encoding either.
++    public static func mux(_ silent: URL, _ sound: URL, to url: URL) async throws(Encoding.Error) {
++        // swift-linter:disable:next do throws for typed catch
++        // REASON: AVMutableComposition and AVAssetExportSession throw untyped; their errors become Error.writer.
++        do {
++            try await join(silent, sound, to: url)
++        } catch let failure as Encoding.Error {
++            throw failure
++        } catch {
++            throw .writer("\(error)")
++        }
++    }
++
++    // swift-linter:disable:next untyped throws
++    // REASON: loadTracks, insertTimeRange and export(to:as:) throw untyped; mux(_:_:to:) types them.
++    static func join(_ silent: URL, _ sound: URL, to url: URL) async throws {
++        let picture = AVURLAsset(url: silent)
++        let audio = AVURLAsset(url: sound)
++        let composition = AVMutableComposition()
++        let duration = try await picture.load(.duration)
++        guard
++            let frames = try await picture.loadTracks(withMediaType: .video).first,
++            let samples = try await audio.loadTracks(withMediaType: .audio).first,
++            let video = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
++            let sound = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
++        else { throw Encoding.Error.writer("\(silent.lastPathComponent) or \(sound.lastPathComponent) has no track") }
++        video.naturalTimeScale = try await frames.load(.naturalTimeScale)
++        try video.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: frames, at: .zero)
++        let length = min(duration, try await audio.load(.duration))
++        try sound.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: samples, at: .zero)
++        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
++            throw Encoding.Error.writer("no passthrough export session")
++        }
++        session.shouldOptimizeForNetworkUse = true
++        try await session.export(to: url, as: .mp4)
++    }
++}
+diff --git a/Sources/Motion/Raster+PSNR.swift b/Sources/Motion/Raster+PSNR.swift
+deleted file mode 100644
+index 74edd87..0000000
+--- a/Sources/Motion/Raster+PSNR.swift
++++ /dev/null
+@@ -1,18 +0,0 @@
+-import ISO_9899
+-
+-extension Raster {
+-    /// Peak signal-to-noise ratio in dB over the colour channels, alpha aside; equal pictures give +∞.
+-    public static func psnr(_ a: Self, _ b: Self) -> Double {
+-        precondition(a.width == b.width && a.height == b.height, "PSNR compares pictures of one size")
+-        var sum = 0.0
+-        for y in 0..<a.height {
+-            for (k, (p, q)) in zip(a.row(y), b.row(y)).enumerated() where k % 4 != 3 {
+-                let d = Double(Int(p) - Int(q))
+-                sum += d * d
+-            }
+-        }
+-        guard sum > 0 else { return .infinity }
+-        let mse = sum / Double(a.width * a.height * 3)
+-        return 10 * ISO_9899.Math.log10(255 * 255 / mse)
+-    }
+-}
+diff --git a/Sources/Motion/Raster.swift b/Sources/Motion/Raster.swift
+index 499829b..8059bbe 100644
+--- a/Sources/Motion/Raster.swift
++++ b/Sources/Motion/Raster.swift
+@@ -2,6 +2,8 @@
+ ///
+ /// No colour channel exceeds its alpha, and two rasters are equal when their pixels are,
+ /// whatever padding their rows carry.
++import ISO_9899
++
+ public struct Raster: Sendable {
+     public let width: Int
+     public let height: Int
+@@ -62,3 +64,20 @@ extension Raster: Equatable {
+         a.width == b.width && a.height == b.height && (0..<a.height).allSatisfy { a.row($0) == b.row($0) }
+     }
+ }
++
++extension Raster {
++    /// Peak signal-to-noise ratio in dB over the colour channels, alpha aside; equal pictures give +∞.
++    public static func psnr(_ a: Self, _ b: Self) -> Double {
++        precondition(a.width == b.width && a.height == b.height, "PSNR compares pictures of one size")
++        var sum = 0.0
++        for y in 0..<a.height {
++            for (k, (p, q)) in zip(a.row(y), b.row(y)).enumerated() where k % 4 != 3 {
++                let d = Double(Int(p) - Int(q))
++                sum += d * d
++            }
++        }
++        guard sum > 0 else { return .infinity }
++        let mse = sum / Double(a.width * a.height * 3)
++        return 10 * ISO_9899.Math.log10(255 * 255 / mse)
++    }
++}
+-- 
+2.43.0
+
