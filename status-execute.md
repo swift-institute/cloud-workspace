@@ -75,17 +75,19 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 
 Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as the baseline). Backed up to `findings-wip`.
 
-**Verified at 23:50 UTC by a lint of all 438 packages: 30,436 → 24,949, 5,487 fixed (18.0%).**
+**Verified at 00:45 UTC (8 Nov) by lint of all 438 packages: 30,436 → 23,611, 6,825 fixed (22.4%).** Ratchet gate clean of this session's changes.
 
 | Rule | Baseline → now (all packages) |
 |---|---|
+| minimal type body | 3,463 → 1,560 |
 | compound suite name | 4,730 → 493 |
-| minimal type body | 3,463 → 2,857 |
 | extension file naming | 2,531 → 2,192 |
 | single type per file | 1,518 → 1,404 |
 | test display name string | 541 → 420 |
 | counter loop iteration | 487 → 445 |
 
+- **Batch 8:** `minimal-bodies.py` again, with failures reverted per file, not per directory (6 type-check rounds), and ratchet rises reverted per file to the state before the moves.
+- **`compound identifier` (3,236): skipped.** Its fix is nested accessors (`fetch.all()` for `fetchAll`), which needs a new accessor type for almost every finding; 2,963 are public API, many named after SQL functions. The brief leaves fixes needing new types to the semantic pass.
 - **Batch 5:** the runner's own repairs (`minimal type body`, `counter loop iteration`, `test display name string`, `swift protocol qualification`, `comment in source`), type-checked; 16 failing directories left out.
 - **Batch 7:** `overnight/minimal-bodies.py` moves non-stored members into an extension of the type (722 types, 2,480 members); classes, `~Copyable`, `#if` bodies and over-visible members skipped; 82 directories failing the type-check or uncheckable left out; 72 targets reverted to origin/main where the move raised a rule over its ratchet limit.
 - **Ratchet gate** (`overnight/ratchet-check.py`, institute's limits): no repository over any limit from this session's changes. 63 targets whose changes raised a rule over its limit were reverted to origin/main. Three items are over the limit already on origin/main, not from this session: swift-linter-rules `comment in source` 1>0 and `path name grammar` 17>16, institute `comment in source` 21>0.
