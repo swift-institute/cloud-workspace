@@ -82,7 +82,7 @@ for f in sorted(glob.glob(os.path.join(args.lint, "*.json"))):
                 print("SKIP outside Sources/Tests", p, rel, file=sys.stderr)
                 continue
             path = os.path.join(repo, rel)
-            mirror = os.path.join("/home/user/lintmirror", p, rel)
+            mirror = os.path.join("/home/user/lintmirror", p.replace("/", "__", 1), os.path.basename(p), rel)
             if manifest:
                 current = git(repo, "show", ":Package.swift").stdout
             else:
