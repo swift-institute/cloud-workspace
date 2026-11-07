@@ -75,16 +75,19 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 
 Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as the baseline). Backed up to `findings-wip`.
 
-**Verified at 22:55 UTC by a lint of all 438 packages: 30,436 → 25,357, 5,079 fixed (16.7%).**
+**Verified at 23:50 UTC by a lint of all 438 packages: 30,436 → 24,949, 5,487 fixed (18.0%).**
 
 | Rule | Baseline → now (all packages) |
 |---|---|
-| compound suite name | 4,730 → about 441 |
-| extension file naming | 2,531 → about 2,131 |
-| minimal type body | 3,463 → about 3,103 |
-| single type per file | 1,518 → about 1,368 |
-| test display name string | 541 → about 396 |
+| compound suite name | 4,730 → 493 |
+| minimal type body | 3,463 → 2,857 |
+| extension file naming | 2,531 → 2,192 |
+| single type per file | 1,518 → 1,404 |
+| test display name string | 541 → 420 |
+| counter loop iteration | 487 → 445 |
 
+- **Batch 5:** the runner's own repairs (`minimal type body`, `counter loop iteration`, `test display name string`, `swift protocol qualification`, `comment in source`), type-checked; 16 failing directories left out.
+- **Batch 7:** `overnight/minimal-bodies.py` moves non-stored members into an extension of the type (722 types, 2,480 members); classes, `~Copyable`, `#if` bodies and over-visible members skipped; 82 directories failing the type-check or uncheckable left out; 72 targets reverted to origin/main where the move raised a rule over its ratchet limit.
 - **Ratchet gate** (`overnight/ratchet-check.py`, institute's limits): no repository over any limit from this session's changes. 63 targets whose changes raised a rule over its limit were reverted to origin/main. Three items are over the limit already on origin/main, not from this session: swift-linter-rules `comment in source` 1>0 and `path name grammar` 17>16, institute `comment in source` 21>0.
 - **Lint fix:** `lint-all.sh` mirrors each package alone, as CI checks it out. Sibling mirrors made the runner report about 450 false `target import edge` findings; with isolated mirrors the rule is back at its baseline.
 - **Batch 4:** `merge-extension-files.py` (798 merges) and `split-types.py` (855 moves), then reverted where they broke: directories failing the type-check only after the batch, directories the type-check can't verify (C shims, macros), 33 directories where a merged file brought conditional imports mid-file; 45+ unused `public import`s made internal. Institute's generated `Ratchet+limits.swift` kept separate.
