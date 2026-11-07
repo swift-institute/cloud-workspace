@@ -75,16 +75,18 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 
 Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as the baseline). Backed up to `findings-wip`.
 
-**Verified by re-lint of the 338 changed packages (28,215 → 23,556): 4,659 net fixed; ecosystem 30,436 → 25,777 (15.3%).**
+**Verified at 22:20 UTC by re-lint of the 367 changed packages (29,417 → 24,399): 5,018 net fixed; ecosystem 30,436 → 25,418 (16.5%).** Batch 4 (extension-file merges, type splits) added 359 net after its reverts.
 
 | Rule | Before → after (changed packages) |
 |---|---|
-| compound suite name | 4,691 → 402 (−4,289) |
-| minimal type body | 3,380 → 3,020 (−360) |
-| test display name string | 503 → 358 (−145) |
-| compound type name | 882 → 867 (−15, side effect) |
-| target import edge | 5 → 125 (+120): packages with no Sources change in this session; upstream commits pulled by sync.sh, not this batch |
-| single type per file | 1,476 → 1,502 (+26): the batch-1 repair's new extension files |
+| compound suite name | 4,707 → 418 (−4,289) |
+| extension file naming | 2,491 → 2,091 (−400) |
+| minimal type body | 3,413 → 3,053 (−360) |
+| single type per file | 1,502 → 1,352 (−150) |
+| test display name string | 509 → 364 (−145) |
+| target import edge | 5 → 324 (+319): split files carry their original's transitive imports, and upstream commits; to fix with `add-import-edges.py` before any push |
 
+- **Batch 4:** `merge-extension-files.py` (798 merges) and `split-types.py` (855 moves), then reverted where they broke: directories failing the type-check only after the batch, directories the type-check can't verify (C shims, macros), 33 directories where a merged file brought conditional imports mid-file; 45+ unused `public import`s made internal. Institute's generated `Ratchet+limits.swift` kept separate.
+- **Pre-push gate:** `overnight/ratchet-check.py` lists every repository rule count over institute's ratchet limit; run before every push.
 - **Build:** root build with 682 test targets in one plan (`generate.py` on main): libraries green; test targets type-checked with `overnight/typecheck-tests.py` (2 s per target, shown to fail on a deliberate error); targets failing only through this session's changes reverted to origin/main (svg-render, rfc-8446 Extension tests, 2 more). Fallback list `overnight/tests-fallback.txt`: swift-slab `Slab Tests` (trait-gated `Slab.Inline`), swift-rfc-8446 `Standard Library Integration Tests` (fails on origin/main). 136 targets the root can't take are in `tests-skipped.json` (macro plugins, Apple-only, non-product deps, `package` access). The last root test build stopped on the rfc-8446 target, now on the fallback list; the next batch's build confirms green.
 - **Next batch, prepared:** `overnight/merge-extension-files.py` (799 `extension file naming` merges) and `overnight/split-types.py` (1,037 `single type per file` moves), applied together, type-check sweep, one root build.
