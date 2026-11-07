@@ -5,7 +5,7 @@
 
 Skipped: a file changed after its .dia was written (offsets would be stale), a file with any `#if` (the warning
 may hold on this platform only), and overlapping fix-its. Prints one line per file changed."""
-import argparse, glob, os, sys
+import argparse, glob, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dia
@@ -59,7 +59,8 @@ for real, fixes in sorted(edits.items()):
         print("SKIP changed since compiled", rel, file=sys.stderr)
         continue
     data = open(real, "rb").read()
-    if b"#if" in data:
+    conditions = re.findall(rb"^\s*#(?:if|elseif)\s+(.*?)\s*$", data, re.M)
+    if any(not re.fullmatch(rb"!?[A-Za-z_][A-Za-z0-9_]*", c) for c in conditions):
         print("SKIP conditional compilation", rel, file=sys.stderr)
         continue
     ordered = sorted(fixes, reverse=True)
