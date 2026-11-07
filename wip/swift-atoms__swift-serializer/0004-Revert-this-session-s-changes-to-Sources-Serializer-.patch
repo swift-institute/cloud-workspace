@@ -1,0 +1,118 @@
+From 2344fe5a60c02d10a1bed3a060d56c85ab4ab9de Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:43:07 +0000
+Subject: [PATCH 4/4] Revert this session's changes to Sources/Serializer: they
+ raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/Serializer/Lazy/Lazy.Serializer.swift | 41 +++++++++----------
+ .../Swift/Swift.Array+Serializer.swift        | 20 ++++-----
+ 2 files changed, 30 insertions(+), 31 deletions(-)
+
+diff --git a/Sources/Serializer/Lazy/Lazy.Serializer.swift b/Sources/Serializer/Lazy/Lazy.Serializer.swift
+index 9b58864..0d9d7e4 100644
+--- a/Sources/Serializer/Lazy/Lazy.Serializer.swift
++++ b/Sources/Serializer/Lazy/Lazy.Serializer.swift
+@@ -9,7 +9,12 @@
+         Value.Buffer: ~Copyable & ~Escapable,
+         Value.Output: ~Copyable & ~Escapable
+     {
++
+         public struct Serializer<Failure: Swift::Error>: Serializing {
++
++            public typealias Buffer = Value.Buffer
++            public typealias Output = Value.Output
++
+             public let wrapped: Lazy::Lazy<Value, FactoryFailure>
+             @usableFromInline internal let factoryFailure: (FactoryFailure) -> Failure
+             @usableFromInline internal let serializeFailure: (Value.Failure) -> Failure
+@@ -29,6 +34,21 @@
+                 self.factoryFailure = { .left($0) }
+                 self.serializeFailure = { .right($0) }
+             }
++
++            @inlinable
++            public borrowing func serialize(_ output: borrowing Output, into buffer: inout Buffer) throws(Failure) {
++                let parser: Value
++                do throws(FactoryFailure) {
++                    parser = try wrapped()
++                } catch {
++                    throw factoryFailure(error)
++                }
++                do throws(Value.Failure) {
++                    try parser.serialize(output, into: &buffer)
++                } catch {
++                    throw serializeFailure(error)
++                }
++            }
+         }
+ 
+         @inlinable
+@@ -41,25 +61,4 @@
+             .init(self)
+         }
+     }
+-
+-extension Lazy.Serializer {
+-        public typealias Buffer = Value.Buffer
+-
+-        public typealias Output = Value.Output
+-
+-        @inlinable
+-        public borrowing func serialize(_ output: borrowing Output, into buffer: inout Buffer) throws(Failure) {
+-            let parser: Value
+-            do throws(FactoryFailure) {
+-                parser = try wrapped()
+-            } catch {
+-                throw factoryFailure(error)
+-            }
+-            do throws(Value.Failure) {
+-                try parser.serialize(output, into: &buffer)
+-            } catch {
+-                throw serializeFailure(error)
+-            }
+-        }
+-}
+ #endif
+diff --git a/Sources/Serializer/Swift/Swift.Array+Serializer.swift b/Sources/Serializer/Swift/Swift.Array+Serializer.swift
+index 1f0f02c..17c86cb 100644
+--- a/Sources/Serializer/Swift/Swift.Array+Serializer.swift
++++ b/Sources/Serializer/Swift/Swift.Array+Serializer.swift
+@@ -1,24 +1,24 @@
+ public import Serializer_Core
+ 
+ extension Swift.Array {
++
+     public struct Serializer<Buffer: RangeReplaceableCollection>: Serializer::Serializing
+     where Buffer.Element == Element {
++
++        public typealias Output = Void
++
++        public typealias Failure = Never
++
+         public let elements: [Element]
+ 
+         @inlinable
+         public init(_ elements: [Element]) {
+             self.elements = elements
+         }
+-    }
+-}
+-
+-extension Swift.Array.Serializer {
+-    public typealias Output = Void
+-
+-    public typealias Failure = Never
+ 
+-    @inlinable
+-    public borrowing func serialize(_ output: Void, into buffer: inout Buffer) {
+-        buffer.append(contentsOf: elements)
++        @inlinable
++        public borrowing func serialize(_ output: Void, into buffer: inout Buffer) {
++            buffer.append(contentsOf: elements)
++        }
+     }
+ }
+-- 
+2.43.0
+

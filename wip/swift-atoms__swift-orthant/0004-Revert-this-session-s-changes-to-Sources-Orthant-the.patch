@@ -1,0 +1,282 @@
+From 0c3d2f2283815397f87e8ecbf39e5e2e03a8d562 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:43:06 +0000
+Subject: [PATCH 4/4] Revert this session's changes to Sources/Orthant: they
+ raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/Orthant/Orthant+Ordinal.swift         | 45 ++++++++++++
+ Sources/Orthant/Orthant+Swift.Codable.swift   | 23 ++++++
+ .../Orthant/Orthant+Swift.Comparable.swift    |  1 +
+ Sources/Orthant/Orthant+Swift.Equatable.swift |  1 +
+ Sources/Orthant/Orthant+Swift.Hashable.swift  |  1 +
+ .../Orthant.Enumeration+Swift.Sequence.swift  |  8 +++
+ Sources/Orthant/Orthant.Enumeration.swift     | 34 ++++-----
+ Sources/Orthant/Orthant.swift                 | 72 -------------------
+ 8 files changed, 92 insertions(+), 93 deletions(-)
+ create mode 100644 Sources/Orthant/Orthant+Ordinal.swift
+ create mode 100644 Sources/Orthant/Orthant+Swift.Codable.swift
+ create mode 100644 Sources/Orthant/Orthant+Swift.Comparable.swift
+ create mode 100644 Sources/Orthant/Orthant+Swift.Equatable.swift
+ create mode 100644 Sources/Orthant/Orthant+Swift.Hashable.swift
+ create mode 100644 Sources/Orthant/Orthant.Enumeration+Swift.Sequence.swift
+
+diff --git a/Sources/Orthant/Orthant+Ordinal.swift b/Sources/Orthant/Orthant+Ordinal.swift
+new file mode 100644
+index 0000000..b86d0ce
+--- /dev/null
++++ b/Sources/Orthant/Orthant+Ordinal.swift
+@@ -0,0 +1,45 @@
++public import Cardinal
++public import Direction
++public import Ordinal
++
++extension Orthant {
++    @inlinable
++    public static var count: Cardinal {
++        get throws(Error) {
++            guard N >= 0, N < UInt.bitWidth else { throw .countOverflow }
++            return Cardinal(UInt(1) << N)
++        }
++    }
++
++    @inlinable
++    public var ordinal: Ordinal {
++        get throws(Error) {
++            var bits: UInt = 0
++            for index in 0..<N where directions[index] == .negative {
++                guard index < UInt.bitWidth else { throw .ordinalOverflow }
++                bits |= UInt(1) << index
++            }
++            return Ordinal(bits)
++        }
++    }
++
++    @inlinable
++    public init(ordinal: Ordinal) throws(Error) {
++        if N < UInt.bitWidth {
++            guard ordinal.rawValue < UInt(1) << N else {
++                throw .ordinalOutOfBounds(ordinal)
++            }
++        }
++        self.init(_ordinal: ordinal)
++    }
++
++    @usableFromInline
++    init(_ordinal: Ordinal) {
++        let bits = _ordinal.rawValue
++        self.init(
++            InlineArray<N, Direction> { index in
++                index < UInt.bitWidth && bits & (UInt(1) << index) != 0 ? .negative : .positive
++            }
++        )
++    }
++}
+diff --git a/Sources/Orthant/Orthant+Swift.Codable.swift b/Sources/Orthant/Orthant+Swift.Codable.swift
+new file mode 100644
+index 0000000..e88fe94
+--- /dev/null
++++ b/Sources/Orthant/Orthant+Swift.Codable.swift
+@@ -0,0 +1,23 @@
++import Direction
++
++#if !hasFeature(Embedded)
++    extension Orthant: Swift::Codable {
++        @inlinable
++        public init(from decoder: any Decoder) throws {
++            var container = try decoder.unkeyedContainer()
++            self.init(try InlineArray<N, Direction> { _ in try container.decode(Direction.self) })
++            guard container.isAtEnd else {
++                throw DecodingError.dataCorruptedError(
++                    in: container,
++                    debugDescription: "Expected exactly \(N) orthant directions"
++                )
++            }
++        }
++
++        @inlinable
++        public func encode(to encoder: any Encoder) throws {
++            var container = encoder.unkeyedContainer()
++            for index in 0..<N { try container.encode(directions[index]) }
++        }
++    }
++#endif
+diff --git a/Sources/Orthant/Orthant+Swift.Comparable.swift b/Sources/Orthant/Orthant+Swift.Comparable.swift
+new file mode 100644
+index 0000000..7a4747c
+--- /dev/null
++++ b/Sources/Orthant/Orthant+Swift.Comparable.swift
+@@ -0,0 +1 @@
++extension Orthant: Swift::Comparable {}
+diff --git a/Sources/Orthant/Orthant+Swift.Equatable.swift b/Sources/Orthant/Orthant+Swift.Equatable.swift
+new file mode 100644
+index 0000000..9a01550
+--- /dev/null
++++ b/Sources/Orthant/Orthant+Swift.Equatable.swift
+@@ -0,0 +1 @@
++extension Orthant: Swift::Equatable {}
+diff --git a/Sources/Orthant/Orthant+Swift.Hashable.swift b/Sources/Orthant/Orthant+Swift.Hashable.swift
+new file mode 100644
+index 0000000..9e85eee
+--- /dev/null
++++ b/Sources/Orthant/Orthant+Swift.Hashable.swift
+@@ -0,0 +1 @@
++extension Orthant: Swift::Hashable {}
+diff --git a/Sources/Orthant/Orthant.Enumeration+Swift.Sequence.swift b/Sources/Orthant/Orthant.Enumeration+Swift.Sequence.swift
+new file mode 100644
+index 0000000..e838256
+--- /dev/null
++++ b/Sources/Orthant/Orthant.Enumeration+Swift.Sequence.swift
+@@ -0,0 +1,8 @@
++public import Cardinal
++
++extension Orthant.Enumeration: Swift::Sequence {
++    @inlinable
++    public func makeIterator() -> Iterator {
++        Iterator(end: count.rawValue)
++    }
++}
+diff --git a/Sources/Orthant/Orthant.Enumeration.swift b/Sources/Orthant/Orthant.Enumeration.swift
+index 2c30533..63cddf5 100644
+--- a/Sources/Orthant/Orthant.Enumeration.swift
++++ b/Sources/Orthant/Orthant.Enumeration.swift
+@@ -9,6 +9,19 @@ extension Orthant {
+         init(count: Cardinal) {
+             self.count = count
+         }
++
++        public struct Iterator: Sendable {
++            @usableFromInline
++            var current: UInt = 0
++
++            @usableFromInline
++            let end: UInt
++
++            @usableFromInline
++            init(end: UInt) {
++                self.end = end
++            }
++        }
+     }
+ 
+     @inlinable
+@@ -20,31 +33,10 @@ extension Orthant {
+ }
+ 
+ extension Orthant.Enumeration {
+-    public struct Iterator: Sendable {
+-        @usableFromInline
+-        var current: UInt = 0
+ 
+-        @usableFromInline
+-        let end: UInt
+-
+-        @usableFromInline
+-        init(end: UInt) {
+-            self.end = end
+-        }
+-    }
+-}
+-
+-extension Orthant.Enumeration {
+     @inlinable
+     public func element(at ordinal: Ordinal) -> Orthant? {
+         guard ordinal.rawValue < count.rawValue else { return nil }
+         return Orthant(_ordinal: ordinal)
+     }
+ }
+-
+-extension Orthant.Enumeration: Swift::Sequence {
+-    @inlinable
+-    public func makeIterator() -> Iterator {
+-        Iterator(end: count.rawValue)
+-    }
+-}
+diff --git a/Sources/Orthant/Orthant.swift b/Sources/Orthant/Orthant.swift
+index 8600b4c..9e30a95 100644
+--- a/Sources/Orthant/Orthant.swift
++++ b/Sources/Orthant/Orthant.swift
+@@ -1,6 +1,4 @@
+ import Direction
+-public import Cardinal
+-public import Ordinal
+ 
+ public struct Orthant<let N: Int>: Sendable {
+ 
+@@ -63,73 +61,3 @@ extension Orthant {
+         (0..<N).forEach { index in hasher.combine(directions[index].sign) }
+     }
+ }
+-
+-extension Orthant {
+-    @inlinable
+-    public static var count: Cardinal {
+-        get throws(Error) {
+-            guard N >= 0, N < UInt.bitWidth else { throw .countOverflow }
+-            return Cardinal(UInt(1) << N)
+-        }
+-    }
+-
+-    @inlinable
+-    public var ordinal: Ordinal {
+-        get throws(Error) {
+-            var bits: UInt = 0
+-            for index in 0..<N where directions[index] == .negative {
+-                guard index < UInt.bitWidth else { throw .ordinalOverflow }
+-                bits |= UInt(1) << index
+-            }
+-            return Ordinal(bits)
+-        }
+-    }
+-
+-    @inlinable
+-    public init(ordinal: Ordinal) throws(Error) {
+-        if N < UInt.bitWidth {
+-            guard ordinal.rawValue < UInt(1) << N else {
+-                throw .ordinalOutOfBounds(ordinal)
+-            }
+-        }
+-        self.init(_ordinal: ordinal)
+-    }
+-
+-    @usableFromInline
+-    init(_ordinal: Ordinal) {
+-        let bits = _ordinal.rawValue
+-        self.init(
+-            InlineArray<N, Direction> { index in
+-                index < UInt.bitWidth && bits & (UInt(1) << index) != 0 ? .negative : .positive
+-            }
+-        )
+-    }
+-}
+-
+-#if !hasFeature(Embedded)
+-    extension Orthant: Swift::Codable {
+-        @inlinable
+-        public init(from decoder: any Decoder) throws {
+-            var container = try decoder.unkeyedContainer()
+-            self.init(try InlineArray<N, Direction> { _ in try container.decode(Direction.self) })
+-            guard container.isAtEnd else {
+-                throw DecodingError.dataCorruptedError(
+-                    in: container,
+-                    debugDescription: "Expected exactly \(N) orthant directions"
+-                )
+-            }
+-        }
+-
+-        @inlinable
+-        public func encode(to encoder: any Encoder) throws {
+-            var container = encoder.unkeyedContainer()
+-            for index in 0..<N { try container.encode(directions[index]) }
+-        }
+-    }
+-#endif
+-
+-extension Orthant: Swift::Comparable {}
+-
+-extension Orthant: Swift::Equatable {}
+-
+-extension Orthant: Swift::Hashable {}
+-- 
+2.43.0
+

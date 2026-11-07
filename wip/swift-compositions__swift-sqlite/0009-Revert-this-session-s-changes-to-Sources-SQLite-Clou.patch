@@ -1,0 +1,470 @@
+From bd3549eb44af3726331415f0c5f9d05e1038473a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:43:07 +0000
+Subject: [PATCH 09/10] Revert this session's changes to Sources/SQLite
+ CloudKit: they raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ .../CloudKit+StructuredQueries.swift          | 43 ++++++--------
+ Sources/SQLite CloudKit/CloudKitSharing.swift |  5 --
+ .../Internal/DataManager.swift                |  6 --
+ .../Internal/MockCloudDatabase.swift          | 18 +++---
+ .../Internal/MockSyncEngine.swift             | 11 ++--
+ .../Internal/PendingRecordZoneChange.swift    | 32 +++++------
+ .../Internal/SyncEngine.Event.swift           | 34 ++++++-----
+ .../Internal/UserDatabase.swift               |  2 -
+ .../SQLite CloudKit/PrimaryKeyMigration.swift |  3 -
+ Sources/SQLite CloudKit/SyncEngine.swift      | 57 ++++++++-----------
+ 10 files changed, 84 insertions(+), 127 deletions(-)
+
+diff --git a/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift b/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift
+index 5744c63..61bde7d 100644
+--- a/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift	
++++ b/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift	
+@@ -10,6 +10,15 @@
+         public struct _SystemFieldsRepresentation<Record: CKRecord>: QueryBindable, QueryRepresentable {
+             public let queryOutput: Record
+ 
++            public var queryBinding: ISO_9075.Value {
++                let archiver = NSKeyedArchiver(requiringSecureCoding: true)
++                queryOutput.encodeSystemFields(with: archiver)
++                if let recordChangeTag = queryOutput._recordChangeTag {
++                    archiver.encode(NSNumber(value: recordChangeTag), forKey: "_recordChangeTag")
++                }
++                return .blob([Byte](archiver.encodedData))
++            }
++
+             public init(queryOutput: Record) {
+                 self.queryOutput = queryOutput
+             }
+@@ -37,24 +46,22 @@
+                 }
+                 self.init(queryOutput: queryOutput)
+             }
++
++            private struct DecodingError: Swift.Error {}
+         }
+ 
+-        extension _SystemFieldsRepresentation {
++        public struct _AllFieldsRepresentation<Record: CKRecord>: QueryBindable, QueryRepresentable {
++            public let queryOutput: Record
++
+             public var queryBinding: ISO_9075.Value {
+                 let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+-                queryOutput.encodeSystemFields(with: archiver)
++                queryOutput.encode(with: archiver)
+                 if let recordChangeTag = queryOutput._recordChangeTag {
+                     archiver.encode(NSNumber(value: recordChangeTag), forKey: "_recordChangeTag")
+                 }
+                 return .blob([Byte](archiver.encodedData))
+             }
+ 
+-            private struct DecodingError: Swift.Error {}
+-        }
+-
+-        public struct _AllFieldsRepresentation<Record: CKRecord>: QueryBindable, QueryRepresentable {
+-            public let queryOutput: Record
+-
+             public init(queryOutput: Record) {
+                 self.queryOutput = queryOutput
+             }
+@@ -82,17 +89,6 @@
+                 }
+                 self.init(queryOutput: queryOutput)
+             }
+-        }
+-
+-        extension _AllFieldsRepresentation {
+-            public var queryBinding: ISO_9075.Value {
+-                let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+-                queryOutput.encode(with: archiver)
+-                if let recordChangeTag = queryOutput._recordChangeTag {
+-                    archiver.encode(NSNumber(value: recordChangeTag), forKey: "_recordChangeTag")
+-                }
+-                return .blob([Byte](archiver.encodedData))
+-            }
+ 
+             private struct DecodingError: Swift.Error {}
+         }
+@@ -100,6 +96,9 @@
+         extension CKDatabase.Scope {
+             public struct RawValueRepresentation: QueryBindable, QueryRepresentable {
+                 public let queryOutput: CKDatabase.Scope
++                public var queryBinding: ISO_9075.Value {
++                    .int(Int64(queryOutput.rawValue))
++                }
+                 public init(queryOutput: CKDatabase.Scope) {
+                     self.queryOutput = queryOutput
+                 }
+@@ -112,12 +111,6 @@
+             }
+         }
+ 
+-extension CKDatabase.Scope.RawValueRepresentation {
+-            public var queryBinding: ISO_9075.Value {
+-                .int(Int64(queryOutput.rawValue))
+-            }
+-}
+-
+         extension CKRecordKeyValueSetting {
+             fileprivate subscript(at key: String) -> Int64 {
+                 get {
+diff --git a/Sources/SQLite CloudKit/CloudKitSharing.swift b/Sources/SQLite CloudKit/CloudKitSharing.swift
+index 8915488..ffd3a00 100644
+--- a/Sources/SQLite CloudKit/CloudKitSharing.swift	
++++ b/Sources/SQLite CloudKit/CloudKitSharing.swift	
+@@ -15,9 +15,7 @@
+         public struct SharedRecord: Hashable, Identifiable, Sendable {
+             let container: any CloudContainer
+             public let share: CKShare
+-        }
+ 
+-        extension SharedRecord {
+             public var id: CKRecord.ID { share.recordID }
+ 
+             public static func == (lhs: Self, rhs: Self) -> Bool {
+@@ -256,9 +254,6 @@
+                     self.availablePermissions = availablePermissions
+                     self.syncEngine = syncEngine
+                 }
+-            }
+-
+-            extension CloudSharingView {
+                 public var body: some View {
+                     if syncEngine.context == .live {
+                         CloudSharingViewRepresentable(
+diff --git a/Sources/SQLite CloudKit/Internal/DataManager.swift b/Sources/SQLite CloudKit/Internal/DataManager.swift
+index 505787b..e0159d5 100644
+--- a/Sources/SQLite CloudKit/Internal/DataManager.swift	
++++ b/Sources/SQLite CloudKit/Internal/DataManager.swift	
+@@ -13,17 +13,12 @@
+ 
+         public struct LiveDataManager: DataManager {
+             public init() {}
+-        }
+-
+-        extension LiveDataManager {
+             public func load(_ url: URL) throws -> Data {
+                 try Data(contentsOf: url)
+             }
+-
+             public func save(_ data: Data, to url: URL) throws {
+                 try data.write(to: url)
+             }
+-
+             public func sha256(of fileURL: URL) -> Data? {
+                 do {
+                     let fileHandle = try FileHandle(forReadingFrom: fileURL)
+@@ -47,7 +42,6 @@
+                     return nil
+                 }
+             }
+-
+             public var temporaryDirectory: URL {
+                 URL(fileURLWithPath: NSTemporaryDirectory())
+             }
+diff --git a/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift b/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift
+index fb7231a..a894679 100644
+--- a/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift	
++++ b/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift	
+@@ -16,6 +16,13 @@
+                 /// Every deletion with the change tag it was made at, kept so that each device fetching after it
+                 /// receives it once (a deviation from upstream, which forgets a deletion after its first fetch).
+                 var deletedRecords: [(CKRecord.ID, CKRecord.RecordType, changeTag: Int)] = []
++                mutating func recordDeletion(_ recordID: CKRecord.ID, _ recordType: CKRecord.RecordType) {
++                    deletedRecords.append((recordID, recordType, changeTag: nextRecordChangeTag()))
++                }
++                mutating func nextRecordChangeTag() -> Int {
++                    lastRecordChangeTag += 1
++                    return lastRecordChangeTag
++                }
+             }
+ 
+             struct AssetID: Hashable {
+@@ -383,17 +390,6 @@
+             }
+         }
+ 
+-extension MockCloudDatabase.State {
+-            mutating func recordDeletion(_ recordID: CKRecord.ID, _ recordType: CKRecord.RecordType) {
+-                deletedRecords.append((recordID, recordType, changeTag: nextRecordChangeTag()))
+-            }
+-
+-            mutating func nextRecordChangeTag() -> Int {
+-                lastRecordChangeTag += 1
+-                return lastRecordChangeTag
+-            }
+-}
+-
+         private func ckError(forAccountStatus accountStatus: CKAccountStatus) -> CKError {
+             switch accountStatus {
+             case .couldNotDetermine, .restricted, .noAccount:
+diff --git a/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift b/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift
+index c637c85..3d44a97 100644
+--- a/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift	
++++ b/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift	
+@@ -90,9 +90,11 @@
+             }
+ 
+             package func sendChanges(_ options: CKSyncEngine.SendChangesOptions) async throws {
++
+                 if !parentSyncEngine.syncEngine(for: database.databaseScope).state.pendingDatabaseChanges
+                     .isEmpty
+                 {
++
+                     try await parentSyncEngine.processPendingDatabaseChanges(scope: database.databaseScope)
+                 }
+                 var pending = state.pendingRecordZoneChanges
+@@ -208,6 +210,9 @@
+         extension SyncEngine {
+             package struct SendRecordsCallback {
+                 fileprivate let operation: @Sendable () async -> Void
++                package func receive() async {
++                    await operation()
++                }
+             }
+ 
+             package func sendPendingRecordZoneChanges(
+@@ -439,12 +444,6 @@
+                 }
+             }
+         }
+-
+-extension SyncEngine.SendRecordsCallback {
+-            package func receive() async {
+-                await operation()
+-            }
+-}
+     #endif
+ 
+ #endif
+diff --git a/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift b/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift
+index 3799fa8..91dc6b3 100644
+--- a/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift	
++++ b/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift	
+@@ -25,6 +25,21 @@
+                     self.queryOutput = queryOutput
+                 }
+ 
++                package var queryBinding: ISO_9075.Value {
++                    let archiver = NSKeyedArchiver(requiringSecureCoding: true)
++                    switch queryOutput {
++                    case .saveRecord(let recordID):
++                        recordID.encode(with: archiver)
++                        archiver.encode("saveRecord", forKey: "changeType")
++                    case .deleteRecord(let recordID):
++                        recordID.encode(with: archiver)
++                        archiver.encode("deleteRecord", forKey: "changeType")
++                    @unknown default:
++                        return .invalid(ISO_9075.Value.Failure("Unknown pending record zone change: \(queryOutput)"))
++                    }
++                    return .blob([Byte](archiver.encodedData))
++                }
++
+                 package init(decoder: inout some SQL::QueryDecoder) throws(QueryDecodingError) {
+                     let bytes = try [Byte](decoder: &decoder)
+                     do {
+@@ -54,23 +69,6 @@
+ 
+             private struct DecodingError: Swift.Error {}
+         }
+-
+-extension CKSyncEngine.PendingRecordZoneChange.DataRepresentation {
+-            package var queryBinding: ISO_9075.Value {
+-                let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+-                switch queryOutput {
+-                case .saveRecord(let recordID):
+-                    recordID.encode(with: archiver)
+-                    archiver.encode("saveRecord", forKey: "changeType")
+-                case .deleteRecord(let recordID):
+-                    recordID.encode(with: archiver)
+-                    archiver.encode("deleteRecord", forKey: "changeType")
+-                @unknown default:
+-                    return .invalid(ISO_9075.Value.Failure("Unknown pending record zone change: \(queryOutput)"))
+-                }
+-                return .blob([Byte](archiver.encodedData))
+-            }
+-}
+     #endif
+ 
+ #endif
+diff --git a/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift b/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift
+index 45d72ed..77b41de 100644
+--- a/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift	
++++ b/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift	
+@@ -81,27 +81,25 @@
+                         return nil
+                     }
+                 }
+-            }
+-        }
+ 
+-extension SyncEngine.Event {
+-            package var description: String {
+-                switch self {
+-                case .stateUpdate: "stateUpdate"
+-                case .accountChange: "accountChange"
+-                case .fetchedDatabaseChanges: "fetchedDatabaseChanges"
+-                case .fetchedRecordZoneChanges: "fetchedRecordZoneChanges"
+-                case .sentDatabaseChanges: "sentDatabaseChanges"
+-                case .sentRecordZoneChanges: "sentRecordZoneChanges"
+-                case .willFetchChanges: "willFetchChanges"
+-                case .willFetchRecordZoneChanges: "willFetchRecordZoneChanges"
+-                case .didFetchRecordZoneChanges: "didFetchRecordZoneChanges"
+-                case .didFetchChanges: "didFetchChanges"
+-                case .willSendChanges: "willSendChanges"
+-                case .didSendChanges: "didSendChanges"
++                package var description: String {
++                    switch self {
++                    case .stateUpdate: "stateUpdate"
++                    case .accountChange: "accountChange"
++                    case .fetchedDatabaseChanges: "fetchedDatabaseChanges"
++                    case .fetchedRecordZoneChanges: "fetchedRecordZoneChanges"
++                    case .sentDatabaseChanges: "sentDatabaseChanges"
++                    case .sentRecordZoneChanges: "sentRecordZoneChanges"
++                    case .willFetchChanges: "willFetchChanges"
++                    case .willFetchRecordZoneChanges: "willFetchRecordZoneChanges"
++                    case .didFetchRecordZoneChanges: "didFetchRecordZoneChanges"
++                    case .didFetchChanges: "didFetchChanges"
++                    case .willSendChanges: "willSendChanges"
++                    case .didSendChanges: "didSendChanges"
++                    }
+                 }
+             }
+-}
++        }
+     #endif
+ 
+ #endif
+diff --git a/Sources/SQLite CloudKit/Internal/UserDatabase.swift b/Sources/SQLite CloudKit/Internal/UserDatabase.swift
+index 3d4f092..2e64c6c 100644
+--- a/Sources/SQLite CloudKit/Internal/UserDatabase.swift	
++++ b/Sources/SQLite CloudKit/Internal/UserDatabase.swift	
+@@ -8,9 +8,7 @@
+             package init(database: any DatabaseWriter) {
+                 self.database = database
+             }
+-        }
+ 
+-        extension UserDatabase {
+             /// The same database, as the Institute's ``SQLite/Database``.
+             package var sqliteDatabase: SQLite.Database {
+                 SQLite.Database(database)
+diff --git a/Sources/SQLite CloudKit/PrimaryKeyMigration.swift b/Sources/SQLite CloudKit/PrimaryKeyMigration.swift
+index aab7b75..18f6806 100644
+--- a/Sources/SQLite CloudKit/PrimaryKeyMigration.swift	
++++ b/Sources/SQLite CloudKit/PrimaryKeyMigration.swift	
+@@ -564,9 +564,6 @@
+ 
+         struct ForeignKeyCheckError: LocalizedError {
+             let checks: [SQLite.Pragma.ForeignKey.Check]
+-        }
+-
+-        extension ForeignKeyCheckError {
+             var errorDescription: String? {
+                 checks.map {
+                     """
+diff --git a/Sources/SQLite CloudKit/SyncEngine.swift b/Sources/SQLite CloudKit/SyncEngine.swift
+index d56e69e..6b8fb27 100644
+--- a/Sources/SQLite CloudKit/SyncEngine.swift	
++++ b/Sources/SQLite CloudKit/SyncEngine.swift	
+@@ -2230,13 +2230,9 @@
+             init(private: any SyncEngineProtocol, shared: any SyncEngineProtocol) {
+                 rawValue = (`private`, shared)
+             }
+-        }
+-
+-        extension SyncEngines {
+             var isRunning: Bool {
+                 rawValue != nil
+             }
+-
+             package var `private`: (any SyncEngineProtocol)? {
+                 guard let `private` = rawValue?.private
+                 else {
+@@ -2245,7 +2241,6 @@
+                 }
+                 return `private`
+             }
+-
+             package var `shared`: (any SyncEngineProtocol)? {
+                 guard let `shared` = rawValue?.shared
+                 else {
+@@ -2316,8 +2311,31 @@
+ 
+         extension SyncEngine {
+             public struct SchemaError: LocalizedError {
++                package enum Reason {
++                    case cycleDetected
++                    case invalidForeignKey(ForeignKey)
++                    case invalidForeignKeyAction(ForeignKey)
++                    case invalidTableName(String)
++                    case metadatabaseMismatch(attachedPath: String, syncEngineConfiguredPath: String)
++                    case noCloudKitContainer
++                    case nonNullColumnsWithoutDefault(tableName: String, columnNames: [String])
++                    case unknown
++                    case uniquenessConstraint
++                }
+                 package let reason: Reason
+                 public let debugDescription: String
++
++                public var errorDescription: String? {
++                    "Could not synchronize data with iCloud."
++                }
++
++                static let noCloudKitContainer = Self(
++                    reason: .noCloudKitContainer,
++                    debugDescription: """
++                        No default CloudKit container found. Make sure to enable iCloud entitlements in your \
++                        app's "Signing & Capabilities" and add a container identifier.
++                        """
++                )
+             }
+ 
+             fileprivate func validateSchema() throws {
+@@ -2381,32 +2399,6 @@
+             }
+         }
+ 
+-extension SyncEngine.SchemaError {
+-            package enum Reason {
+-                case cycleDetected
+-                case invalidForeignKey(ForeignKey)
+-                case invalidForeignKeyAction(ForeignKey)
+-                case invalidTableName(String)
+-                case metadatabaseMismatch(attachedPath: String, syncEngineConfiguredPath: String)
+-                case noCloudKitContainer
+-                case nonNullColumnsWithoutDefault(tableName: String, columnNames: [String])
+-                case unknown
+-                case uniquenessConstraint
+-            }
+-
+-            public var errorDescription: String? {
+-                "Could not synchronize data with iCloud."
+-            }
+-
+-            static let noCloudKitContainer = Self(
+-                reason: .noCloudKitContainer,
+-                debugDescription: """
+-                    No default CloudKit container found. Make sure to enable iCloud entitlements in your \
+-                    app's "Signing & Capabilities" and add a container identifier.
+-                    """
+-            )
+-}
+-
+         package protocol SynchronizableTable<Base>: Hashable, Sendable {
+             associatedtype Base: PrimaryKeyedTable & _SendableMetatype
+             where
+@@ -2423,9 +2415,6 @@ extension SyncEngine.SchemaError {
+             Base.TableColumns.PrimaryColumn: WritableTableColumnExpression
+         {
+             package init(for table: Base.Type = Base.self) {}
+-        }
+-
+-        extension SynchronizedTable {
+             package var base: Base.Type { Base.self }
+         }
+ 
+-- 
+2.43.0
+

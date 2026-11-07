@@ -1,0 +1,110 @@
+From d7fac0691b4cb36601ffceb1be90d292bdc52134 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:43:06 +0000
+Subject: [PATCH 6/6] Revert this session's changes to Sources/Indexed: they
+ raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/Indexed/Indexed.swift | 61 ++++++++++++++++++-----------------
+ 1 file changed, 32 insertions(+), 29 deletions(-)
+
+diff --git a/Sources/Indexed/Indexed.swift b/Sources/Indexed/Indexed.swift
+index c151de0..2fc9d2a 100644
+--- a/Sources/Indexed/Indexed.swift
++++ b/Sources/Indexed/Indexed.swift
+@@ -5,6 +5,18 @@ public import Property
+ public import Tagged
+ 
+ public struct Indexed<Bound: ~Copyable> {
++
++    public typealias Index = Index::Index<Indexed<Bound>>
++
++    public enum ForEach {}
++
++    public enum Drain {}
++
++    public enum Error: Swift::Error, Hashable, Sendable {
++
++        case invalidBounds(start: Index, end: Index)
++    }
++
+     @usableFromInline
+     var _start: Index
+ 
+@@ -16,6 +28,24 @@ public struct Indexed<Bound: ~Copyable> {
+     @usableFromInline
+     let transform: @Sendable (Index) -> Bound
+ 
++    public struct Iterator: ~Copyable {
++        @usableFromInline
++        var current: Index
++
++        @usableFromInline
++        let end: Index
++
++        @usableFromInline
++        let transform: @Sendable (Index) -> Bound
++
++        @inlinable
++        package init(current: Index, end: Index, transform: @escaping @Sendable (Index) -> Bound) {
++            self.current = current
++            self.end = end
++            self.transform = transform
++        }
++    }
++
+     public struct Reversed {
+         @usableFromInline
+         var start: Index
+@@ -56,6 +86,7 @@ public struct Indexed<Bound: ~Copyable> {
+                     self.current = start
+                     self.exhausted = true
+                 } else {
++
+                     do throws(Ordinal::Ordinal.Error) {
+                         self.current = try end.predecessor.exact()
+                         self.exhausted = false
+@@ -307,6 +338,7 @@ extension Indexed.Reversed.Iterator where Bound: ~Copyable {
+         if current == start {
+             exhausted = true
+         } else {
++
+             do throws(Ordinal::Ordinal.Error) {
+                 current = try current.predecessor.exact()
+             } catch {
+@@ -329,32 +361,3 @@ extension Indexed.Reversed.Iterator: Swift::Sendable where Bound: Swift::Sendabl
+ extension Indexed.Iterator: Swift::Copyable where Bound: Swift::Copyable {}
+ 
+ extension Indexed.Reversed.Iterator: Swift::Copyable where Bound: Swift::Copyable {}
+-
+-extension Indexed where Bound: ~Copyable {
+-    public typealias Index = Index::Index<Indexed<Bound>>
+-
+-    public enum ForEach {}
+-
+-    public enum Drain {}
+-
+-    public enum Error: Swift::Error, Hashable, Sendable {
+-        case invalidBounds(start: Index, end: Index)
+-    }
+-
+-    public struct Iterator: ~Copyable {
+-        @usableFromInline
+-        var current: Index
+-
+-        @usableFromInline
+-        let end: Index
+-
+-        @usableFromInline
+-        let transform: @Sendable (Index) -> Bound
+-
+-        @inlinable
+-        package init(current: Index, end: Index, transform: @escaping @Sendable (Index) -> Bound) {
+-            self.current = current
+-            self.end = end
+-            self.transform = transform
+-        }
+-    }}
+-- 
+2.43.0
+
