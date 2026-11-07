@@ -84,6 +84,22 @@ def setting(st):
     return None
 
 
+_pkg_decls = {}
+
+
+def uses_package_access(path, tdir):
+    if path not in _pkg_decls:
+        names = set()
+        for f in glob.glob(os.path.join(path, "Sources/**/*.swift"), recursive=True):
+            for m in re.finditer(r"\bpackage\s+(?:(?:static|final|override|mutating|nonisolated|convenience|required|lazy)\s+)*(?:func|var|let|init|struct|enum|class|actor|typealias|protocol|subscript)\s*(`[^`]+`|\w+)?", open(f, errors="replace").read()):
+                names.add(m[1] or "init")
+        names.discard("init")
+        _pkg_decls[path] = re.compile(r"\b(?:" + "|".join(re.escape(n) for n in names) + r")\b") if names else None
+    pat = _pkg_decls[path]
+    if not pat: return False
+    return any(pat.search(open(f, errors="replace").read()) for f in glob.glob(os.path.join(tdir, "**/*.swift"), recursive=True))
+
+
 taken = {t["name"] for _, _, _, m in dumped if m for t in m["targets"]}
 test_targets, extra_targets, renamed, skipped, test_names = [], [], {}, [], []
 own_copies = {}
@@ -100,6 +116,8 @@ for path, name, libs, m in dumped:
     for t in m["targets"]:
         if t["type"] != "test": continue
         tdir = os.path.join(path, t.get("path") or f"Tests/{t['name']}")
+        if uses_package_access(path, tdir):
+            skipped.append((path, t["name"], "uses package-access declarations (the root can't give it its package's -package-name)")); continue
         if apple_only([tdir]):
             skipped.append((path, t["name"], "imports an Apple-only framework")); continue
         deps, why = [], None

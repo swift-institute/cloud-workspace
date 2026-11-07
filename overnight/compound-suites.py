@@ -188,6 +188,8 @@ def process(p, rel, lines, tests, types):
             if not host:
                 stats["no host"] = stats.get("no host", 0) + 1; continue
             if un in CATS: continue
+            if name == host:
+                stats["name is the namespace"] = stats.get("name is the namespace", 0) + 1; continue
             tops.append((start, end, name))
         else:
             kind, pname, suite, pstart = info(t, mask, par)
@@ -250,7 +252,7 @@ def process(p, rel, lines, tests, types):
             text = "\n\n" + indent + "extension " + target + " {\n" + "\n\n".join(body) + "\n" + indent + "}"
             edits.append((pe, pe, text, 1))
     if tops:
-        decl = re.compile(r"\b(?:enum|struct)\s+" + re.escape(host) + r"\s*\{")
+        decl = re.compile(r"^(?:@\w+(?:\([^\n]*\))?\s+)*(?:\w+ )*(?:enum|struct|class|actor)\s+" + re.escape(host) + r"\s*[{:]", re.M)
         if not any(decl.search(x) for x in tests.values()):
             first = min(s for s, _, _ in tops)
             edits.append((first, first, "enum " + host + " {}\n\n", -1))
