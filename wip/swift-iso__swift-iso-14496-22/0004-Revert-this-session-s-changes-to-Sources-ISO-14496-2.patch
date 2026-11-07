@@ -1,0 +1,587 @@
+From b72b79119ab88401cda2dfd0c6016dbdf82bd73d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:14:06 +0000
+Subject: [PATCH 4/5] Revert this session's changes to Sources/ISO 14496-22:
+ they raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/ISO 14496-22/Tables/CmapTable.swift   | 60 +++++++++++++
+ Sources/ISO 14496-22/Tables/HeadTable.swift   | 59 +++++++++++++
+ Sources/ISO 14496-22/Tables/HmtxTable.swift   | 11 +++
+ .../Tables/ISO_14496_22.EncodingRecord.swift  | 16 ----
+ .../Tables/ISO_14496_22.Fixed.swift           | 21 -----
+ .../Tables/ISO_14496_22.HeadTable.Flags.swift | 20 -----
+ .../ISO_14496_22.HeadTable.MacStyle.swift     | 24 ------
+ .../Tables/ISO_14496_22.LongHorMetric.swift   | 13 ---
+ .../Tables/ISO_14496_22.NameID.swift          | 56 -------------
+ .../Tables/ISO_14496_22.NameRecord.swift      | 32 -------
+ .../Tables/ISO_14496_22.PlatformID.swift      | 14 ----
+ .../ISO_14496_22.UnicodeEncodingID.swift      | 18 ----
+ .../ISO_14496_22.WindowsEncodingID.swift      | 20 -----
+ Sources/ISO 14496-22/Tables/NameTable.swift   | 84 +++++++++++++++++++
+ 14 files changed, 214 insertions(+), 234 deletions(-)
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.EncodingRecord.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.Fixed.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.Flags.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.MacStyle.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.LongHorMetric.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.NameID.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.NameRecord.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.PlatformID.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.UnicodeEncodingID.swift
+ delete mode 100644 Sources/ISO 14496-22/Tables/ISO_14496_22.WindowsEncodingID.swift
+
+diff --git a/Sources/ISO 14496-22/Tables/CmapTable.swift b/Sources/ISO 14496-22/Tables/CmapTable.swift
+index a349995..8d146c0 100644
+--- a/Sources/ISO 14496-22/Tables/CmapTable.swift	
++++ b/Sources/ISO 14496-22/Tables/CmapTable.swift	
+@@ -23,7 +23,67 @@ extension ISO_14496_22 {
+         }
+     }
+ 
++    public struct EncodingRecord: Sendable, Equatable {
+ 
++        public let platformID: PlatformID
+ 
++        public let encodingID: UInt16
+ 
++        public let subtableOffset: UInt32
++
++        public init(platformID: PlatformID, encodingID: UInt16, subtableOffset: UInt32) {
++            self.platformID = platformID
++            self.encodingID = encodingID
++            self.subtableOffset = subtableOffset
++        }
++    }
++
++    public enum PlatformID: UInt16, Sendable, Equatable {
++
++        case unicode = 0
++
++        case macintosh = 1
++
++        case iso = 2
++
++        case windows = 3
++
++        case custom = 4
++    }
++
++    public enum WindowsEncodingID: UInt16, Sendable, Equatable {
++
++        case symbol = 0
++
++        case unicodeBMP = 1
++
++        case shiftJIS = 2
++
++        case prc = 3
++
++        case big5 = 4
++
++        case wansung = 5
++
++        case johab = 6
++
++        case unicodeFull = 10
++    }
++
++    public enum UnicodeEncodingID: UInt16, Sendable, Equatable {
++
++        case unicode1_0 = 0
++
++        case unicode1_1 = 1
++
++        case iso10646 = 2
++
++        case unicode2_0_BMP = 3
++
++        case unicode2_0_Full = 4
++
++        case unicodeVariation = 5
++
++        case unicodeFull = 6
++    }
+ }
+diff --git a/Sources/ISO 14496-22/Tables/HeadTable.swift b/Sources/ISO 14496-22/Tables/HeadTable.swift
+index 5c29a55..fab8848 100644
+--- a/Sources/ISO 14496-22/Tables/HeadTable.swift	
++++ b/Sources/ISO 14496-22/Tables/HeadTable.swift	
+@@ -81,7 +81,66 @@ extension ISO_14496_22 {
+ }
+ 
+ extension ISO_14496_22 {
++
++    public struct Fixed: Sendable, Equatable {
++        public let integer: Int16
++        public let fraction: UInt16
++
++        public init(integer: Int16, fraction: UInt16) {
++            self.integer = integer
++            self.fraction = fraction
++        }
++
++        public init(rawValue: Int32) {
++            self.integer = Int16(truncatingIfNeeded: rawValue >> 16)
++            self.fraction = UInt16(truncatingIfNeeded: rawValue & 0xFFFF)
++        }
++
++        public var doubleValue: Double {
++            Double(integer) + Double(fraction) / 65536.0
++        }
++    }
+ }
+ 
+ extension ISO_14496_22.HeadTable {
++
++    public struct Flags: OptionSet, Sendable, Equatable {
++        public let rawValue: UInt16
++
++        public init(rawValue: UInt16) {
++            self.rawValue = rawValue
++        }
++
++        public static let baselineAtY0 = Flags(rawValue: 1 << 0)
++
++        public static let leftSidebearingAtX0 = Flags(rawValue: 1 << 1)
++
++        public static let instructionsDependOnPointSize = Flags(rawValue: 1 << 2)
++
++        public static let forcePPEMToInteger = Flags(rawValue: 1 << 3)
++
++        public static let instructionsMayAlterAdvanceWidth = Flags(rawValue: 1 << 4)
++    }
++
++    public struct MacStyle: OptionSet, Sendable, Equatable {
++        public let rawValue: UInt16
++
++        public init(rawValue: UInt16) {
++            self.rawValue = rawValue
++        }
++
++        public static let bold = MacStyle(rawValue: 1 << 0)
++
++        public static let italic = MacStyle(rawValue: 1 << 1)
++
++        public static let underline = MacStyle(rawValue: 1 << 2)
++
++        public static let outline = MacStyle(rawValue: 1 << 3)
++
++        public static let shadow = MacStyle(rawValue: 1 << 4)
++
++        public static let condensed = MacStyle(rawValue: 1 << 5)
++
++        public static let extended = MacStyle(rawValue: 1 << 6)
++    }
+ }
+diff --git a/Sources/ISO 14496-22/Tables/HmtxTable.swift b/Sources/ISO 14496-22/Tables/HmtxTable.swift
+index 375128c..9993cd2 100644
+--- a/Sources/ISO 14496-22/Tables/HmtxTable.swift	
++++ b/Sources/ISO 14496-22/Tables/HmtxTable.swift	
+@@ -39,4 +39,15 @@ extension ISO_14496_22 {
+         }
+     }
+ 
++    public struct LongHorMetric: Sendable, Equatable {
++
++        public let advanceWidth: UInt16
++
++        public let leftSideBearing: Int16
++
++        public init(advanceWidth: UInt16, leftSideBearing: Int16) {
++            self.advanceWidth = advanceWidth
++            self.leftSideBearing = leftSideBearing
++        }
++    }
+ }
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.EncodingRecord.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.EncodingRecord.swift
+deleted file mode 100644
+index 921aecc..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.EncodingRecord.swift	
++++ /dev/null
+@@ -1,16 +0,0 @@
+-extension ISO_14496_22 {
+-    public struct EncodingRecord: Sendable, Equatable {
+-
+-        public let platformID: PlatformID
+-
+-        public let encodingID: UInt16
+-
+-        public let subtableOffset: UInt32
+-
+-        public init(platformID: PlatformID, encodingID: UInt16, subtableOffset: UInt32) {
+-            self.platformID = platformID
+-            self.encodingID = encodingID
+-            self.subtableOffset = subtableOffset
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.Fixed.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.Fixed.swift
+deleted file mode 100644
+index 7e4f78c..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.Fixed.swift	
++++ /dev/null
+@@ -1,21 +0,0 @@
+-
+-extension ISO_14496_22 {
+-    public struct Fixed: Sendable, Equatable {
+-        public let integer: Int16
+-        public let fraction: UInt16
+-
+-        public init(integer: Int16, fraction: UInt16) {
+-            self.integer = integer
+-            self.fraction = fraction
+-        }
+-
+-        public init(rawValue: Int32) {
+-            self.integer = Int16(truncatingIfNeeded: rawValue >> 16)
+-            self.fraction = UInt16(truncatingIfNeeded: rawValue & 0xFFFF)
+-        }
+-
+-        public var doubleValue: Double {
+-            Double(integer) + Double(fraction) / 65536.0
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.Flags.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.Flags.swift
+deleted file mode 100644
+index f6d3a87..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.Flags.swift	
++++ /dev/null
+@@ -1,20 +0,0 @@
+-
+-extension ISO_14496_22.HeadTable {
+-    public struct Flags: OptionSet, Sendable, Equatable {
+-        public let rawValue: UInt16
+-
+-        public init(rawValue: UInt16) {
+-            self.rawValue = rawValue
+-        }
+-
+-        public static let baselineAtY0 = Flags(rawValue: 1 << 0)
+-
+-        public static let leftSidebearingAtX0 = Flags(rawValue: 1 << 1)
+-
+-        public static let instructionsDependOnPointSize = Flags(rawValue: 1 << 2)
+-
+-        public static let forcePPEMToInteger = Flags(rawValue: 1 << 3)
+-
+-        public static let instructionsMayAlterAdvanceWidth = Flags(rawValue: 1 << 4)
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.MacStyle.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.MacStyle.swift
+deleted file mode 100644
+index 9d9b372..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.HeadTable.MacStyle.swift	
++++ /dev/null
+@@ -1,24 +0,0 @@
+-
+-extension ISO_14496_22.HeadTable {
+-    public struct MacStyle: OptionSet, Sendable, Equatable {
+-        public let rawValue: UInt16
+-
+-        public init(rawValue: UInt16) {
+-            self.rawValue = rawValue
+-        }
+-
+-        public static let bold = MacStyle(rawValue: 1 << 0)
+-
+-        public static let italic = MacStyle(rawValue: 1 << 1)
+-
+-        public static let underline = MacStyle(rawValue: 1 << 2)
+-
+-        public static let outline = MacStyle(rawValue: 1 << 3)
+-
+-        public static let shadow = MacStyle(rawValue: 1 << 4)
+-
+-        public static let condensed = MacStyle(rawValue: 1 << 5)
+-
+-        public static let extended = MacStyle(rawValue: 1 << 6)
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.LongHorMetric.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.LongHorMetric.swift
+deleted file mode 100644
+index e29199d..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.LongHorMetric.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-extension ISO_14496_22 {
+-    public struct LongHorMetric: Sendable, Equatable {
+-
+-        public let advanceWidth: UInt16
+-
+-        public let leftSideBearing: Int16
+-
+-        public init(advanceWidth: UInt16, leftSideBearing: Int16) {
+-            self.advanceWidth = advanceWidth
+-            self.leftSideBearing = leftSideBearing
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.NameID.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.NameID.swift
+deleted file mode 100644
+index 5ad7345..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.NameID.swift	
++++ /dev/null
+@@ -1,56 +0,0 @@
+-extension ISO_14496_22 {
+-    public enum NameID: UInt16, Sendable, Equatable, Hashable {
+-
+-        case copyright = 0
+-
+-        case fontFamily = 1
+-
+-        case fontSubfamily = 2
+-
+-        case uniqueID = 3
+-
+-        case fullFontName = 4
+-
+-        case version = 5
+-
+-        case postScriptName = 6
+-
+-        case trademark = 7
+-
+-        case manufacturer = 8
+-
+-        case designer = 9
+-
+-        case description = 10
+-
+-        case vendorURL = 11
+-
+-        case designerURL = 12
+-
+-        case license = 13
+-
+-        case licenseURL = 14
+-
+-        case reserved = 15
+-
+-        case typographicFamily = 16
+-
+-        case typographicSubfamily = 17
+-
+-        case compatibleFull = 18
+-
+-        case sampleText = 19
+-
+-        case postScriptCID = 20
+-
+-        case wwsFamily = 21
+-
+-        case wwsSubfamily = 22
+-
+-        case lightBackgroundPalette = 23
+-
+-        case darkBackgroundPalette = 24
+-
+-        case variationsPostScriptPrefix = 25
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.NameRecord.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.NameRecord.swift
+deleted file mode 100644
+index b23803d..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.NameRecord.swift	
++++ /dev/null
+@@ -1,32 +0,0 @@
+-extension ISO_14496_22 {
+-    public struct NameRecord: Sendable, Equatable {
+-
+-        public let platformID: PlatformID
+-
+-        public let encodingID: UInt16
+-
+-        public let languageID: UInt16
+-
+-        public let nameID: NameID
+-
+-        public let length: UInt16
+-
+-        public let stringOffset: UInt16
+-
+-        public init(
+-            platformID: PlatformID,
+-            encodingID: UInt16,
+-            languageID: UInt16,
+-            nameID: NameID,
+-            length: UInt16,
+-            stringOffset: UInt16
+-        ) {
+-            self.platformID = platformID
+-            self.encodingID = encodingID
+-            self.languageID = languageID
+-            self.nameID = nameID
+-            self.length = length
+-            self.stringOffset = stringOffset
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.PlatformID.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.PlatformID.swift
+deleted file mode 100644
+index a1c7c53..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.PlatformID.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-extension ISO_14496_22 {
+-    public enum PlatformID: UInt16, Sendable, Equatable {
+-
+-        case unicode = 0
+-
+-        case macintosh = 1
+-
+-        case iso = 2
+-
+-        case windows = 3
+-
+-        case custom = 4
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.UnicodeEncodingID.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.UnicodeEncodingID.swift
+deleted file mode 100644
+index 5f9288d..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.UnicodeEncodingID.swift	
++++ /dev/null
+@@ -1,18 +0,0 @@
+-extension ISO_14496_22 {
+-    public enum UnicodeEncodingID: UInt16, Sendable, Equatable {
+-
+-        case unicode1_0 = 0
+-
+-        case unicode1_1 = 1
+-
+-        case iso10646 = 2
+-
+-        case unicode2_0_BMP = 3
+-
+-        case unicode2_0_Full = 4
+-
+-        case unicodeVariation = 5
+-
+-        case unicodeFull = 6
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/ISO_14496_22.WindowsEncodingID.swift b/Sources/ISO 14496-22/Tables/ISO_14496_22.WindowsEncodingID.swift
+deleted file mode 100644
+index ca73e43..0000000
+--- a/Sources/ISO 14496-22/Tables/ISO_14496_22.WindowsEncodingID.swift	
++++ /dev/null
+@@ -1,20 +0,0 @@
+-extension ISO_14496_22 {
+-    public enum WindowsEncodingID: UInt16, Sendable, Equatable {
+-
+-        case symbol = 0
+-
+-        case unicodeBMP = 1
+-
+-        case shiftJIS = 2
+-
+-        case prc = 3
+-
+-        case big5 = 4
+-
+-        case wansung = 5
+-
+-        case johab = 6
+-
+-        case unicodeFull = 10
+-    }
+-}
+diff --git a/Sources/ISO 14496-22/Tables/NameTable.swift b/Sources/ISO 14496-22/Tables/NameTable.swift
+index d2ecd31..6131413 100644
+--- a/Sources/ISO 14496-22/Tables/NameTable.swift	
++++ b/Sources/ISO 14496-22/Tables/NameTable.swift	
+@@ -51,5 +51,89 @@ extension ISO_14496_22 {
+         public var typographicSubfamily: String? { strings[.typographicSubfamily] }
+     }
+ 
++    public struct NameRecord: Sendable, Equatable {
+ 
++        public let platformID: PlatformID
++
++        public let encodingID: UInt16
++
++        public let languageID: UInt16
++
++        public let nameID: NameID
++
++        public let length: UInt16
++
++        public let stringOffset: UInt16
++
++        public init(
++            platformID: PlatformID,
++            encodingID: UInt16,
++            languageID: UInt16,
++            nameID: NameID,
++            length: UInt16,
++            stringOffset: UInt16
++        ) {
++            self.platformID = platformID
++            self.encodingID = encodingID
++            self.languageID = languageID
++            self.nameID = nameID
++            self.length = length
++            self.stringOffset = stringOffset
++        }
++    }
++
++    public enum NameID: UInt16, Sendable, Equatable, Hashable {
++
++        case copyright = 0
++
++        case fontFamily = 1
++
++        case fontSubfamily = 2
++
++        case uniqueID = 3
++
++        case fullFontName = 4
++
++        case version = 5
++
++        case postScriptName = 6
++
++        case trademark = 7
++
++        case manufacturer = 8
++
++        case designer = 9
++
++        case description = 10
++
++        case vendorURL = 11
++
++        case designerURL = 12
++
++        case license = 13
++
++        case licenseURL = 14
++
++        case reserved = 15
++
++        case typographicFamily = 16
++
++        case typographicSubfamily = 17
++
++        case compatibleFull = 18
++
++        case sampleText = 19
++
++        case postScriptCID = 20
++
++        case wwsFamily = 21
++
++        case wwsSubfamily = 22
++
++        case lightBackgroundPalette = 23
++
++        case darkBackgroundPalette = 24
++
++        case variationsPostScriptPrefix = 25
++    }
+ }
+-- 
+2.43.0
+

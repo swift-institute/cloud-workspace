@@ -1,0 +1,780 @@
+From 81ae188b143f925d1560e993f6d294301248df59 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:14:05 +0000
+Subject: [PATCH 6/7] Revert this session's changes to Sources/IEEE 754: they
+ raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/IEEE 754/Float+Exception.swift        | 27 ++++++++++++++++
+ Sources/IEEE 754/Float.Exception.State.swift  | 29 -----------------
+ Sources/IEEE 754/IEEE_754+Rounding.swift      | 22 +++++++++++++
+ ...Binary128.SpecialValuesDocumentation.swift |  4 ---
+ Sources/IEEE 754/IEEE_754.Binary128.swift     |  2 ++
+ ...Binary256.SpecialValuesDocumentation.swift |  4 ---
+ Sources/IEEE 754/IEEE_754.Binary256.swift     |  2 ++
+ .../IEEE_754.Binary32.SpecialValues.swift     |  6 ----
+ Sources/IEEE 754/IEEE_754.Binary32.swift      |  2 ++
+ .../IEEE_754.Binary64.SpecialValues.swift     |  6 ----
+ Sources/IEEE 754/IEEE_754.Binary64.swift      |  2 ++
+ ...54.Classification.NumberClass.Finite.swift | 13 --------
+ ...E_754.Classification.NumberClass.NaN.swift |  9 ------
+ .../IEEE_754.Classification.NumberClass.swift | 11 -------
+ .../IEEE 754/IEEE_754.Classification.swift    | 26 +++++++++++++++
+ ...54.Comparison.Predicate.EqualityMode.swift |  9 ------
+ ...54.Comparison.Predicate.OrderingMode.swift |  9 ------
+ .../IEEE_754.Comparison.Predicate.swift       |  9 ------
+ Sources/IEEE 754/IEEE_754.Comparison.swift    | 20 ++++++++++++
+ ..._754.Exceptions.ExceptionState.Flags.swift | 14 --------
+ .../IEEE_754.Exceptions.ExceptionState.swift  | 14 --------
+ .../IEEE 754/IEEE_754.Exceptions.Flag.swift   | 18 -----------
+ Sources/IEEE 754/IEEE_754.Exceptions.swift    | 32 +++++++++++++++++--
+ .../IEEE_754.MinMax.Operation.Mode.swift      |  9 ------
+ .../IEEE 754/IEEE_754.MinMax.Operation.swift  | 11 -------
+ Sources/IEEE 754/IEEE_754.MinMax.swift        | 15 +++++++++
+ ..._754.NextOperations.Direction.Target.swift | 11 -------
+ .../IEEE_754.NextOperations.Direction.swift   |  7 ----
+ .../IEEE 754/IEEE_754.NextOperations.swift    | 13 ++++++++
+ .../IEEE 754/IEEE_754.Payload.NaNType.swift   |  9 ------
+ Sources/IEEE 754/IEEE_754.Payload.swift       |  6 ++++
+ .../IEEE_754.Rounding.Direction.Sign.swift    |  9 ------
+ ...E_754.Rounding.Direction.TieBreaking.swift |  9 ------
+ .../IEEE_754.Rounding.Direction.swift         | 11 -------
+ 34 files changed, 167 insertions(+), 233 deletions(-)
+ delete mode 100644 Sources/IEEE 754/Float.Exception.State.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Binary128.SpecialValuesDocumentation.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Binary256.SpecialValuesDocumentation.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Binary32.SpecialValues.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Binary64.SpecialValues.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Classification.NumberClass.Finite.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Classification.NumberClass.NaN.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Classification.NumberClass.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Comparison.Predicate.EqualityMode.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Comparison.Predicate.OrderingMode.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Comparison.Predicate.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.Flags.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Exceptions.Flag.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.MinMax.Operation.Mode.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.MinMax.Operation.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.NextOperations.Direction.Target.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.NextOperations.Direction.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Payload.NaNType.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Rounding.Direction.Sign.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Rounding.Direction.TieBreaking.swift
+ delete mode 100644 Sources/IEEE 754/IEEE_754.Rounding.Direction.swift
+
+diff --git a/Sources/IEEE 754/Float+Exception.swift b/Sources/IEEE 754/Float+Exception.swift
+index da1236d..b59a207 100644
+--- a/Sources/IEEE 754/Float+Exception.swift	
++++ b/Sources/IEEE 754/Float+Exception.swift	
+@@ -10,6 +10,33 @@ extension Float {
+ }
+ 
+ extension Float.Exception {
++
++    public struct State: Sendable, Equatable {
++
++        public let invalid: Bool
++
++        public let division: Bool
++
++        public let overflow: Bool
++
++        public let underflow: Bool
++
++        public let inexact: Bool
++
++        public init(
++            invalid: Bool,
++            division: Bool,
++            overflow: Bool,
++            underflow: Bool,
++            inexact: Bool
++        ) {
++            self.invalid = invalid
++            self.division = division
++            self.overflow = overflow
++            self.underflow = underflow
++            self.inexact = inexact
++        }
++    }
+ }
+ 
+ #if IEEE_754_SHIMS
+diff --git a/Sources/IEEE 754/Float.Exception.State.swift b/Sources/IEEE 754/Float.Exception.State.swift
+deleted file mode 100644
+index c333a8e..0000000
+--- a/Sources/IEEE 754/Float.Exception.State.swift	
++++ /dev/null
+@@ -1,29 +0,0 @@
+-
+-extension Float.Exception {
+-    public struct State: Sendable, Equatable {
+-
+-        public let invalid: Bool
+-
+-        public let division: Bool
+-
+-        public let overflow: Bool
+-
+-        public let underflow: Bool
+-
+-        public let inexact: Bool
+-
+-        public init(
+-            invalid: Bool,
+-            division: Bool,
+-            overflow: Bool,
+-            underflow: Bool,
+-            inexact: Bool
+-        ) {
+-            self.invalid = invalid
+-            self.division = division
+-            self.overflow = overflow
+-            self.underflow = underflow
+-            self.inexact = inexact
+-        }
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754+Rounding.swift b/Sources/IEEE 754/IEEE_754+Rounding.swift
+index 56a69b6..bd8a8b7 100644
+--- a/Sources/IEEE 754/IEEE_754+Rounding.swift	
++++ b/Sources/IEEE 754/IEEE_754+Rounding.swift	
+@@ -5,6 +5,14 @@ extension IEEE_754 {
+ 
+ extension IEEE_754.Rounding {
+ 
++    public enum Direction: Sendable, Equatable {
++
++        case towardInfinity(Sign)
++
++        case towardZero
++
++        case toNearest(TieBreaking)
++    }
+ 
+     @inlinable
+     public static func apply(_ value: Double, direction: Direction) -> Double {
+@@ -48,6 +56,20 @@ extension IEEE_754.Rounding {
+ }
+ 
+ extension IEEE_754.Rounding.Direction {
++
++    public enum Sign: Sendable, Equatable {
++
++        case positive
++
++        case negative
++    }
++
++    public enum TieBreaking: Sendable, Equatable {
++
++        case toEven
++
++        case awayFromZero
++    }
+ }
+ 
+ extension IEEE_754.Rounding {
+diff --git a/Sources/IEEE 754/IEEE_754.Binary128.SpecialValuesDocumentation.swift b/Sources/IEEE 754/IEEE_754.Binary128.SpecialValuesDocumentation.swift
+deleted file mode 100644
+index ab5bda8..0000000
+--- a/Sources/IEEE 754/IEEE_754.Binary128.SpecialValuesDocumentation.swift	
++++ /dev/null
+@@ -1,4 +0,0 @@
+-
+-extension IEEE_754.Binary128 {
+-    public enum SpecialValuesDocumentation {}
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Binary128.swift b/Sources/IEEE 754/IEEE_754.Binary128.swift
+index 298e341..7ae8a53 100644
+--- a/Sources/IEEE 754/IEEE_754.Binary128.swift	
++++ b/Sources/IEEE 754/IEEE_754.Binary128.swift	
+@@ -29,4 +29,6 @@ extension IEEE_754.Binary128 {
+ }
+ 
+ extension IEEE_754.Binary128 {
++
++    public enum SpecialValuesDocumentation {}
+ }
+diff --git a/Sources/IEEE 754/IEEE_754.Binary256.SpecialValuesDocumentation.swift b/Sources/IEEE 754/IEEE_754.Binary256.SpecialValuesDocumentation.swift
+deleted file mode 100644
+index a0ab218..0000000
+--- a/Sources/IEEE 754/IEEE_754.Binary256.SpecialValuesDocumentation.swift	
++++ /dev/null
+@@ -1,4 +0,0 @@
+-
+-extension IEEE_754.Binary256 {
+-    public enum SpecialValuesDocumentation {}
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Binary256.swift b/Sources/IEEE 754/IEEE_754.Binary256.swift
+index 374b36a..fc5bb72 100644
+--- a/Sources/IEEE 754/IEEE_754.Binary256.swift	
++++ b/Sources/IEEE 754/IEEE_754.Binary256.swift	
+@@ -29,4 +29,6 @@ extension IEEE_754.Binary256 {
+ }
+ 
+ extension IEEE_754.Binary256 {
++
++    public enum SpecialValuesDocumentation {}
+ }
+diff --git a/Sources/IEEE 754/IEEE_754.Binary32.SpecialValues.swift b/Sources/IEEE 754/IEEE_754.Binary32.SpecialValues.swift
+deleted file mode 100644
+index b3be1d8..0000000
+--- a/Sources/IEEE 754/IEEE_754.Binary32.SpecialValues.swift	
++++ /dev/null
+@@ -1,6 +0,0 @@
+-import Binary
+-
+-
+-extension IEEE_754.Binary32 {
+-    public enum SpecialValues {}
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Binary32.swift b/Sources/IEEE 754/IEEE_754.Binary32.swift
+index 4f07fa1..6784393 100644
+--- a/Sources/IEEE 754/IEEE_754.Binary32.swift	
++++ b/Sources/IEEE 754/IEEE_754.Binary32.swift	
+@@ -37,6 +37,8 @@ extension IEEE_754.Binary32 {
+ }
+ 
+ extension IEEE_754.Binary32 {
++
++    public enum SpecialValues {}
+ }
+ 
+ extension IEEE_754.Binary32.SpecialValues {
+diff --git a/Sources/IEEE 754/IEEE_754.Binary64.SpecialValues.swift b/Sources/IEEE 754/IEEE_754.Binary64.SpecialValues.swift
+deleted file mode 100644
+index 0447dd5..0000000
+--- a/Sources/IEEE 754/IEEE_754.Binary64.SpecialValues.swift	
++++ /dev/null
+@@ -1,6 +0,0 @@
+-import Binary
+-
+-
+-extension IEEE_754.Binary64 {
+-    public enum SpecialValues {}
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Binary64.swift b/Sources/IEEE 754/IEEE_754.Binary64.swift
+index 5c0ec98..779b000 100644
+--- a/Sources/IEEE 754/IEEE_754.Binary64.swift	
++++ b/Sources/IEEE 754/IEEE_754.Binary64.swift	
+@@ -37,6 +37,8 @@ extension IEEE_754.Binary64 {
+ }
+ 
+ extension IEEE_754.Binary64 {
++
++    public enum SpecialValues {}
+ }
+ 
+ extension IEEE_754.Binary64.SpecialValues {
+diff --git a/Sources/IEEE 754/IEEE_754.Classification.NumberClass.Finite.swift b/Sources/IEEE 754/IEEE_754.Classification.NumberClass.Finite.swift
+deleted file mode 100644
+index 5c157cd..0000000
+--- a/Sources/IEEE 754/IEEE_754.Classification.NumberClass.Finite.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-
+-extension IEEE_754.Classification.NumberClass {
+-    public enum Finite: Sendable, Equatable {
+-
+-        case infinity
+-
+-        case normal
+-
+-        case subnormal
+-
+-        case zero
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Classification.NumberClass.NaN.swift b/Sources/IEEE 754/IEEE_754.Classification.NumberClass.NaN.swift
+deleted file mode 100644
+index ab0ecef..0000000
+--- a/Sources/IEEE 754/IEEE_754.Classification.NumberClass.NaN.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Classification.NumberClass {
+-    public enum NaN: Sendable, Equatable {
+-
+-        case signaling
+-
+-        case quiet
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Classification.NumberClass.swift b/Sources/IEEE 754/IEEE_754.Classification.NumberClass.swift
+deleted file mode 100644
+index b656fa7..0000000
+--- a/Sources/IEEE 754/IEEE_754.Classification.NumberClass.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-
+-extension IEEE_754.Classification {
+-    public enum NumberClass: Sendable, Equatable {
+-
+-        case nan(NaN)
+-
+-        case positive(Finite)
+-
+-        case negative(Finite)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Classification.swift b/Sources/IEEE 754/IEEE_754.Classification.swift
+index d5753c2..49228b7 100644
+--- a/Sources/IEEE 754/IEEE_754.Classification.swift	
++++ b/Sources/IEEE 754/IEEE_754.Classification.swift	
+@@ -111,6 +111,14 @@ extension IEEE_754.Classification {
+ 
+ extension IEEE_754.Classification {
+ 
++    public enum NumberClass: Sendable, Equatable {
++
++        case nan(NaN)
++
++        case positive(Finite)
++
++        case negative(Finite)
++    }
+ 
+     @inlinable
+     public static func numberClass(_ value: Double) -> NumberClass {
+@@ -154,4 +162,22 @@ extension IEEE_754.Classification {
+ }
+ 
+ extension IEEE_754.Classification.NumberClass {
++
++    public enum NaN: Sendable, Equatable {
++
++        case signaling
++
++        case quiet
++    }
++
++    public enum Finite: Sendable, Equatable {
++
++        case infinity
++
++        case normal
++
++        case subnormal
++
++        case zero
++    }
+ }
+diff --git a/Sources/IEEE 754/IEEE_754.Comparison.Predicate.EqualityMode.swift b/Sources/IEEE 754/IEEE_754.Comparison.Predicate.EqualityMode.swift
+deleted file mode 100644
+index 6eccc36..0000000
+--- a/Sources/IEEE 754/IEEE_754.Comparison.Predicate.EqualityMode.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Comparison.Predicate {
+-    public enum EqualityMode: Sendable, Equatable {
+-
+-        case equal
+-
+-        case notEqual
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Comparison.Predicate.OrderingMode.swift b/Sources/IEEE 754/IEEE_754.Comparison.Predicate.OrderingMode.swift
+deleted file mode 100644
+index 6c78d0d..0000000
+--- a/Sources/IEEE 754/IEEE_754.Comparison.Predicate.OrderingMode.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Comparison.Predicate {
+-    public enum OrderingMode: Sendable, Equatable {
+-
+-        case less(orEqual: Bool)
+-
+-        case greater(orEqual: Bool)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Comparison.Predicate.swift b/Sources/IEEE 754/IEEE_754.Comparison.Predicate.swift
+deleted file mode 100644
+index 59d8fdc..0000000
+--- a/Sources/IEEE 754/IEEE_754.Comparison.Predicate.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Comparison {
+-    public enum Predicate: Sendable, Equatable {
+-
+-        case equality(EqualityMode)
+-
+-        case ordering(OrderingMode)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Comparison.swift b/Sources/IEEE 754/IEEE_754.Comparison.swift
+index cb2a358..72f5ab8 100644
+--- a/Sources/IEEE 754/IEEE_754.Comparison.swift	
++++ b/Sources/IEEE 754/IEEE_754.Comparison.swift	
+@@ -9,6 +9,12 @@ extension IEEE_754 {
+ 
+ extension IEEE_754.Comparison {
+ 
++    public enum Predicate: Sendable, Equatable {
++
++        case equality(EqualityMode)
++
++        case ordering(OrderingMode)
++    }
+ 
+     @inlinable
+     public static func compare(_ lhs: Double, _ rhs: Double, using predicate: Predicate) -> Bool {
+@@ -58,6 +64,20 @@ extension IEEE_754.Comparison {
+ }
+ 
+ extension IEEE_754.Comparison.Predicate {
++
++    public enum EqualityMode: Sendable, Equatable {
++
++        case equal
++
++        case notEqual
++    }
++
++    public enum OrderingMode: Sendable, Equatable {
++
++        case less(orEqual: Bool)
++
++        case greater(orEqual: Bool)
++    }
+ }
+ 
+ extension IEEE_754.Comparison {
+diff --git a/Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.Flags.swift b/Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.Flags.swift
+deleted file mode 100644
+index fe9686f..0000000
+--- a/Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.Flags.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-import Dependency
+-import Synchronization
+-
+-
+-extension IEEE_754.Exceptions.ExceptionState {
+-    @usableFromInline
+-    struct Flags {
+-        var invalid: Bool = false
+-        var divisionByZero: Bool = false
+-        var overflow: Bool = false
+-        var underflow: Bool = false
+-        var inexact: Bool = false
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.swift b/Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.swift
+deleted file mode 100644
+index 91e1a91..0000000
+--- a/Sources/IEEE 754/IEEE_754.Exceptions.ExceptionState.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-import Dependency
+-public import Synchronization
+-
+-
+-extension IEEE_754.Exceptions {
+-    @usableFromInline
+-    final class ExceptionState: @unchecked Sendable {
+-        @usableFromInline
+-        let state: Mutex<Flags> = Mutex(Flags())
+-
+-        @usableFromInline
+-        init() {}
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Exceptions.Flag.swift b/Sources/IEEE 754/IEEE_754.Exceptions.Flag.swift
+deleted file mode 100644
+index fadb5f2..0000000
+--- a/Sources/IEEE 754/IEEE_754.Exceptions.Flag.swift	
++++ /dev/null
+@@ -1,18 +0,0 @@
+-import Dependency
+-import Synchronization
+-
+-
+-extension IEEE_754.Exceptions {
+-    public enum Flag: Sendable, Equatable, CaseIterable {
+-
+-        case invalid
+-
+-        case divisionByZero
+-
+-        case overflow
+-
+-        case underflow
+-
+-        case inexact
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Exceptions.swift b/Sources/IEEE 754/IEEE_754.Exceptions.swift
+index 4407298..02e74bd 100644
+--- a/Sources/IEEE 754/IEEE_754.Exceptions.swift	
++++ b/Sources/IEEE 754/IEEE_754.Exceptions.swift	
+@@ -1,5 +1,5 @@
+ public import Dependency
+-import Synchronization
++public import Synchronization
+ 
+ extension IEEE_754 {
+ 
+@@ -7,6 +7,19 @@ extension IEEE_754 {
+ }
+ 
+ extension IEEE_754.Exceptions {
++
++    public enum Flag: Sendable, Equatable, CaseIterable {
++
++        case invalid
++
++        case divisionByZero
++
++        case overflow
++
++        case underflow
++
++        case inexact
++    }
+ }
+ 
+ extension IEEE_754.Exceptions.Flag: CustomStringConvertible {
+@@ -23,6 +36,14 @@ extension IEEE_754.Exceptions.Flag: CustomStringConvertible {
+ 
+ extension IEEE_754.Exceptions {
+ 
++    @usableFromInline
++    final class ExceptionState: @unchecked Sendable {
++        @usableFromInline
++        let state: Mutex<Flags> = Mutex(Flags())
++
++        @usableFromInline
++        init() {}
++    }
+ 
+     @usableFromInline
+     static var state: ExceptionState {
+@@ -31,7 +52,14 @@ extension IEEE_754.Exceptions {
+ }
+ 
+ extension IEEE_754.Exceptions.ExceptionState {
+-
++    @usableFromInline
++    struct Flags {
++        var invalid: Bool = false
++        var divisionByZero: Bool = false
++        var overflow: Bool = false
++        var underflow: Bool = false
++        var inexact: Bool = false
++    }
+ 
+     @usableFromInline
+     static let _global = IEEE_754.Exceptions.ExceptionState()
+diff --git a/Sources/IEEE 754/IEEE_754.MinMax.Operation.Mode.swift b/Sources/IEEE 754/IEEE_754.MinMax.Operation.Mode.swift
+deleted file mode 100644
+index 5572438..0000000
+--- a/Sources/IEEE 754/IEEE_754.MinMax.Operation.Mode.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.MinMax.Operation {
+-    public enum Mode: Sendable, Equatable {
+-
+-        case minimum
+-
+-        case maximum
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.MinMax.Operation.swift b/Sources/IEEE 754/IEEE_754.MinMax.Operation.swift
+deleted file mode 100644
+index 979e48f..0000000
+--- a/Sources/IEEE 754/IEEE_754.MinMax.Operation.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-
+-extension IEEE_754.MinMax {
+-    public enum Operation: Sendable, Equatable {
+-
+-        case standard(Mode)
+-
+-        case number(Mode)
+-
+-        case magnitude(Mode, preferNumber: Bool)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.MinMax.swift b/Sources/IEEE 754/IEEE_754.MinMax.swift
+index 85598f2..a518c7b 100644
+--- a/Sources/IEEE 754/IEEE_754.MinMax.swift	
++++ b/Sources/IEEE 754/IEEE_754.MinMax.swift	
+@@ -5,6 +5,14 @@ extension IEEE_754 {
+ 
+ extension IEEE_754.MinMax {
+ 
++    public enum Operation: Sendable, Equatable {
++
++        case standard(Mode)
++
++        case number(Mode)
++
++        case magnitude(Mode, preferNumber: Bool)
++    }
+ 
+     @inlinable
+     public static func apply(_ x: Double, _ y: Double, operation: Operation) -> Double {
+@@ -66,6 +74,13 @@ extension IEEE_754.MinMax {
+ }
+ 
+ extension IEEE_754.MinMax.Operation {
++
++    public enum Mode: Sendable, Equatable {
++
++        case minimum
++
++        case maximum
++    }
+ }
+ 
+ extension IEEE_754.MinMax {
+diff --git a/Sources/IEEE 754/IEEE_754.NextOperations.Direction.Target.swift b/Sources/IEEE 754/IEEE_754.NextOperations.Direction.Target.swift
+deleted file mode 100644
+index 274a35b..0000000
+--- a/Sources/IEEE 754/IEEE_754.NextOperations.Direction.Target.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-
+-extension IEEE_754.NextOperations.Direction {
+-    public enum Target: Sendable, Equatable {
+-
+-        case positiveInfinity
+-
+-        case negativeInfinity
+-
+-        case value(Double)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.NextOperations.Direction.swift b/Sources/IEEE 754/IEEE_754.NextOperations.Direction.swift
+deleted file mode 100644
+index d4e0ca8..0000000
+--- a/Sources/IEEE 754/IEEE_754.NextOperations.Direction.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-
+-extension IEEE_754.NextOperations {
+-    public enum Direction: Sendable, Equatable {
+-
+-        case toward(Target)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.NextOperations.swift b/Sources/IEEE 754/IEEE_754.NextOperations.swift
+index 1d4df2a..780e4c9 100644
+--- a/Sources/IEEE 754/IEEE_754.NextOperations.swift	
++++ b/Sources/IEEE 754/IEEE_754.NextOperations.swift	
+@@ -5,6 +5,10 @@ extension IEEE_754 {
+ 
+ extension IEEE_754.NextOperations {
+ 
++    public enum Direction: Sendable, Equatable {
++
++        case toward(Target)
++    }
+ 
+     @inlinable
+     public static func next(_ value: Double, direction: Direction) -> Double {
+@@ -68,6 +72,15 @@ extension IEEE_754.NextOperations {
+ }
+ 
+ extension IEEE_754.NextOperations.Direction {
++
++    public enum Target: Sendable, Equatable {
++
++        case positiveInfinity
++
++        case negativeInfinity
++
++        case value(Double)
++    }
+ }
+ 
+ extension IEEE_754.NextOperations.Direction.Target {
+diff --git a/Sources/IEEE 754/IEEE_754.Payload.NaNType.swift b/Sources/IEEE 754/IEEE_754.Payload.NaNType.swift
+deleted file mode 100644
+index 605df33..0000000
+--- a/Sources/IEEE 754/IEEE_754.Payload.NaNType.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Payload {
+-    public enum NaNType: Sendable, Equatable {
+-
+-        case quiet(payload: UInt64)
+-
+-        case signaling(payload: UInt64)
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Payload.swift b/Sources/IEEE 754/IEEE_754.Payload.swift
+index 015ca72..a068a18 100644
+--- a/Sources/IEEE 754/IEEE_754.Payload.swift	
++++ b/Sources/IEEE 754/IEEE_754.Payload.swift	
+@@ -5,6 +5,12 @@ extension IEEE_754 {
+ 
+ extension IEEE_754.Payload {
+ 
++    public enum NaNType: Sendable, Equatable {
++
++        case quiet(payload: UInt64)
++
++        case signaling(payload: UInt64)
++    }
+ 
+     @inlinable
+     public static func encode(_ type: NaNType) -> Double {
+diff --git a/Sources/IEEE 754/IEEE_754.Rounding.Direction.Sign.swift b/Sources/IEEE 754/IEEE_754.Rounding.Direction.Sign.swift
+deleted file mode 100644
+index d64d55e..0000000
+--- a/Sources/IEEE 754/IEEE_754.Rounding.Direction.Sign.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Rounding.Direction {
+-    public enum Sign: Sendable, Equatable {
+-
+-        case positive
+-
+-        case negative
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Rounding.Direction.TieBreaking.swift b/Sources/IEEE 754/IEEE_754.Rounding.Direction.TieBreaking.swift
+deleted file mode 100644
+index 315a5c0..0000000
+--- a/Sources/IEEE 754/IEEE_754.Rounding.Direction.TieBreaking.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension IEEE_754.Rounding.Direction {
+-    public enum TieBreaking: Sendable, Equatable {
+-
+-        case toEven
+-
+-        case awayFromZero
+-    }
+-}
+diff --git a/Sources/IEEE 754/IEEE_754.Rounding.Direction.swift b/Sources/IEEE 754/IEEE_754.Rounding.Direction.swift
+deleted file mode 100644
+index 582bb2a..0000000
+--- a/Sources/IEEE 754/IEEE_754.Rounding.Direction.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-
+-extension IEEE_754.Rounding {
+-    public enum Direction: Sendable, Equatable {
+-
+-        case towardInfinity(Sign)
+-
+-        case towardZero
+-
+-        case toNearest(TieBreaking)
+-    }
+-}
+-- 
+2.43.0
+

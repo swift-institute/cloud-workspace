@@ -1,0 +1,136 @@
+From 18da32baa307da32a57f28679960b3da29b7c148 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:14:03 +0000
+Subject: [PATCH 4/4] Revert this session's changes to Sources/Iterator: they
+ raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/Iterator/Iterator.Buffered.swift  | 51 +++++++++++------------
+ Sources/Iterator/Iterator.Flattened.swift |  9 ++--
+ Sources/Iterator/Iterator.repeating.swift |  7 ++++
+ Sources/Iterator/Iterator.swift           |  8 ----
+ 4 files changed, 34 insertions(+), 41 deletions(-)
+ create mode 100644 Sources/Iterator/Iterator.repeating.swift
+
+diff --git a/Sources/Iterator/Iterator.Buffered.swift b/Sources/Iterator/Iterator.Buffered.swift
+index f0abd77..ee543c8 100644
+--- a/Sources/Iterator/Iterator.Buffered.swift
++++ b/Sources/Iterator/Iterator.Buffered.swift
+@@ -2,44 +2,41 @@ extension Iterator {
+ 
+     public struct Buffered<Base: Iterating & ~Copyable & ~Escapable, SourceFailure: Swift::Error>: Iterating, ~Copyable, ~Escapable
+     where Base.Element: ~Copyable & Escapable, Base.Failure == SourceFailure {
++        public typealias Element = Base.Element
++        public typealias Failure = Base.Failure
+         private var base: Base
+         private var pending: Node?
+ 
++        private final class Node {
++            var element: Element?
++            let next: Node?
++            init(_ element: consuming Element, next: Node?) {
++                self.element = .some(consume element)
++                self.next = next
++            }
++        }
++
+         @_lifetime(copy base)
+         public init(_ base: consuming Base) {
+             self.base = base
+             self.pending = nil
+         }
+-    }
+-}
+-
+-extension Iterator::Iterator.Buffered: Escapable
+-where Base: ~Copyable & Escapable, Base.Element: ~Copyable & Escapable {}
+ 
+-extension Iterator.Buffered where Base: ~Copyable & ~Escapable, Base.Element: ~Copyable {
+-    public typealias Element = Base.Element
+-    public typealias Failure = Base.Failure
+-
+-    private final class Node {
+-        var element: Element?
+-        let next: Node?
+-        init(_ element: consuming Element, next: Node?) {
+-            self.element = .some(consume element)
+-            self.next = next
++        public mutating func next() throws(Failure) -> Element? {
++            if let node = pending {
++                pending = node.next
++                var result: Element? = nil
++                swap(&result, &node.element)
++                return result
++            }
++            return try base.next()
+         }
+-    }
+ 
+-    public mutating func next() throws(Failure) -> Element? {
+-        if let node = pending {
+-            pending = node.next
+-            var result: Element? = nil
+-            swap(&result, &node.element)
+-            return result
++        public mutating func unread(_ element: consuming Element) {
++            pending = Node(element, next: pending)
+         }
+-        return try base.next()
+-    }
+-
+-    public mutating func unread(_ element: consuming Element) {
+-        pending = Node(element, next: pending)
+     }
+ }
++
++extension Iterator::Iterator.Buffered: Escapable
++where Base: ~Copyable & Escapable, Base.Element: ~Copyable & Escapable {}
+diff --git a/Sources/Iterator/Iterator.Flattened.swift b/Sources/Iterator/Iterator.Flattened.swift
+index e3164c0..38d9e72 100644
+--- a/Sources/Iterator/Iterator.Flattened.swift
++++ b/Sources/Iterator/Iterator.Flattened.swift
+@@ -5,11 +5,8 @@ extension Iterator {
+         private var source: Source
+         @_lifetime(copy source)
+         public init(_ source: consuming Source) { self.source = source }
+-    }
+-}
+-
+-extension Iterator.Flattened where Source: ~Copyable & ~Escapable {
+-    public mutating func next() throws(Source.Failure) -> Source.Element? {
+-        try source.next()
++        public mutating func next() throws(Source.Failure) -> Source.Element? {
++            try source.next()
++        }
+     }
+ }
+diff --git a/Sources/Iterator/Iterator.repeating.swift b/Sources/Iterator/Iterator.repeating.swift
+new file mode 100644
+index 0000000..d77a54a
+--- /dev/null
++++ b/Sources/Iterator/Iterator.repeating.swift
+@@ -0,0 +1,7 @@
++extension Iterator {
++
++    @inlinable
++    public static func repeating<Element>(_ element: Element) -> Iterator.Witness<Element, Never> {
++        Self.Witness<Element, Never> { element }
++    }
++}
+diff --git a/Sources/Iterator/Iterator.swift b/Sources/Iterator/Iterator.swift
+index 52ae535..f1a5bee 100644
+--- a/Sources/Iterator/Iterator.swift
++++ b/Sources/Iterator/Iterator.swift
+@@ -1,9 +1 @@
+ public enum Iterator {}
+-
+-extension Iterator {
+-
+-    @inlinable
+-    public static func repeating<Element>(_ element: Element) -> Iterator.Witness<Element, Never> {
+-        Self.Witness<Element, Never> { element }
+-    }
+-}
+-- 
+2.43.0
+
