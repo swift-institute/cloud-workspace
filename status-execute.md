@@ -71,11 +71,12 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 - **Tools added:** `overnight/dependents.py`, `overnight/backup-wip.sh`, `overnight/suite-display-names.py`.
 - **Disk:** the per-session allowance filled up. Deleting institute's and swift-linter-rules' `.build` freed about 11 GB.
 
-### Findings session 2, 7 Nov (running)
+### Findings session 2, 7 Nov (running; updated 20:15 UTC)
 
-Linux x86_64, Swift 6.4.2. Patches from `findings-wip` applied; all local commits backed up to `findings-wip` (207 repositories).
+Linux x86_64, Swift 6.4.2. All local commits backed up to `findings-wip` (338 repositories, 19:34).
 
-- **Batch 1, `minimal type body` (441):** root build passes after two fixes: swift-tests `Counters` made `fileprivate` (its operator moved to an extension), institute `Institute.Repository.Policy.Capability.swift` reverted (sibling name out of scope). Test builds pending.
-- **Batch 2, `test display name string` (147 suites, 39 repositories):** display strings became raw-identifier suite names. Guarded against names declared more than once (a first run renamed every `Test`; reverted).
-- **Batch 3, `compound suite name` (2,672 of 4,730, about 200 repositories):** `overnight/compound-suites.py`: 1,020 top-level suites into `extension <Host>`, 1,652 nested into `extension <Path>.<Parent>`. Parse-checked; builds pending. Skipped: 1,824 with no usable host type from the file name (generic, protocol, or not declared in the package), 163 concatenated names, 47 nested under a non-suite type, 17 nested deeper, 4 stale lines, 1 referenced elsewhere.
-- **Running total (unverified, not re-linted):** about 441 + 147 + 2,672 = **3,260 of 30,436 (10.7%)**.
+- **Batch 1, `minimal type body` (441):** root library build green after two fixes (swift-tests `Counters` fileprivate; institute `Institute.Repository.Policy.Capability.swift` reverted).
+- **Batch 2, `test display name string` (147 suites):** committed, backed up.
+- **Batch 3, `compound suite name` (about 4,450 of 4,730):** redone in #239's layout: narrative suites move into the test module's own namespace `` `<File> Tests` `` (declared if missing), never an extension of a library type (Xcode's ⌘U loops on those); nested suites into `extension <Path>.<Parent>`. Committed, backed up; root test build in progress, any file still failing it is reverted to origin/main.
+- **Root test package:** `generate.py` (main) declares 682 test targets in the root; 136 go to `tests-skipped.json` (macro plugins, Apple-only, non-product dependencies, `package`-access tests: SwiftPM ignores a per-target `-package-name`).
+- **Running total, unverified:** about 5,040 of 30,436 (16.5%). Verified count follows the first green root build and a re-lint of the changed packages.
