@@ -43,7 +43,10 @@ for f in sorted(glob.glob(os.path.join(lint, "*.json"))):
         m = pat.search(x["message"])
         if m:
             wants.setdefault(x["fileID"][2:], set()).add(m[2])
+    # No chains: a file that receives a merge is not merged away, and vice versa.
+    dests = {next(iter(v)) for v in wants.values() if len(v) == 1}
     for rel, targets in sorted(wants.items()):
+        if os.path.basename(rel) in dests: skip("receives a merge itself"); continue
         if not rel.startswith("Sources/"): skip("not Sources"); continue
         if len(targets) != 1: skip("several targets"); continue
         src = os.path.join(pkg, rel)
@@ -80,5 +83,5 @@ for f in sorted(glob.glob(os.path.join(lint, "*.json"))):
         print(p, os.path.relpath(src, pkg), "->", os.path.relpath(dst, pkg))
         if not dry:
             open(dst, "w", encoding="utf8").write(new)
-            subprocess.run(["git", "-C", pkg, "rm", "-q", os.path.relpath(src, pkg)], check=True)
+            subprocess.run(["git", "-C", pkg, "rm", "-q", "-f", os.path.relpath(src, pkg)])
 print("merged", merged, "skips", stats, file=sys.stderr)
