@@ -17,6 +17,7 @@ Linux x86_64, Swift 6.4.2, 7 Nov. Brief: `BRIEF-execute.md`. Counts: `overnight/
 | 1 ratchet | institute | 2a07c96 | 3,615 limits, 32,421 findings (was 4,038 / 40,371) |
 | 1 rules | institute | b50d560 | `do throws for typed catch` skips pattern catches and catches that never read `error`; `hoisted error in public throws` reports only public/open declarations (incl. `public extension` members), not `do`, closures or non-public API. Second session. |
 | 1 rules | institute | 574f43b, 7d18cd8, c7f4dfc | `unknown default` only over enums declared in the file; `closure typed throws annotation` only for callees taking `throws(E)` closures (in-file or map/flatMap/compactMap); `bool public parameter` skips memberwise parameters stored as the same-named property; `extension file naming` ignores suppression-only where clauses. Narrowing only: no policy list or runner change needed. |
+| 1 rules | institute | c1c5781, c5194d4, 0b143d9, 93f047e, e7af0b9 | `path name grammar` leaves a file's declared leaf type name to `compound type name`; `counter loop iteration` skips triangular and span loops (detect and repair); `untyped throws` admits Codable container, Decoder and macro witnesses; `fatal error outside tests` skips unavailable declarations and `* Test Support` targets; `file name nested path` strips backticks and skips `__`-hoisted types. Narrowing only. |
 | 2 pilot | swift-algebra | bc520ef, fa2521f | absorbs swift-symmetry-algebra behind trait `Symmetry` |
 | 2 pilot | swift-symmetry-dimension | e26e210, e4d8542 | uses swift-algebra with `Symmetry` |
 
