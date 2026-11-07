@@ -1,0 +1,710 @@
+From b50b6951b02e6ef8f91283e67d963cf2ab4efb84 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:28:24 +0000
+Subject: [PATCH 6/7] minimal type body: more non-stored members move into
+ extensions of their type (overnight/minimal-bodies.py); type-checked, failing
+ files left out (coenttb/work#242)
+
+---
+ Sources/ISO 14496-22/FontSubsetter.swift    | 116 ++++++++++----------
+ Sources/ISO 14496-22/Tables/CmapTable.swift |  16 +--
+ Sources/ISO 14496-22/Tables/GlyfTable.swift | 110 +++++++++----------
+ Sources/ISO 14496-22/Tables/HmtxTable.swift |  52 +++++----
+ Sources/ISO 14496-22/Tables/LocaTable.swift |  22 ++--
+ Sources/ISO 14496-22/Tables/MaxpTable.swift |  20 ++--
+ Sources/ISO 14496-22/Tables/NameTable.swift |  78 +++++++------
+ Sources/ISO 14496-22/Tables/PostTable.swift |  11 +-
+ 8 files changed, 205 insertions(+), 220 deletions(-)
+
+diff --git a/Sources/ISO 14496-22/FontSubsetter.swift b/Sources/ISO 14496-22/FontSubsetter.swift
+index 17a7c06..20901da 100644
+--- a/Sources/ISO 14496-22/FontSubsetter.swift	
++++ b/Sources/ISO 14496-22/FontSubsetter.swift	
+@@ -2,89 +2,88 @@ internal import Binary
+ public import Byte
+ 
+ extension ISO_14496_22 {
+-
+     public struct FontSubsetter: Sendable {
+-
+         public let fontFile: FontFile
+ 
+         public init(fontFile: FontFile) {
+             self.fontFile = fontFile
+         }
++    }
++}
+ 
+-        public func subset(characters: Set<Character>) throws(SubsetError) -> [Byte] {
+-            guard let loca = fontFile.loca, let glyf = fontFile.glyf else {
+-                throw SubsetError.missingTables(
+-                    "Font missing loca/glyf tables (CFF fonts not supported)"
+-                )
+-            }
++extension ISO_14496_22.FontSubsetter {
++    public func subset(characters: Set<Character>) throws(SubsetError) -> [Byte] {
++        guard let loca = fontFile.loca, let glyf = fontFile.glyf else {
++            throw SubsetError.missingTables(
++                "Font missing loca/glyf tables (CFF fonts not supported)"
++            )
++        }
+ 
+-            var requiredGlyphs = Set<UInt16>()
++        var requiredGlyphs = Set<UInt16>()
+ 
+-            requiredGlyphs.insert(0)
++        requiredGlyphs.insert(0)
+ 
+-            for char in characters {
+-                for scalar in char.unicodeScalars {
+-                    if let glyphID = fontFile.cmap.glyphIndex(for: scalar.value) {
+-                        requiredGlyphs.insert(glyphID)
+-                    }
++        for char in characters {
++            for scalar in char.unicodeScalars {
++                if let glyphID = fontFile.cmap.glyphIndex(for: scalar.value) {
++                    requiredGlyphs.insert(glyphID)
+                 }
+             }
++        }
+ 
+-            var processed = Set<UInt16>()
+-            var toProcess = Array(requiredGlyphs)
++        var processed = Set<UInt16>()
++        var toProcess = Array(requiredGlyphs)
+ 
+-            while let glyphID = toProcess.popLast() {
+-                guard !processed.contains(glyphID) else { continue }
+-                processed.insert(glyphID)
++        while let glyphID = toProcess.popLast() {
++            guard !processed.contains(glyphID) else { continue }
++            processed.insert(glyphID)
+ 
+-                if let range = loca.glyphRange(for: glyphID) {
+-                    let components = glyf.componentGlyphIDs(start: range.start, end: range.end)
+-                    for component in components {
+-                        if !processed.contains(component) {
+-                            requiredGlyphs.insert(component)
+-                            toProcess.append(component)
+-                        }
++            if let range = loca.glyphRange(for: glyphID) {
++                let components = glyf.componentGlyphIDs(start: range.start, end: range.end)
++                for component in components {
++                    if !processed.contains(component) {
++                        requiredGlyphs.insert(component)
++                        toProcess.append(component)
+                     }
+                 }
+             }
++        }
+ 
+-            var sortedGlyphs = Array(requiredGlyphs).sorted()
+-            if let zeroIndex = sortedGlyphs.firstIndex(of: 0), zeroIndex != 0 {
+-                sortedGlyphs.remove(at: zeroIndex)
+-                sortedGlyphs.insert(0, at: 0)
+-            }
++        var sortedGlyphs = Array(requiredGlyphs).sorted()
++        if let zeroIndex = sortedGlyphs.firstIndex(of: 0), zeroIndex != 0 {
++            sortedGlyphs.remove(at: zeroIndex)
++            sortedGlyphs.insert(0, at: 0)
++        }
+ 
+-            var oldToNew = [UInt16: UInt16]()
+-            for (newIndex, oldIndex) in sortedGlyphs.enumerated() {
+-                oldToNew[oldIndex] = UInt16(newIndex)
+-            }
++        var oldToNew = [UInt16: UInt16]()
++        for (newIndex, oldIndex) in sortedGlyphs.enumerated() {
++            oldToNew[oldIndex] = UInt16(newIndex)
++        }
+ 
+-            let (newGlyfData, newLocaOffsets) = buildGlyfAndLoca(
+-                sortedGlyphs: sortedGlyphs,
+-                oldToNew: oldToNew,
+-                loca: loca,
+-                glyf: glyf
+-            )
++        let (newGlyfData, newLocaOffsets) = buildGlyfAndLoca(
++            sortedGlyphs: sortedGlyphs,
++            oldToNew: oldToNew,
++            loca: loca,
++            glyf: glyf
++        )
+ 
+-            return buildSubsetFont(
+-                sortedGlyphs: sortedGlyphs,
+-                oldToNew: oldToNew,
+-                newGlyfData: newGlyfData,
+-                newLocaOffsets: newLocaOffsets,
+-                characters: characters
+-            )
+-        }
++        return buildSubsetFont(
++            sortedGlyphs: sortedGlyphs,
++            oldToNew: oldToNew,
++            newGlyfData: newGlyfData,
++            newLocaOffsets: newLocaOffsets,
++            characters: characters
++        )
++    }
+ 
+-        public enum SubsetError: Swift::Error, Sendable {
+-            case missingTables(String)
+-            case invalidGlyph(String)
+-            case buildFailed(String)
+-        }
++    public enum SubsetError: Swift::Error, Sendable {
++        case missingTables(String)
++        case invalidGlyph(String)
++        case buildFailed(String)
+     }
+ }
+ 
+ extension ISO_14496_22.FontSubsetter {
+-
+     private func buildGlyfAndLoca(
+         sortedGlyphs: [UInt16],
+         oldToNew: [UInt16: UInt16],
+@@ -95,7 +94,6 @@ extension ISO_14496_22.FontSubsetter {
+         var newLocaOffsets = [UInt32]()
+ 
+         for oldGlyphID in sortedGlyphs {
+-
+             newLocaOffsets.append(UInt32(newGlyfData.count))
+ 
+             guard let range = loca.glyphRange(for: oldGlyphID) else {
+@@ -123,7 +121,6 @@ extension ISO_14496_22.FontSubsetter {
+     }
+ 
+     private func remapCompositeGlyph(_ data: inout [Byte], oldToNew: [UInt16: UInt16]) {
+-
+         var offset = 10
+ 
+         let ARG_1_AND_2_ARE_WORDS: UInt16 = 0x0001
+@@ -242,7 +239,6 @@ extension ISO_14496_22.FontSubsetter {
+         }
+ 
+         for (index, (tag, _)) in tables.enumerated() {
+-
+             let tagBytes = [Byte](utf8: tag)
+             output.append(contentsOf: tagBytes)
+             for _ in tagBytes.count..<4 {
+@@ -364,7 +360,6 @@ extension ISO_14496_22.FontSubsetter {
+     }
+ 
+     private func buildCmapTable(characters: Set<Character>, oldToNew: [UInt16: UInt16]) -> [Byte] {
+-
+         var charToGlyph: [(UInt32, UInt16)] = []
+ 
+         for char in characters {
+@@ -396,7 +391,6 @@ extension ISO_14496_22.FontSubsetter {
+     }
+ 
+     private func buildCmapFormat4(charToGlyph: [(UInt32, UInt16)]) -> [Byte] {
+-
+         let bmpMappings = charToGlyph.filter { $0.0 <= 0xFFFF }
+ 
+         func computeDelta(glyph: UInt16, code: UInt16) -> Int16 {
+diff --git a/Sources/ISO 14496-22/Tables/CmapTable.swift b/Sources/ISO 14496-22/Tables/CmapTable.swift
+index 8d146c0..147029d 100644
+--- a/Sources/ISO 14496-22/Tables/CmapTable.swift	
++++ b/Sources/ISO 14496-22/Tables/CmapTable.swift	
+@@ -1,7 +1,5 @@
+ extension ISO_14496_22 {
+-
+     public struct CmapTable: Sendable, Equatable {
+-
+         public let version: UInt16
+ 
+         public let encodingRecords: [EncodingRecord]
+@@ -17,14 +15,9 @@ extension ISO_14496_22 {
+             self.encodingRecords = encodingRecords
+             self.unicodeMapping = unicodeMapping
+         }
+-
+-        public func glyphIndex(for codePoint: UInt32) -> UInt16? {
+-            unicodeMapping[codePoint]
+-        }
+     }
+ 
+     public struct EncodingRecord: Sendable, Equatable {
+-
+         public let platformID: PlatformID
+ 
+         public let encodingID: UInt16
+@@ -39,7 +32,6 @@ extension ISO_14496_22 {
+     }
+ 
+     public enum PlatformID: UInt16, Sendable, Equatable {
+-
+         case unicode = 0
+ 
+         case macintosh = 1
+@@ -52,7 +44,6 @@ extension ISO_14496_22 {
+     }
+ 
+     public enum WindowsEncodingID: UInt16, Sendable, Equatable {
+-
+         case symbol = 0
+ 
+         case unicodeBMP = 1
+@@ -71,7 +62,6 @@ extension ISO_14496_22 {
+     }
+ 
+     public enum UnicodeEncodingID: UInt16, Sendable, Equatable {
+-
+         case unicode1_0 = 0
+ 
+         case unicode1_1 = 1
+@@ -87,3 +77,9 @@ extension ISO_14496_22 {
+         case unicodeFull = 6
+     }
+ }
++
++extension ISO_14496_22.CmapTable {
++    public func glyphIndex(for codePoint: UInt32) -> UInt16? {
++        unicodeMapping[codePoint]
++    }
++}
+diff --git a/Sources/ISO 14496-22/Tables/GlyfTable.swift b/Sources/ISO 14496-22/Tables/GlyfTable.swift
+index ef94081..a110760 100644
+--- a/Sources/ISO 14496-22/Tables/GlyfTable.swift	
++++ b/Sources/ISO 14496-22/Tables/GlyfTable.swift	
+@@ -2,9 +2,7 @@ internal import Binary
+ public import Byte
+ 
+ extension ISO_14496_22 {
+-
+     public struct GlyfTable: Sendable, Equatable {
+-
+         public let data: [Byte]
+ 
+         public let tableOffset: UInt32
+@@ -13,77 +11,79 @@ extension ISO_14496_22 {
+             self.data = data
+             self.tableOffset = tableOffset
+         }
++    }
++}
+ 
+-        public func glyphData(start: UInt32, end: UInt32) -> [Byte]? {
+-            let startIndex = Int(start)
+-            let endIndex = Int(end)
+-            guard startIndex <= endIndex, endIndex <= data.count else { return nil }
+-            if startIndex == endIndex { return [] }
+-            return Array(data[startIndex..<endIndex])
+-        }
++extension ISO_14496_22.GlyfTable {
++    public func glyphData(start: UInt32, end: UInt32) -> [Byte]? {
++        let startIndex = Int(start)
++        let endIndex = Int(end)
++        guard startIndex <= endIndex, endIndex <= data.count else { return nil }
++        if startIndex == endIndex { return [] }
++        return Array(data[startIndex..<endIndex])
++    }
+ 
+-        public func isComposite(start: UInt32, end: UInt32) -> Bool {
+-            let startIndex = Int(start)
+-            guard startIndex + 2 <= data.count, start < end else { return false }
+-            guard
+-                let numberOfContours = Int16(
+-                    bytes: data[startIndex..<startIndex + 2],
+-                    endianness: .big
+-                )
+-            else {
+-                preconditionFailure("A 2-byte slice always decodes")
+-            }
+-            return numberOfContours < 0
++    public func isComposite(start: UInt32, end: UInt32) -> Bool {
++        let startIndex = Int(start)
++        guard startIndex + 2 <= data.count, start < end else { return false }
++        guard
++            let numberOfContours = Int16(
++                bytes: data[startIndex..<startIndex + 2],
++                endianness: .big
++            )
++        else {
++            preconditionFailure("A 2-byte slice always decodes")
+         }
++        return numberOfContours < 0
++    }
++
++    public func componentGlyphIDs(start: UInt32, end: UInt32) -> [UInt16] {
++        guard isComposite(start: start, end: end) else { return [] }
+ 
+-        public func componentGlyphIDs(start: UInt32, end: UInt32) -> [UInt16] {
+-            guard isComposite(start: start, end: end) else { return [] }
++        let startIndex = Int(start)
++        var components: [UInt16] = []
+ 
+-            let startIndex = Int(start)
+-            var components: [UInt16] = []
++        var offset = startIndex + 10
+ 
+-            var offset = startIndex + 10
++        let ARG_1_AND_2_ARE_WORDS: UInt16 = 0x0001
+ 
+-            let ARG_1_AND_2_ARE_WORDS: UInt16 = 0x0001
++        let WE_HAVE_A_SCALE: UInt16 = 0x0008
+ 
+-            let WE_HAVE_A_SCALE: UInt16 = 0x0008
++        let MORE_COMPONENTS: UInt16 = 0x0020
+ 
+-            let MORE_COMPONENTS: UInt16 = 0x0020
++        let WE_HAVE_AN_X_AND_Y_SCALE: UInt16 = 0x0040
+ 
+-            let WE_HAVE_AN_X_AND_Y_SCALE: UInt16 = 0x0040
++        let WE_HAVE_A_TWO_BY_TWO: UInt16 = 0x0080
+ 
+-            let WE_HAVE_A_TWO_BY_TWO: UInt16 = 0x0080
++        var hasMoreComponents = true
+ 
+-            var hasMoreComponents = true
++        while hasMoreComponents && offset + 4 <= data.count {
++            guard let flags = UInt16(bytes: data[offset..<offset + 2], endianness: .big),
++                let glyphIndex = UInt16(bytes: data[offset + 2..<offset + 4], endianness: .big)
++            else {
++                preconditionFailure("A 2-byte slice always decodes")
++            }
+ 
+-            while hasMoreComponents && offset + 4 <= data.count {
+-                guard let flags = UInt16(bytes: data[offset..<offset + 2], endianness: .big),
+-                    let glyphIndex = UInt16(bytes: data[offset + 2..<offset + 4], endianness: .big)
+-                else {
+-                    preconditionFailure("A 2-byte slice always decodes")
+-                }
++            components.append(glyphIndex)
++            offset += 4
+ 
+-                components.append(glyphIndex)
++            if flags & ARG_1_AND_2_ARE_WORDS != 0 {
+                 offset += 4
++            } else {
++                offset += 2
++            }
+ 
+-                if flags & ARG_1_AND_2_ARE_WORDS != 0 {
+-                    offset += 4
+-                } else {
+-                    offset += 2
+-                }
+-
+-                if flags & WE_HAVE_A_SCALE != 0 {
+-                    offset += 2
+-                } else if flags & WE_HAVE_AN_X_AND_Y_SCALE != 0 {
+-                    offset += 4
+-                } else if flags & WE_HAVE_A_TWO_BY_TWO != 0 {
+-                    offset += 8
+-                }
+-
+-                hasMoreComponents = (flags & MORE_COMPONENTS) != 0
++            if flags & WE_HAVE_A_SCALE != 0 {
++                offset += 2
++            } else if flags & WE_HAVE_AN_X_AND_Y_SCALE != 0 {
++                offset += 4
++            } else if flags & WE_HAVE_A_TWO_BY_TWO != 0 {
++                offset += 8
+             }
+ 
+-            return components
++            hasMoreComponents = (flags & MORE_COMPONENTS) != 0
+         }
++
++        return components
+     }
+ }
+diff --git a/Sources/ISO 14496-22/Tables/HmtxTable.swift b/Sources/ISO 14496-22/Tables/HmtxTable.swift
+index 9993cd2..be80dde 100644
+--- a/Sources/ISO 14496-22/Tables/HmtxTable.swift	
++++ b/Sources/ISO 14496-22/Tables/HmtxTable.swift	
+@@ -1,7 +1,5 @@
+ extension ISO_14496_22 {
+-
+     public struct HmtxTable: Sendable, Equatable {
+-
+         public let hMetrics: [LongHorMetric]
+ 
+         public let leftSideBearings: [Int16]
+@@ -13,34 +11,9 @@ extension ISO_14496_22 {
+             self.leftSideBearings = leftSideBearings
+             self.numberOfHMetrics = numberOfHMetrics
+         }
+-
+-        public func advanceWidth(for glyphIndex: UInt16) -> UInt16 {
+-            let index = Int(glyphIndex)
+-            if index < hMetrics.count {
+-                return hMetrics[index].advanceWidth
+-            } else if !hMetrics.isEmpty {
+-
+-                return hMetrics[hMetrics.count - 1].advanceWidth
+-            }
+-            return 0
+-        }
+-
+-        public func leftSideBearing(for glyphIndex: UInt16) -> Int16 {
+-            let index = Int(glyphIndex)
+-            if index < hMetrics.count {
+-                return hMetrics[index].leftSideBearing
+-            } else {
+-                let lsbIndex = index - hMetrics.count
+-                if lsbIndex < leftSideBearings.count {
+-                    return leftSideBearings[lsbIndex]
+-                }
+-            }
+-            return 0
+-        }
+     }
+ 
+     public struct LongHorMetric: Sendable, Equatable {
+-
+         public let advanceWidth: UInt16
+ 
+         public let leftSideBearing: Int16
+@@ -51,3 +24,28 @@ extension ISO_14496_22 {
+         }
+     }
+ }
++
++extension ISO_14496_22.HmtxTable {
++    public func advanceWidth(for glyphIndex: UInt16) -> UInt16 {
++        let index = Int(glyphIndex)
++        if index < hMetrics.count {
++            return hMetrics[index].advanceWidth
++        } else if !hMetrics.isEmpty {
++            return hMetrics[hMetrics.count - 1].advanceWidth
++        }
++        return 0
++    }
++
++    public func leftSideBearing(for glyphIndex: UInt16) -> Int16 {
++        let index = Int(glyphIndex)
++        if index < hMetrics.count {
++            return hMetrics[index].leftSideBearing
++        } else {
++            let lsbIndex = index - hMetrics.count
++            if lsbIndex < leftSideBearings.count {
++                return leftSideBearings[lsbIndex]
++            }
++        }
++        return 0
++    }
++}
+diff --git a/Sources/ISO 14496-22/Tables/LocaTable.swift b/Sources/ISO 14496-22/Tables/LocaTable.swift
+index af8bfe0..f6d5c32 100644
+--- a/Sources/ISO 14496-22/Tables/LocaTable.swift	
++++ b/Sources/ISO 14496-22/Tables/LocaTable.swift	
+@@ -1,22 +1,22 @@
+ extension ISO_14496_22 {
+-
+     public struct LocaTable: Sendable, Equatable {
+-
+         public let offsets: [UInt32]
+ 
+         public init(offsets: [UInt32]) {
+             self.offsets = offsets
+         }
++    }
++}
+ 
+-        public func glyphRange(for glyphIndex: UInt16) -> (start: UInt32, end: UInt32)? {
+-            let index = Int(glyphIndex)
+-            guard index + 1 < offsets.count else { return nil }
+-            return (offsets[index], offsets[index + 1])
+-        }
++extension ISO_14496_22.LocaTable {
++    public func glyphRange(for glyphIndex: UInt16) -> (start: UInt32, end: UInt32)? {
++        let index = Int(glyphIndex)
++        guard index + 1 < offsets.count else { return nil }
++        return (offsets[index], offsets[index + 1])
++    }
+ 
+-        public func hasOutline(glyphIndex: UInt16) -> Bool {
+-            guard let range = glyphRange(for: glyphIndex) else { return false }
+-            return range.start < range.end
+-        }
++    public func hasOutline(glyphIndex: UInt16) -> Bool {
++        guard let range = glyphRange(for: glyphIndex) else { return false }
++        return range.start < range.end
+     }
+ }
+diff --git a/Sources/ISO 14496-22/Tables/MaxpTable.swift b/Sources/ISO 14496-22/Tables/MaxpTable.swift
+index 1119894..118c3c1 100644
+--- a/Sources/ISO 14496-22/Tables/MaxpTable.swift	
++++ b/Sources/ISO 14496-22/Tables/MaxpTable.swift	
+@@ -1,7 +1,5 @@
+ extension ISO_14496_22 {
+-
+     public struct MaxpTable: Sendable, Equatable {
+-
+         public let version: UInt32
+ 
+         public let numGlyphs: UInt16
+@@ -32,14 +30,6 @@ extension ISO_14496_22 {
+ 
+         public let maxComponentDepth: UInt16?
+ 
+-        public var isTrueType: Bool {
+-            version == 0x0001_0000
+-        }
+-
+-        public var isCFF: Bool {
+-            version == 0x0000_5000
+-        }
+-
+         public init(numGlyphs: UInt16) {
+             self.version = 0x0000_5000
+             self.numGlyphs = numGlyphs
+@@ -92,3 +82,13 @@ extension ISO_14496_22 {
+         }
+     }
+ }
++
++extension ISO_14496_22.MaxpTable {
++    public var isTrueType: Bool {
++        version == 0x0001_0000
++    }
++
++    public var isCFF: Bool {
++        version == 0x0000_5000
++    }
++}
+diff --git a/Sources/ISO 14496-22/Tables/NameTable.swift b/Sources/ISO 14496-22/Tables/NameTable.swift
+index 6131413..833d08b 100644
+--- a/Sources/ISO 14496-22/Tables/NameTable.swift	
++++ b/Sources/ISO 14496-22/Tables/NameTable.swift	
+@@ -1,7 +1,5 @@
+ extension ISO_14496_22 {
+-
+     public struct NameTable: Sendable, Equatable {
+-
+         public let format: UInt16
+ 
+         public let nameRecords: [NameRecord]
+@@ -13,46 +11,9 @@ extension ISO_14496_22 {
+             self.nameRecords = nameRecords
+             self.strings = strings
+         }
+-
+-        public var copyright: String? { strings[.copyright] }
+-
+-        public var fontFamily: String? { strings[.fontFamily] }
+-
+-        public var fontSubfamily: String? { strings[.fontSubfamily] }
+-
+-        public var uniqueID: String? { strings[.uniqueID] }
+-
+-        public var fullFontName: String? { strings[.fullFontName] }
+-
+-        // swift-linter:disable:next raw concept
+-        // REASON: OpenType name ID 5, free text such as `Version 1.001; ttfautohint`; looked at Version.Semantic and Version.Tools, which refuse it.
+-        public var version: String? { strings[.version] }
+-
+-        public var postScriptName: String? { strings[.postScriptName] }
+-
+-        public var trademark: String? { strings[.trademark] }
+-
+-        public var manufacturer: String? { strings[.manufacturer] }
+-
+-        public var designer: String? { strings[.designer] }
+-
+-        public var description: String? { strings[.description] }
+-
+-        public var vendorURL: String? { strings[.vendorURL] }
+-
+-        public var designerURL: String? { strings[.designerURL] }
+-
+-        public var license: String? { strings[.license] }
+-
+-        public var licenseURL: String? { strings[.licenseURL] }
+-
+-        public var typographicFamily: String? { strings[.typographicFamily] }
+-
+-        public var typographicSubfamily: String? { strings[.typographicSubfamily] }
+     }
+ 
+     public struct NameRecord: Sendable, Equatable {
+-
+         public let platformID: PlatformID
+ 
+         public let encodingID: UInt16
+@@ -83,7 +44,6 @@ extension ISO_14496_22 {
+     }
+ 
+     public enum NameID: UInt16, Sendable, Equatable, Hashable {
+-
+         case copyright = 0
+ 
+         case fontFamily = 1
+@@ -137,3 +97,41 @@ extension ISO_14496_22 {
+         case variationsPostScriptPrefix = 25
+     }
+ }
++
++extension ISO_14496_22.NameTable {
++    public var copyright: String? { strings[.copyright] }
++
++    public var fontFamily: String? { strings[.fontFamily] }
++
++    public var fontSubfamily: String? { strings[.fontSubfamily] }
++
++    public var uniqueID: String? { strings[.uniqueID] }
++
++    public var fullFontName: String? { strings[.fullFontName] }
++
++    // swift-linter:disable:next raw concept
++    // REASON: OpenType name ID 5, free text such as `Version 1.001; ttfautohint`; looked at Version.Semantic and Version.Tools, which refuse it.
++    public var version: String? { strings[.version] }
++
++    public var postScriptName: String? { strings[.postScriptName] }
++
++    public var trademark: String? { strings[.trademark] }
++
++    public var manufacturer: String? { strings[.manufacturer] }
++
++    public var designer: String? { strings[.designer] }
++
++    public var description: String? { strings[.description] }
++
++    public var vendorURL: String? { strings[.vendorURL] }
++
++    public var designerURL: String? { strings[.designerURL] }
++
++    public var license: String? { strings[.license] }
++
++    public var licenseURL: String? { strings[.licenseURL] }
++
++    public var typographicFamily: String? { strings[.typographicFamily] }
++
++    public var typographicSubfamily: String? { strings[.typographicSubfamily] }
++}
+diff --git a/Sources/ISO 14496-22/Tables/PostTable.swift b/Sources/ISO 14496-22/Tables/PostTable.swift
+index e4f6df5..45d7198 100644
+--- a/Sources/ISO 14496-22/Tables/PostTable.swift	
++++ b/Sources/ISO 14496-22/Tables/PostTable.swift	
+@@ -1,7 +1,5 @@
+ extension ISO_14496_22 {
+-
+     public struct PostTable: Sendable, Equatable {
+-
+         public let version: Fixed
+ 
+         public let italicAngle: Double
+@@ -45,10 +43,11 @@ extension ISO_14496_22 {
+             self.maxMemType1 = maxMemType1
+             self.glyphNames = glyphNames
+         }
++    }
++}
+ 
+-        public var hasGlyphNames: Bool {
+-
+-            version.integer == 2 && version.fraction == 0
+-        }
++extension ISO_14496_22.PostTable {
++    public var hasGlyphNames: Bool {
++        version.integer == 2 && version.fraction == 0
+     }
+ }
+-- 
+2.43.0
+

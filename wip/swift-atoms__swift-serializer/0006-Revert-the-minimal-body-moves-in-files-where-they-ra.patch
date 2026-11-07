@@ -1,0 +1,78 @@
+From 284fb9e20ffc156d8a2346dbea3638a8730a7d80 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:31:25 +0000
+Subject: [PATCH 6/6] Revert the minimal-body moves in files where they raised
+ a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/Serializer/Lazy/Lazy.Serializer.swift | 41 +++++++++----------
+ 1 file changed, 20 insertions(+), 21 deletions(-)
+
+diff --git a/Sources/Serializer/Lazy/Lazy.Serializer.swift b/Sources/Serializer/Lazy/Lazy.Serializer.swift
+index 9b58864..0d9d7e4 100644
+--- a/Sources/Serializer/Lazy/Lazy.Serializer.swift
++++ b/Sources/Serializer/Lazy/Lazy.Serializer.swift
+@@ -9,7 +9,12 @@
+         Value.Buffer: ~Copyable & ~Escapable,
+         Value.Output: ~Copyable & ~Escapable
+     {
++
+         public struct Serializer<Failure: Swift::Error>: Serializing {
++
++            public typealias Buffer = Value.Buffer
++            public typealias Output = Value.Output
++
+             public let wrapped: Lazy::Lazy<Value, FactoryFailure>
+             @usableFromInline internal let factoryFailure: (FactoryFailure) -> Failure
+             @usableFromInline internal let serializeFailure: (Value.Failure) -> Failure
+@@ -29,6 +34,21 @@
+                 self.factoryFailure = { .left($0) }
+                 self.serializeFailure = { .right($0) }
+             }
++
++            @inlinable
++            public borrowing func serialize(_ output: borrowing Output, into buffer: inout Buffer) throws(Failure) {
++                let parser: Value
++                do throws(FactoryFailure) {
++                    parser = try wrapped()
++                } catch {
++                    throw factoryFailure(error)
++                }
++                do throws(Value.Failure) {
++                    try parser.serialize(output, into: &buffer)
++                } catch {
++                    throw serializeFailure(error)
++                }
++            }
+         }
+ 
+         @inlinable
+@@ -41,25 +61,4 @@
+             .init(self)
+         }
+     }
+-
+-extension Lazy.Serializer {
+-        public typealias Buffer = Value.Buffer
+-
+-        public typealias Output = Value.Output
+-
+-        @inlinable
+-        public borrowing func serialize(_ output: borrowing Output, into buffer: inout Buffer) throws(Failure) {
+-            let parser: Value
+-            do throws(FactoryFailure) {
+-                parser = try wrapped()
+-            } catch {
+-                throw factoryFailure(error)
+-            }
+-            do throws(Value.Failure) {
+-                try parser.serialize(output, into: &buffer)
+-            } catch {
+-                throw serializeFailure(error)
+-            }
+-        }
+-}
+ #endif
+-- 
+2.43.0
+

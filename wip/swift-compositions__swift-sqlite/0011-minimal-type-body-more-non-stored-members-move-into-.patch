@@ -1,0 +1,1314 @@
+From 46044f04232d91722a5fd06af8a74090186fc13e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:28:26 +0000
+Subject: [PATCH 11/12] minimal type body: more non-stored members move into
+ extensions of their type (overnight/minimal-bodies.py); type-checked, failing
+ files left out (coenttb/work#242)
+
+---
+ .../CloudKit+StructuredQueries.swift          |  43 ++++---
+ Sources/SQLite CloudKit/CloudKitSharing.swift |   5 +
+ .../Internal/DataManager.swift                |   6 +
+ .../Internal/MockCloudDatabase.swift          |  18 +--
+ .../Internal/MockSyncEngine.swift             |  11 +-
+ .../Internal/PendingRecordZoneChange.swift    |  32 ++---
+ .../Internal/SyncEngine.Event.swift           |  34 +++---
+ .../Internal/UserDatabase.swift               |   2 +
+ .../SQLite CloudKit/PrimaryKeyMigration.swift |   3 +
+ Sources/SQLite CloudKit/SyncEngine.swift      |  57 +++++----
+ Sources/SQLite SQL/Cast.swift                 |  18 ++-
+ Sources/SQLite SQL/DatabaseFunction.swift     |   3 +
+ Sources/SQLite SQL/Instant+JulianDay.swift    |  14 ++-
+ Sources/SQLite SQL/Instant+UnixTime.swift     |  14 ++-
+ Sources/SQLite SQL/JSONBRepresentation.swift  |   2 +
+ Sources/SQLite SQL/JSONEach.swift             |  20 ++--
+ Sources/SQLite SQL/JSONRepresentation.swift   |   2 +
+ Sources/SQLite SQL/SQLite.swift               |   2 +
+ Sources/SQLite SQL/Triggers.swift             |  20 ++--
+ Sources/SQLite SQL/UUID+Bytes.swift           |  22 ++--
+ Sources/SQLite SQL/Views.swift                |   9 +-
+ Sources/SQLite/GRDB/CustomCollations.swift    |   6 +-
+ .../SQLite/GRDB/SQLite.Configuration.swift    |  14 ++-
+ Sources/SQLite/GRDB/SQLite.Connection.swift   | 112 +++++++++---------
+ Sources/SQLite/GRDB/SQLite.Database.swift     |  30 ++---
+ Sources/SQLite/GRDB/SQLite.Error.swift        |  22 ++--
+ .../SQLite/GRDB/SQLiteFunctionDecoder.swift   |   2 +
+ Sources/SQLite/GRDB/SQLiteQueryDecoder.swift  |   2 +
+ Sources/SQLite/Observation/Fetch.swift        |   6 +-
+ Sources/SQLite/Observation/FetchAll.swift     |  14 ++-
+ .../SQLite/Observation/FetchKeyRequest.swift  |   4 +
+ Sources/SQLite/Observation/FetchOne.swift     |   6 +-
+ .../Observation/FetchSubscription.swift       |   2 +
+ .../ResultsSectionCollection.swift            |   4 +
+ .../SQLite/Observation/SQLite.Scheduler.swift |  33 +++---
+ 35 files changed, 357 insertions(+), 237 deletions(-)
+
+diff --git a/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift b/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift
+index 61bde7d..5744c63 100644
+--- a/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift	
++++ b/Sources/SQLite CloudKit/CloudKit+StructuredQueries.swift	
+@@ -10,15 +10,6 @@
+         public struct _SystemFieldsRepresentation<Record: CKRecord>: QueryBindable, QueryRepresentable {
+             public let queryOutput: Record
+ 
+-            public var queryBinding: ISO_9075.Value {
+-                let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+-                queryOutput.encodeSystemFields(with: archiver)
+-                if let recordChangeTag = queryOutput._recordChangeTag {
+-                    archiver.encode(NSNumber(value: recordChangeTag), forKey: "_recordChangeTag")
+-                }
+-                return .blob([Byte](archiver.encodedData))
+-            }
+-
+             public init(queryOutput: Record) {
+                 self.queryOutput = queryOutput
+             }
+@@ -46,22 +37,24 @@
+                 }
+                 self.init(queryOutput: queryOutput)
+             }
+-
+-            private struct DecodingError: Swift.Error {}
+         }
+ 
+-        public struct _AllFieldsRepresentation<Record: CKRecord>: QueryBindable, QueryRepresentable {
+-            public let queryOutput: Record
+-
++        extension _SystemFieldsRepresentation {
+             public var queryBinding: ISO_9075.Value {
+                 let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+-                queryOutput.encode(with: archiver)
++                queryOutput.encodeSystemFields(with: archiver)
+                 if let recordChangeTag = queryOutput._recordChangeTag {
+                     archiver.encode(NSNumber(value: recordChangeTag), forKey: "_recordChangeTag")
+                 }
+                 return .blob([Byte](archiver.encodedData))
+             }
+ 
++            private struct DecodingError: Swift.Error {}
++        }
++
++        public struct _AllFieldsRepresentation<Record: CKRecord>: QueryBindable, QueryRepresentable {
++            public let queryOutput: Record
++
+             public init(queryOutput: Record) {
+                 self.queryOutput = queryOutput
+             }
+@@ -89,6 +82,17 @@
+                 }
+                 self.init(queryOutput: queryOutput)
+             }
++        }
++
++        extension _AllFieldsRepresentation {
++            public var queryBinding: ISO_9075.Value {
++                let archiver = NSKeyedArchiver(requiringSecureCoding: true)
++                queryOutput.encode(with: archiver)
++                if let recordChangeTag = queryOutput._recordChangeTag {
++                    archiver.encode(NSNumber(value: recordChangeTag), forKey: "_recordChangeTag")
++                }
++                return .blob([Byte](archiver.encodedData))
++            }
+ 
+             private struct DecodingError: Swift.Error {}
+         }
+@@ -96,9 +100,6 @@
+         extension CKDatabase.Scope {
+             public struct RawValueRepresentation: QueryBindable, QueryRepresentable {
+                 public let queryOutput: CKDatabase.Scope
+-                public var queryBinding: ISO_9075.Value {
+-                    .int(Int64(queryOutput.rawValue))
+-                }
+                 public init(queryOutput: CKDatabase.Scope) {
+                     self.queryOutput = queryOutput
+                 }
+@@ -111,6 +112,12 @@
+             }
+         }
+ 
++extension CKDatabase.Scope.RawValueRepresentation {
++            public var queryBinding: ISO_9075.Value {
++                .int(Int64(queryOutput.rawValue))
++            }
++}
++
+         extension CKRecordKeyValueSetting {
+             fileprivate subscript(at key: String) -> Int64 {
+                 get {
+diff --git a/Sources/SQLite CloudKit/CloudKitSharing.swift b/Sources/SQLite CloudKit/CloudKitSharing.swift
+index ffd3a00..8915488 100644
+--- a/Sources/SQLite CloudKit/CloudKitSharing.swift	
++++ b/Sources/SQLite CloudKit/CloudKitSharing.swift	
+@@ -15,7 +15,9 @@
+         public struct SharedRecord: Hashable, Identifiable, Sendable {
+             let container: any CloudContainer
+             public let share: CKShare
++        }
+ 
++        extension SharedRecord {
+             public var id: CKRecord.ID { share.recordID }
+ 
+             public static func == (lhs: Self, rhs: Self) -> Bool {
+@@ -254,6 +256,9 @@
+                     self.availablePermissions = availablePermissions
+                     self.syncEngine = syncEngine
+                 }
++            }
++
++            extension CloudSharingView {
+                 public var body: some View {
+                     if syncEngine.context == .live {
+                         CloudSharingViewRepresentable(
+diff --git a/Sources/SQLite CloudKit/Internal/DataManager.swift b/Sources/SQLite CloudKit/Internal/DataManager.swift
+index e0159d5..505787b 100644
+--- a/Sources/SQLite CloudKit/Internal/DataManager.swift	
++++ b/Sources/SQLite CloudKit/Internal/DataManager.swift	
+@@ -13,12 +13,17 @@
+ 
+         public struct LiveDataManager: DataManager {
+             public init() {}
++        }
++
++        extension LiveDataManager {
+             public func load(_ url: URL) throws -> Data {
+                 try Data(contentsOf: url)
+             }
++
+             public func save(_ data: Data, to url: URL) throws {
+                 try data.write(to: url)
+             }
++
+             public func sha256(of fileURL: URL) -> Data? {
+                 do {
+                     let fileHandle = try FileHandle(forReadingFrom: fileURL)
+@@ -42,6 +47,7 @@
+                     return nil
+                 }
+             }
++
+             public var temporaryDirectory: URL {
+                 URL(fileURLWithPath: NSTemporaryDirectory())
+             }
+diff --git a/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift b/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift
+index a894679..fb7231a 100644
+--- a/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift	
++++ b/Sources/SQLite CloudKit/Internal/MockCloudDatabase.swift	
+@@ -16,13 +16,6 @@
+                 /// Every deletion with the change tag it was made at, kept so that each device fetching after it
+                 /// receives it once (a deviation from upstream, which forgets a deletion after its first fetch).
+                 var deletedRecords: [(CKRecord.ID, CKRecord.RecordType, changeTag: Int)] = []
+-                mutating func recordDeletion(_ recordID: CKRecord.ID, _ recordType: CKRecord.RecordType) {
+-                    deletedRecords.append((recordID, recordType, changeTag: nextRecordChangeTag()))
+-                }
+-                mutating func nextRecordChangeTag() -> Int {
+-                    lastRecordChangeTag += 1
+-                    return lastRecordChangeTag
+-                }
+             }
+ 
+             struct AssetID: Hashable {
+@@ -390,6 +383,17 @@
+             }
+         }
+ 
++extension MockCloudDatabase.State {
++            mutating func recordDeletion(_ recordID: CKRecord.ID, _ recordType: CKRecord.RecordType) {
++                deletedRecords.append((recordID, recordType, changeTag: nextRecordChangeTag()))
++            }
++
++            mutating func nextRecordChangeTag() -> Int {
++                lastRecordChangeTag += 1
++                return lastRecordChangeTag
++            }
++}
++
+         private func ckError(forAccountStatus accountStatus: CKAccountStatus) -> CKError {
+             switch accountStatus {
+             case .couldNotDetermine, .restricted, .noAccount:
+diff --git a/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift b/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift
+index 3d44a97..c637c85 100644
+--- a/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift	
++++ b/Sources/SQLite CloudKit/Internal/MockSyncEngine.swift	
+@@ -90,11 +90,9 @@
+             }
+ 
+             package func sendChanges(_ options: CKSyncEngine.SendChangesOptions) async throws {
+-
+                 if !parentSyncEngine.syncEngine(for: database.databaseScope).state.pendingDatabaseChanges
+                     .isEmpty
+                 {
+-
+                     try await parentSyncEngine.processPendingDatabaseChanges(scope: database.databaseScope)
+                 }
+                 var pending = state.pendingRecordZoneChanges
+@@ -210,9 +208,6 @@
+         extension SyncEngine {
+             package struct SendRecordsCallback {
+                 fileprivate let operation: @Sendable () async -> Void
+-                package func receive() async {
+-                    await operation()
+-                }
+             }
+ 
+             package func sendPendingRecordZoneChanges(
+@@ -444,6 +439,12 @@
+                 }
+             }
+         }
++
++extension SyncEngine.SendRecordsCallback {
++            package func receive() async {
++                await operation()
++            }
++}
+     #endif
+ 
+ #endif
+diff --git a/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift b/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift
+index 91dc6b3..3799fa8 100644
+--- a/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift	
++++ b/Sources/SQLite CloudKit/Internal/PendingRecordZoneChange.swift	
+@@ -25,21 +25,6 @@
+                     self.queryOutput = queryOutput
+                 }
+ 
+-                package var queryBinding: ISO_9075.Value {
+-                    let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+-                    switch queryOutput {
+-                    case .saveRecord(let recordID):
+-                        recordID.encode(with: archiver)
+-                        archiver.encode("saveRecord", forKey: "changeType")
+-                    case .deleteRecord(let recordID):
+-                        recordID.encode(with: archiver)
+-                        archiver.encode("deleteRecord", forKey: "changeType")
+-                    @unknown default:
+-                        return .invalid(ISO_9075.Value.Failure("Unknown pending record zone change: \(queryOutput)"))
+-                    }
+-                    return .blob([Byte](archiver.encodedData))
+-                }
+-
+                 package init(decoder: inout some SQL::QueryDecoder) throws(QueryDecodingError) {
+                     let bytes = try [Byte](decoder: &decoder)
+                     do {
+@@ -69,6 +54,23 @@
+ 
+             private struct DecodingError: Swift.Error {}
+         }
++
++extension CKSyncEngine.PendingRecordZoneChange.DataRepresentation {
++            package var queryBinding: ISO_9075.Value {
++                let archiver = NSKeyedArchiver(requiringSecureCoding: true)
++                switch queryOutput {
++                case .saveRecord(let recordID):
++                    recordID.encode(with: archiver)
++                    archiver.encode("saveRecord", forKey: "changeType")
++                case .deleteRecord(let recordID):
++                    recordID.encode(with: archiver)
++                    archiver.encode("deleteRecord", forKey: "changeType")
++                @unknown default:
++                    return .invalid(ISO_9075.Value.Failure("Unknown pending record zone change: \(queryOutput)"))
++                }
++                return .blob([Byte](archiver.encodedData))
++            }
++}
+     #endif
+ 
+ #endif
+diff --git a/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift b/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift
+index 77b41de..45d72ed 100644
+--- a/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift	
++++ b/Sources/SQLite CloudKit/Internal/SyncEngine.Event.swift	
+@@ -81,25 +81,27 @@
+                         return nil
+                     }
+                 }
++            }
++        }
+ 
+-                package var description: String {
+-                    switch self {
+-                    case .stateUpdate: "stateUpdate"
+-                    case .accountChange: "accountChange"
+-                    case .fetchedDatabaseChanges: "fetchedDatabaseChanges"
+-                    case .fetchedRecordZoneChanges: "fetchedRecordZoneChanges"
+-                    case .sentDatabaseChanges: "sentDatabaseChanges"
+-                    case .sentRecordZoneChanges: "sentRecordZoneChanges"
+-                    case .willFetchChanges: "willFetchChanges"
+-                    case .willFetchRecordZoneChanges: "willFetchRecordZoneChanges"
+-                    case .didFetchRecordZoneChanges: "didFetchRecordZoneChanges"
+-                    case .didFetchChanges: "didFetchChanges"
+-                    case .willSendChanges: "willSendChanges"
+-                    case .didSendChanges: "didSendChanges"
+-                    }
++extension SyncEngine.Event {
++            package var description: String {
++                switch self {
++                case .stateUpdate: "stateUpdate"
++                case .accountChange: "accountChange"
++                case .fetchedDatabaseChanges: "fetchedDatabaseChanges"
++                case .fetchedRecordZoneChanges: "fetchedRecordZoneChanges"
++                case .sentDatabaseChanges: "sentDatabaseChanges"
++                case .sentRecordZoneChanges: "sentRecordZoneChanges"
++                case .willFetchChanges: "willFetchChanges"
++                case .willFetchRecordZoneChanges: "willFetchRecordZoneChanges"
++                case .didFetchRecordZoneChanges: "didFetchRecordZoneChanges"
++                case .didFetchChanges: "didFetchChanges"
++                case .willSendChanges: "willSendChanges"
++                case .didSendChanges: "didSendChanges"
+                 }
+             }
+-        }
++}
+     #endif
+ 
+ #endif
+diff --git a/Sources/SQLite CloudKit/Internal/UserDatabase.swift b/Sources/SQLite CloudKit/Internal/UserDatabase.swift
+index 2e64c6c..3d4f092 100644
+--- a/Sources/SQLite CloudKit/Internal/UserDatabase.swift	
++++ b/Sources/SQLite CloudKit/Internal/UserDatabase.swift	
+@@ -8,7 +8,9 @@
+             package init(database: any DatabaseWriter) {
+                 self.database = database
+             }
++        }
+ 
++        extension UserDatabase {
+             /// The same database, as the Institute's ``SQLite/Database``.
+             package var sqliteDatabase: SQLite.Database {
+                 SQLite.Database(database)
+diff --git a/Sources/SQLite CloudKit/PrimaryKeyMigration.swift b/Sources/SQLite CloudKit/PrimaryKeyMigration.swift
+index 18f6806..aab7b75 100644
+--- a/Sources/SQLite CloudKit/PrimaryKeyMigration.swift	
++++ b/Sources/SQLite CloudKit/PrimaryKeyMigration.swift	
+@@ -564,6 +564,9 @@
+ 
+         struct ForeignKeyCheckError: LocalizedError {
+             let checks: [SQLite.Pragma.ForeignKey.Check]
++        }
++
++        extension ForeignKeyCheckError {
+             var errorDescription: String? {
+                 checks.map {
+                     """
+diff --git a/Sources/SQLite CloudKit/SyncEngine.swift b/Sources/SQLite CloudKit/SyncEngine.swift
+index 6b8fb27..d56e69e 100644
+--- a/Sources/SQLite CloudKit/SyncEngine.swift	
++++ b/Sources/SQLite CloudKit/SyncEngine.swift	
+@@ -2230,9 +2230,13 @@
+             init(private: any SyncEngineProtocol, shared: any SyncEngineProtocol) {
+                 rawValue = (`private`, shared)
+             }
++        }
++
++        extension SyncEngines {
+             var isRunning: Bool {
+                 rawValue != nil
+             }
++
+             package var `private`: (any SyncEngineProtocol)? {
+                 guard let `private` = rawValue?.private
+                 else {
+@@ -2241,6 +2245,7 @@
+                 }
+                 return `private`
+             }
++
+             package var `shared`: (any SyncEngineProtocol)? {
+                 guard let `shared` = rawValue?.shared
+                 else {
+@@ -2311,31 +2316,8 @@
+ 
+         extension SyncEngine {
+             public struct SchemaError: LocalizedError {
+-                package enum Reason {
+-                    case cycleDetected
+-                    case invalidForeignKey(ForeignKey)
+-                    case invalidForeignKeyAction(ForeignKey)
+-                    case invalidTableName(String)
+-                    case metadatabaseMismatch(attachedPath: String, syncEngineConfiguredPath: String)
+-                    case noCloudKitContainer
+-                    case nonNullColumnsWithoutDefault(tableName: String, columnNames: [String])
+-                    case unknown
+-                    case uniquenessConstraint
+-                }
+                 package let reason: Reason
+                 public let debugDescription: String
+-
+-                public var errorDescription: String? {
+-                    "Could not synchronize data with iCloud."
+-                }
+-
+-                static let noCloudKitContainer = Self(
+-                    reason: .noCloudKitContainer,
+-                    debugDescription: """
+-                        No default CloudKit container found. Make sure to enable iCloud entitlements in your \
+-                        app's "Signing & Capabilities" and add a container identifier.
+-                        """
+-                )
+             }
+ 
+             fileprivate func validateSchema() throws {
+@@ -2399,6 +2381,32 @@
+             }
+         }
+ 
++extension SyncEngine.SchemaError {
++            package enum Reason {
++                case cycleDetected
++                case invalidForeignKey(ForeignKey)
++                case invalidForeignKeyAction(ForeignKey)
++                case invalidTableName(String)
++                case metadatabaseMismatch(attachedPath: String, syncEngineConfiguredPath: String)
++                case noCloudKitContainer
++                case nonNullColumnsWithoutDefault(tableName: String, columnNames: [String])
++                case unknown
++                case uniquenessConstraint
++            }
++
++            public var errorDescription: String? {
++                "Could not synchronize data with iCloud."
++            }
++
++            static let noCloudKitContainer = Self(
++                reason: .noCloudKitContainer,
++                debugDescription: """
++                    No default CloudKit container found. Make sure to enable iCloud entitlements in your \
++                    app's "Signing & Capabilities" and add a container identifier.
++                    """
++            )
++}
++
+         package protocol SynchronizableTable<Base>: Hashable, Sendable {
+             associatedtype Base: PrimaryKeyedTable & _SendableMetatype
+             where
+@@ -2415,6 +2423,9 @@
+             Base.TableColumns.PrimaryColumn: WritableTableColumnExpression
+         {
+             package init(for table: Base.Type = Base.self) {}
++        }
++
++        extension SynchronizedTable {
+             package var base: Base.Type { Base.self }
+         }
+ 
+diff --git a/Sources/SQLite SQL/Cast.swift b/Sources/SQLite SQL/Cast.swift
+index 344ee2c..74278f6 100644
+--- a/Sources/SQLite SQL/Cast.swift	
++++ b/Sources/SQLite SQL/Cast.swift	
+@@ -44,12 +44,6 @@ public protocol SQLiteType: QueryBindable {
+ }
+ 
+ public struct SQLiteTypeAffinity: RawRepresentable, Sendable {
+-    public static let blob = Self(rawValue: "BLOB")
+-    public static let integer = Self(rawValue: "INTEGER")
+-    public static let numeric = Self(rawValue: "NUMERIC")
+-    public static let real = Self(rawValue: "REAL")
+-    public static let text = Self(rawValue: "TEXT")
+-
+     public let rawValue: ISO_9075.Fragment
+ 
+     public init(rawValue: ISO_9075.Fragment) {
+@@ -57,6 +51,18 @@ public struct SQLiteTypeAffinity: RawRepresentable, Sendable {
+     }
+ }
+ 
++extension SQLiteTypeAffinity {
++    public static let blob = Self(rawValue: "BLOB")
++
++    public static let integer = Self(rawValue: "INTEGER")
++
++    public static let numeric = Self(rawValue: "NUMERIC")
++
++    public static let real = Self(rawValue: "REAL")
++
++    public static let text = Self(rawValue: "TEXT")
++}
++
+ extension SQLiteType where Self: BinaryInteger {
+     public static var typeAffinity: SQLiteTypeAffinity { .integer }
+ }
+diff --git a/Sources/SQLite SQL/DatabaseFunction.swift b/Sources/SQLite SQL/DatabaseFunction.swift
+index 4b45b17..60365c2 100644
+--- a/Sources/SQLite SQL/DatabaseFunction.swift	
++++ b/Sources/SQLite SQL/DatabaseFunction.swift	
+@@ -110,6 +110,9 @@ public struct _DatabaseFunctionDeallocated: Swift.Error, CustomStringConvertible
+     public init(_ message: String) {
+         self.message = message
+     }
++}
++
++extension _DatabaseFunctionDeallocated {
+     public var description: String {
+         message
+     }
+diff --git a/Sources/SQLite SQL/Instant+JulianDay.swift b/Sources/SQLite SQL/Instant+JulianDay.swift
+index e96404f..d317ce0 100644
+--- a/Sources/SQLite SQL/Instant+JulianDay.swift	
++++ b/Sources/SQLite SQL/Instant+JulianDay.swift	
+@@ -9,14 +9,16 @@ extension Time.Instant {
+         public init(queryOutput: Time.Instant) {
+             self.queryOutput = queryOutput
+         }
++    }
++}
+ 
+-        public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            subsecDateTime([queryFragment, "'julianday'"])
+-        }
++extension Time.Instant.JulianDayRepresentation {
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        subsecDateTime([queryFragment, "'julianday'"])
++    }
+ 
+-        public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            "julianday(\(queryFragment))"
+-        }
++    public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "julianday(\(queryFragment))"
+     }
+ }
+ 
+diff --git a/Sources/SQLite SQL/Instant+UnixTime.swift b/Sources/SQLite SQL/Instant+UnixTime.swift
+index 28971e9..7581f75 100644
+--- a/Sources/SQLite SQL/Instant+UnixTime.swift	
++++ b/Sources/SQLite SQL/Instant+UnixTime.swift	
+@@ -9,14 +9,16 @@ extension Time.Instant {
+         public init(queryOutput: Time.Instant) {
+             self.queryOutput = queryOutput
+         }
++    }
++}
+ 
+-        public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            "datetime(\(queryFragment), 'unixepoch')"
+-        }
++extension Time.Instant.UnixTimeRepresentation {
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "datetime(\(queryFragment), 'unixepoch')"
++    }
+ 
+-        public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            "unixepoch(\(queryFragment))"
+-        }
++    public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "unixepoch(\(queryFragment))"
+     }
+ }
+ 
+diff --git a/Sources/SQLite SQL/JSONBRepresentation.swift b/Sources/SQLite SQL/JSONBRepresentation.swift
+index 3041568..68328f2 100644
+--- a/Sources/SQLite SQL/JSONBRepresentation.swift	
++++ b/Sources/SQLite SQL/JSONBRepresentation.swift	
+@@ -7,7 +7,9 @@ public struct JSONBRepresentation<QueryOutput: Codable>: Codable, QueryRepresent
+     public init(queryOutput: QueryOutput) {
+         self.queryOutput = queryOutput
+     }
++}
+ 
++extension JSONBRepresentation {
+     public static func queryFragment(decoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+         "json(\(queryFragment))"
+     }
+diff --git a/Sources/SQLite SQL/JSONEach.swift b/Sources/SQLite SQL/JSONEach.swift
+index a4bdaa5..d3a6732 100644
+--- a/Sources/SQLite SQL/JSONEach.swift	
++++ b/Sources/SQLite SQL/JSONEach.swift	
+@@ -213,16 +213,18 @@ public struct JSONEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
++    public let key: Key.QueryOutput
++
++    public let value: Value.QueryOutput
++}
++
++extension JSONEach {
+     public static var tableName: String { "json_each" }
+ 
+     public static var columns: TableColumns { TableColumns() }
+ 
+     public static var _columnWidth: Int { 2 }
+ 
+-    public let key: Key.QueryOutput
+-
+-    public let value: Value.QueryOutput
+-
+     fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONEach> {
+         var select = all.asSelect()
+         select.tableReference = tableReference
+@@ -277,16 +279,18 @@ public struct JSONBEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
++    public let key: Key.QueryOutput
++
++    public let value: Value.QueryOutput
++}
++
++extension JSONBEach {
+     public static var tableName: String { "jsonb_each" }
+ 
+     public static var columns: TableColumns { TableColumns() }
+ 
+     public static var _columnWidth: Int { 2 }
+ 
+-    public let key: Key.QueryOutput
+-
+-    public let value: Value.QueryOutput
+-
+     fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONBEach> {
+         var select = all.asSelect()
+         select.tableReference = tableReference
+diff --git a/Sources/SQLite SQL/JSONRepresentation.swift b/Sources/SQLite SQL/JSONRepresentation.swift
+index 50b0c81..33b76fd 100644
+--- a/Sources/SQLite SQL/JSONRepresentation.swift	
++++ b/Sources/SQLite SQL/JSONRepresentation.swift	
+@@ -8,7 +8,9 @@ public struct JSONRepresentation<QueryOutput: Codable>: Codable, QueryRepresenta
+     public init(queryOutput: QueryOutput) {
+         self.queryOutput = queryOutput
+     }
++}
+ 
++extension JSONRepresentation {
+     public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+         "json(\(queryFragment))"
+     }
+diff --git a/Sources/SQLite SQL/SQLite.swift b/Sources/SQLite SQL/SQLite.swift
+index 507f045..f32f18e 100644
+--- a/Sources/SQLite SQL/SQLite.swift	
++++ b/Sources/SQLite SQL/SQLite.swift	
+@@ -2,7 +2,9 @@ public import ISO_9075_Foundation
+ 
+ public struct SQLite: ISO_9075.Dialect {
+     public init() {}
++}
+ 
++extension SQLite {
+     public func placeholder(_ offset: Int) -> String { "?" }
+ 
+     public var defaultPrimaryKey: String { "NULL" }
+diff --git a/Sources/SQLite SQL/Triggers.swift b/Sources/SQLite SQL/Triggers.swift
+index df3de7f..8c6e91f 100644
+--- a/Sources/SQLite SQL/Triggers.swift	
++++ b/Sources/SQLite SQL/Triggers.swift	
+@@ -62,8 +62,20 @@ extension Table {
+ }
+ 
+ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
++    fileprivate let name: String?
++    fileprivate let ifNotExists: Bool
++    fileprivate let operation: Operation
++    fileprivate let when: When
++    fileprivate let fileID: StaticString
++    fileprivate let line: UInt
++    fileprivate let column: UInt
++}
++
++extension TemporaryTrigger {
+     public typealias From = Never
++
+     public typealias Joins = ()
++
+     public typealias QueryValue = ()
+ 
+     fileprivate enum When: ISO_9075.Fragment {
+@@ -319,14 +331,6 @@ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
+         }
+     }
+ 
+-    fileprivate let name: String?
+-    fileprivate let ifNotExists: Bool
+-    fileprivate let operation: Operation
+-    fileprivate let when: When
+-    fileprivate let fileID: StaticString
+-    fileprivate let line: UInt
+-    fileprivate let column: UInt
+-
+     public func drop(ifExists: Bool = false) -> some Statement<()> {
+         var query: ISO_9075.Fragment = "DROP TRIGGER"
+         if ifExists {
+diff --git a/Sources/SQLite SQL/UUID+Bytes.swift b/Sources/SQLite SQL/UUID+Bytes.swift
+index 120aacb..83a3d9d 100644
+--- a/Sources/SQLite SQL/UUID+Bytes.swift	
++++ b/Sources/SQLite SQL/UUID+Bytes.swift	
+@@ -10,17 +10,19 @@ extension RFC_4122.UUID {
+         public init(queryOutput: RFC_4122.UUID) {
+             self.queryOutput = queryOutput
+         }
++    }
++}
+ 
+-        public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            """
+-            CASE WHEN \(queryFragment) IS NULL THEN NULL ELSE lower(printf('%s-%s-%s-%s-%s', \
+-            substr(hex(\(queryFragment)), 1, 8), \
+-            substr(hex(\(queryFragment)), 9, 4), \
+-            substr(hex(\(queryFragment)), 13, 4), \
+-            substr(hex(\(queryFragment)), 17, 4), \
+-            substr(hex(\(queryFragment)), 21, 12))) END
+-            """
+-        }
++extension RFC_4122.UUID.BytesRepresentation {
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        """
++        CASE WHEN \(queryFragment) IS NULL THEN NULL ELSE lower(printf('%s-%s-%s-%s-%s', \
++        substr(hex(\(queryFragment)), 1, 8), \
++        substr(hex(\(queryFragment)), 9, 4), \
++        substr(hex(\(queryFragment)), 13, 4), \
++        substr(hex(\(queryFragment)), 17, 4), \
++        substr(hex(\(queryFragment)), 21, 12))) END
++        """
+     }
+ }
+ 
+diff --git a/Sources/SQLite SQL/Views.swift b/Sources/SQLite SQL/Views.swift
+index 875f33c..f7003dd 100644
+--- a/Sources/SQLite SQL/Views.swift	
++++ b/Sources/SQLite SQL/Views.swift	
+@@ -13,11 +13,14 @@ extension Table {
+ 
+ public struct TemporaryView<View: Table, Selection: PartialSelectStatement>: Statement
+ where Selection.QueryValue == View {
+-    public typealias QueryValue = ()
+-    public typealias From = Never
+-
+     fileprivate let ifNotExists: Bool
+     fileprivate let select: Selection
++}
++
++extension TemporaryView {
++    public typealias QueryValue = ()
++
++    public typealias From = Never
+ 
+     public func drop(ifExists: Bool = false) -> some Statement<()> {
+         var query: ISO_9075.Fragment = "DROP VIEW"
+diff --git a/Sources/SQLite/GRDB/CustomCollations.swift b/Sources/SQLite/GRDB/CustomCollations.swift
+index 27185fb..b2e26b7 100644
+--- a/Sources/SQLite/GRDB/CustomCollations.swift
++++ b/Sources/SQLite/GRDB/CustomCollations.swift
+@@ -62,8 +62,12 @@ public import SQLite_SQL
+         public static var canonical: Self { Self() }
+     }
+     public nonisolated struct CanonicalCollation: SQLite_SQL::DatabaseCollation, Sendable {
+-        public var name: String { "canonical" }
+         public init() {}
++    }
++
++    extension CanonicalCollation {
++        public var name: String { "canonical" }
++
+         public func compare(
+             _ lhs: UnsafeRawBufferPointer,
+             _ rhs: UnsafeRawBufferPointer
+diff --git a/Sources/SQLite/GRDB/SQLite.Configuration.swift b/Sources/SQLite/GRDB/SQLite.Configuration.swift
+index 10eb651..9181495 100644
+--- a/Sources/SQLite/GRDB/SQLite.Configuration.swift
++++ b/Sources/SQLite/GRDB/SQLite.Configuration.swift
+@@ -24,15 +24,17 @@ public import SQLite_SQL
+             private var preparations: [@Sendable (SQLite.Connection) throws -> Void] = []
+ 
+             public init() {}
+-
+-            /// Runs `body` on each connection as it opens, before any other statement: to add functions and collations,
+-            /// attach databases, or start a trace.
+-            public mutating func prepareDatabase(_ body: @escaping @Sendable (SQLite.Connection) throws -> Void) {
+-                preparations.append(body)
+-            }
+         }
+     }
+ 
++extension SQLite.Configuration {
++        /// Runs `body` on each connection as it opens, before any other statement: to add functions and collations,
++        /// attach databases, or start a trace.
++        public mutating func prepareDatabase(_ body: @escaping @Sendable (SQLite.Connection) throws -> Void) {
++            preparations.append(body)
++        }
++}
++
+     extension SQLite.Configuration {
+         /// The driver's configuration for the connection that holds a read-only database's `-shm` file. SQLite can't
+         /// open a WAL database with no such file on a read-only connection, which may not create it. So this one opens
+diff --git a/Sources/SQLite/GRDB/SQLite.Connection.swift b/Sources/SQLite/GRDB/SQLite.Connection.swift
+index 8b02e49..9245fcd 100644
+--- a/Sources/SQLite/GRDB/SQLite.Connection.swift
++++ b/Sources/SQLite/GRDB/SQLite.Connection.swift
+@@ -9,11 +9,6 @@ public import SQLite_SQL
+         public struct Row: ISO_9075.Row {
+             public let columns: [String]
+             let values: [ISO_9075.Value]
+-
+-            public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
+-                guard values.indices.contains(index) else { throw .decoding("no column \(index)") }
+-                return values[index]
+-            }
+         }
+ 
+         /// One open connection, for the duration of a ``SQLite/Database`` read or write: what its closure is given, and
+@@ -27,45 +22,54 @@ public import SQLite_SQL
+             package init(_ database: GRDB.Database) {
+                 self.database = database
+             }
++        }
++    }
+ 
+-            public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
+-                try step(statement) { _ in }
+-                return Int(unsafe sqlite3_changes(database.sqliteConnection))
+-            }
++extension SQLite.Row {
++        public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
++            guard values.indices.contains(index) else { throw .decoding("no column \(index)") }
++            return values[index]
++        }
++}
+ 
+-            public func fetchAll<Value>(
+-                _ statement: ISO_9075.Rendering,
+-                decode: (SQLite.Row) throws(ISO_9075.Error) -> Value
+-            ) throws(ISO_9075.Error) -> [Value] {
+-                var values: [Value] = []
+-                try step(statement) { row throws(ISO_9075.Error) in values.append(try decode(row)) }
+-                return values
+-            }
++extension SQLite.Connection {
++        public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
++            try step(statement) { _ in }
++            return Int(unsafe sqlite3_changes(database.sqliteConnection))
++        }
+ 
+-            private func step(
+-                _ rendering: ISO_9075.Rendering,
+-                _ body: (SQLite.Row) throws(ISO_9075.Error) -> Void
+-            ) throws(ISO_9075.Error) {
+-                let statement: GRDB.Statement
+-                do {
+-                    (statement, _) = try database.prepare(rendering, cached: true)
+-                } catch let error as ISO_9075.Error {
+-                    throw error
+-                } catch {
+-                    throw .execution("\(SQLite.Error.translated(error))")
+-                }
+-                defer { unsafe sqlite3_reset(statement.sqliteStatement) }
+-                let rows = Cursor(statement)
+-                do {
+-                    while let row = try rows.next() { try body(row) }
+-                } catch let error as ISO_9075.Error {
+-                    throw error
+-                } catch {
+-                    throw .execution("\(SQLite.Error.translated(error))")
+-                }
++        public func fetchAll<Value>(
++            _ statement: ISO_9075.Rendering,
++            decode: (SQLite.Row) throws(ISO_9075.Error) -> Value
++        ) throws(ISO_9075.Error) -> [Value] {
++            var values: [Value] = []
++            try step(statement) { row throws(ISO_9075.Error) in values.append(try decode(row)) }
++            return values
++        }
++
++        private func step(
++            _ rendering: ISO_9075.Rendering,
++            _ body: (SQLite.Row) throws(ISO_9075.Error) -> Void
++        ) throws(ISO_9075.Error) {
++            let statement: GRDB.Statement
++            do {
++                (statement, _) = try database.prepare(rendering, cached: true)
++            } catch let error as ISO_9075.Error {
++                throw error
++            } catch {
++                throw .execution("\(SQLite.Error.translated(error))")
++            }
++            defer { unsafe sqlite3_reset(statement.sqliteStatement) }
++            let rows = Cursor(statement)
++            do {
++                while let row = try rows.next() { try body(row) }
++            } catch let error as ISO_9075.Error {
++                throw error
++            } catch {
++                throw .execution("\(SQLite.Error.translated(error))")
+             }
+         }
+-    }
++}
+ 
+     extension SQLite.Connection {
+         /// Whether a transaction is open on this connection.
+@@ -140,20 +144,6 @@ public import SQLite_SQL
+         public enum Trace: Sendable {
+             /// A statement about to run, as it was prepared.
+             case statement(Statement)
+-
+-            public struct Statement: Sendable {
+-                /// The statement's text, with `?` where it binds values.
+-                public let sql: String
+-            }
+-
+-            /// Which events a trace reports.
+-            public struct Options: OptionSet, Sendable {
+-                public let rawValue: Int
+-                public init(rawValue: Int) { self.rawValue = rawValue }
+-
+-                /// Every statement about to run.
+-                public static let statement = Options(rawValue: 1 << 0)
+-            }
+         }
+ 
+         /// Reports what `options` names to `body` for as long as the connection is open, until another trace replaces it.
+@@ -165,4 +155,20 @@ public import SQLite_SQL
+             }
+         }
+     }
++
++extension SQLite.Connection.Trace {
++        public struct Statement: Sendable {
++            /// The statement's text, with `?` where it binds values.
++            public let sql: String
++        }
++
++        /// Which events a trace reports.
++        public struct Options: OptionSet, Sendable {
++            public let rawValue: Int
++            public init(rawValue: Int) { self.rawValue = rawValue }
++
++            /// Every statement about to run.
++            public static let statement = Options(rawValue: 1 << 0)
++        }
++}
+ #endif
+diff --git a/Sources/SQLite/GRDB/SQLite.Database.swift b/Sources/SQLite/GRDB/SQLite.Database.swift
+index 2a7844c..418ccb8 100644
+--- a/Sources/SQLite/GRDB/SQLite.Database.swift
++++ b/Sources/SQLite/GRDB/SQLite.Database.swift
+@@ -18,8 +18,6 @@ public import SQLite_SQL
+         /// other write. Each comes synchronous and asynchronous; the asynchronous ones that take a closure throwing
+         /// `ISO_9075.Error` are the call-level interface swift-sql's `Migrator` runs on.
+         public struct Database: ISO_9075.Database {
+-            public typealias Connection = SQLite.Connection
+-
+             package let writer: any DatabaseWriter
+ 
+             /// Holds the `-shm` file of a read-only database that had none. Declared after `writer` so that it closes
+@@ -67,21 +65,25 @@ public import SQLite_SQL
+                 }
+                 self.init(writer, holder: holder)
+             }
++        }
++    }
+ 
+-            /// How a database file is opened.
+-            public enum Kind: Sendable {
+-                /// One connection, every read and write serialised on it.
+-                case queue
+-                /// A writer and concurrent readers, in WAL mode.
+-                case pool
+-            }
++extension SQLite.Database {
++        public typealias Connection = SQLite.Connection
+ 
+-            /// The path of the database file; for a database in memory, `:memory:`.
+-            // swift-linter:disable:next raw concept
+-            // REASON: GRDB's report of the database location: a file path, or :memory: or an empty text for a database with no file, which File.Path does not describe and refuses when empty.
+-            public var path: String { writer.path }
++        /// How a database file is opened.
++        public enum Kind: Sendable {
++            /// One connection, every read and write serialised on it.
++            case queue
++            /// A writer and concurrent readers, in WAL mode.
++            case pool
+         }
+-    }
++
++        /// The path of the database file; for a database in memory, `:memory:`.
++        // swift-linter:disable:next raw concept
++        // REASON: GRDB's report of the database location: a file path, or :memory: or an empty text for a database with no file, which File.Path does not describe and refuses when empty.
++        public var path: String { writer.path }
++}
+ 
+     extension SQLite.Database {
+         @_disfavoredOverload
+diff --git a/Sources/SQLite/GRDB/SQLite.Error.swift b/Sources/SQLite/GRDB/SQLite.Error.swift
+index ff9dc9e..b10c086 100644
+--- a/Sources/SQLite/GRDB/SQLite.Error.swift
++++ b/Sources/SQLite/GRDB/SQLite.Error.swift
+@@ -9,9 +9,6 @@ public import SQLite_SQL
+         /// Every operation of ``SQLite/Database`` and ``SQLite/Connection`` throws this for a failure SQLite reports,
+         /// so a caller tells a constraint violation from a busy database by ``code``, not by the driver's own error type.
+         public struct Error: Swift.Error, Hashable, Sendable, CustomStringConvertible {
+-            /// The primary result code: the least significant 8 bits of ``extendedCode``.
+-            public var code: Code { Code(rawValue: extendedCode.rawValue & 0xFF) }
+-
+             /// The extended result code, such as `SQLITE_CONSTRAINT_FOREIGNKEY`.
+             public let extendedCode: Code
+ 
+@@ -26,16 +23,21 @@ public import SQLite_SQL
+                 self.message = message
+                 self.statement = statement
+             }
+-
+-            public var description: String {
+-                var description = "SQLite error \(extendedCode.rawValue)"
+-                if let message { description += ": \(message)" }
+-                if let statement { description += " - while executing `\(statement)`" }
+-                return description
+-            }
+         }
+     }
+ 
++extension SQLite.Error {
++        /// The primary result code: the least significant 8 bits of ``extendedCode``.
++        public var code: Code { Code(rawValue: extendedCode.rawValue & 0xFF) }
++
++        public var description: String {
++            var description = "SQLite error \(extendedCode.rawValue)"
++            if let message { description += ": \(message)" }
++            if let statement { description += " - while executing `\(statement)`" }
++            return description
++        }
++}
++
+     extension SQLite.Error {
+         /// An SQLite result code (<https://www.sqlite.org/rescode.html>).
+         public struct Code: RawRepresentable, Hashable, Sendable {
+diff --git a/Sources/SQLite/GRDB/SQLiteFunctionDecoder.swift b/Sources/SQLite/GRDB/SQLiteFunctionDecoder.swift
+index 0d12b17..308ca97 100644
+--- a/Sources/SQLite/GRDB/SQLiteFunctionDecoder.swift
++++ b/Sources/SQLite/GRDB/SQLiteFunctionDecoder.swift
+@@ -20,7 +20,9 @@ import SQLite_SQL
+         init(name: String) {
+             self.name = name
+         }
++    }
+ 
++    extension SQLiteFunctionDecoder {
+         mutating func reset(argumentCount: Int32, arguments: UnsafeMutablePointer<OpaquePointer?>?) {
+             self.argumentCount = argumentCount
+             unsafe self.arguments = arguments
+diff --git a/Sources/SQLite/GRDB/SQLiteQueryDecoder.swift b/Sources/SQLite/GRDB/SQLiteQueryDecoder.swift
+index 268b8c5..edcde5f 100644
+--- a/Sources/SQLite/GRDB/SQLiteQueryDecoder.swift
++++ b/Sources/SQLite/GRDB/SQLiteQueryDecoder.swift
+@@ -18,7 +18,9 @@ import SQLite_SQL
+         init(statement: OpaquePointer) {
+             unsafe self.statement = unsafe statement
+         }
++    }
+ 
++    extension SQLiteQueryDecoder {
+         mutating func next() {
+             currentIndex = 0
+         }
+diff --git a/Sources/SQLite/Observation/Fetch.swift b/Sources/SQLite/Observation/Fetch.swift
+index 897a767..e50ee6d 100644
+--- a/Sources/SQLite/Observation/Fetch.swift
++++ b/Sources/SQLite/Observation/Fetch.swift
+@@ -6,8 +6,6 @@ public import SQLite_SQL
+     public struct Fetch<Value: Sendable> {
+         public let projectedValue: FetchStore<Value>
+ 
+-        public var wrappedValue: Value { projectedValue.value }
+-
+         public init(wrappedValue: Value) {
+             projectedValue = FetchStore(value: wrappedValue)
+         }
+@@ -21,4 +19,8 @@ public import SQLite_SQL
+             projectedValue = FetchStore(value: wrappedValue, request, database: database, scheduling: scheduler)
+         }
+     }
++
++    extension Fetch {
++        public var wrappedValue: Value { projectedValue.value }
++    }
+ #endif
+diff --git a/Sources/SQLite/Observation/FetchAll.swift b/Sources/SQLite/Observation/FetchAll.swift
+index 70b096b..457c489 100644
+--- a/Sources/SQLite/Observation/FetchAll.swift
++++ b/Sources/SQLite/Observation/FetchAll.swift
+@@ -8,10 +8,6 @@ public import SQLite_SQL
+     public struct FetchAll<Element: Sendable> {
+         public let projectedValue: FetchStore<ResultsSectionCollection<Element, String?>>
+ 
+-        public var wrappedValue: [Element] { projectedValue.value.elements }
+-
+-        public var sections: ResultsSectionCollection<Element, String?> { projectedValue.value }
+-
+         public init(wrappedValue: [Element] = []) {
+             projectedValue = FetchStore(value: ResultsSectionCollection(elements: wrappedValue, sectionName: nil))
+         }
+@@ -90,6 +86,12 @@ public import SQLite_SQL
+         }
+     }
+ 
++    extension FetchAll {
++        public var wrappedValue: [Element] { projectedValue.value.elements }
++
++        public var sections: ResultsSectionCollection<Element, String?> { projectedValue.value }
++    }
++
+     extension FetchStore {
+         // Starting without waiting for the first value, as the property wrappers do.
+         func start<Element: Sendable, QueryValue: QueryRepresentable>(
+@@ -159,7 +161,9 @@ public import SQLite_SQL
+ 
+     struct Unsectioned<QueryValue: QueryRepresentable>: FetchKeyRequest where QueryValue.QueryOutput: Sendable {
+         let query: ISO_9075.Fragment
++    }
+ 
++    extension Unsectioned {
+         func fetch(_ connection: SQLite.Connection) throws -> ResultsSectionCollection<QueryValue.QueryOutput, String?> {
+             ResultsSectionCollection(
+                 elements: try Array(QueryValueCursor<QueryValue>(db: connection.database, query: query, cached: true)),
+@@ -170,7 +174,9 @@ public import SQLite_SQL
+ 
+     struct Sectioned<QueryValue: QueryRepresentable>: FetchKeyRequest where QueryValue.QueryOutput: Sendable {
+         let query: ISO_9075.Fragment
++    }
+ 
++    extension Sectioned {
+         func fetch(_ connection: SQLite.Connection) throws -> ResultsSectionCollection<QueryValue.QueryOutput, String?> {
+             try ResultsSectionCollection(
+                 cursor: QuerySectionedCursor<QueryValue, String?>(db: connection.database, query: query, cached: true)
+diff --git a/Sources/SQLite/Observation/FetchKeyRequest.swift b/Sources/SQLite/Observation/FetchKeyRequest.swift
+index 0108bca..947f7fb 100644
+--- a/Sources/SQLite/Observation/FetchKeyRequest.swift
++++ b/Sources/SQLite/Observation/FetchKeyRequest.swift
+@@ -12,7 +12,9 @@ public import SQLite_SQL
+ 
+     struct StatementValue<QueryValue: QueryRepresentable>: FetchKeyRequest {
+         let query: ISO_9075.Fragment
++    }
+ 
++    extension StatementValue {
+         func fetch(_ connection: SQLite.Connection) throws -> QueryValue.QueryOutput? {
+             try QueryValueCursor<QueryValue>(db: connection.database, query: query, cached: true).next()
+         }
+@@ -21,7 +23,9 @@ public import SQLite_SQL
+     struct Coalescing<Wrapped: Sendable, Base: FetchKeyRequest<Wrapped?>>: FetchKeyRequest {
+         let base: Base
+         let value: Wrapped
++    }
+ 
++    extension Coalescing {
+         func fetch(_ connection: SQLite.Connection) throws -> Wrapped {
+             try base.fetch(connection) ?? value
+         }
+diff --git a/Sources/SQLite/Observation/FetchOne.swift b/Sources/SQLite/Observation/FetchOne.swift
+index e0b7849..f3027bc 100644
+--- a/Sources/SQLite/Observation/FetchOne.swift
++++ b/Sources/SQLite/Observation/FetchOne.swift
+@@ -7,8 +7,6 @@ public import SQLite_SQL
+     public struct FetchOne<Value: Sendable> {
+         public let projectedValue: FetchStore<Value>
+ 
+-        public var wrappedValue: Value { projectedValue.value }
+-
+         public init(wrappedValue: Value) {
+             projectedValue = FetchStore(value: wrappedValue)
+         }
+@@ -37,4 +35,8 @@ public import SQLite_SQL
+             projectedValue.start(StatementValue<QueryValue>(query: statement.query), database: database, scheduling: scheduler)
+         }
+     }
++
++    extension FetchOne {
++        public var wrappedValue: Value { projectedValue.value }
++    }
+ #endif
+diff --git a/Sources/SQLite/Observation/FetchSubscription.swift b/Sources/SQLite/Observation/FetchSubscription.swift
+index 91ceb44..3d1deba 100644
+--- a/Sources/SQLite/Observation/FetchSubscription.swift
++++ b/Sources/SQLite/Observation/FetchSubscription.swift
+@@ -22,7 +22,9 @@ import SQLite_SQL
+         init<Value>(store: FetchStore<Value>) {
+             onCancel = { Task { @MainActor in store.cancel() } }
+         }
++    }
+ 
++    extension FetchSubscription {
+         /// An async handle to the given fetch observation.
+         ///
+         /// This handle will suspend until the current task is cancelled, at which point it will terminate
+diff --git a/Sources/SQLite/Observation/ResultsSectionCollection.swift b/Sources/SQLite/Observation/ResultsSectionCollection.swift
+index 31a5ba0..1d46b61 100644
+--- a/Sources/SQLite/Observation/ResultsSectionCollection.swift
++++ b/Sources/SQLite/Observation/ResultsSectionCollection.swift
+@@ -17,7 +17,9 @@ import SQLite_SQL
+             self.elementIndicesBySectionName =
+                 elements.isEmpty ? [:] : [sectionName: ElementIndices(range: elements.indices)]
+         }
++    }
+ 
++    extension ResultsSectionCollection {
+         public var sectionNames: [SectionName] {
+             elementIndicesBySectionName.keys.elements
+         }
+@@ -86,7 +88,9 @@ import SQLite_SQL
+             self.base = base
+             self.elementIndices = elementIndices
+         }
++    }
+ 
++    extension ResultsSection {
+         public var id: SectionName {
+             name
+         }
+diff --git a/Sources/SQLite/Observation/SQLite.Scheduler.swift b/Sources/SQLite/Observation/SQLite.Scheduler.swift
+index 9de87ab..17f834d 100644
+--- a/Sources/SQLite/Observation/SQLite.Scheduler.swift
++++ b/Sources/SQLite/Observation/SQLite.Scheduler.swift
+@@ -29,17 +29,20 @@ public import SQLite_SQL
+         /// can run on a thread other than the process's initial one, and the check then fails although the
+         /// caller is correctly isolated. Later values still arrive on the main queue, as GRDB delivers them.
+         struct Immediate: ValueObservationMainActorScheduler {
+-            func immediateInitialValue() -> Bool {
+-                MainActor.preconditionIsolated("A fetch store starts its observation on the main actor")
+-                return true
+-            }
+-
+-            func scheduleOnMainActor(_ action: @escaping @MainActor () -> Void) {
+-                DispatchQueue.main.async(execute: action)
+-            }
+         }
+     }
+ 
++extension SQLite.Scheduler.Immediate {
++        func immediateInitialValue() -> Bool {
++            MainActor.preconditionIsolated("A fetch store starts its observation on the main actor")
++            return true
++        }
++
++        func scheduleOnMainActor(_ action: @escaping @MainActor () -> Void) {
++            DispatchQueue.main.async(execute: action)
++        }
++}
++
+     #if canImport(SwiftUI)
+         public import SwiftUI
+ 
+@@ -50,15 +53,17 @@ public import SQLite_SQL
+ 
+             struct Animated: ValueObservationScheduler {
+                 let animation: Animation?
++            }
++        }
+ 
+-                func immediateInitialValue() -> Bool { true }
++extension SQLite.Scheduler.Animated {
++            func immediateInitialValue() -> Bool { true }
+ 
+-                func schedule(_ action: @escaping @Sendable () -> Void) {
+-                    DispatchQueue.main.async {
+-                        withAnimation(animation) { action() }
+-                    }
++            func schedule(_ action: @escaping @Sendable () -> Void) {
++                DispatchQueue.main.async {
++                    withAnimation(animation) { action() }
+                 }
+             }
+-        }
++}
+     #endif
+ #endif
+-- 
+2.43.0
+

@@ -1,0 +1,552 @@
+From 5f31c7962d514df241c188a4cee61ce85bd08e5a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:31:23 +0000
+Subject: [PATCH 7/7] Revert the minimal-body moves in files where they raised
+ a rule over its ratchet limit (coenttb/work#242)
+
+---
+ .../Type.Syntax.Expression.swift              |  20 +--
+ .../Type.Syntax.Properties.swift              |  15 +-
+ .../Type.Syntax.Record.swift                  | 139 +++++++--------
+ Sources/Type Algebra/Type.Mapping.swift       |  98 ++++++-----
+ Sources/Type Algebra/Type.Polynomial.swift    | 160 +++++++++---------
+ 5 files changed, 209 insertions(+), 223 deletions(-)
+
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Expression.swift b/Sources/Type Algebra Syntax/Type.Syntax.Expression.swift
+index 12f26cd..c6d02fe 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Expression.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Expression.swift	
+@@ -11,6 +11,15 @@ extension Type.Syntax {
+         case arrow([Type.Syntax.Expression], Type.Syntax.Expression)
+         case unsupported(TypeSyntax, Set<String>)
+ 
++        public struct Coordinate {
++            public let label: String?
++            public let type: Type.Syntax.Expression
++            public init(label: String?, type: Type.Syntax.Expression) {
++                self.label = label
++                self.type = type
++            }
++        }
++
+         public init(_ syntax: TypeSyntax, parameters: Set<String>) {
+             let references = Self.references(in: syntax, parameters: parameters)
+             guard !references.isEmpty else {
+@@ -89,20 +98,11 @@ extension Type.Syntax {
+             self = .unsupported(syntax, references)
+         }
+     }
+-}
+ 
+-extension Type.Syntax.Expression {
+-    public struct Coordinate {
+-        public let label: String?
+-        public let type: Type.Syntax.Expression
+-        public init(label: String?, type: Type.Syntax.Expression) {
+-            self.label = label
+-            self.type = type
+-        }
+-    }
+ }
+ 
+ extension Type.Syntax.Expression {
++
+     public typealias Polarity = Type.Polarity
+ 
+     public var algebra: Type.Expression {
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Properties.swift b/Sources/Type Algebra Syntax/Type.Syntax.Properties.swift
+index e17b5b5..89a2493 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Properties.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Properties.swift	
+@@ -3,6 +3,13 @@ public import Type_Algebra
+ 
+ extension Type.Syntax {
+     public struct Properties {
++        public struct Field {
++            public let declaration: VariableDeclSyntax
++            public let binding: PatternBindingSyntax
++            public let name: String
++            public let type: TypeSyntax
++        }
++
+         public let declaration: StructDeclSyntax
+         public let fields: [Field]
+         public let diagnostics: [String]
+@@ -72,15 +79,7 @@ extension Type.Syntax {
+             diagnostics = reasons
+         }
+     }
+-}
+ 
+-extension Type.Syntax.Properties {
+-    public struct Field {
+-        public let declaration: VariableDeclSyntax
+-        public let binding: PatternBindingSyntax
+-        public let name: String
+-        public let type: TypeSyntax
+-    }
+ }
+ 
+ extension Type.Syntax.Properties.Field {
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Record.swift b/Sources/Type Algebra Syntax/Type.Syntax.Record.swift
+index e8ef1f4..de6afb0 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Record.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Record.swift	
+@@ -2,6 +2,35 @@ public import Type_Algebra
+ 
+ extension Type.Syntax {
+     public struct Record {
++        public struct Field {
++            public let name: String
++            public let type: String
++            public let label: String
++            public let binding: String
++            public let argument: String
++            public let initial: String?
++            public let mutable: Bool
++            public let access: String?
++            public init(
++                _ name: String,
++                type: String,
++                label: String? = nil,
++                binding: String? = nil,
++                argument: String? = nil,
++                initial: String? = nil,
++                mutable: Bool = true,
++                access: String? = nil
++            ) {
++                self.name = name
++                self.type = type
++                self.label = label ?? name
++                self.binding = binding ?? name
++                self.argument = argument ?? type
++                self.initial = initial
++                self.mutable = mutable
++                self.access = access
++            }
++        }
+         public let fields: [Field]
+         public let algebra: Type.Record
+         public init(_ fields: [Field]) throws {
+@@ -17,85 +46,47 @@ extension Type.Syntax {
+             self.algebra = algebra
+             self.fields = try algebra.fields.map(representation)
+         }
++        public func selecting(_ labels: [String]) throws -> Self {
++            let selection = try algebra.selecting(labels)
++            return Self(algebra: selection.record, fields: selection.indices.map { fields[$0] })
++        }
+         private init(algebra: Type.Record, fields: [Field]) {
+             self.algebra = algebra
+             self.fields = fields
+         }
+-    }
+-}
+-
+-extension Type.Syntax.Record {
+-    public struct Field {
+-        public let name: String
+-        public let type: String
+-        public let label: String
+-        public let binding: String
+-        public let argument: String
+-        public let initial: String?
+-        public let mutable: Bool
+-        public let access: String?
+-        public init(
+-            _ name: String,
+-            type: String,
+-            label: String? = nil,
+-            binding: String? = nil,
+-            argument: String? = nil,
+-            initial: String? = nil,
+-            mutable: Bool = true,
+-            access: String? = nil
+-        ) {
+-            self.name = name
+-            self.type = type
+-            self.label = label ?? name
+-            self.binding = binding ?? name
+-            self.argument = argument ?? type
+-            self.initial = initial
+-            self.mutable = mutable
+-            self.access = access
++        public var tupleType: String {
++            fields.isEmpty
++                ? "Void"
++                : fields.count == 1
++                    ? fields[0].type : "(" + fields.map(\.type).joined(separator: ", ") + ")"
+         }
+-    }
+-
+-    public func selecting(_ labels: [String]) throws -> Self {
+-        let selection = try algebra.selecting(labels)
+-        return Self(algebra: selection.record, fields: selection.indices.map { fields[$0] })
+-    }
+-
+-    public var tupleType: String {
+-        fields.isEmpty
+-            ? "Void"
+-            : fields.count == 1
+-                ? fields[0].type : "(" + fields.map(\.type).joined(separator: ", ") + ")"
+-    }
+-
+-    public func unpacking(_ value: String) -> Interpretation.Product {
+-        .product(fields.indices.map { .value(fields.count == 1 ? value : "\(value).\($0)") })
+-    }
+-
+-    public func declarations(access: String) -> [String] {
+-        fields.map {
+-            "\($0.access ?? access)\($0.mutable ? "var" : "let") \($0.name): \($0.type)"
+-                + ($0.initial.map { " = \($0)" } ?? "")
++        public func unpacking(_ value: String) -> Interpretation.Product {
++            .product(fields.indices.map { .value(fields.count == 1 ? value : "\(value).\($0)") })
++        }
++        public func declarations(access: String) -> [String] {
++            fields.map {
++                "\($0.access ?? access)\($0.mutable ? "var" : "let") \($0.name): \($0.type)"
++                    + ($0.initial.map { " = \($0)" } ?? "")
++            }
++        }
++        public var parameters: String {
++            fields.map { field in
++                let name =
++                    field.label == field.binding ? field.binding : "\(field.label) \(field.binding)"
++                return "\(name): \(field.argument)" + (field.initial.map { " = \($0)" } ?? "")
++            }.joined(separator: ", ")
++        }
++        public func initializer(
++            access: String,
++            parameters selected: [String]? = nil,
++            prelude: String = ""
++        ) throws -> String {
++            let record = try selected.map(selecting) ?? self
++            let assignments = record.fields.map { "self.\($0.name) = \($0.binding)" }.joined(
++                separator: "\n"
++            )
++            return
++                "\(access)init(\(record.parameters)) {\n\(prelude.isEmpty ? "" : prelude + "\n")\(assignments)\n}"
+         }
+-    }
+-
+-    public var parameters: String {
+-        fields.map { field in
+-            let name =
+-                field.label == field.binding ? field.binding : "\(field.label) \(field.binding)"
+-            return "\(name): \(field.argument)" + (field.initial.map { " = \($0)" } ?? "")
+-        }.joined(separator: ", ")
+-    }
+-
+-    public func initializer(
+-        access: String,
+-        parameters selected: [String]? = nil,
+-        prelude: String = ""
+-    ) throws -> String {
+-        let record = try selected.map(selecting) ?? self
+-        let assignments = record.fields.map { "self.\($0.name) = \($0.binding)" }.joined(
+-            separator: "\n"
+-        )
+-        return
+-            "\(access)init(\(record.parameters)) {\n\(prelude.isEmpty ? "" : prelude + "\n")\(assignments)\n}"
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Mapping.swift b/Sources/Type Algebra/Type.Mapping.swift
+index bc0227b..da44c66 100644
+--- a/Sources/Type Algebra/Type.Mapping.swift	
++++ b/Sources/Type Algebra/Type.Mapping.swift	
+@@ -6,60 +6,58 @@ extension Type {
+         case product([Mapping])
+         case list(Mapping)
+         case exponential(domain: Mapping, codomain: Mapping)
+-    }
+-}
+ 
+-extension Type.Mapping {
+-    public enum Direction: Equatable, Sendable { case forward, backward }
++        public enum Direction: Equatable, Sendable { case forward, backward }
+ 
+-    public static func derive(
+-        _ type: Expression,
+-        forward: Set<Variable>,
+-        backward: Set<Variable> = [],
+-        direction: Direction = .forward
+-    ) throws -> Self {
+-        switch type {
+-        case .zero, .unit, .atom: return .identity
+-        case .variable(let variable):
+-            guard (direction == .forward ? forward : backward).contains(variable) else {
+-                throw Failure(
+-                    "parameter `\(variable.name)` occurs in the wrong variance position; supply a bidirectional mapping or an explicit implementation"
+-                )
+-            }
+-            return .transform(variable, direction)
+-        case .sum(let types):
+-            return .sum(
+-                try types.map {
+-                    try derive($0, forward: forward, backward: backward, direction: direction)
+-                }
+-            )
+-        case .product(let types):
+-            return .product(
+-                try types.map {
+-                    try derive($0, forward: forward, backward: backward, direction: direction)
++        public static func derive(
++            _ type: Expression,
++            forward: Set<Variable>,
++            backward: Set<Variable> = [],
++            direction: Direction = .forward
++        ) throws -> Self {
++            switch type {
++            case .zero, .unit, .atom: return .identity
++            case .variable(let variable):
++                guard (direction == .forward ? forward : backward).contains(variable) else {
++                    throw Failure(
++                        "parameter `\(variable.name)` occurs in the wrong variance position; supply a bidirectional mapping or an explicit implementation"
++                    )
+                 }
+-            )
+-        case .list(let type):
+-            return .list(
+-                try derive(type, forward: forward, backward: backward, direction: direction)
+-            )
+-        case .exponential(let domain, let codomain):
+-            return .exponential(
+-                domain: try derive(
+-                    domain,
+-                    forward: forward,
+-                    backward: backward,
+-                    direction: direction == .forward ? .backward : .forward
+-                ),
+-                codomain: try derive(
+-                    codomain,
+-                    forward: forward,
+-                    backward: backward,
+-                    direction: direction
++                return .transform(variable, direction)
++            case .sum(let types):
++                return .sum(
++                    try types.map {
++                        try derive($0, forward: forward, backward: backward, direction: direction)
++                    }
+                 )
+-            )
+-        case .effect, .opaque:
+-            throw Failure("mapping this constructor requires an explicit functor action")
++            case .product(let types):
++                return .product(
++                    try types.map {
++                        try derive($0, forward: forward, backward: backward, direction: direction)
++                    }
++                )
++            case .list(let type):
++                return .list(
++                    try derive(type, forward: forward, backward: backward, direction: direction)
++                )
++            case .exponential(let domain, let codomain):
++                return .exponential(
++                    domain: try derive(
++                        domain,
++                        forward: forward,
++                        backward: backward,
++                        direction: direction == .forward ? .backward : .forward
++                    ),
++                    codomain: try derive(
++                        codomain,
++                        forward: forward,
++                        backward: backward,
++                        direction: direction
++                    )
++                )
++            case .effect, .opaque:
++                throw Failure("mapping this constructor requires an explicit functor action")
++            }
+         }
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Polynomial.swift b/Sources/Type Algebra/Type.Polynomial.swift
+index 1b03af6..f6c674f 100644
+--- a/Sources/Type Algebra/Type.Polynomial.swift	
++++ b/Sources/Type Algebra/Type.Polynomial.swift	
+@@ -21,100 +21,98 @@ extension Type {
+                 )
+             }
+         }
+-    }
+-}
+-
+-extension Type.Polynomial {
+-    public var expression: Expression {
+-        switch self {
+-        case .zero: return .zero
+-        case .unit: return .unit
+-        case .atom(let value): return .atom(value)
+-        case .variable(let value): return .variable(value)
+-        case .sum(let values): return .sum(values.map(\.expression))
+-        case .product(let values): return .product(values.map(\.expression))
+-        }
+-    }
+ 
+-    public func derivative(withRespectTo variable: Variable) -> Self {
+-        switch self {
+-        case .zero, .unit, .atom: return .zero
+-        case .variable(let found): return found == variable ? .unit : .zero
+-        case .sum(let values):
+-            return .sum(values.map { $0.derivative(withRespectTo: variable) })
+-        case .product(let values):
+-            return .sum(
+-                values.indices.map { hole in
+-                    .product(
+-                        values.enumerated().map { index, value in
+-                            index == hole ? value.derivative(withRespectTo: variable) : value
+-                        }
+-                    )
+-                }
+-            )
++        public var expression: Expression {
++            switch self {
++            case .zero: return .zero
++            case .unit: return .unit
++            case .atom(let value): return .atom(value)
++            case .variable(let value): return .variable(value)
++            case .sum(let values): return .sum(values.map(\.expression))
++            case .product(let values): return .product(values.map(\.expression))
++            }
+         }
+-    }
+ 
+-    public func cardinality(
+-        atoms: [Atom: Int] = [:],
+-        variables: [Variable: Int] = [:]
+-    ) throws -> Int {
+-        func checked(_ value: Int?) throws -> Int {
+-            guard let value, value >= 0 else {
+-                throw Failure(
+-                    "cardinality requires a nonnegative interpretation for every sort"
++        public func derivative(withRespectTo variable: Variable) -> Self {
++            switch self {
++            case .zero, .unit, .atom: return .zero
++            case .variable(let found): return found == variable ? .unit : .zero
++            case .sum(let values):
++                return .sum(values.map { $0.derivative(withRespectTo: variable) })
++            case .product(let values):
++                return .sum(
++                    values.indices.map { hole in
++                        .product(
++                            values.enumerated().map { index, value in
++                                index == hole ? value.derivative(withRespectTo: variable) : value
++                            }
++                        )
++                    }
+                 )
+             }
+-            return value
+         }
+-        switch self {
+-        case .zero: return 0
+-        case .unit: return 1
+-        case .atom(let atom): return try checked(atoms[atom])
+-        case .variable(let variable): return try checked(variables[variable])
+-        case .sum(let values), .product(let values):
+-            let product: Bool
+-            if case .product = self { product = true } else { product = false }
+-            return try values.reduce(product ? 1 : 0) { accumulated, value in
+-                let next = try value.cardinality(atoms: atoms, variables: variables)
+-                let result =
+-                    product
+-                    ? accumulated.multipliedReportingOverflow(by: next)
+-                    : accumulated.addingReportingOverflow(next)
+-                guard !result.overflow else { throw Failure("finite cardinality exceeds Int") }
+-                return result.partialValue
++
++        public func cardinality(
++            atoms: [Atom: Int] = [:],
++            variables: [Variable: Int] = [:]
++        ) throws -> Int {
++            func checked(_ value: Int?) throws -> Int {
++                guard let value, value >= 0 else {
++                    throw Failure(
++                        "cardinality requires a nonnegative interpretation for every sort"
++                    )
++                }
++                return value
++            }
++            switch self {
++            case .zero: return 0
++            case .unit: return 1
++            case .atom(let atom): return try checked(atoms[atom])
++            case .variable(let variable): return try checked(variables[variable])
++            case .sum(let values), .product(let values):
++                let product: Bool
++                if case .product = self { product = true } else { product = false }
++                return try values.reduce(product ? 1 : 0) { accumulated, value in
++                    let next = try value.cardinality(atoms: atoms, variables: variables)
++                    let result =
++                        product
++                        ? accumulated.multipliedReportingOverflow(by: next)
++                        : accumulated.addingReportingOverflow(next)
++                    guard !result.overflow else { throw Failure("finite cardinality exceeds Int") }
++                    return result.partialValue
++                }
+             }
+         }
+-    }
+ 
+-    public struct Context: Hashable, Sendable {
+-        public let alternative: Int
+-        public let position: Int
+-        public let remainder: [Polynomial]
+-    }
+-
+-    public func contexts(for variable: Variable) throws -> [Context] {
+-        guard case .sum(let alternatives) = self else {
+-            throw Failure("direct contexts require a sum of products")
++        public struct Context: Hashable, Sendable {
++            public let alternative: Int
++            public let position: Int
++            public let remainder: [Polynomial]
+         }
+-        return try alternatives.enumerated().flatMap { alternative, term in
+-            guard case .product(let fields) = term else {
+-                throw Failure("each constructor must be a product")
++
++        public func contexts(for variable: Variable) throws -> [Context] {
++            guard case .sum(let alternatives) = self else {
++                throw Failure("direct contexts require a sum of products")
+             }
+-            return try fields.enumerated().compactMap { position, field in
+-                if field == .variable(variable) {
+-                    return Context(
+-                        alternative: alternative,
+-                        position: position,
+-                        remainder: fields.enumerated().filter { $0.offset != position }.map(
+-                            \.element
+-                        )
+-                    )
++            return try alternatives.enumerated().flatMap { alternative, term in
++                guard case .product(let fields) = term else {
++                    throw Failure("each constructor must be a product")
+                 }
+-                guard !field.expression.variables.contains(variable) else {
+-                    throw Failure("direct contexts do not support nested recursive positions")
++                return try fields.enumerated().compactMap { position, field in
++                    if field == .variable(variable) {
++                        return Context(
++                            alternative: alternative,
++                            position: position,
++                            remainder: fields.enumerated().filter { $0.offset != position }.map(
++                                \.element
++                            )
++                        )
++                    }
++                    guard !field.expression.variables.contains(variable) else {
++                        throw Failure("direct contexts do not support nested recursive positions")
++                    }
++                    return nil
+                 }
+-                return nil
+             }
+         }
+     }
+-- 
+2.43.0
+
