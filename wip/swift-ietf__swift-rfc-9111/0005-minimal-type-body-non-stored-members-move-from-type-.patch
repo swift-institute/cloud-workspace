@@ -1,0 +1,266 @@
+From 8715ef78af90f71065f77329eeeb77de08045a0d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:56 +0000
+Subject: [PATCH 5/5] minimal type body: non-stored members move from type
+ bodies into an extension of the type in the same file
+ (overnight/minimal-bodies.py); type-checked against the root build,
+ directories that failed or couldn't be checked left out (coenttb/work#242)
+
+---
+ .../HTTP.Cache.Age.Coder.swift                | 49 +++++++--------
+ .../HTTP.Cache.Control.Coder.swift            | 40 ++++++------
+ .../HTTP.Cache.Expires.Coder.swift            | 63 +++++++++----------
+ .../Scanning.swift                            |  2 +
+ 4 files changed, 76 insertions(+), 78 deletions(-)
+
+diff --git a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Age.Coder.swift b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Age.Coder.swift
+index a92d59c..eed3929 100644
+--- a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Age.Coder.swift	
++++ b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Age.Coder.swift	
+@@ -7,45 +7,44 @@
+     import Serializer
+ 
+     extension RFC_9110.Cache.Age {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_9110.Cache.Age
+-
+-            public typealias Failure = RFC_9110.Cache.Age.Error
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+ 
+-            public init() {}
++        public enum Error: Swift::Error, Equatable {
++            case empty
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> RFC_9110.Cache.Age {
+-                let digits = Scanning.take(&input) { (0x30...0x39).contains($0.bitPattern) }
++            case overflow(String)
++        }
++    }
+ 
+-                guard !digits.isEmpty else {
+-                    throw .empty
+-                }
++extension RFC_9110.Cache.Age.Coder {
++        public typealias Output = RFC_9110.Cache.Age
+ 
+-                let text = Scanning.text(digits)
++        public typealias Failure = RFC_9110.Cache.Age.Error
+ 
+-                return RFC_9110.Cache.Age(seconds: Int(text) ?? 2_147_483_648)
+-            }
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> RFC_9110.Cache.Age {
++            let digits = Scanning.take(&input) { (0x30...0x39).contains($0.bitPattern) }
+ 
+-            public borrowing func serialize(
+-                _ output: RFC_9110.Cache.Age,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                buffer.append(contentsOf: Scanning.bytes(String(output.seconds)))
++            guard !digits.isEmpty else {
++                throw .empty
+             }
+-        }
+-
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+ 
+-        public enum Error: Swift::Error, Equatable {
++            let text = Scanning.text(digits)
+ 
+-            case empty
++            return RFC_9110.Cache.Age(seconds: Int(text) ?? 2_147_483_648)
++        }
+ 
+-            case overflow(String)
++        public borrowing func serialize(
++            _ output: RFC_9110.Cache.Age,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            buffer.append(contentsOf: Scanning.bytes(String(output.seconds)))
+         }
+-    }
++}
+ #endif
+diff --git a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Control.Coder.swift b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Control.Coder.swift
+index 16eb988..1c970c4 100644
+--- a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Control.Coder.swift	
++++ b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Control.Coder.swift	
+@@ -7,39 +7,38 @@
+     import Serializer
+ 
+     extension RFC_9110.Cache.Control {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_9110.Cache.Control
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = Never
++extension RFC_9110.Cache.Control.Coder {
++        public typealias Output = RFC_9110.Cache.Control
+ 
+-            public init() {}
++        public typealias Failure = Never
+ 
+-            public borrowing func parse(_ input: inout Input) -> RFC_9110.Cache.Control {
+-                RFC_9110.Cache.Control(
+-                    directives: RFC_9110.Field.Value.directives(
+-                        in: Scanning.text(Scanning.line(&input))
+-                    )
++        public borrowing func parse(_ input: inout Input) -> RFC_9110.Cache.Control {
++            RFC_9110.Cache.Control(
++                directives: RFC_9110.Field.Value.directives(
++                    in: Scanning.text(Scanning.line(&input))
+                 )
+-            }
+-
+-            public borrowing func serialize(
+-                _ output: RFC_9110.Cache.Control,
+-                into buffer: inout Buffer
+-            ) {
+-                buffer.append(contentsOf: Scanning.bytes(output.directives.joined(separator: ", ")))
+-            }
++            )
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(
++            _ output: RFC_9110.Cache.Control,
++            into buffer: inout Buffer
++        ) {
++            buffer.append(contentsOf: Scanning.bytes(output.directives.joined(separator: ", ")))
++        }
++}
+ 
+     extension RFC_9110.Cache.Control {
+-
+         init(directives: [(name: String, value: String?)]) {
+             self.init()
+ 
+@@ -201,7 +200,6 @@
+     }
+ 
+     extension RFC_9110.Cache.Control {
+-
+         fileprivate static func deltaSeconds(_ value: String) -> Int? {
+             guard !value.isEmpty, value.utf8.allSatisfy({ (0x30...0x39).contains($0) }) else { return nil }
+             return Int(value) ?? 2_147_483_648
+diff --git a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Expires.Coder.swift b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Expires.Coder.swift
+index 24e08aa..1a38adf 100644
+--- a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Expires.Coder.swift	
++++ b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/HTTP.Cache.Expires.Coder.swift	
+@@ -8,53 +8,52 @@
+     import Serializer
+ 
+     extension RFC_9110.Cache.Expires {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_9110.Cache.Expires
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+ 
+-            public typealias Failure = RFC_9110.Cache.Expires.Error
++        public enum Error: Swift::Error, Equatable {
++            case empty
+ 
+-            public init() {}
++            case invalidDate(String)
++        }
++    }
+ 
+-            public borrowing func parse(
+-                _ input: inout Input
+-            ) throws(Failure) -> RFC_9110.Cache.Expires {
+-                let text = Scanning.trimmed(Scanning.text(Scanning.line(&input)))
++extension RFC_9110.Cache.Expires.Coder {
++        public typealias Output = RFC_9110.Cache.Expires
+ 
+-                guard !text.isEmpty else {
+-                    throw .empty
+-                }
++        public typealias Failure = RFC_9110.Cache.Expires.Error
+ 
+-                guard let date = RFC_5322.DateTime(RFC_9110.Field.Value(unchecked: text)) else {
+-                    throw .invalidDate(text)
+-                }
++        public borrowing func parse(
++            _ input: inout Input
++        ) throws(Failure) -> RFC_9110.Cache.Expires {
++            let text = Scanning.trimmed(Scanning.text(Scanning.line(&input)))
+ 
+-                return RFC_9110.Cache.Expires(date: date)
++            guard !text.isEmpty else {
++                throw .empty
+             }
+ 
+-            public borrowing func serialize(
+-                _ output: RFC_9110.Cache.Expires,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                buffer.append(
+-                    contentsOf: Scanning.bytes(
+-                        RFC_9110.Field(dateTime: output.date).value.rawValue
+-                    )
+-                )
++            guard let date = RFC_5322.DateTime(RFC_9110.Field.Value(unchecked: text)) else {
++                throw .invalidDate(text)
+             }
+-        }
+-
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-
+-        public enum Error: Swift::Error, Equatable {
+ 
+-            case empty
++            return RFC_9110.Cache.Expires(date: date)
++        }
+ 
+-            case invalidDate(String)
++        public borrowing func serialize(
++            _ output: RFC_9110.Cache.Expires,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            buffer.append(
++                contentsOf: Scanning.bytes(
++                    RFC_9110.Field(dateTime: output.date).value.rawValue
++                )
++            )
+         }
+-    }
++}
+ #endif
+diff --git a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/Scanning.swift b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/Scanning.swift
+index d80f115..cecb9b7 100644
+--- a/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/Scanning.swift	
++++ b/Sources/RFC 9111/Absorbed swift-rfc-9111-coder/Scanning.swift	
+@@ -3,7 +3,9 @@
+     import Cursor
+ 
+     enum Scanning {
++    }
+ 
++    extension Scanning {
+         static func take<Input: Cursor.`Protocol`<Byte, Never>>(
+             _ input: inout Input,
+             while predicate: (Byte) -> Bool
+-- 
+2.43.0
+

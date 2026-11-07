@@ -1,0 +1,127 @@
+From e4cbaf6aa7c4c19eb421b974604e71454b25ec63 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:54 +0000
+Subject: [PATCH 2/2] minimal type body: non-stored members move from type
+ bodies into an extension of the type in the same file
+ (overnight/minimal-bodies.py); type-checked against the root build,
+ directories that failed or couldn't be checked left out (coenttb/work#242)
+
+---
+ .../RFC_2387.Related.Coder.swift              | 84 +++++++++----------
+ 1 file changed, 42 insertions(+), 42 deletions(-)
+
+diff --git a/Sources/RFC 2387 Coder/RFC_2387.Related.Coder.swift b/Sources/RFC 2387 Coder/RFC_2387.Related.Coder.swift
+index db0ef12..a5873e3 100644
+--- a/Sources/RFC 2387 Coder/RFC_2387.Related.Coder.swift	
++++ b/Sources/RFC 2387 Coder/RFC_2387.Related.Coder.swift	
+@@ -9,65 +9,65 @@
+     import Serializer
+ 
+     extension RFC_2387.Related {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
+-
+-            public typealias Output = RFC_2387.Related
+-
+-            public typealias Failure = RFC_2387.Related.Error
+-
+             public let boundary: RFC_2046.Boundary
+ 
+             public init(boundary: RFC_2046.Boundary) {
+                 self.boundary = boundary
+             }
++        }
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                let multipartCoder = RFC_2046.Multipart.Coder<Input, Buffer>(
+-                    boundary: boundary,
+-                    subtype: .related
+-                )
++        public static func coder(
++            boundary: RFC_2046.Boundary
++        ) -> Coder<ArraySlice<Byte>, [Byte]> {
++            .init(boundary: boundary)
++        }
++    }
++
++extension RFC_2387.Related.Coder {
++        public typealias Output = RFC_2387.Related
+ 
+-                let multipart: RFC_2046.Multipart
+-                do throws(RFC_2046.Multipart.Error) {
+-                    multipart = try multipartCoder.parse(&input)
+-                } catch {
+-                    throw Failure.multipartError(error)
+-                }
++        public typealias Failure = RFC_2387.Related.Error
+ 
+-                guard let rootPart = multipart.parts.first else {
+-                    input.seek(to: start)
+-                    throw Failure.emptyParts
+-                }
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            let multipartCoder = RFC_2046.Multipart.Coder<Input, Buffer>(
++                boundary: boundary,
++                subtype: .related
++            )
+ 
+-                do throws(Failure) {
+-                    return try RFC_2387.Related(
+-                        rootPart: rootPart,
+-                        relatedParts: Array(multipart.parts.dropFirst()),
+-                        boundary: multipart.boundary
+-                    )
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
++            let multipart: RFC_2046.Multipart
++            do throws(RFC_2046.Multipart.Error) {
++                multipart = try multipartCoder.parse(&input)
++            } catch {
++                throw Failure.multipartError(error)
+             }
+ 
+-            public borrowing func serialize(
+-                _ output: Output,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                RFC_2046.Multipart.serialize(output.multipart, into: &buffer)
++            guard let rootPart = multipart.parts.first else {
++                input.seek(to: start)
++                throw Failure.emptyParts
++            }
++
++            do throws(Failure) {
++                return try RFC_2387.Related(
++                    rootPart: rootPart,
++                    relatedParts: Array(multipart.parts.dropFirst()),
++                    boundary: multipart.boundary
++                )
++            } catch {
++                input.seek(to: start)
++                throw error
+             }
+         }
+ 
+-        public static func coder(
+-            boundary: RFC_2046.Boundary
+-        ) -> Coder<ArraySlice<Byte>, [Byte]> {
+-            .init(boundary: boundary)
++        public borrowing func serialize(
++            _ output: Output,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            RFC_2046.Multipart.serialize(output.multipart, into: &buffer)
+         }
+-    }
++}
+ #endif
+-- 
+2.43.0
+

@@ -1,0 +1,264 @@
+From e9100c0542a09cf4fa51a7564431acabdd2d89f0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:55 +0000
+Subject: [PATCH] minimal type body: non-stored members move from type bodies
+ into an extension of the type in the same file (overnight/minimal-bodies.py);
+ type-checked against the root build, directories that failed or couldn't be
+ checked left out (coenttb/work#242)
+
+---
+ .../RFC_5280.AttributeTypeAndValue.swift      | 16 +++++++-----
+ .../RFC_5280.Certificate.SerialNumber.swift   | 18 +++++++------
+ .../RFC_5280.Certificate.Version.swift        | 20 +++++++-------
+ .../RFC 5280/RFC_5280.DirectoryString.swift   | 16 +++++++-----
+ .../RFC 5280/RFC_5280.GeneralSubtree.swift    | 12 +++++----
+ Sources/RFC 5280/RFC_5280.Name.swift          | 10 ++++---
+ .../RFC 5280/RFC_5280.TBSCertificate.swift    | 24 +++++++++--------
+ Sources/RFC 5280/RFC_5280.Validity.swift      | 26 ++++++++++---------
+ 8 files changed, 79 insertions(+), 63 deletions(-)
+
+diff --git a/Sources/RFC 5280/RFC_5280.AttributeTypeAndValue.swift b/Sources/RFC 5280/RFC_5280.AttributeTypeAndValue.swift
+index 87e334b..26abcad 100644
+--- a/Sources/RFC 5280/RFC_5280.AttributeTypeAndValue.swift	
++++ b/Sources/RFC 5280/RFC_5280.AttributeTypeAndValue.swift	
+@@ -22,14 +22,16 @@ extension RFC_5280 {
+             self.type = type
+             self.value = value
+         }
++    }
++}
+ 
+-        /// Interprets the value under the profile's `DirectoryString` syntax.
+-        ///
+-        /// Throws when the encoded value is not one of the five
+-        /// `DirectoryString` arms.
+-        public func directoryStringValue() throws(ISO_8824.Error) -> RFC_5280.DirectoryString {
+-            try RFC_5280.DirectoryString(asn1Any: self.value)
+-        }
++extension RFC_5280.AttributeTypeAndValue {
++    /// Interprets the value under the profile's `DirectoryString` syntax.
++    ///
++    /// Throws when the encoded value is not one of the five
++    /// `DirectoryString` arms.
++    public func directoryStringValue() throws(ISO_8824.Error) -> RFC_5280.DirectoryString {
++        try RFC_5280.DirectoryString(asn1Any: self.value)
+     }
+ }
+ 
+diff --git a/Sources/RFC 5280/RFC_5280.Certificate.SerialNumber.swift b/Sources/RFC 5280/RFC_5280.Certificate.SerialNumber.swift
+index 36fdcb4..384f2ac 100644
+--- a/Sources/RFC 5280/RFC_5280.Certificate.SerialNumber.swift	
++++ b/Sources/RFC 5280/RFC_5280.Certificate.SerialNumber.swift	
+@@ -42,15 +42,17 @@ extension RFC_5280.Certificate {
+             }
+             self.bytes = content[...]
+         }
++    }
++}
+ 
+-        /// Whether this value satisfies the §4.1.2.2 CA issuance law:
+-        /// a positive integer of at most 20 content octets.
+-        public var isRFC5280Conformant: Bool {
+-            guard let first = self.bytes.first else { return false }
+-            guard first & 0x80 == 0 else { return false }
+-            guard self.bytes.contains(where: { $0 != 0 }) else { return false }
+-            return self.bytes.count <= 20
+-        }
++extension RFC_5280.Certificate.SerialNumber {
++    /// Whether this value satisfies the §4.1.2.2 CA issuance law:
++    /// a positive integer of at most 20 content octets.
++    public var isRFC5280Conformant: Bool {
++        guard let first = self.bytes.first else { return false }
++        guard first & 0x80 == 0 else { return false }
++        guard self.bytes.contains(where: { $0 != 0 }) else { return false }
++        return self.bytes.count <= 20
+     }
+ }
+ 
+diff --git a/Sources/RFC 5280/RFC_5280.Certificate.Version.swift b/Sources/RFC 5280/RFC_5280.Certificate.Version.swift
+index 57568cf..58ef92f 100644
+--- a/Sources/RFC 5280/RFC_5280.Certificate.Version.swift	
++++ b/Sources/RFC 5280/RFC_5280.Certificate.Version.swift	
+@@ -14,19 +14,21 @@ extension RFC_5280.Certificate {
+         public init(rawValue: Int) {
+             self.rawValue = rawValue
+         }
++    }
++}
+ 
+-        /// X.509 version 1 (wire value 0).
+-        public static let v1 = Self(rawValue: 0)
++extension RFC_5280.Certificate.Version {
++    /// X.509 version 1 (wire value 0).
++    public static let v1 = Self(rawValue: 0)
+ 
+-        /// X.509 version 2 (wire value 1).
+-        public static let v2 = Self(rawValue: 1)
++    /// X.509 version 2 (wire value 1).
++    public static let v2 = Self(rawValue: 1)
+ 
+-        /// X.509 version 3 (wire value 2).
+-        public static let v3 = Self(rawValue: 2)
++    /// X.509 version 3 (wire value 2).
++    public static let v3 = Self(rawValue: 2)
+ 
+-        public static func < (lhs: Self, rhs: Self) -> Bool {
+-            lhs.rawValue < rhs.rawValue
+-        }
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs.rawValue < rhs.rawValue
+     }
+ }
+ 
+diff --git a/Sources/RFC 5280/RFC_5280.DirectoryString.swift b/Sources/RFC 5280/RFC_5280.DirectoryString.swift
+index 0a4ec52..39e235e 100644
+--- a/Sources/RFC 5280/RFC_5280.DirectoryString.swift	
++++ b/Sources/RFC 5280/RFC_5280.DirectoryString.swift	
+@@ -19,14 +19,16 @@ extension RFC_5280 {
+         case universalString(ISO_8824.UniversalString)
+         case utf8String(ISO_8824.UTF8String)
+         case bmpString(ISO_8824.BMPString)
++    }
++}
+ 
+-        /// Whether this value uses one of the two arms the profile permits
+-        /// new CAs to emit (`PrintableString` or `UTF8String`).
+-        public var isRFC5280Preferred: Bool {
+-            switch self {
+-            case .printableString, .utf8String: true
+-            case .teletexString, .universalString, .bmpString: false
+-            }
++extension RFC_5280.DirectoryString {
++    /// Whether this value uses one of the two arms the profile permits
++    /// new CAs to emit (`PrintableString` or `UTF8String`).
++    public var isRFC5280Preferred: Bool {
++        switch self {
++        case .printableString, .utf8String: true
++        case .teletexString, .universalString, .bmpString: false
+         }
+     }
+ }
+diff --git a/Sources/RFC 5280/RFC_5280.GeneralSubtree.swift b/Sources/RFC 5280/RFC_5280.GeneralSubtree.swift
+index bc9824c..c4fa491 100644
+--- a/Sources/RFC 5280/RFC_5280.GeneralSubtree.swift	
++++ b/Sources/RFC 5280/RFC_5280.GeneralSubtree.swift	
+@@ -24,12 +24,14 @@ extension RFC_5280 {
+             self.minimum = minimum
+             self.maximum = maximum
+         }
++    }
++}
+ 
+-        /// Whether this subtree satisfies the §4.2.1.10 profile law
+-        /// (`minimum` zero, `maximum` absent).
+-        public var isRFC5280Conformant: Bool {
+-            self.minimum == 0 && self.maximum == nil
+-        }
++extension RFC_5280.GeneralSubtree {
++    /// Whether this subtree satisfies the §4.2.1.10 profile law
++    /// (`minimum` zero, `maximum` absent).
++    public var isRFC5280Conformant: Bool {
++        self.minimum == 0 && self.maximum == nil
+     }
+ }
+ 
+diff --git a/Sources/RFC 5280/RFC_5280.Name.swift b/Sources/RFC 5280/RFC_5280.Name.swift
+index 1dc81c9..16327aa 100644
+--- a/Sources/RFC 5280/RFC_5280.Name.swift	
++++ b/Sources/RFC 5280/RFC_5280.Name.swift	
+@@ -20,11 +20,13 @@ extension RFC_5280 {
+         public init(_ rdnSequence: [RFC_5280.RelativeDistinguishedName]) {
+             self.rdnSequence = rdnSequence
+         }
++    }
++}
+ 
+-        /// Whether this is the empty name (an RDNSequence of length zero).
+-        public var isEmpty: Bool {
+-            self.rdnSequence.isEmpty
+-        }
++extension RFC_5280.Name {
++    /// Whether this is the empty name (an RDNSequence of length zero).
++    public var isEmpty: Bool {
++        self.rdnSequence.isEmpty
+     }
+ }
+ 
+diff --git a/Sources/RFC 5280/RFC_5280.TBSCertificate.swift b/Sources/RFC 5280/RFC_5280.TBSCertificate.swift
+index 33e7d04..c7e998c 100644
+--- a/Sources/RFC 5280/RFC_5280.TBSCertificate.swift	
++++ b/Sources/RFC 5280/RFC_5280.TBSCertificate.swift	
+@@ -55,19 +55,21 @@ extension RFC_5280 {
+             self.subjectUniqueID = subjectUniqueID
+             self.extensions = extensions
+         }
++    }
++}
+ 
+-        /// The lowest version §4.1.2.1 permits for this certificate's
+-        /// populated fields: `v3` when extensions are present, `v2` when
+-        /// unique identifiers are present without extensions, `v1` otherwise.
+-        public var minimumRequiredVersion: RFC_5280.Certificate.Version {
+-            if !self.extensions.isEmpty {
+-                return .v3
+-            }
+-            if self.issuerUniqueID != nil || self.subjectUniqueID != nil {
+-                return .v2
+-            }
+-            return .v1
++extension RFC_5280.TBSCertificate {
++    /// The lowest version §4.1.2.1 permits for this certificate's
++    /// populated fields: `v3` when extensions are present, `v2` when
++    /// unique identifiers are present without extensions, `v1` otherwise.
++    public var minimumRequiredVersion: RFC_5280.Certificate.Version {
++        if !self.extensions.isEmpty {
++            return .v3
++        }
++        if self.issuerUniqueID != nil || self.subjectUniqueID != nil {
++            return .v2
+         }
++        return .v1
+     }
+ }
+ 
+diff --git a/Sources/RFC 5280/RFC_5280.Validity.swift b/Sources/RFC 5280/RFC_5280.Validity.swift
+index 25d265d..999cc6f 100644
+--- a/Sources/RFC 5280/RFC_5280.Validity.swift	
++++ b/Sources/RFC 5280/RFC_5280.Validity.swift	
+@@ -18,19 +18,21 @@ extension RFC_5280 {
+             self.notBefore = notBefore
+             self.notAfter = notAfter
+         }
++    }
++}
+ 
+-        /// Whether `notAfter` is the §4.1.2.5 `99991231235959Z` sentinel for
+-        /// a certificate with no well-defined expiration date.
+-        public var hasNoWellDefinedExpiration: Bool {
+-            guard case .generalTime(let time) = self.notAfter else { return false }
+-            return time.year == 9999
+-                && time.month == 12
+-                && time.day == 31
+-                && time.hours == 23
+-                && time.minutes == 59
+-                && time.seconds == 59
+-                && time.rawFractionalSeconds.isEmpty
+-        }
++extension RFC_5280.Validity {
++    /// Whether `notAfter` is the §4.1.2.5 `99991231235959Z` sentinel for
++    /// a certificate with no well-defined expiration date.
++    public var hasNoWellDefinedExpiration: Bool {
++        guard case .generalTime(let time) = self.notAfter else { return false }
++        return time.year == 9999
++            && time.month == 12
++            && time.day == 31
++            && time.hours == 23
++            && time.minutes == 59
++            && time.seconds == 59
++            && time.rawFractionalSeconds.isEmpty
+     }
+ }
+ 
+-- 
+2.43.0
+

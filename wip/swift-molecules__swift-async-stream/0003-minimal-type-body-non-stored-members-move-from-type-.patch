@@ -1,0 +1,328 @@
+From 3e88f613575449c0c9a4739adb1d9021eaa7a2d1 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:53 +0000
+Subject: [PATCH 3/3] minimal type body: non-stored members move from type
+ bodies into an extension of the type in the same file
+ (overnight/minimal-bodies.py); type-checked against the root build,
+ directories that failed or couldn't be checked left out (coenttb/work#242)
+
+---
+ .../Async.Stream.Map.Flat.Latest.State.swift  | 17 ++++++-------
+ .../Async.Stream.Map.Flat.State.swift         | 16 ++++++------
+ Sources/Async Stream/Async.Stream.Pull.swift  | 16 ++++++------
+ Sources/Async Stream/Async.Stream.swift       | 25 +++----------------
+ 4 files changed, 27 insertions(+), 47 deletions(-)
+
+diff --git a/Sources/Async Stream/Async.Stream.Map.Flat.Latest.State.swift b/Sources/Async Stream/Async.Stream.Map.Flat.Latest.State.swift
+index 0ddb065..4b723de 100644
+--- a/Sources/Async Stream/Async.Stream.Map.Flat.Latest.State.swift	
++++ b/Sources/Async Stream/Async.Stream.Map.Flat.Latest.State.swift	
+@@ -18,12 +18,10 @@ import Storage
+ import Store
+ 
+ extension Async.Stream.Map.Flat {
+-
+     public enum Latest {}
+ }
+ 
+ extension Async.Stream.Map.Flat.Latest {
+-
+     @usableFromInline
+     actor State<U: Sendable> {
+         @usableFromInline
+@@ -47,12 +45,6 @@ extension Async.Stream.Map.Flat.Latest {
+         @usableFromInline
+         var innerDone: Bool = true
+ 
+-        @usableFromInline
+-        enum Transform {
+-            case sync(@Sendable (Element) -> Async.Stream<U>)
+-            case async(@Sendable (Element) async -> Async.Stream<U>)
+-        }
+-
+         @usableFromInline
+         init(stream: Async.Stream<Element>, transform: Transform) {
+             self.outerBox = Async.Stream<Element>.Iterator.Box(stream.makeAsyncIterator())
+@@ -61,11 +53,18 @@ extension Async.Stream.Map.Flat.Latest {
+     }
+ }
+ 
++extension Async.Stream.Map.Flat.Latest.State {
++    @usableFromInline
++    enum Transform {
++        case sync(@Sendable (Element) -> Async.Stream<U>)
++        case async(@Sendable (Element) async -> Async.Stream<U>)
++    }
++}
++
+ extension Async.Stream.Map.Flat.Latest.State {
+     @usableFromInline
+     func next() async -> U? {
+         while true {
+-
+             if !queue.isEmpty {
+                 guard let element = queue.dequeue() else {
+                     preconditionFailure("a non-empty queue dequeues an element")
+diff --git a/Sources/Async Stream/Async.Stream.Map.Flat.State.swift b/Sources/Async Stream/Async.Stream.Map.Flat.State.swift
+index d077191..a86af28 100644
+--- a/Sources/Async Stream/Async.Stream.Map.Flat.State.swift	
++++ b/Sources/Async Stream/Async.Stream.Map.Flat.State.swift	
+@@ -2,7 +2,6 @@ public import Async
+ public import Ownership
+ 
+ extension Async.Stream.Map.Flat {
+-
+     @usableFromInline
+     actor State<U: Sendable> {
+         @usableFromInline
+@@ -14,12 +13,6 @@ extension Async.Stream.Map.Flat {
+         @usableFromInline
+         var innerBox: Async.Stream<Element>.Iterator.Box<Async.Stream<U>.Iterator>?
+ 
+-        @usableFromInline
+-        enum Transform {
+-            case sync(@Sendable (Element) -> Async.Stream<U>)
+-            case async(@Sendable (Element) async -> Async.Stream<U>)
+-        }
+-
+         @usableFromInline
+         init(stream: Async.Stream<Element>, transform: Transform) {
+             self.outerBox = Async.Stream<Element>.Iterator.Box(stream.makeAsyncIterator())
+@@ -28,11 +21,18 @@ extension Async.Stream.Map.Flat {
+     }
+ }
+ 
++extension Async.Stream.Map.Flat.State {
++    @usableFromInline
++    enum Transform {
++        case sync(@Sendable (Element) -> Async.Stream<U>)
++        case async(@Sendable (Element) async -> Async.Stream<U>)
++    }
++}
++
+ extension Async.Stream.Map.Flat.State {
+     @usableFromInline
+     func next() async -> U? {
+         while true {
+-
+             if let inner = innerBox, let element = await inner.next() {
+                 return element
+             }
+diff --git a/Sources/Async Stream/Async.Stream.Pull.swift b/Sources/Async Stream/Async.Stream.Pull.swift
+index 4082c91..867cd7e 100644
+--- a/Sources/Async Stream/Async.Stream.Pull.swift	
++++ b/Sources/Async Stream/Async.Stream.Pull.swift	
+@@ -3,7 +3,6 @@ public import Clock_Concurrency
+ public import Ownership
+ 
+ extension Async.Stream {
+-
+     /// Pulls an upstream iterator for an operator that races each pull against a timer.
+     ///
+     /// One pull task at a time calls `box.next()`. When the timer wins the race, that pull
+@@ -12,13 +11,6 @@ extension Async.Stream {
+     /// Cancelling the consumer's task cancels the pull and ends the upstream.
+     @usableFromInline
+     actor Pull {
+-        @usableFromInline
+-        enum Outcome: Sendable {
+-            case element(Element)
+-            case timerExpired
+-            case upstreamComplete
+-        }
+-
+         @usableFromInline
+         let box: Async.Stream<Element>.Iterator.Box<Async.Stream<Element>.Iterator>
+ 
+@@ -53,7 +45,15 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream.Pull {
++    @usableFromInline
++    enum Outcome: Sendable {
++        case element(Element)
++        case timerExpired
++        case upstreamComplete
++    }
++}
+ 
++extension Async.Stream.Pull {
+     /// Returns the next upstream result, or `.timerExpired` when `deadline` passes first.
+     ///
+     /// With no deadline, it waits for the upstream only.
+diff --git a/Sources/Async Stream/Async.Stream.swift b/Sources/Async Stream/Async.Stream.swift
+index fbf2188..e982d75 100644
+--- a/Sources/Async Stream/Async.Stream.swift	
++++ b/Sources/Async Stream/Async.Stream.swift	
+@@ -4,10 +4,7 @@ import _Concurrency
+ public import Clock_Concurrency
+ 
+ extension Async {
+-
+     public struct Stream<Element: Sendable>: AsyncSequence, Sendable {
+-        public typealias AsyncIterator = Iterator
+-
+         @usableFromInline
+         let _makeIterator: @Sendable () -> Iterator
+ 
+@@ -19,10 +16,12 @@ extension Async {
+ }
+ 
+ extension Async.Stream {
++    public typealias AsyncIterator = Iterator
++}
+ 
++extension Async.Stream {
+     public init<S: AsyncSequence & Sendable>(_ sequence: S) where S.Element == Element {
+         self.init {
+-
+             let box = Async.Stream<Element>.Iterator.Box(sequence.makeAsyncIterator())
+             return Iterator {
+                 await box.next()
+@@ -39,7 +38,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static var empty: Self {
+         Self { Iterator { nil } }
+     }
+@@ -47,7 +45,6 @@ extension Async.Stream {
+     public static var never: Self {
+         Self {
+             Iterator {
+-
+                 try? await Task.sleep(for: .seconds(Int64.max))
+                 return nil
+             }
+@@ -70,7 +67,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func debounce(
+         _ duration: Duration,
+         clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+@@ -89,7 +85,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func filter(
+         _ predicate: @escaping @Sendable (Element) -> Bool
+     ) -> Self {
+@@ -124,7 +119,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func first() -> Self {
+         prefix(1)
+     }
+@@ -137,7 +131,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func last() -> Self {
+         Self { [self] in
+             let state = Async.Stream<Element>.Last.State(stream: self)
+@@ -155,7 +148,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func reduce<Result: Sendable>(
+         _ initial: Result,
+         _ accumulator: @escaping @Sendable (Result, Element) -> Result
+@@ -169,7 +161,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static func repeating(_ value: Element, count: Int? = nil) -> Self {
+         Self {
+             let state = Async.Stream<Element>.Repeat.State(value: value, count: count)
+@@ -181,7 +172,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static func repeating(
+         _ value: Element,
+         every interval: Duration,
+@@ -203,7 +193,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func scan<Result: Sendable>(
+         _ initial: sending Result,
+         _ accumulator: @escaping @Sendable (Result, Element) -> Result
+@@ -223,7 +212,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func throttle(
+         _ duration: Duration,
+         clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+@@ -242,7 +230,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static func timer(
+         after delay: Duration,
+         clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+@@ -257,7 +244,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static func timer(
+         after delay: Duration,
+         value: Element,
+@@ -277,7 +263,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static func unfold<State: Sendable>(
+         _ initial: sending State,
+         _ next: @escaping @Sendable (State) async -> (Element, State)?
+@@ -293,7 +278,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public static func generate(
+         _ generator: @escaping @Sendable () async -> Element?
+     ) -> Self {
+@@ -307,7 +291,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func delay(
+         _ duration: Duration,
+         clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+@@ -327,7 +310,6 @@ extension Async.Stream {
+ }
+ 
+ extension Async.Stream {
+-
+     public func timeout(
+         _ duration: Duration,
+         clock: some Clock.Nonsending<Duration> = Swift::ContinuousClock()
+@@ -358,7 +340,6 @@ extension Async.Stream {
+                         return nil
+                     }
+                 } catch {
+-
+                     return nil
+                 }
+             }
+-- 
+2.43.0
+

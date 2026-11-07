@@ -1,0 +1,163 @@
+From 4da01a0f01f8464a7481b4451186924ba60c0861 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:53 +0000
+Subject: [PATCH 3/3] minimal type body: non-stored members move from type
+ bodies into an extension of the type in the same file
+ (overnight/minimal-bodies.py); type-checked against the root build,
+ directories that failed or couldn't be checked left out (coenttb/work#242)
+
+---
+ ...ync.Channel.Bounded.Receiver.Receive.swift | 45 ++++++++-------
+ .../Async.Channel.Bounded.Sender.Send.swift   | 57 ++++++++++---------
+ 2 files changed, 52 insertions(+), 50 deletions(-)
+
+diff --git a/Sources/Async Channel/Async.Channel.Bounded.Receiver.Receive.swift b/Sources/Async Channel/Async.Channel.Bounded.Receiver.Receive.swift
+index 42cd14c..e4541ef 100644
+--- a/Sources/Async Channel/Async.Channel.Bounded.Receiver.Receive.swift	
++++ b/Sources/Async Channel/Async.Channel.Bounded.Receiver.Receive.swift	
+@@ -14,7 +14,6 @@
+     public import Deque
+ 
+     extension Async.Channel.Bounded.Receiver where Element: ~Copyable {
+-
+         public struct Receive: Sendable {
+             @usableFromInline
+             let storage: Async.Channel<Element>.Bounded.Storage
+@@ -23,34 +22,36 @@
+             init(storage: Async.Channel<Element>.Bounded.Storage) {
+                 self.storage = storage
+             }
++        }
++    }
+ 
+-            @_optimize(none)
+-            @inlinable
+-            public func immediate() throws(Async.Channel<Element>.Error) -> Element? {
+-                let action = storage.withLock { state in
+-                    state.receive()
+-                }
++extension Async.Channel.Bounded.Receiver.Receive {
++        @_optimize(none)
++        @inlinable
++        public func immediate() throws(Async.Channel<Element>.Error) -> Element? {
++            let action = storage.withLock { state in
++                state.receive()
++            }
+ 
+-                switch consume action {
+-                case .returnElement(let element, let resumeSender, var cancelled, _):
++            switch consume action {
++            case .returnElement(let element, let resumeSender, var cancelled, _):
+ 
+-                    while let c = cancelled?.take(from: .front) {
+-                        c.resume(returning: .cancelled)
+-                    }
+-                    resumeSender?.resume(returning: nil)
+-                    return element
++                while let c = cancelled?.take(from: .front) {
++                    c.resume(returning: .cancelled)
++                }
++                resumeSender?.resume(returning: nil)
++                return element
+ 
+-                case .returnNil:
+-                    return nil
++            case .returnNil:
++                return nil
+ 
+-                case .rejectCancelled:
+-                    throw .cancelled
++            case .rejectCancelled:
++                throw .cancelled
+ 
+-                case .suspend:
+-                    throw .empty
+-                }
++            case .suspend:
++                throw .empty
+             }
+         }
+-    }
++}
+ 
+ #endif
+diff --git a/Sources/Async Channel/Async.Channel.Bounded.Sender.Send.swift b/Sources/Async Channel/Async.Channel.Bounded.Sender.Send.swift
+index 4919a9b..d2e2318 100644
+--- a/Sources/Async Channel/Async.Channel.Bounded.Sender.Send.swift	
++++ b/Sources/Async Channel/Async.Channel.Bounded.Sender.Send.swift	
+@@ -14,7 +14,6 @@
+     import Store
+ 
+     extension Async.Channel.Bounded.Sender where Element: ~Copyable {
+-
+         public struct Send: Sendable {
+             @usableFromInline
+             let handle: Handle
+@@ -23,35 +22,37 @@
+             init(handle: Handle) {
+                 self.handle = handle
+             }
++        }
++    }
+ 
+-            @_optimize(none)
+-            @inlinable
+-            public func immediate(
+-                _ element: consuming sending Element
+-            ) throws(Async.Channel<Element>.Error) {
+-                let slot = Ownership.Slot(consume element)
+-                let decision = handle.storage.withLock { state in
+-                    state.send(slot)
+-                }
+-
+-                switch consume decision {
+-                case .deliverToReceiver(let receiverCont, let element):
+-                    _ = handle.storage.deliverySlot.store(element)
+-                    receiverCont.resume(
+-                        returning: Async.Channel<Element>.Bounded.State.Receive.Signal.delivered
+-                    )
+-
+-                case .buffered:
+-                    break
+-
+-                case .rejectClosed:
+-                    throw .closed
+-
+-                case .suspend:
+-                    throw .full
+-                }
++extension Async.Channel.Bounded.Sender.Send {
++        @_optimize(none)
++        @inlinable
++        public func immediate(
++            _ element: consuming sending Element
++        ) throws(Async.Channel<Element>.Error) {
++            let slot = Ownership.Slot(consume element)
++            let decision = handle.storage.withLock { state in
++                state.send(slot)
++            }
++
++            switch consume decision {
++            case .deliverToReceiver(let receiverCont, let element):
++                _ = handle.storage.deliverySlot.store(element)
++                receiverCont.resume(
++                    returning: Async.Channel<Element>.Bounded.State.Receive.Signal.delivered
++                )
++
++            case .buffered:
++                break
++
++            case .rejectClosed:
++                throw .closed
++
++            case .suspend:
++                throw .full
+             }
+         }
+-    }
++}
+ 
+ #endif
+-- 
+2.43.0
+

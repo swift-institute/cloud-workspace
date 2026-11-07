@@ -1,0 +1,393 @@
+From 32da2f9abdb059f14e71c4f30d995166845b691e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:55 +0000
+Subject: [PATCH 3/3] minimal type body: non-stored members move from type
+ bodies into an extension of the type in the same file
+ (overnight/minimal-bodies.py); type-checked against the root build,
+ directories that failed or couldn't be checked left out (coenttb/work#242)
+
+---
+ .../RFC_768.Checksum.Coder.swift              | 38 ++++----
+ .../RFC_768.Datagram.Coder.swift              | 58 ++++++------
+ .../RFC_768.Header.Coder.swift                | 92 +++++++++----------
+ .../RFC_768.Length.Coder.swift                | 50 +++++-----
+ .../RFC_768.Port.Coder.swift                  | 38 ++++----
+ 5 files changed, 138 insertions(+), 138 deletions(-)
+
+diff --git a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Checksum.Coder.swift b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Checksum.Coder.swift
+index aa2b004..6a4c97d 100644
+--- a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Checksum.Coder.swift	
++++ b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Checksum.Coder.swift	
+@@ -7,32 +7,32 @@
+     import Serializer
+ 
+     extension RFC_768.Checksum {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_768.Checksum
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_768.Checksum.Error
++extension RFC_768.Checksum.Coder {
++        public typealias Output = RFC_768.Checksum
+ 
+-            public init() {}
++        public typealias Failure = RFC_768.Checksum.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                guard let high = input.next() else {
+-                    throw .empty
+-                }
+-                guard let low = input.next() else {
+-                    input.seek(to: start)
+-                    throw .insufficientBytes
+-                }
+-                return RFC_768.Checksum(rawValue: UInt16(high.bitPattern) << 8 | UInt16(low.bitPattern))
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            guard let high = input.next() else {
++                throw .empty
+             }
+-
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                RFC_768.Checksum.serialize(output, into: &buffer)
++            guard let low = input.next() else {
++                input.seek(to: start)
++                throw .insufficientBytes
+             }
++            return RFC_768.Checksum(rawValue: UInt16(high.bitPattern) << 8 | UInt16(low.bitPattern))
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            RFC_768.Checksum.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Datagram.Coder.swift b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Datagram.Coder.swift
+index d308108..2385d2b 100644
+--- a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Datagram.Coder.swift	
++++ b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Datagram.Coder.swift	
+@@ -7,46 +7,46 @@
+     import Serializer
+ 
+     extension RFC_768.Datagram {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_768.Datagram
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_768.Datagram.Error
++extension RFC_768.Datagram.Coder {
++        public typealias Output = RFC_768.Datagram
+ 
+-            public init() {}
++        public typealias Failure = RFC_768.Datagram.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
+ 
+-                let header: RFC_768.Header
+-                do throws(RFC_768.Header.Error) {
+-                    header = try RFC_768.Header.Coder<Input, Buffer>().parse(&input)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw .header(error)
+-                }
++            let header: RFC_768.Header
++            do throws(RFC_768.Header.Error) {
++                header = try RFC_768.Header.Coder<Input, Buffer>().parse(&input)
++            } catch {
++                input.seek(to: start)
++                throw .header(error)
++            }
+ 
+-                let expected = Int(header.length.data)
+-                var data: [Byte] = []
+-                data.reserveCapacity(expected)
++            let expected = Int(header.length.data)
++            var data: [Byte] = []
++            data.reserveCapacity(expected)
+ 
+-                while data.count < expected {
+-                    guard let byte = input.next() else {
+-                        input.seek(to: start)
+-                        throw .insufficientData(expected: expected, got: data.count)
+-                    }
+-                    data.append(byte)
++            while data.count < expected {
++                guard let byte = input.next() else {
++                    input.seek(to: start)
++                    throw .insufficientData(expected: expected, got: data.count)
+                 }
+-
+-                return RFC_768.Datagram(header: header, data: data)
++                data.append(byte)
+             }
+ 
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                RFC_768.Datagram.serialize(output, into: &buffer)
+-            }
++            return RFC_768.Datagram(header: header, data: data)
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            RFC_768.Datagram.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Header.Coder.swift b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Header.Coder.swift
+index 099a774..9671a95 100644
+--- a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Header.Coder.swift	
++++ b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Header.Coder.swift	
+@@ -7,63 +7,63 @@
+     import Serializer
+ 
+     extension RFC_768.Header {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-
+-            public typealias Output = RFC_768.Header
+-
+-            public typealias Failure = RFC_768.Header.Error
+-
+             public init() {}
++        }
++
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
++extension RFC_768.Header.Coder {
++        public typealias Output = RFC_768.Header
+ 
+-                let source: RFC_768.Port
+-                do throws(RFC_768.Port.Error) {
+-                    source = try RFC_768.Port.Coder<Input, Buffer>().parse(&input)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw .source(error)
+-                }
++        public typealias Failure = RFC_768.Header.Error
+ 
+-                let destination: RFC_768.Port
+-                do throws(RFC_768.Port.Error) {
+-                    destination = try RFC_768.Port.Coder<Input, Buffer>().parse(&input)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw .destination(error)
+-                }
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
+ 
+-                let length: RFC_768.Length
+-                do throws(RFC_768.Length.Error) {
+-                    length = try RFC_768.Length.Coder<Input, Buffer>().parse(&input)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw .length(error)
+-                }
++            let source: RFC_768.Port
++            do throws(RFC_768.Port.Error) {
++                source = try RFC_768.Port.Coder<Input, Buffer>().parse(&input)
++            } catch {
++                input.seek(to: start)
++                throw .source(error)
++            }
+ 
+-                let checksum: RFC_768.Checksum
+-                do throws(RFC_768.Checksum.Error) {
+-                    checksum = try RFC_768.Checksum.Coder<Input, Buffer>().parse(&input)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw .checksum(error)
+-                }
++            let destination: RFC_768.Port
++            do throws(RFC_768.Port.Error) {
++                destination = try RFC_768.Port.Coder<Input, Buffer>().parse(&input)
++            } catch {
++                input.seek(to: start)
++                throw .destination(error)
++            }
+ 
+-                return RFC_768.Header(
+-                    source: source,
+-                    destination: destination,
+-                    length: length,
+-                    checksum: checksum
+-                )
++            let length: RFC_768.Length
++            do throws(RFC_768.Length.Error) {
++                length = try RFC_768.Length.Coder<Input, Buffer>().parse(&input)
++            } catch {
++                input.seek(to: start)
++                throw .length(error)
+             }
+ 
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                RFC_768.Header.serialize(output, into: &buffer)
++            let checksum: RFC_768.Checksum
++            do throws(RFC_768.Checksum.Error) {
++                checksum = try RFC_768.Checksum.Coder<Input, Buffer>().parse(&input)
++            } catch {
++                input.seek(to: start)
++                throw .checksum(error)
+             }
++
++            return RFC_768.Header(
++                source: source,
++                destination: destination,
++                length: length,
++                checksum: checksum
++            )
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            RFC_768.Header.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Length.Coder.swift b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Length.Coder.swift
+index c830c7a..6b53b61 100644
+--- a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Length.Coder.swift	
++++ b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Length.Coder.swift	
+@@ -7,38 +7,38 @@
+     import Serializer
+ 
+     extension RFC_768.Length {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_768.Length
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_768.Length.Error
++extension RFC_768.Length.Coder {
++        public typealias Output = RFC_768.Length
+ 
+-            public init() {}
++        public typealias Failure = RFC_768.Length.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                guard let high = input.next() else {
+-                    throw .empty
+-                }
+-                guard let low = input.next() else {
+-                    input.seek(to: start)
+-                    throw .insufficientBytes
+-                }
+-                let value = UInt16(high.bitPattern) << 8 | UInt16(low.bitPattern)
+-                do throws(RFC_768.Length.Error) {
+-                    return try RFC_768.Length(rawValue: value)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            guard let high = input.next() else {
++                throw .empty
+             }
+-
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                RFC_768.Length.serialize(output, into: &buffer)
++            guard let low = input.next() else {
++                input.seek(to: start)
++                throw .insufficientBytes
++            }
++            let value = UInt16(high.bitPattern) << 8 | UInt16(low.bitPattern)
++            do throws(RFC_768.Length.Error) {
++                return try RFC_768.Length(rawValue: value)
++            } catch {
++                input.seek(to: start)
++                throw error
+             }
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            RFC_768.Length.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Port.Coder.swift b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Port.Coder.swift
+index 287d7d9..a1520a1 100644
+--- a/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Port.Coder.swift	
++++ b/Sources/RFC 768/Absorbed swift-rfc-768-coder/RFC_768.Port.Coder.swift	
+@@ -7,32 +7,32 @@
+     import Serializer
+ 
+     extension RFC_768.Port {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_768.Port
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_768.Port.Error
++extension RFC_768.Port.Coder {
++        public typealias Output = RFC_768.Port
+ 
+-            public init() {}
++        public typealias Failure = RFC_768.Port.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                guard let high = input.next() else {
+-                    throw .empty
+-                }
+-                guard let low = input.next() else {
+-                    input.seek(to: start)
+-                    throw .insufficientBytes
+-                }
+-                return RFC_768.Port(rawValue: UInt16(high.bitPattern) << 8 | UInt16(low.bitPattern))
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            guard let high = input.next() else {
++                throw .empty
+             }
+-
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                RFC_768.Port.serialize(output, into: &buffer)
++            guard let low = input.next() else {
++                input.seek(to: start)
++                throw .insufficientBytes
+             }
++            return RFC_768.Port(rawValue: UInt16(high.bitPattern) << 8 | UInt16(low.bitPattern))
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            RFC_768.Port.serialize(output, into: &buffer)
++        }
++}
+ #endif
+-- 
+2.43.0
+

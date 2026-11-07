@@ -1,0 +1,560 @@
+From 22d27d3386068fd480d024967e0baa52ce5e9440 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 22:39:54 +0000
+Subject: [PATCH 2/2] minimal type body: non-stored members move from type
+ bodies into an extension of the type in the same file
+ (overnight/minimal-bodies.py); type-checked against the root build,
+ directories that failed or couldn't be checked left out (coenttb/work#242)
+
+---
+ .../Absorbed swift-rfc-2046-coder/Lines.swift |   2 +
+ .../RFC_2046.BodyPart.Coder.swift             |  44 +++---
+ .../RFC_2046.BodyPart.Headers.Coder.swift     |  44 +++---
+ .../RFC_2046.Boundary.Coder.swift             |  48 +++----
+ .../RFC_2046.Multipart.Coder.swift            |  56 ++++----
+ .../RFC_2046.Multipart.Subtype.Coder.swift    |  48 +++----
+ .../RFC_2046.QuotedPrintable.swift            | 133 +++++++++---------
+ .../Absorbed swift-rfc-2046-coder/Scan.swift  |   2 +
+ 8 files changed, 191 insertions(+), 186 deletions(-)
+
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Lines.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Lines.swift
+index c21ac47..c3b2e4e 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Lines.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Lines.swift	
+@@ -3,7 +3,9 @@
+     import Byte
+ 
+     enum Lines {
++    }
+ 
++    extension Lines {
+         static func split(_ bytes: [Byte]) -> [ArraySlice<Byte>] {
+             let cr = ASCII.Code.cr.byte
+             let lf = ASCII.Code.lf.byte
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Coder.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Coder.swift
+index f7c0157..5f5b6c7 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Coder.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Coder.swift	
+@@ -7,37 +7,37 @@
+     import Serializer
+ 
+     extension RFC_2046.BodyPart {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_2046.BodyPart
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_2046.BodyPart.Error
++extension RFC_2046.BodyPart.Coder {
++        public typealias Output = RFC_2046.BodyPart
+ 
+-            public init() {}
++        public typealias Failure = RFC_2046.BodyPart.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                let bytes = Scan.rest(&input)
+-                do throws(Failure) {
+-                    return try RFC_2046.BodyPart(binary: bytes)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
+-            }
+-
+-            public borrowing func serialize(
+-                _ output: Output,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                RFC_2046.BodyPart.serialize(output, into: &buffer)
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            let bytes = Scan.rest(&input)
++            do throws(Failure) {
++                return try RFC_2046.BodyPart(binary: bytes)
++            } catch {
++                input.seek(to: start)
++                throw error
+             }
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(
++            _ output: Output,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            RFC_2046.BodyPart.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Headers.Coder.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Headers.Coder.swift
+index 8ca048b..0ae6a79 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Headers.Coder.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.BodyPart.Headers.Coder.swift	
+@@ -7,37 +7,37 @@
+     import Serializer
+ 
+     extension RFC_2046.BodyPart.Headers {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_2046.BodyPart.Headers
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_2046.BodyPart.Headers.Error
++extension RFC_2046.BodyPart.Headers.Coder {
++        public typealias Output = RFC_2046.BodyPart.Headers
+ 
+-            public init() {}
++        public typealias Failure = RFC_2046.BodyPart.Headers.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                let bytes = Scan.rest(&input)
+-                do throws(Failure) {
+-                    return try RFC_2046.BodyPart.Headers(ascii: bytes)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
+-            }
+-
+-            public borrowing func serialize(
+-                _ output: Output,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                RFC_2046.BodyPart.Headers.serialize(output, into: &buffer)
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            let bytes = Scan.rest(&input)
++            do throws(Failure) {
++                return try RFC_2046.BodyPart.Headers(ascii: bytes)
++            } catch {
++                input.seek(to: start)
++                throw error
+             }
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(
++            _ output: Output,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            RFC_2046.BodyPart.Headers.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Boundary.Coder.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Boundary.Coder.swift
+index ed82ed9..58149d6 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Boundary.Coder.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Boundary.Coder.swift	
+@@ -6,40 +6,40 @@
+     import Serializer
+ 
+     extension RFC_2046.Boundary {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_2046.Boundary
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_2046.Boundary.Error
++extension RFC_2046.Boundary.Coder {
++        public typealias Output = RFC_2046.Boundary
+ 
+-            public init() {}
++        public typealias Failure = RFC_2046.Boundary.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                let bytes = Scan.run(&input) { byte in
+-                    let code = byte.bitPattern
+-                    return code != 0x0D && code != 0x0A
+-                }
+-                do throws(Failure) {
+-                    return try RFC_2046.Boundary(ascii: bytes)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            let bytes = Scan.run(&input) { byte in
++                let code = byte.bitPattern
++                return code != 0x0D && code != 0x0A
+             }
+-
+-            public borrowing func serialize(
+-                _ output: Output,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                Scan.append(output.rawValue, into: &buffer)
++            do throws(Failure) {
++                return try RFC_2046.Boundary(ascii: bytes)
++            } catch {
++                input.seek(to: start)
++                throw error
+             }
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(
++            _ output: Output,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            Scan.append(output.rawValue, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Coder.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Coder.swift
+index d3c8a7a..7aa31f7 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Coder.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Coder.swift	
+@@ -7,16 +7,10 @@
+     import Serializer
+ 
+     extension RFC_2046.Multipart {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
+-
+-            public typealias Output = RFC_2046.Multipart
+-
+-            public typealias Failure = RFC_2046.Multipart.Error
+-
+             public let boundary: RFC_2046.Boundary
+ 
+             public let subtype: RFC_2046.Multipart.Subtype
+@@ -28,28 +22,6 @@
+                 self.boundary = boundary
+                 self.subtype = subtype
+             }
+-
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                let bytes = Scan.rest(&input)
+-                do throws(Failure) {
+-                    return try RFC_2046.Multipart(
+-                        binary: bytes,
+-                        boundary: boundary,
+-                        subtype: subtype
+-                    )
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
+-            }
+-
+-            public borrowing func serialize(
+-                _ output: Output,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                RFC_2046.Multipart.serialize(output, into: &buffer)
+-            }
+         }
+ 
+         public static func coder(
+@@ -59,4 +31,32 @@
+             .init(boundary: boundary, subtype: subtype)
+         }
+     }
++
++extension RFC_2046.Multipart.Coder {
++        public typealias Output = RFC_2046.Multipart
++
++        public typealias Failure = RFC_2046.Multipart.Error
++
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            let bytes = Scan.rest(&input)
++            do throws(Failure) {
++                return try RFC_2046.Multipart(
++                    binary: bytes,
++                    boundary: boundary,
++                    subtype: subtype
++                )
++            } catch {
++                input.seek(to: start)
++                throw error
++            }
++        }
++
++        public borrowing func serialize(
++            _ output: Output,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            RFC_2046.Multipart.serialize(output, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Subtype.Coder.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Subtype.Coder.swift
+index a693df3..d8cc82e 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Subtype.Coder.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.Multipart.Subtype.Coder.swift	
+@@ -6,40 +6,40 @@
+     import Serializer
+ 
+     extension RFC_2046.Multipart.Subtype {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_2046.Multipart.Subtype
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_2046.Multipart.Subtype.Error
++extension RFC_2046.Multipart.Subtype.Coder {
++        public typealias Output = RFC_2046.Multipart.Subtype
+ 
+-            public init() {}
++        public typealias Failure = RFC_2046.Multipart.Subtype.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let start = input.checkpoint
+-                let bytes = Scan.run(&input) { byte in
+-                    let code = byte.bitPattern
+-                    return code > 0x20 && code != 0x3B
+-                }
+-                do throws(Failure) {
+-                    return try RFC_2046.Multipart.Subtype(ascii: bytes)
+-                } catch {
+-                    input.seek(to: start)
+-                    throw error
+-                }
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let start = input.checkpoint
++            let bytes = Scan.run(&input) { byte in
++                let code = byte.bitPattern
++                return code > 0x20 && code != 0x3B
+             }
+-
+-            public borrowing func serialize(
+-                _ output: Output,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                Scan.append(output.rawValue, into: &buffer)
++            do throws(Failure) {
++                return try RFC_2046.Multipart.Subtype(ascii: bytes)
++            } catch {
++                input.seek(to: start)
++                throw error
+             }
+         }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public borrowing func serialize(
++            _ output: Output,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            Scan.append(output.rawValue, into: &buffer)
++        }
++}
+ #endif
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.QuotedPrintable.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.QuotedPrintable.swift
+index 82e4ff5..7a1051a 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.QuotedPrintable.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/RFC_2046.QuotedPrintable.swift	
+@@ -3,89 +3,90 @@
+     public import Byte
+ 
+     extension RFC_2046 {
+-
+         public enum QuotedPrintable {
++        }
++    }
+ 
+-            public static func encode(_ bytes: [Byte]) -> [Byte] {
+-                let equals = ASCII.Code.equalsSign.byte
+-                let cr = ASCII.Code.cr.byte
+-                let lf = ASCII.Code.lf.byte
+-                let hexDigits: [Byte] = [Byte](utf8: "0123456789ABCDEF")
++extension RFC_2046.QuotedPrintable {
++        public static func encode(_ bytes: [Byte]) -> [Byte] {
++            let equals = ASCII.Code.equalsSign.byte
++            let cr = ASCII.Code.cr.byte
++            let lf = ASCII.Code.lf.byte
++            let hexDigits: [Byte] = [Byte](utf8: "0123456789ABCDEF")
+ 
+-                var output: [Byte] = []
+-                output.reserveCapacity(bytes.count + bytes.count / 3)
+-                var lineLength = 0
++            var output: [Byte] = []
++            output.reserveCapacity(bytes.count + bytes.count / 3)
++            var lineLength = 0
+ 
+-                for byte in bytes {
+-                    let isLiteral = (33...126).contains(byte.bitPattern) && byte != equals
+-                    let tokenLength = isLiteral ? 1 : 3
++            for byte in bytes {
++                let isLiteral = (33...126).contains(byte.bitPattern) && byte != equals
++                let tokenLength = isLiteral ? 1 : 3
+ 
+-                    if lineLength + tokenLength > 75 {
+-                        output.append(equals)
+-                        output.append(cr)
+-                        output.append(lf)
+-                        lineLength = 0
+-                    }
++                if lineLength + tokenLength > 75 {
++                    output.append(equals)
++                    output.append(cr)
++                    output.append(lf)
++                    lineLength = 0
++                }
+ 
+-                    if isLiteral {
+-                        output.append(byte)
+-                    } else {
+-                        output.append(equals)
+-                        output.append(hexDigits[Int(byte.bitPattern >> 4)])
+-                        output.append(hexDigits[Int(byte.bitPattern & 0x0F)])
+-                    }
+-                    lineLength += tokenLength
++                if isLiteral {
++                    output.append(byte)
++                } else {
++                    output.append(equals)
++                    output.append(hexDigits[Int(byte.bitPattern >> 4)])
++                    output.append(hexDigits[Int(byte.bitPattern & 0x0F)])
+                 }
+-                return output
++                lineLength += tokenLength
+             }
++            return output
++        }
+ 
+-            public static func decode(_ bytes: [Byte]) -> [Byte]? {
+-                let equals = ASCII.Code.equalsSign.byte
+-                let cr = ASCII.Code.cr.byte
+-                let lf = ASCII.Code.lf.byte
++        public static func decode(_ bytes: [Byte]) -> [Byte]? {
++            let equals = ASCII.Code.equalsSign.byte
++            let cr = ASCII.Code.cr.byte
++            let lf = ASCII.Code.lf.byte
+ 
+-                func hexValue(_ byte: Byte) -> UInt8? {
+-                    switch byte.bitPattern {
+-                    case 0x30...0x39: return byte.bitPattern - 0x30
+-                    case 0x41...0x46: return byte.bitPattern - 0x41 + 10
+-                    case 0x61...0x66: return byte.bitPattern - 0x61 + 10
+-                    default: return nil
+-                    }
++            func hexValue(_ byte: Byte) -> UInt8? {
++                switch byte.bitPattern {
++                case 0x30...0x39: return byte.bitPattern - 0x30
++                case 0x41...0x46: return byte.bitPattern - 0x41 + 10
++                case 0x61...0x66: return byte.bitPattern - 0x61 + 10
++                default: return nil
+                 }
++            }
+ 
+-                var output: [Byte] = []
+-                output.reserveCapacity(bytes.count)
+-                var index = bytes.startIndex
+-
+-                while index < bytes.endIndex {
+-                    let byte = bytes[index]
+-                    if byte == equals {
+-                        let next = index + 1
++            var output: [Byte] = []
++            output.reserveCapacity(bytes.count)
++            var index = bytes.startIndex
+ 
+-                        if next < bytes.endIndex, bytes[next] == cr,
+-                            next + 1 < bytes.endIndex, bytes[next + 1] == lf
+-                        {
+-                            index = next + 2
+-                            continue
+-                        }
+-                        if next < bytes.endIndex, bytes[next] == lf {
+-                            index = next + 1
+-                            continue
+-                        }
++            while index < bytes.endIndex {
++                let byte = bytes[index]
++                if byte == equals {
++                    let next = index + 1
+ 
+-                        guard next + 1 < bytes.endIndex,
+-                            let high = hexValue(bytes[next]),
+-                            let low = hexValue(bytes[next + 1])
+-                        else { return nil }
+-                        output.append(Byte(bitPattern: (high << 4) | low))
++                    if next < bytes.endIndex, bytes[next] == cr,
++                        next + 1 < bytes.endIndex, bytes[next + 1] == lf
++                    {
+                         index = next + 2
+-                    } else {
+-                        output.append(byte)
+-                        index += 1
++                        continue
+                     }
++                    if next < bytes.endIndex, bytes[next] == lf {
++                        index = next + 1
++                        continue
++                    }
++
++                    guard next + 1 < bytes.endIndex,
++                        let high = hexValue(bytes[next]),
++                        let low = hexValue(bytes[next + 1])
++                    else { return nil }
++                    output.append(Byte(bitPattern: (high << 4) | low))
++                    index = next + 2
++                } else {
++                    output.append(byte)
++                    index += 1
+                 }
+-                return output
+             }
++            return output
+         }
+-    }
++}
+ #endif
+diff --git a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Scan.swift b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Scan.swift
+index 677c8f7..86a1404 100644
+--- a/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Scan.swift	
++++ b/Sources/RFC 2046/Absorbed swift-rfc-2046-coder/Scan.swift	
+@@ -4,7 +4,9 @@
+     import Cursor
+ 
+     enum Scan {
++    }
+ 
++    extension Scan {
+         static func run<Input: Cursor.`Protocol`<Byte, Never>>(
+             _ input: inout Input,
+             while predicate: (Byte) -> Bool
+-- 
+2.43.0
+
