@@ -1,0 +1,1348 @@
+From 273f0fe645ff567641b48e18f677eab306f6271e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:34 +0000
+Subject: [PATCH 4/4] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ .../Package.Manager+Catalog.swift             |  44 --
+ .../Package.Manager+Dump.swift                |  61 ---
+ .../Package.Manager+Edit.swift                |  76 ---
+ .../Package.Manager+Evaluation.swift          |  19 -
+ .../Package.Manager+Manifest.swift            | 168 -------
+ .../Package.Manager+Resolution.swift          |  42 --
+ .../Package.Manager+Toolchain.swift           |  36 --
+ Sources/Package Manager/Package.Manager.swift | 431 ++++++++++++++++++
+ ....Dependency.SourceControl+Extraction.swift |  14 -
+ ...ge.Manifest.Dependency.SourceControl.swift |  15 +
+ ...anifest.Identity.Conflict+Evaluation.swift |  59 ---
+ ....Manifest.Identity.Conflict+Resolved.swift |  22 -
+ .../Package.Manifest.Identity.Conflict.swift  |  83 ++++
+ .../Package.Manifest.Source+Code.swift        |  66 ---
+ .../Package.Manifest.Source.swift             |  67 +++
+ 15 files changed, 596 insertions(+), 607 deletions(-)
+ delete mode 100644 Sources/Package Manager/Package.Manager+Catalog.swift
+ delete mode 100644 Sources/Package Manager/Package.Manager+Dump.swift
+ delete mode 100644 Sources/Package Manager/Package.Manager+Edit.swift
+ delete mode 100644 Sources/Package Manager/Package.Manager+Evaluation.swift
+ delete mode 100644 Sources/Package Manager/Package.Manager+Manifest.swift
+ delete mode 100644 Sources/Package Manager/Package.Manager+Resolution.swift
+ delete mode 100644 Sources/Package Manager/Package.Manager+Toolchain.swift
+ delete mode 100644 Sources/Package Manager/Package.Manifest.Dependency.SourceControl+Extraction.swift
+ delete mode 100644 Sources/Package Manager/Package.Manifest.Identity.Conflict+Evaluation.swift
+ delete mode 100644 Sources/Package Manager/Package.Manifest.Identity.Conflict+Resolved.swift
+ delete mode 100644 Sources/Package Manager/Package.Manifest.Source+Code.swift
+
+diff --git a/Sources/Package Manager/Package.Manager+Catalog.swift b/Sources/Package Manager/Package.Manager+Catalog.swift
+deleted file mode 100644
+index 8f41acc..0000000
+--- a/Sources/Package Manager/Package.Manager+Catalog.swift	
++++ /dev/null
+@@ -1,44 +0,0 @@
+-internal import FIPS_180_4
+-public import File_System
+-
+-extension Package.Manager {
+-    public func catalog(
+-        at directory: File.Directory,
+-        timeout: Swift.Duration = .seconds(120),
+-        scratch: Swift.String? = nil
+-    ) throws(Error) -> Catalog {
+-        let before = try manifestSource(at: directory)
+-        let toolchain = try toolchain(timeout: timeout)
+-        let evaluation = try evaluation(
+-            at: directory,
+-            timeout: timeout,
+-            scratch: scratch
+-        )
+-        let after = try manifestSource(at: directory)
+-        guard before == after else {
+-            throw .manifestChanged(directory: directory.path.string)
+-        }
+-        return .init(
+-            manifest: FIPS_180_4.SHA256.digest(before).hex,
+-            toolchain: FIPS_180_4.SHA256.digest(toolchain).hex,
+-            evaluation: evaluation
+-        )
+-    }
+-
+-    private func manifestSource(
+-        at directory: File.Directory
+-    ) throws(Error) -> [Byte] {
+-        do throws(Either<File.System.Read.Full.Error, Never>) {
+-            return try directory[file: "Package.swift"].read.full { bytes in
+-                var source = [Byte]()
+-                source.reserveCapacity(bytes.count)
+-                for index in bytes.indices {
+-                    source.append(bytes[index])
+-                }
+-                return source
+-            }
+-        } catch {
+-            throw .manifestUnavailable(directory: directory.path.string)
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager+Dump.swift b/Sources/Package Manager/Package.Manager+Dump.swift
+deleted file mode 100644
+index 85fc73a..0000000
+--- a/Sources/Package Manager/Package.Manager+Dump.swift	
++++ /dev/null
+@@ -1,61 +0,0 @@
+-internal import File_System
+-internal import JSON
+-internal import Process
+-internal import SPM_Standard
+-
+-extension Package.Manager {
+-
+-    internal func dump(
+-        at directory: File.Directory,
+-        timeout: Swift.Duration,
+-        scratch: Swift.String?
+-    ) throws(Error) -> JSON {
+-        var arguments = launcherPrefix + ["package"]
+-        if let scratch {
+-            arguments.append(contentsOf: ["--scratch-path", scratch])
+-        }
+-        arguments.append("dump-package")
+-        let output: Process.Output
+-        do throws(Process.Error) {
+-            output = try Process.Spawn.run(
+-                .init(
+-                    executable: executable,
+-                    arguments: arguments,
+-                    stdout: .pipe,
+-                    stderr: .pipe,
+-                    directory: directory.path,
+-                    timeout: timeout
+-                )
+-            )
+-        } catch {
+-            throw .execution
+-        }
+-
+-        if case .signaled = output.status {
+-            throw .timedOut(directory: directory.path.string)
+-        }
+-        guard output.status == .exited(code: 0) else {
+-            throw .command(
+-                termination: termination(output.status),
+-                stderr: output.stderr ?? []
+-            )
+-        }
+-        guard let bytes = output.stdout else {
+-            throw .output
+-        }
+-
+-        do throws(JSON.Error) {
+-            return try JSON.parse(Swift.String(decoding: bytes, as: UTF8.self))
+-        } catch {
+-            throw .manifest
+-        }
+-    }
+-
+-    internal func termination(_ status: Process.Status) -> Termination {
+-        switch status {
+-        case .exited(let code): .exited(code: code)
+-        case .signaled(let signal): .signaled(signal: signal)
+-        case .stopped(let signal): .stopped(signal: signal)
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager+Edit.swift b/Sources/Package Manager/Package.Manager+Edit.swift
+deleted file mode 100644
+index 0b9bfc4..0000000
+--- a/Sources/Package Manager/Package.Manager+Edit.swift	
++++ /dev/null
+@@ -1,76 +0,0 @@
+-public import File_System
+-internal import Process
+-
+-extension Package.Manager {
+-
+-    public func edit(
+-        _ identity: Swift.String,
+-        path: File.Path,
+-        at directory: File.Directory,
+-        timeout: Swift.Duration = .seconds(120)
+-    ) throws(Error) {
+-        try run(["package", "edit", identity, "--path", path.string], at: directory, timeout: timeout)
+-    }
+-
+-    public func unedit(
+-        _ identity: Swift.String,
+-        at directory: File.Directory,
+-        force: Swift.Bool = false,
+-        timeout: Swift.Duration = .seconds(120)
+-    ) throws(Error) {
+-        try run(
+-            force
+-                ? ["package", "unedit", "--force", identity]
+-                : ["package", "unedit", identity],
+-            at: directory,
+-            timeout: timeout
+-        )
+-    }
+-}
+-
+-extension Package.Manager {
+-
+-    private func run(
+-        _ arguments: [Swift.String],
+-        at directory: File.Directory,
+-        timeout: Swift.Duration
+-    ) throws(Error) {
+-        let output: Process.Output
+-        do throws(Process.Error) {
+-            output = try Process.Spawn.run(
+-                .init(
+-                    executable: executable,
+-                    arguments: launcherPrefix + arguments,
+-                    stdout: .pipe,
+-                    stderr: .pipe,
+-                    directory: directory.path,
+-                    timeout: timeout
+-                )
+-            )
+-        } catch {
+-            throw .execution
+-        }
+-
+-        if case .signaled = output.status {
+-            let stderr = output.stderr ?? []
+-            throw Self.waiting(onLockIn: stderr)
+-                ? .locked(directory: directory.path.string)
+-                : .timedOut(directory: directory.path.string)
+-        }
+-
+-        guard output.status == .exited(code: 0) else {
+-            throw .command(
+-                termination: termination(output.status),
+-                stderr: output.stderr ?? []
+-            )
+-        }
+-    }
+-
+-    internal static func waiting(onLockIn stderr: [UInt8]) -> Swift.Bool {
+-        let needle = Array("is already running using".utf8)
+-        guard stderr.count >= needle.count else { return false }
+-        return (0...(stderr.count - needle.count)).contains { start in
+-            needle.indices.allSatisfy { offset in stderr[start + offset] == needle[offset] }
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager+Evaluation.swift b/Sources/Package Manager/Package.Manager+Evaluation.swift
+deleted file mode 100644
+index 81cb8d8..0000000
+--- a/Sources/Package Manager/Package.Manager+Evaluation.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-public import File_System
+-private import JSON
+-public import SPM_Standard
+-
+-extension Package.Manager {
+-
+-    public func evaluation(
+-        at directory: File.Directory,
+-        timeout: Swift.Duration = .seconds(120),
+-        scratch: Swift.String? = nil
+-    ) throws(Error) -> Package.Manifest.Evaluation {
+-        let json = try dump(at: directory, timeout: timeout, scratch: scratch)
+-        do throws(DecodingError) {
+-            return try json.decode(Package.Manifest.Evaluation.self)
+-        } catch {
+-            throw .manifest
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager+Manifest.swift b/Sources/Package Manager/Package.Manager+Manifest.swift
+deleted file mode 100644
+index 636626f..0000000
+--- a/Sources/Package Manager/Package.Manager+Manifest.swift	
++++ /dev/null
+@@ -1,168 +0,0 @@
+-public import File_System
+-private import JSON
+-public import SPM_Standard
+-
+-extension Package.Manager {
+-
+-    public func manifest(
+-        at directory: File.Directory,
+-        timeout: Swift.Duration = .seconds(120),
+-        scratch: Swift.String? = nil
+-    ) throws(Error) -> Package.Manifest {
+-        let json = try dump(at: directory, timeout: timeout, scratch: scratch)
+-        do throws(JSON.Error) {
+-            return try decode(json)
+-        } catch {
+-            throw .manifest
+-        }
+-    }
+-
+-    private func decode(_ json: JSON) throws(JSON.Error) -> Package.Manifest {
+-        guard json.isObject else {
+-            throw .typeMismatch(expected: "Manifest object", got: "non-object JSON value")
+-        }
+-        let nameValue = json["name"]
+-        guard nameValue.isString else { throw .missingKey("name") }
+-
+-        let versionValue = json["toolsVersion"]["_version"]
+-        guard versionValue.isString else { throw .missingKey("toolsVersion._version") }
+-        let version = try tools(Swift.String(versionValue))
+-
+-        guard let values = json["dependencies"].array else {
+-            throw .missingKey("dependencies")
+-        }
+-        var dependencies: [Package.Dependency] = []
+-        dependencies.reserveCapacity(values.count)
+-        for value in values {
+-            dependencies.append(try dependency(value))
+-        }
+-
+-        return Package.Manifest(
+-            name: Package.Name(_unchecked: Swift.String(nameValue)),
+-            toolsVersion: version,
+-            dependencies: dependencies
+-        )
+-    }
+-
+-    private func dependency(_ json: JSON) throws(JSON.Error) -> Package.Dependency {
+-        guard json.isObject else {
+-            throw .typeMismatch(expected: "dependency object", got: "non-object JSON value")
+-        }
+-
+-        if let record = json["fileSystem"].array?.first {
+-            let identity = try string(record["identity"], key: "fileSystem.identity")
+-            let path = try string(record["path"], key: "fileSystem.path")
+-            return .init(
+-                source: .path(path),
+-                name: Package.Name(_unchecked: identity),
+-                products: []
+-            )
+-        }
+-
+-        if let record = json["sourceControl"].array?.first {
+-            let identity = try string(record["identity"], key: "sourceControl.identity")
+-            let remotes = record["location"]["remote"].array ?? []
+-            let value: Swift.String
+-            if let remote = remotes.first {
+-                value = try string(
+-                    remote["urlString"],
+-                    key: "sourceControl.location.remote.urlString"
+-                )
+-            } else {
+-                value = ""
+-            }
+-            let uri: URI
+-            do throws(URIError) {
+-                uri = try URI(value)
+-            } catch {
+-                throw .typeMismatch(expected: "valid URI per RFC 3986", got: value)
+-            }
+-            return .init(
+-                source: .url(uri, try requirement(record["requirement"])),
+-                name: Package.Name(_unchecked: identity),
+-                products: []
+-            )
+-        }
+-
+-        if let record = json["registry"].array?.first {
+-            let value = try string(record["identity"], key: "registry.identity")
+-            return .init(
+-                source: .registry(try identity(value), try requirement(record["requirement"])),
+-                name: Package.Name(_unchecked: value),
+-                products: []
+-            )
+-        }
+-
+-        throw .typeMismatch(
+-            expected: "fileSystem|sourceControl|registry dependency",
+-            got: "object without a dependency discriminator"
+-        )
+-    }
+-
+-    private func requirement(_ json: JSON) throws(JSON.Error) -> Package.Requirement {
+-        guard json.isObject else {
+-            throw .typeMismatch(expected: "requirement object", got: "non-object JSON value")
+-        }
+-        if let value = json["exact"].array?.first {
+-            return .exact(try semantic(try string(value, key: "exact[0]")))
+-        }
+-        if let value = json["range"].array?.first {
+-            let lower = try semantic(try string(value["lowerBound"], key: "range.lowerBound"))
+-            let upper = try semantic(try string(value["upperBound"], key: "range.upperBound"))
+-            return lower..<upper
+-        }
+-        if let value = json["branch"].array?.first {
+-            return .branch(try string(value, key: "branch[0]"))
+-        }
+-        if let value = json["revision"].array?.first {
+-            return .revision(try string(value, key: "revision[0]"))
+-        }
+-        throw .typeMismatch(
+-            expected: "exact|range|branch|revision requirement",
+-            got: "object without a requirement discriminator"
+-        )
+-    }
+-
+-    private func string(_ json: JSON, key: Swift.String) throws(JSON.Error) -> Swift.String {
+-        guard json.isString else { throw .missingKey(key) }
+-        return Swift.String(json)
+-    }
+-
+-    private func tools(_ value: Swift.String) throws(JSON.Error) -> Version.Tools {
+-        var input = [Byte](utf8: value)[...]
+-        let parsed: Version.Tools?
+-        do throws(Version.Tools.ParserError) {
+-            parsed = try Version.Tools.parser.parse(&input)
+-        } catch {
+-            parsed = nil
+-        }
+-        guard let parsed, input.isEmpty else {
+-            throw .typeMismatch(expected: "valid swift-tools-version", got: value)
+-        }
+-        return parsed
+-    }
+-
+-    private func semantic(_ value: Swift.String) throws(JSON.Error) -> Version.Semantic {
+-        var input = [Byte](utf8: value)[...]
+-        let parsed: Version.Semantic?
+-        do throws(Version.Semantic.ParserError) {
+-            parsed = try Version.Semantic.parser.parse(&input)
+-        } catch {
+-            parsed = nil
+-        }
+-        guard let parsed, input.isEmpty else {
+-            throw .typeMismatch(expected: "valid semantic version", got: value)
+-        }
+-        return parsed
+-    }
+-
+-    private func identity(_ value: Swift.String) throws(JSON.Error) -> Package.Identity {
+-        guard let dot = value.firstIndex(of: ".") else {
+-            throw .typeMismatch(expected: "registry identity 'scope.name'", got: value)
+-        }
+-        return .init(
+-            scope: Swift.String(value[..<dot]),
+-            name: Swift.String(value[value.index(after: dot)...])
+-        )
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager+Resolution.swift b/Sources/Package Manager/Package.Manager+Resolution.swift
+deleted file mode 100644
+index 020753e..0000000
+--- a/Sources/Package Manager/Package.Manager+Resolution.swift	
++++ /dev/null
+@@ -1,42 +0,0 @@
+-public import File_System
+-private import JSON
+-public import SPM_Standard
+-
+-extension Package.Manager {
+-
+-    public func resolution(
+-        at directory: File.Directory,
+-        scratch: Swift.String? = nil
+-    ) throws(Error) -> Package.Resolution {
+-        let location = (try Package.Manager.scratch(scratch, in: directory) / File.Path.Component(unchecked: "workspace-state.json")).path
+-
+-        let bytes: [Byte]
+-
+-        do throws(Either<File.System.Read.Full.Error, Never>) {
+-            bytes = try File(location).read.full { span in
+-                var storage = [Byte]()
+-                storage.reserveCapacity(span.count)
+-
+-                for index in span.indices {
+-                    storage.append(span[index])
+-                }
+-                return storage
+-            }
+-        } catch {
+-            throw .state
+-        }
+-
+-        let json: JSON
+-        do throws(JSON.Error) {
+-            json = try JSON.parse(Swift.String(decoding: bytes, as: UTF8.self))
+-        } catch {
+-            throw .state
+-        }
+-
+-        do throws(DecodingError) {
+-            return try json.decode(Package.Resolution.self)
+-        } catch {
+-            throw .state
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager+Toolchain.swift b/Sources/Package Manager/Package.Manager+Toolchain.swift
+deleted file mode 100644
+index 6b402b5..0000000
+--- a/Sources/Package Manager/Package.Manager+Toolchain.swift	
++++ /dev/null
+@@ -1,36 +0,0 @@
+-internal import File_System
+-internal import Process
+-
+-extension Package.Manager {
+-    internal func toolchain(
+-        timeout: Swift.Duration
+-    ) throws(Error) -> [Byte] {
+-        let output: Process.Output
+-        do throws(Process.Error) {
+-            output = try Process.Spawn.run(
+-                .init(
+-                    executable: executable,
+-                    arguments: launcherPrefix + ["--version"],
+-                    stdout: .pipe,
+-                    stderr: .pipe,
+-                    timeout: timeout
+-                )
+-            )
+-        } catch {
+-            throw .execution
+-        }
+-        if case .signaled = output.status {
+-            throw .timedOut(directory: executable)
+-        }
+-        guard output.status == .exited(code: 0) else {
+-            throw .command(
+-                termination: termination(output.status),
+-                stderr: output.stderr ?? []
+-            )
+-        }
+-        guard let stdout = output.stdout, !stdout.isEmpty else {
+-            throw .toolchain
+-        }
+-        return stdout.map(Byte.init(bitPattern:))
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manager.swift b/Sources/Package Manager/Package.Manager.swift
+index 5071e3b..fd26fc9 100644
+--- a/Sources/Package Manager/Package.Manager.swift	
++++ b/Sources/Package Manager/Package.Manager.swift	
+@@ -1,4 +1,8 @@
+ public import SPM_Standard
++internal import FIPS_180_4
++public import File_System
++internal import JSON
++internal import Process
+ 
+ extension Package {
+ 
+@@ -30,3 +34,430 @@ extension Package.Manager {
+         #endif
+     }
+ }
++
++extension Package.Manager {
++    public func catalog(
++        at directory: File.Directory,
++        timeout: Swift.Duration = .seconds(120),
++        scratch: Swift.String? = nil
++    ) throws(Error) -> Catalog {
++        let before = try manifestSource(at: directory)
++        let toolchain = try toolchain(timeout: timeout)
++        let evaluation = try evaluation(
++            at: directory,
++            timeout: timeout,
++            scratch: scratch
++        )
++        let after = try manifestSource(at: directory)
++        guard before == after else {
++            throw .manifestChanged(directory: directory.path.string)
++        }
++        return .init(
++            manifest: FIPS_180_4.SHA256.digest(before).hex,
++            toolchain: FIPS_180_4.SHA256.digest(toolchain).hex,
++            evaluation: evaluation
++        )
++    }
++
++    private func manifestSource(
++        at directory: File.Directory
++    ) throws(Error) -> [Byte] {
++        do throws(Either<File.System.Read.Full.Error, Never>) {
++            return try directory[file: "Package.swift"].read.full { bytes in
++                var source = [Byte]()
++                source.reserveCapacity(bytes.count)
++                for index in bytes.indices {
++                    source.append(bytes[index])
++                }
++                return source
++            }
++        } catch {
++            throw .manifestUnavailable(directory: directory.path.string)
++        }
++    }
++}
++
++extension Package.Manager {
++
++    internal func dump(
++        at directory: File.Directory,
++        timeout: Swift.Duration,
++        scratch: Swift.String?
++    ) throws(Error) -> JSON {
++        var arguments = launcherPrefix + ["package"]
++        if let scratch {
++            arguments.append(contentsOf: ["--scratch-path", scratch])
++        }
++        arguments.append("dump-package")
++        let output: Process.Output
++        do throws(Process.Error) {
++            output = try Process.Spawn.run(
++                .init(
++                    executable: executable,
++                    arguments: arguments,
++                    stdout: .pipe,
++                    stderr: .pipe,
++                    directory: directory.path,
++                    timeout: timeout
++                )
++            )
++        } catch {
++            throw .execution
++        }
++
++        if case .signaled = output.status {
++            throw .timedOut(directory: directory.path.string)
++        }
++        guard output.status == .exited(code: 0) else {
++            throw .command(
++                termination: termination(output.status),
++                stderr: output.stderr ?? []
++            )
++        }
++        guard let bytes = output.stdout else {
++            throw .output
++        }
++
++        do throws(JSON.Error) {
++            return try JSON.parse(Swift.String(decoding: bytes, as: UTF8.self))
++        } catch {
++            throw .manifest
++        }
++    }
++
++    internal func termination(_ status: Process.Status) -> Termination {
++        switch status {
++        case .exited(let code): .exited(code: code)
++        case .signaled(let signal): .signaled(signal: signal)
++        case .stopped(let signal): .stopped(signal: signal)
++        }
++    }
++}
++
++extension Package.Manager {
++
++    public func edit(
++        _ identity: Swift.String,
++        path: File.Path,
++        at directory: File.Directory,
++        timeout: Swift.Duration = .seconds(120)
++    ) throws(Error) {
++        try run(["package", "edit", identity, "--path", path.string], at: directory, timeout: timeout)
++    }
++
++    public func unedit(
++        _ identity: Swift.String,
++        at directory: File.Directory,
++        force: Swift.Bool = false,
++        timeout: Swift.Duration = .seconds(120)
++    ) throws(Error) {
++        try run(
++            force
++                ? ["package", "unedit", "--force", identity]
++                : ["package", "unedit", identity],
++            at: directory,
++            timeout: timeout
++        )
++    }
++}
++
++extension Package.Manager {
++
++    private func run(
++        _ arguments: [Swift.String],
++        at directory: File.Directory,
++        timeout: Swift.Duration
++    ) throws(Error) {
++        let output: Process.Output
++        do throws(Process.Error) {
++            output = try Process.Spawn.run(
++                .init(
++                    executable: executable,
++                    arguments: launcherPrefix + arguments,
++                    stdout: .pipe,
++                    stderr: .pipe,
++                    directory: directory.path,
++                    timeout: timeout
++                )
++            )
++        } catch {
++            throw .execution
++        }
++
++        if case .signaled = output.status {
++            let stderr = output.stderr ?? []
++            throw Self.waiting(onLockIn: stderr)
++                ? .locked(directory: directory.path.string)
++                : .timedOut(directory: directory.path.string)
++        }
++
++        guard output.status == .exited(code: 0) else {
++            throw .command(
++                termination: termination(output.status),
++                stderr: output.stderr ?? []
++            )
++        }
++    }
++
++    internal static func waiting(onLockIn stderr: [UInt8]) -> Swift.Bool {
++        let needle = Array("is already running using".utf8)
++        guard stderr.count >= needle.count else { return false }
++        return (0...(stderr.count - needle.count)).contains { start in
++            needle.indices.allSatisfy { offset in stderr[start + offset] == needle[offset] }
++        }
++    }
++}
++
++extension Package.Manager {
++
++    public func evaluation(
++        at directory: File.Directory,
++        timeout: Swift.Duration = .seconds(120),
++        scratch: Swift.String? = nil
++    ) throws(Error) -> Package.Manifest.Evaluation {
++        let json = try dump(at: directory, timeout: timeout, scratch: scratch)
++        do throws(DecodingError) {
++            return try json.decode(Package.Manifest.Evaluation.self)
++        } catch {
++            throw .manifest
++        }
++    }
++}
++
++extension Package.Manager {
++
++    public func manifest(
++        at directory: File.Directory,
++        timeout: Swift.Duration = .seconds(120),
++        scratch: Swift.String? = nil
++    ) throws(Error) -> Package.Manifest {
++        let json = try dump(at: directory, timeout: timeout, scratch: scratch)
++        do throws(JSON.Error) {
++            return try decode(json)
++        } catch {
++            throw .manifest
++        }
++    }
++
++    private func decode(_ json: JSON) throws(JSON.Error) -> Package.Manifest {
++        guard json.isObject else {
++            throw .typeMismatch(expected: "Manifest object", got: "non-object JSON value")
++        }
++        let nameValue = json["name"]
++        guard nameValue.isString else { throw .missingKey("name") }
++
++        let versionValue = json["toolsVersion"]["_version"]
++        guard versionValue.isString else { throw .missingKey("toolsVersion._version") }
++        let version = try tools(Swift.String(versionValue))
++
++        guard let values = json["dependencies"].array else {
++            throw .missingKey("dependencies")
++        }
++        var dependencies: [Package.Dependency] = []
++        dependencies.reserveCapacity(values.count)
++        for value in values {
++            dependencies.append(try dependency(value))
++        }
++
++        return Package.Manifest(
++            name: Package.Name(_unchecked: Swift.String(nameValue)),
++            toolsVersion: version,
++            dependencies: dependencies
++        )
++    }
++
++    private func dependency(_ json: JSON) throws(JSON.Error) -> Package.Dependency {
++        guard json.isObject else {
++            throw .typeMismatch(expected: "dependency object", got: "non-object JSON value")
++        }
++
++        if let record = json["fileSystem"].array?.first {
++            let identity = try string(record["identity"], key: "fileSystem.identity")
++            let path = try string(record["path"], key: "fileSystem.path")
++            return .init(
++                source: .path(path),
++                name: Package.Name(_unchecked: identity),
++                products: []
++            )
++        }
++
++        if let record = json["sourceControl"].array?.first {
++            let identity = try string(record["identity"], key: "sourceControl.identity")
++            let remotes = record["location"]["remote"].array ?? []
++            let value: Swift.String
++            if let remote = remotes.first {
++                value = try string(
++                    remote["urlString"],
++                    key: "sourceControl.location.remote.urlString"
++                )
++            } else {
++                value = ""
++            }
++            let uri: URI
++            do throws(URIError) {
++                uri = try URI(value)
++            } catch {
++                throw .typeMismatch(expected: "valid URI per RFC 3986", got: value)
++            }
++            return .init(
++                source: .url(uri, try requirement(record["requirement"])),
++                name: Package.Name(_unchecked: identity),
++                products: []
++            )
++        }
++
++        if let record = json["registry"].array?.first {
++            let value = try string(record["identity"], key: "registry.identity")
++            return .init(
++                source: .registry(try identity(value), try requirement(record["requirement"])),
++                name: Package.Name(_unchecked: value),
++                products: []
++            )
++        }
++
++        throw .typeMismatch(
++            expected: "fileSystem|sourceControl|registry dependency",
++            got: "object without a dependency discriminator"
++        )
++    }
++
++    private func requirement(_ json: JSON) throws(JSON.Error) -> Package.Requirement {
++        guard json.isObject else {
++            throw .typeMismatch(expected: "requirement object", got: "non-object JSON value")
++        }
++        if let value = json["exact"].array?.first {
++            return .exact(try semantic(try string(value, key: "exact[0]")))
++        }
++        if let value = json["range"].array?.first {
++            let lower = try semantic(try string(value["lowerBound"], key: "range.lowerBound"))
++            let upper = try semantic(try string(value["upperBound"], key: "range.upperBound"))
++            return lower..<upper
++        }
++        if let value = json["branch"].array?.first {
++            return .branch(try string(value, key: "branch[0]"))
++        }
++        if let value = json["revision"].array?.first {
++            return .revision(try string(value, key: "revision[0]"))
++        }
++        throw .typeMismatch(
++            expected: "exact|range|branch|revision requirement",
++            got: "object without a requirement discriminator"
++        )
++    }
++
++    private func string(_ json: JSON, key: Swift.String) throws(JSON.Error) -> Swift.String {
++        guard json.isString else { throw .missingKey(key) }
++        return Swift.String(json)
++    }
++
++    private func tools(_ value: Swift.String) throws(JSON.Error) -> Version.Tools {
++        var input = [Byte](utf8: value)[...]
++        let parsed: Version.Tools?
++        do throws(Version.Tools.ParserError) {
++            parsed = try Version.Tools.parser.parse(&input)
++        } catch {
++            parsed = nil
++        }
++        guard let parsed, input.isEmpty else {
++            throw .typeMismatch(expected: "valid swift-tools-version", got: value)
++        }
++        return parsed
++    }
++
++    private func semantic(_ value: Swift.String) throws(JSON.Error) -> Version.Semantic {
++        var input = [Byte](utf8: value)[...]
++        let parsed: Version.Semantic?
++        do throws(Version.Semantic.ParserError) {
++            parsed = try Version.Semantic.parser.parse(&input)
++        } catch {
++            parsed = nil
++        }
++        guard let parsed, input.isEmpty else {
++            throw .typeMismatch(expected: "valid semantic version", got: value)
++        }
++        return parsed
++    }
++
++    private func identity(_ value: Swift.String) throws(JSON.Error) -> Package.Identity {
++        guard let dot = value.firstIndex(of: ".") else {
++            throw .typeMismatch(expected: "registry identity 'scope.name'", got: value)
++        }
++        return .init(
++            scope: Swift.String(value[..<dot]),
++            name: Swift.String(value[value.index(after: dot)...])
++        )
++    }
++}
++
++extension Package.Manager {
++
++    public func resolution(
++        at directory: File.Directory,
++        scratch: Swift.String? = nil
++    ) throws(Error) -> Package.Resolution {
++        let location = (try Package.Manager.scratch(scratch, in: directory) / File.Path.Component(unchecked: "workspace-state.json")).path
++
++        let bytes: [Byte]
++
++        do throws(Either<File.System.Read.Full.Error, Never>) {
++            bytes = try File(location).read.full { span in
++                var storage = [Byte]()
++                storage.reserveCapacity(span.count)
++
++                for index in span.indices {
++                    storage.append(span[index])
++                }
++                return storage
++            }
++        } catch {
++            throw .state
++        }
++
++        let json: JSON
++        do throws(JSON.Error) {
++            json = try JSON.parse(Swift.String(decoding: bytes, as: UTF8.self))
++        } catch {
++            throw .state
++        }
++
++        do throws(DecodingError) {
++            return try json.decode(Package.Resolution.self)
++        } catch {
++            throw .state
++        }
++    }
++}
++
++extension Package.Manager {
++    internal func toolchain(
++        timeout: Swift.Duration
++    ) throws(Error) -> [Byte] {
++        let output: Process.Output
++        do throws(Process.Error) {
++            output = try Process.Spawn.run(
++                .init(
++                    executable: executable,
++                    arguments: launcherPrefix + ["--version"],
++                    stdout: .pipe,
++                    stderr: .pipe,
++                    timeout: timeout
++                )
++            )
++        } catch {
++            throw .execution
++        }
++        if case .signaled = output.status {
++            throw .timedOut(directory: executable)
++        }
++        guard output.status == .exited(code: 0) else {
++            throw .command(
++                termination: termination(output.status),
++                stderr: output.stderr ?? []
++            )
++        }
++        guard let stdout = output.stdout, !stdout.isEmpty else {
++            throw .toolchain
++        }
++        return stdout.map(Byte.init(bitPattern:))
++    }
++}
+diff --git a/Sources/Package Manager/Package.Manifest.Dependency.SourceControl+Extraction.swift b/Sources/Package Manager/Package.Manifest.Dependency.SourceControl+Extraction.swift
+deleted file mode 100644
+index 21c61e7..0000000
+--- a/Sources/Package Manager/Package.Manifest.Dependency.SourceControl+Extraction.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-extension Package.Manifest.Dependency.SourceControl {
+-
+-    public static func all(
+-        in source: Swift.String,
+-        document: Swift.String
+-    ) -> [Self] {
+-        Package.Manifest.Clause.all(in: Package.Manifest.Source.code(in: source)).compactMap {
+-            clause in
+-            clause.declaredURL.map {
+-                Self(url: $0, branch: clause.declaredBranch, document: document)
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manifest.Dependency.SourceControl.swift b/Sources/Package Manager/Package.Manifest.Dependency.SourceControl.swift
+index c9cd1b3..cbab295 100644
+--- a/Sources/Package Manager/Package.Manifest.Dependency.SourceControl.swift	
++++ b/Sources/Package Manager/Package.Manifest.Dependency.SourceControl.swift	
+@@ -12,3 +12,18 @@ extension Package.Manifest.Dependency {
+         }
+     }
+ }
++
++extension Package.Manifest.Dependency.SourceControl {
++
++    public static func all(
++        in source: Swift.String,
++        document: Swift.String
++    ) -> [Self] {
++        Package.Manifest.Clause.all(in: Package.Manifest.Source.code(in: source)).compactMap {
++            clause in
++            clause.declaredURL.map {
++                Self(url: $0, branch: clause.declaredBranch, document: document)
++            }
++        }
++    }
++}
+diff --git a/Sources/Package Manager/Package.Manifest.Identity.Conflict+Evaluation.swift b/Sources/Package Manager/Package.Manifest.Identity.Conflict+Evaluation.swift
+deleted file mode 100644
+index d3ac69d..0000000
+--- a/Sources/Package Manager/Package.Manifest.Identity.Conflict+Evaluation.swift	
++++ /dev/null
+@@ -1,59 +0,0 @@
+-extension Package.Manifest.Identity.Conflict {
+-
+-    public static func isRootManifest(_ name: Swift.String) -> Swift.Bool {
+-        guard name.hasPrefix("Package"), name.hasSuffix(".swift") else { return false }
+-        let middle = name.dropFirst("Package".count).dropLast(".swift".count)
+-        if middle.isEmpty { return true }
+-        guard middle.hasPrefix("@swift-") else { return false }
+-        let version = middle.dropFirst("@swift-".count)
+-        return !version.isEmpty && version.allSatisfy { $0.isNumber || $0 == "." }
+-    }
+-
+-    public static func entries(
+-        in manifest: Swift.String,
+-        document: Swift.String
+-    ) -> [Entry] {
+-        Package.Manifest.Clause.all(in: manifest).compactMap { clause in
+-            clause.declaredURL.map {
+-                Entry(url: $0, document: document, source: .manifest)
+-            }
+-        }
+-    }
+-
+-    public static func findings(in entries: [Entry]) -> [Finding] {
+-        let grouped = Swift.Dictionary(grouping: entries, by: \.identity)
+-        return grouped.keys.sorted().compactMap { identity in
+-            guard let observed = grouped[identity] else { return nil }
+-            let locations = Swift.Dictionary(grouping: observed, by: \.location)
+-            guard locations.count > 1 else { return nil }
+-            let manifestLocations = locations.values.filter { entries in
+-                entries.contains { $0.source == .manifest }
+-            }
+-            let disposition: Disposition = manifestLocations.count > 1 ? .fatal : .stalePin
+-            let ordered = observed.sorted {
+-                ($0.location, $0.document) < ($1.location, $1.document)
+-            }
+-            return Finding(identity: identity, entries: ordered, disposition: disposition)
+-        }
+-    }
+-
+-    public static func canonical(_ url: Package.Manifest.Dependency.Location) -> Swift.String {
+-        var location = url.text.lowercased()
+-
+-        if let scheme = location.firstIndex(of: ":"),
+-            location[location.index(after: scheme)...].hasPrefix("//")
+-        {
+-            location = Swift.String(location[location.index(scheme, offsetBy: 3)...])
+-        } else if let at = location.firstIndex(of: "@"),
+-            let colon = location[location.index(after: at)...].firstIndex(of: ":")
+-        {
+-            let host = location[location.index(after: at)..<colon]
+-            let path = location[location.index(after: colon)...]
+-            location = "\(host)/\(path)"
+-        }
+-
+-        while location.last == "/" { location.removeLast() }
+-        if location.hasSuffix(".git") { location.removeLast(4) }
+-        return location
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manifest.Identity.Conflict+Resolved.swift b/Sources/Package Manager/Package.Manifest.Identity.Conflict+Resolved.swift
+deleted file mode 100644
+index 80e79f3..0000000
+--- a/Sources/Package Manager/Package.Manifest.Identity.Conflict+Resolved.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-private import JSON
+-
+-extension Package.Manifest.Identity.Conflict {
+-
+-    public static func entries(
+-        inResolved source: Swift.String,
+-        document: Swift.String = "Package.resolved"
+-    ) -> [Entry] {
+-        let json: JSON
+-        do throws(JSON.Error) {
+-            json = try JSON.parse(source)
+-        } catch {
+-            return []
+-        }
+-        guard let pins = json["pins"].array else { return [] }
+-        return pins.compactMap { pin in
+-            Package.Manifest.Dependency.Location(Swift.String(pin["location"])).map {
+-                Entry(url: $0, document: document, source: .pin)
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift b/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift
+index b644f7b..befc040 100644
+--- a/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift	
++++ b/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift	
+@@ -1,4 +1,87 @@
++private import JSON
++
+ extension Package.Manifest.Identity {
+ 
+     public enum Conflict {}
+ }
++
++extension Package.Manifest.Identity.Conflict {
++
++    public static func isRootManifest(_ name: Swift.String) -> Swift.Bool {
++        guard name.hasPrefix("Package"), name.hasSuffix(".swift") else { return false }
++        let middle = name.dropFirst("Package".count).dropLast(".swift".count)
++        if middle.isEmpty { return true }
++        guard middle.hasPrefix("@swift-") else { return false }
++        let version = middle.dropFirst("@swift-".count)
++        return !version.isEmpty && version.allSatisfy { $0.isNumber || $0 == "." }
++    }
++
++    public static func entries(
++        in manifest: Swift.String,
++        document: Swift.String
++    ) -> [Entry] {
++        Package.Manifest.Clause.all(in: manifest).compactMap { clause in
++            clause.declaredURL.map {
++                Entry(url: $0, document: document, source: .manifest)
++            }
++        }
++    }
++
++    public static func findings(in entries: [Entry]) -> [Finding] {
++        let grouped = Swift.Dictionary(grouping: entries, by: \.identity)
++        return grouped.keys.sorted().compactMap { identity in
++            guard let observed = grouped[identity] else { return nil }
++            let locations = Swift.Dictionary(grouping: observed, by: \.location)
++            guard locations.count > 1 else { return nil }
++            let manifestLocations = locations.values.filter { entries in
++                entries.contains { $0.source == .manifest }
++            }
++            let disposition: Disposition = manifestLocations.count > 1 ? .fatal : .stalePin
++            let ordered = observed.sorted {
++                ($0.location, $0.document) < ($1.location, $1.document)
++            }
++            return Finding(identity: identity, entries: ordered, disposition: disposition)
++        }
++    }
++
++    public static func canonical(_ url: Package.Manifest.Dependency.Location) -> Swift.String {
++        var location = url.text.lowercased()
++
++        if let scheme = location.firstIndex(of: ":"),
++            location[location.index(after: scheme)...].hasPrefix("//")
++        {
++            location = Swift.String(location[location.index(scheme, offsetBy: 3)...])
++        } else if let at = location.firstIndex(of: "@"),
++            let colon = location[location.index(after: at)...].firstIndex(of: ":")
++        {
++            let host = location[location.index(after: at)..<colon]
++            let path = location[location.index(after: colon)...]
++            location = "\(host)/\(path)"
++        }
++
++        while location.last == "/" { location.removeLast() }
++        if location.hasSuffix(".git") { location.removeLast(4) }
++        return location
++    }
++}
++
++extension Package.Manifest.Identity.Conflict {
++
++    public static func entries(
++        inResolved source: Swift.String,
++        document: Swift.String = "Package.resolved"
++    ) -> [Entry] {
++        let json: JSON
++        do throws(JSON.Error) {
++            json = try JSON.parse(source)
++        } catch {
++            return []
++        }
++        guard let pins = json["pins"].array else { return [] }
++        return pins.compactMap { pin in
++            Package.Manifest.Dependency.Location(Swift.String(pin["location"])).map {
++                Entry(url: $0, document: document, source: .pin)
++            }
++        }
++    }
++}
+diff --git a/Sources/Package Manager/Package.Manifest.Source+Code.swift b/Sources/Package Manager/Package.Manifest.Source+Code.swift
+deleted file mode 100644
+index 4993fa7..0000000
+--- a/Sources/Package Manager/Package.Manifest.Source+Code.swift	
++++ /dev/null
+@@ -1,66 +0,0 @@
+-extension Package.Manifest.Source {
+-
+-    public static func code(in source: Swift.String) -> Swift.String {
+-        var bytes = [Swift.UInt8](source.utf8)
+-        let slash = Swift.UInt8(ascii: "/" as Swift.Unicode.Scalar)
+-        let star = Swift.UInt8(ascii: "*" as Swift.Unicode.Scalar)
+-        let quote = Swift.UInt8(ascii: "\"" as Swift.Unicode.Scalar)
+-        let backslash = Swift.UInt8(ascii: "\\" as Swift.Unicode.Scalar)
+-        let newline = Swift.UInt8(ascii: "\n" as Swift.Unicode.Scalar)
+-        let space = Swift.UInt8(ascii: " " as Swift.Unicode.Scalar)
+-
+-        var index = 0
+-        var insideString = false
+-        var escaped = false
+-        var blockDepth = 0
+-        while index < bytes.count {
+-            if blockDepth > 0 {
+-                if index + 1 < bytes.count, bytes[index] == slash, bytes[index + 1] == star {
+-                    bytes[index] = space
+-                    bytes[index + 1] = space
+-                    blockDepth += 1
+-                    index += 2
+-                } else if index + 1 < bytes.count, bytes[index] == star,
+-                    bytes[index + 1] == slash
+-                {
+-                    bytes[index] = space
+-                    bytes[index + 1] = space
+-                    blockDepth -= 1
+-                    index += 2
+-                } else {
+-                    if bytes[index] != newline { bytes[index] = space }
+-                    index += 1
+-                }
+-            } else if insideString {
+-                if escaped {
+-                    escaped = false
+-                } else if bytes[index] == backslash {
+-                    escaped = true
+-                } else if bytes[index] == quote {
+-                    insideString = false
+-                }
+-                index += 1
+-            } else if bytes[index] == quote {
+-                insideString = true
+-                index += 1
+-            } else if index + 1 < bytes.count, bytes[index] == slash,
+-                bytes[index + 1] == slash
+-            {
+-                while index < bytes.count, bytes[index] != newline {
+-                    bytes[index] = space
+-                    index += 1
+-                }
+-            } else if index + 1 < bytes.count, bytes[index] == slash,
+-                bytes[index + 1] == star
+-            {
+-                bytes[index] = space
+-                bytes[index + 1] = space
+-                blockDepth = 1
+-                index += 2
+-            } else {
+-                index += 1
+-            }
+-        }
+-        return Swift.String(decoding: bytes, as: Swift.UTF8.self)
+-    }
+-}
+diff --git a/Sources/Package Manager/Package.Manifest.Source.swift b/Sources/Package Manager/Package.Manifest.Source.swift
+index a8d9042..380e0dd 100644
+--- a/Sources/Package Manager/Package.Manifest.Source.swift	
++++ b/Sources/Package Manager/Package.Manifest.Source.swift	
+@@ -2,3 +2,70 @@ extension Package.Manifest {
+ 
+     public enum Source {}
+ }
++
++extension Package.Manifest.Source {
++
++    public static func code(in source: Swift.String) -> Swift.String {
++        var bytes = [Swift.UInt8](source.utf8)
++        let slash = Swift.UInt8(ascii: "/" as Swift.Unicode.Scalar)
++        let star = Swift.UInt8(ascii: "*" as Swift.Unicode.Scalar)
++        let quote = Swift.UInt8(ascii: "\"" as Swift.Unicode.Scalar)
++        let backslash = Swift.UInt8(ascii: "\\" as Swift.Unicode.Scalar)
++        let newline = Swift.UInt8(ascii: "\n" as Swift.Unicode.Scalar)
++        let space = Swift.UInt8(ascii: " " as Swift.Unicode.Scalar)
++
++        var index = 0
++        var insideString = false
++        var escaped = false
++        var blockDepth = 0
++        while index < bytes.count {
++            if blockDepth > 0 {
++                if index + 1 < bytes.count, bytes[index] == slash, bytes[index + 1] == star {
++                    bytes[index] = space
++                    bytes[index + 1] = space
++                    blockDepth += 1
++                    index += 2
++                } else if index + 1 < bytes.count, bytes[index] == star,
++                    bytes[index + 1] == slash
++                {
++                    bytes[index] = space
++                    bytes[index + 1] = space
++                    blockDepth -= 1
++                    index += 2
++                } else {
++                    if bytes[index] != newline { bytes[index] = space }
++                    index += 1
++                }
++            } else if insideString {
++                if escaped {
++                    escaped = false
++                } else if bytes[index] == backslash {
++                    escaped = true
++                } else if bytes[index] == quote {
++                    insideString = false
++                }
++                index += 1
++            } else if bytes[index] == quote {
++                insideString = true
++                index += 1
++            } else if index + 1 < bytes.count, bytes[index] == slash,
++                bytes[index + 1] == slash
++            {
++                while index < bytes.count, bytes[index] != newline {
++                    bytes[index] = space
++                    index += 1
++                }
++            } else if index + 1 < bytes.count, bytes[index] == slash,
++                bytes[index + 1] == star
++            {
++                bytes[index] = space
++                bytes[index + 1] = space
++                blockDepth = 1
++                index += 2
++            } else {
++                index += 1
++            }
++        }
++        return Swift.String(decoding: bytes, as: Swift.UTF8.self)
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,1592 @@
+From 39a158e485c3c61dd5739b888d7dc6de7c933c5e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:30 +0000
+Subject: [PATCH 5/5] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ Sources/Graph/Graph.Default.list.swift        |   8 -
+ Sources/Graph/Graph.Default.swift             |   8 +
+ Sources/Graph/Graph.Index.swift               |   7 -
+ Sources/Graph/Graph.Node.swift                |   7 -
+ .../Graph.Sequential.Analyze.Cycles.swift     |  22 --
+ .../Graph/Graph.Sequential.Analyze.Dead.swift |  67 ----
+ .../Graph.Sequential.Analyze.Reachable.swift  |  70 ----
+ .../Graph/Graph.Sequential.Analyze.SCC.swift  | 123 ------
+ ...Sequential.Analyze.TransitiveClosure.swift |  72 ----
+ Sources/Graph/Graph.Sequential.Analyze.swift  | 359 ++++++++++++++++++
+ .../Graph/Graph.Sequential.Path.Exists.swift  |  54 ---
+ .../Graph.Sequential.Path.Shortest.swift      |  89 -----
+ Sources/Graph/Graph.Sequential.Path.swift     | 145 +++++++
+ .../Graph.Sequential.Reverse.Graph.swift      |  53 ---
+ .../Graph.Sequential.Reverse.Reachable.swift  |  60 ---
+ Sources/Graph/Graph.Sequential.Reverse.swift  | 115 ++++++
+ .../Graph.Sequential.Transform.Payloads.swift |  18 -
+ .../Graph/Graph.Sequential.Transform.swift    |  19 +
+ ...ph.Sequential.Traverse.First.breadth.swift |  21 -
+ ...raph.Sequential.Traverse.First.depth.swift |  22 --
+ .../Graph.Sequential.Traverse.First.swift     |  45 +++
+ Sources/Graph/Graph.swift                     |  11 +
+ 22 files changed, 702 insertions(+), 693 deletions(-)
+ delete mode 100644 Sources/Graph/Graph.Default.list.swift
+ delete mode 100644 Sources/Graph/Graph.Index.swift
+ delete mode 100644 Sources/Graph/Graph.Node.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Analyze.Cycles.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Analyze.Dead.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Analyze.Reachable.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Analyze.SCC.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Analyze.TransitiveClosure.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Path.Exists.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Path.Shortest.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Reverse.Graph.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Reverse.Reachable.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Transform.Payloads.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Traverse.First.breadth.swift
+ delete mode 100644 Sources/Graph/Graph.Sequential.Traverse.First.depth.swift
+
+diff --git a/Sources/Graph/Graph.Default.list.swift b/Sources/Graph/Graph.Default.list.swift
+deleted file mode 100644
+index 466f084..0000000
+--- a/Sources/Graph/Graph.Default.list.swift
++++ /dev/null
+@@ -1,8 +0,0 @@
+-internal import Array
+-extension Graph.Default {
+-
+-    @inlinable
+-    public static func list<Tag: ~Copyable & ~Escapable>() -> Value<Graph.Adjacency.List<Tag>> {
+-        Value(Graph.Adjacency.List(adjacent: []))
+-    }
+-}
+diff --git a/Sources/Graph/Graph.Default.swift b/Sources/Graph/Graph.Default.swift
+index c67bd65..0572763 100644
+--- a/Sources/Graph/Graph.Default.swift
++++ b/Sources/Graph/Graph.Default.swift
+@@ -3,3 +3,11 @@ extension Graph {
+ 
+     public enum Default {}
+ }
++
++extension Graph.Default {
++
++    @inlinable
++    public static func list<Tag: ~Copyable & ~Escapable>() -> Value<Graph.Adjacency.List<Tag>> {
++        Value(Graph.Adjacency.List(adjacent: []))
++    }
++}
+diff --git a/Sources/Graph/Graph.Index.swift b/Sources/Graph/Graph.Index.swift
+deleted file mode 100644
+index 3c46236..0000000
+--- a/Sources/Graph/Graph.Index.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-public import Array
+-public import Index
+-
+-extension Graph {
+-
+-    public typealias Index<Tag: ~Copyable & ~Escapable> = Index::Index<Tag>
+-}
+diff --git a/Sources/Graph/Graph.Node.swift b/Sources/Graph/Graph.Node.swift
+deleted file mode 100644
+index 3b3445d..0000000
+--- a/Sources/Graph/Graph.Node.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-public import Array
+-internal import Index
+-
+-extension Graph {
+-
+-    public typealias Node<Tag: ~Copyable & ~Escapable> = Index<Tag>
+-}
+diff --git a/Sources/Graph/Graph.Sequential.Analyze.Cycles.swift b/Sources/Graph/Graph.Sequential.Analyze.Cycles.swift
+deleted file mode 100644
+index db3cdfb..0000000
+--- a/Sources/Graph/Graph.Sequential.Analyze.Cycles.swift
++++ /dev/null
+@@ -1,22 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Tagged
+-
+-    extension Graph.Sequential.Analyze {
+-
+-        @inlinable
+-        public func hasCycles(from roots: some Swift::Sequence<Graph.Node<Tag>>) -> Bool {
+-            graph.traverse.topological(from: roots, using: extract).hasCycles
+-        }
+-
+-        @inlinable
+-        public func hasCycles(from root: Graph.Node<Tag>) -> Bool {
+-            hasCycles(from: Swift::CollectionOfOne(root))
+-        }
+-
+-        @inlinable
+-        public func hasCycles() -> Bool {
+-            graph.traverse.topological(using: extract).hasCycles
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Analyze.Dead.swift b/Sources/Graph/Graph.Sequential.Analyze.Dead.swift
+deleted file mode 100644
+index 85bf0e3..0000000
+--- a/Sources/Graph/Graph.Sequential.Analyze.Dead.swift
++++ /dev/null
+@@ -1,67 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Primitive
+-    public import Collection
+-    public import Hash_Indexed_Primitive
+-    public import Hash_Table_Primitive
+-    public import Memory
+-    public import Memory_Allocator
+-    internal import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    internal import Set
+-    public import Set_Ordered
+-    public import Set_Ordered_Primitive
+-    public import Stack
+-    public import Storage
+-    public import Tagged
+-    internal import Vector
+-
+-    extension Graph.Sequential.Analyze {
+-
+-        @inlinable
+-        public func dead(
+-            from roots: some Swift::Sequence<Graph.Node<Tag>>
+-        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
+-            let count = graph.count
+-            var result = __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>>()
+-
+-            guard count > .zero else { return result }
+-
+-            let visited = Bit.Vector(capacity: count.retag(Bit.self))
+-            var stack = Stack<Graph.Node<Tag>>()
+-
+-            for root in roots {
+-                let idx = root.retag(Bit.self)
+-                if root < count && !visited[idx] {
+-                    stack.push(root)
+-                }
+-            }
+-
+-            while let node = stack.pop() {
+-                let idx = node.retag(Bit.self)
+-                guard !visited[idx] else { continue }
+-                visited[idx] = true
+-
+-                let payload = graph.storage[node]
+-                for adjacent in extract.adjacent(payload) {
+-                    let adjIdx = adjacent.retag(Bit.self)
+-                    if !visited[adjIdx] {
+-                        stack.push(adjacent)
+-                    }
+-                }
+-            }
+-
+-            for node in graph.nodes {
+-                let idx = node.retag(Bit.self)
+-                if !visited[idx] {
+-                    result.insert(node)
+-                }
+-            }
+-
+-            return result
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Analyze.Reachable.swift b/Sources/Graph/Graph.Sequential.Analyze.Reachable.swift
+deleted file mode 100644
+index 9eb0630..0000000
+--- a/Sources/Graph/Graph.Sequential.Analyze.Reachable.swift
++++ /dev/null
+@@ -1,70 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Primitive
+-    public import Collection
+-    public import Hash_Indexed_Primitive
+-    public import Hash_Table_Primitive
+-    public import Memory
+-    public import Memory_Allocator
+-    internal import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    internal import Set
+-    public import Set_Ordered
+-    public import Set_Ordered_Primitive
+-    public import Stack
+-    public import Storage
+-    public import Tagged
+-    import Vector
+-
+-    extension Graph.Sequential.Analyze {
+-
+-        @inlinable
+-        public func reachable(
+-            from roots: some Swift::Sequence<Graph.Node<Tag>>
+-        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
+-            let count = graph.count
+-
+-            var result = __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>>(
+-                minimumCapacity: count.retag(Graph.Node<Tag>.self)
+-            )
+-            guard count > .zero else { return result }
+-
+-            let visited = Bit.Vector(capacity: count.retag(Bit.self))
+-            var stack = Stack<Graph.Node<Tag>>()
+-
+-            for root in roots {
+-                let idx = root.retag(Bit.self)
+-                if root < count && !visited[idx] {
+-                    stack.push(root)
+-                }
+-            }
+-
+-            while let node = stack.pop() {
+-                let idx = node.retag(Bit.self)
+-                guard !visited[idx] else { continue }
+-                visited[idx] = true
+-                result.insert(node)
+-
+-                let payload = graph.storage[node]
+-                for adjacent in extract.adjacent(payload) {
+-                    let adjIdx = adjacent.retag(Bit.self)
+-                    if !visited[adjIdx] {
+-                        stack.push(adjacent)
+-                    }
+-                }
+-            }
+-
+-            return result
+-        }
+-
+-        @inlinable
+-        public func reachable(
+-            from root: Graph.Node<Tag>
+-        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
+-            reachable(from: Swift::CollectionOfOne(root))
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Analyze.SCC.swift b/Sources/Graph/Graph.Sequential.Analyze.SCC.swift
+deleted file mode 100644
+index 02f825a..0000000
+--- a/Sources/Graph/Graph.Sequential.Analyze.SCC.swift
++++ /dev/null
+@@ -1,123 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Bounded_Primitive
+-    public import Buffer_Linear_Primitive
+-    public import Collection
+-    public import Fixed
+-    public import Memory
+-    public import Memory_Allocator
+-    internal import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    public import Stack
+-    public import Storage
+-    public import Tagged
+-    internal import Vector
+-
+-    extension Graph.Sequential.Analyze {
+-
+-        @inlinable
+-        public func scc(from roots: some Swift::Sequence<Graph.Node<Tag>>) -> [[Graph.Node<Tag>]] {
+-            let count = graph.count
+-            guard count > .zero else { return [] }
+-
+-            var nodeIndex = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Int>>.Linear.Bounded>(repeating: -1, count: count.retag(Int.self))
+-            var lowLink = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Int>>.Linear.Bounded>(repeating: 0, count: count.retag(Int.self))
+-            let onStack = Bit.Vector(capacity: count.retag(Bit.self))
+-
+-            var index = 0
+-            var sccStack = Stack<Graph.Node<Tag>>()
+-            var components = [[Graph.Node<Tag>]]()
+-
+-            var callStack: [(node: Graph.Node<Tag>, adjacents: [Graph.Node<Tag>], adjIndex: Int, phase: Bool)] = []
+-
+-            for root in roots {
+-                guard root < count else { continue }
+-                if nodeIndex[root.retag(Int.self)] != -1 { continue }
+-
+-                let rootPayload = graph.storage[root]
+-                let rootAdjacents = Swift::Array(extract.adjacent(rootPayload))
+-                callStack.append((root, rootAdjacents, 0, true))
+-
+-                while !callStack.isEmpty {
+-                    let frameIndex = callStack.endIndex - 1
+-                    var frame = callStack[frameIndex]
+-                    let node = frame.node
+-
+-                    if frame.phase {
+-
+-                        nodeIndex[node.retag(Int.self)] = index
+-                        lowLink[node.retag(Int.self)] = index
+-                        index += 1
+-                        sccStack.push(frame.node)
+-                        onStack[frame.node.retag(Bit.self)] = true
+-
+-                        callStack[frameIndex].phase = false
+-                        frame.phase = false
+-                    }
+-
+-                    var pushedChild = false
+-                    while frame.adjIndex < frame.adjacents.count {
+-                        let adjacent = frame.adjacents[frame.adjIndex]
+-                        callStack[frameIndex].adjIndex += 1
+-                        frame.adjIndex += 1
+-
+-                        if nodeIndex[adjacent.retag(Int.self)] == -1 {
+-
+-                            let adjPayload = graph.storage[adjacent]
+-                            let adjAdjacents = Swift::Array(extract.adjacent(adjPayload))
+-                            callStack.append((adjacent, adjAdjacents, 0, true))
+-                            pushedChild = true
+-                            break
+-                        } else if onStack[adjacent.retag(Bit.self)] {
+-
+-                            lowLink[node.retag(Int.self)] = min(
+-                                lowLink[node.retag(Int.self)],
+-                                nodeIndex[adjacent.retag(Int.self)]
+-                            )
+-                        }
+-
+-                    }
+-
+-                    if pushedChild {
+-                        continue
+-                    }
+-
+-                    callStack.removeLast()
+-
+-                    if lowLink[node.retag(Int.self)] == nodeIndex[node.retag(Int.self)] {
+-
+-                        var component = [Graph.Node<Tag>]()
+-                        repeat {
+-                            guard let w = sccStack.pop() else { break }
+-                            onStack[w.retag(Bit.self)] = false
+-                            component.append(w)
+-                        } while component.last != frame.node
+-                        components.append(component)
+-                    }
+-
+-                    if let parent = callStack.last?.node {
+-                        lowLink[parent.retag(Int.self)] = min(
+-                            lowLink[parent.retag(Int.self)],
+-                            lowLink[node.retag(Int.self)]
+-                        )
+-                    }
+-                }
+-            }
+-
+-            return components
+-        }
+-
+-        @inlinable
+-        public func scc(from root: Graph.Node<Tag>) -> [[Graph.Node<Tag>]] {
+-            scc(from: Swift::CollectionOfOne(root))
+-        }
+-
+-        @inlinable
+-        public func scc() -> [[Graph.Node<Tag>]] {
+-            scc(from: graph.nodes)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Analyze.TransitiveClosure.swift b/Sources/Graph/Graph.Sequential.Analyze.TransitiveClosure.swift
+deleted file mode 100644
+index 3aa0f00..0000000
+--- a/Sources/Graph/Graph.Sequential.Analyze.TransitiveClosure.swift
++++ /dev/null
+@@ -1,72 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Bounded_Primitive
+-    public import Buffer_Linear_Primitive
+-    public import Collection
+-    public import Fixed
+-    public import Memory
+-    public import Memory_Allocator
+-    internal import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    public import Stack
+-    public import Storage
+-    public import Tagged
+-    internal import Vector
+-
+-    extension Graph.Sequential.Analyze {
+-
+-        @inlinable
+-        public func transitiveClosure() -> Graph.Sequential<Tag, Graph.Adjacency.List<Tag>> {
+-            let count = graph.count
+-            guard count > .zero else {
+-                let builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder()
+-                return builder.build()
+-            }
+-
+-            var closureAdjacent = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<[Graph.Node<Tag>]>>.Linear.Bounded>(
+-                repeating: [],
+-                count: count.retag([Graph.Node<Tag>].self)
+-            )
+-
+-            for source in graph.nodes {
+-                let visited = Bit.Vector(capacity: count.retag(Bit.self))
+-                var stack = Stack<Graph.Node<Tag>>()
+-
+-                let sourcePayload = graph.storage[source]
+-                for adjacent in extract.adjacent(sourcePayload) {
+-                    stack.push(adjacent)
+-                }
+-
+-                while let node = stack.pop() {
+-                    let idx = node.retag(Bit.self)
+-                    guard !visited[idx] else { continue }
+-                    visited[idx] = true
+-
+-                    closureAdjacent[source.retag([Graph.Node<Tag>].self)].append(node)
+-
+-                    let payload = graph.storage[node]
+-                    for adjacent in extract.adjacent(payload) {
+-                        let adjIdx = adjacent.retag(Bit.self)
+-                        if !visited[adjIdx] {
+-                            stack.push(adjacent)
+-                        }
+-                    }
+-                }
+-            }
+-
+-            var builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder(capacity: count)
+-            for source in graph.nodes {
+-                _ = builder.allocate(
+-                    Graph.Adjacency.List(
+-                        adjacent: closureAdjacent[source.retag([Graph.Node<Tag>].self)]
+-                    )
+-                )
+-            }
+-
+-            return builder.build()
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Analyze.swift b/Sources/Graph/Graph.Sequential.Analyze.swift
+index c90ce6f..28d673f 100644
+--- a/Sources/Graph/Graph.Sequential.Analyze.swift
++++ b/Sources/Graph/Graph.Sequential.Analyze.swift
+@@ -37,3 +37,362 @@
+         }
+     }
+ #endif
++
++#if Algorithms
++    public import Array
++    public import Tagged
++
++    extension Graph.Sequential.Analyze {
++
++        @inlinable
++        public func hasCycles(from roots: some Swift::Sequence<Graph.Node<Tag>>) -> Bool {
++            graph.traverse.topological(from: roots, using: extract).hasCycles
++        }
++
++        @inlinable
++        public func hasCycles(from root: Graph.Node<Tag>) -> Bool {
++            hasCycles(from: Swift::CollectionOfOne(root))
++        }
++
++        @inlinable
++        public func hasCycles() -> Bool {
++            graph.traverse.topological(using: extract).hasCycles
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Primitive
++    public import Collection
++    public import Hash_Indexed_Primitive
++    public import Hash_Table_Primitive
++    public import Memory
++    public import Memory_Allocator
++    internal import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    internal import Set
++    public import Set_Ordered
++    public import Set_Ordered_Primitive
++    public import Stack
++    public import Storage
++    public import Tagged
++    internal import Vector
++
++    extension Graph.Sequential.Analyze {
++
++        @inlinable
++        public func dead(
++            from roots: some Swift::Sequence<Graph.Node<Tag>>
++        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
++            let count = graph.count
++            var result = __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>>()
++
++            guard count > .zero else { return result }
++
++            let visited = Bit.Vector(capacity: count.retag(Bit.self))
++            var stack = Stack<Graph.Node<Tag>>()
++
++            for root in roots {
++                let idx = root.retag(Bit.self)
++                if root < count && !visited[idx] {
++                    stack.push(root)
++                }
++            }
++
++            while let node = stack.pop() {
++                let idx = node.retag(Bit.self)
++                guard !visited[idx] else { continue }
++                visited[idx] = true
++
++                let payload = graph.storage[node]
++                for adjacent in extract.adjacent(payload) {
++                    let adjIdx = adjacent.retag(Bit.self)
++                    if !visited[adjIdx] {
++                        stack.push(adjacent)
++                    }
++                }
++            }
++
++            for node in graph.nodes {
++                let idx = node.retag(Bit.self)
++                if !visited[idx] {
++                    result.insert(node)
++                }
++            }
++
++            return result
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Primitive
++    public import Collection
++    public import Hash_Indexed_Primitive
++    public import Hash_Table_Primitive
++    public import Memory
++    public import Memory_Allocator
++    internal import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    internal import Set
++    public import Set_Ordered
++    public import Set_Ordered_Primitive
++    public import Stack
++    public import Storage
++    public import Tagged
++    import Vector
++
++    extension Graph.Sequential.Analyze {
++
++        @inlinable
++        public func reachable(
++            from roots: some Swift::Sequence<Graph.Node<Tag>>
++        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
++            let count = graph.count
++
++            var result = __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>>(
++                minimumCapacity: count.retag(Graph.Node<Tag>.self)
++            )
++            guard count > .zero else { return result }
++
++            let visited = Bit.Vector(capacity: count.retag(Bit.self))
++            var stack = Stack<Graph.Node<Tag>>()
++
++            for root in roots {
++                let idx = root.retag(Bit.self)
++                if root < count && !visited[idx] {
++                    stack.push(root)
++                }
++            }
++
++            while let node = stack.pop() {
++                let idx = node.retag(Bit.self)
++                guard !visited[idx] else { continue }
++                visited[idx] = true
++                result.insert(node)
++
++                let payload = graph.storage[node]
++                for adjacent in extract.adjacent(payload) {
++                    let adjIdx = adjacent.retag(Bit.self)
++                    if !visited[adjIdx] {
++                        stack.push(adjacent)
++                    }
++                }
++            }
++
++            return result
++        }
++
++        @inlinable
++        public func reachable(
++            from root: Graph.Node<Tag>
++        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
++            reachable(from: Swift::CollectionOfOne(root))
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Bounded_Primitive
++    public import Buffer_Linear_Primitive
++    public import Collection
++    public import Fixed
++    public import Memory
++    public import Memory_Allocator
++    internal import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    public import Stack
++    public import Storage
++    public import Tagged
++    internal import Vector
++
++    extension Graph.Sequential.Analyze {
++
++        @inlinable
++        public func scc(from roots: some Swift::Sequence<Graph.Node<Tag>>) -> [[Graph.Node<Tag>]] {
++            let count = graph.count
++            guard count > .zero else { return [] }
++
++            var nodeIndex = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Int>>.Linear.Bounded>(repeating: -1, count: count.retag(Int.self))
++            var lowLink = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Int>>.Linear.Bounded>(repeating: 0, count: count.retag(Int.self))
++            let onStack = Bit.Vector(capacity: count.retag(Bit.self))
++
++            var index = 0
++            var sccStack = Stack<Graph.Node<Tag>>()
++            var components = [[Graph.Node<Tag>]]()
++
++            var callStack: [(node: Graph.Node<Tag>, adjacents: [Graph.Node<Tag>], adjIndex: Int, phase: Bool)] = []
++
++            for root in roots {
++                guard root < count else { continue }
++                if nodeIndex[root.retag(Int.self)] != -1 { continue }
++
++                let rootPayload = graph.storage[root]
++                let rootAdjacents = Swift::Array(extract.adjacent(rootPayload))
++                callStack.append((root, rootAdjacents, 0, true))
++
++                while !callStack.isEmpty {
++                    let frameIndex = callStack.endIndex - 1
++                    var frame = callStack[frameIndex]
++                    let node = frame.node
++
++                    if frame.phase {
++
++                        nodeIndex[node.retag(Int.self)] = index
++                        lowLink[node.retag(Int.self)] = index
++                        index += 1
++                        sccStack.push(frame.node)
++                        onStack[frame.node.retag(Bit.self)] = true
++
++                        callStack[frameIndex].phase = false
++                        frame.phase = false
++                    }
++
++                    var pushedChild = false
++                    while frame.adjIndex < frame.adjacents.count {
++                        let adjacent = frame.adjacents[frame.adjIndex]
++                        callStack[frameIndex].adjIndex += 1
++                        frame.adjIndex += 1
++
++                        if nodeIndex[adjacent.retag(Int.self)] == -1 {
++
++                            let adjPayload = graph.storage[adjacent]
++                            let adjAdjacents = Swift::Array(extract.adjacent(adjPayload))
++                            callStack.append((adjacent, adjAdjacents, 0, true))
++                            pushedChild = true
++                            break
++                        } else if onStack[adjacent.retag(Bit.self)] {
++
++                            lowLink[node.retag(Int.self)] = min(
++                                lowLink[node.retag(Int.self)],
++                                nodeIndex[adjacent.retag(Int.self)]
++                            )
++                        }
++
++                    }
++
++                    if pushedChild {
++                        continue
++                    }
++
++                    callStack.removeLast()
++
++                    if lowLink[node.retag(Int.self)] == nodeIndex[node.retag(Int.self)] {
++
++                        var component = [Graph.Node<Tag>]()
++                        repeat {
++                            guard let w = sccStack.pop() else { break }
++                            onStack[w.retag(Bit.self)] = false
++                            component.append(w)
++                        } while component.last != frame.node
++                        components.append(component)
++                    }
++
++                    if let parent = callStack.last?.node {
++                        lowLink[parent.retag(Int.self)] = min(
++                            lowLink[parent.retag(Int.self)],
++                            lowLink[node.retag(Int.self)]
++                        )
++                    }
++                }
++            }
++
++            return components
++        }
++
++        @inlinable
++        public func scc(from root: Graph.Node<Tag>) -> [[Graph.Node<Tag>]] {
++            scc(from: Swift::CollectionOfOne(root))
++        }
++
++        @inlinable
++        public func scc() -> [[Graph.Node<Tag>]] {
++            scc(from: graph.nodes)
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Bounded_Primitive
++    public import Buffer_Linear_Primitive
++    public import Collection
++    public import Fixed
++    public import Memory
++    public import Memory_Allocator
++    internal import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    public import Stack
++    public import Storage
++    public import Tagged
++    internal import Vector
++
++    extension Graph.Sequential.Analyze {
++
++        @inlinable
++        public func transitiveClosure() -> Graph.Sequential<Tag, Graph.Adjacency.List<Tag>> {
++            let count = graph.count
++            guard count > .zero else {
++                let builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder()
++                return builder.build()
++            }
++
++            var closureAdjacent = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<[Graph.Node<Tag>]>>.Linear.Bounded>(
++                repeating: [],
++                count: count.retag([Graph.Node<Tag>].self)
++            )
++
++            for source in graph.nodes {
++                let visited = Bit.Vector(capacity: count.retag(Bit.self))
++                var stack = Stack<Graph.Node<Tag>>()
++
++                let sourcePayload = graph.storage[source]
++                for adjacent in extract.adjacent(sourcePayload) {
++                    stack.push(adjacent)
++                }
++
++                while let node = stack.pop() {
++                    let idx = node.retag(Bit.self)
++                    guard !visited[idx] else { continue }
++                    visited[idx] = true
++
++                    closureAdjacent[source.retag([Graph.Node<Tag>].self)].append(node)
++
++                    let payload = graph.storage[node]
++                    for adjacent in extract.adjacent(payload) {
++                        let adjIdx = adjacent.retag(Bit.self)
++                        if !visited[adjIdx] {
++                            stack.push(adjacent)
++                        }
++                    }
++                }
++            }
++
++            var builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder(capacity: count)
++            for source in graph.nodes {
++                _ = builder.allocate(
++                    Graph.Adjacency.List(
++                        adjacent: closureAdjacent[source.retag([Graph.Node<Tag>].self)]
++                    )
++                )
++            }
++
++            return builder.build()
++        }
++    }
++#endif
+diff --git a/Sources/Graph/Graph.Sequential.Path.Exists.swift b/Sources/Graph/Graph.Sequential.Path.Exists.swift
+deleted file mode 100644
+index 8d429fa..0000000
+--- a/Sources/Graph/Graph.Sequential.Path.Exists.swift
++++ /dev/null
+@@ -1,54 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Primitive
+-    public import Buffer_Ring_Primitive
+-    public import Collection
+-    public import Memory
+-    public import Memory_Allocator
+-    public import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    public import Queue
+-    public import Queue_Primitive
+-    public import Storage
+-    public import Tagged
+-    import Vector
+-
+-    extension Graph.Sequential.Path {
+-
+-        @inlinable
+-        public func exists(from source: Graph.Node<Tag>, to target: Graph.Node<Tag>) -> Bool {
+-            let count = graph.count
+-            guard count > .zero else { return false }
+-
+-            guard source < count else { return false }
+-            guard target < count else { return false }
+-
+-            if source == target { return true }
+-
+-            let visited = Bit.Vector(capacity: count.retag(Bit.self))
+-            var queue = __Queue<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Ring>()
+-
+-            visited[source.retag(Bit.self)] = true
+-            queue.enqueue(source)
+-
+-            while let node = queue.dequeue() {
+-                let payload = graph.storage[node]
+-                for adjacent in extract.adjacent(payload) {
+-                    if adjacent == target {
+-                        return true
+-                    }
+-                    let adjIdx = adjacent.retag(Bit.self)
+-                    if !visited[adjIdx] {
+-                        visited[adjIdx] = true
+-                        queue.enqueue(adjacent)
+-                    }
+-                }
+-            }
+-
+-            return false
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Path.Shortest.swift b/Sources/Graph/Graph.Sequential.Path.Shortest.swift
+deleted file mode 100644
+index 09476c0..0000000
+--- a/Sources/Graph/Graph.Sequential.Path.Shortest.swift
++++ /dev/null
+@@ -1,89 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Bounded_Primitive
+-    public import Buffer_Linear_Primitive
+-    public import Buffer_Ring_Primitive
+-    public import Collection
+-    public import Fixed
+-    public import Memory
+-    public import Memory_Allocator
+-    public import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    public import Queue
+-    public import Queue_Primitive
+-    public import Storage
+-    public import Tagged
+-    import Vector
+-
+-    extension Graph.Sequential.Path {
+-
+-        @inlinable
+-        public func shortest(
+-            from source: Graph.Node<Tag>,
+-            to target: Graph.Node<Tag>
+-        ) -> [Graph.Node<Tag>]? {
+-            let count = graph.count
+-            guard count > .zero else { return nil }
+-
+-            guard source < count else { return nil }
+-            guard target < count else { return nil }
+-
+-            if source == target { return [source] }
+-
+-            let visited = Bit.Vector(capacity: count.retag(Bit.self))
+-            var predecessors = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>?>>.Linear.Bounded>(
+-                repeating: nil,
+-                count: count.retag((Graph.Node<Tag>?).self)
+-            )
+-            var queue = __Queue<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Ring>()
+-
+-            visited[source.retag(Bit.self)] = true
+-            queue.enqueue(source)
+-
+-            while let node = queue.dequeue() {
+-                let payload = graph.storage[node]
+-                for adjacent in extract.adjacent(payload) {
+-                    let adjIdx = adjacent.retag(Bit.self)
+-                    if !visited[adjIdx] {
+-                        visited[adjIdx] = true
+-                        predecessors[adjacent.retag((Graph.Node<Tag>?).self)] = node
+-                        queue.enqueue(adjacent)
+-
+-                        if adjacent == target {
+-
+-                            return reconstructPath(
+-                                to: target,
+-                                predecessors: predecessors,
+-                                source: source
+-                            )
+-                        }
+-                    }
+-                }
+-            }
+-
+-            return nil
+-        }
+-
+-        @usableFromInline
+-        func reconstructPath(
+-            to target: Graph.Node<Tag>,
+-            predecessors: borrowing __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>?>>.Linear.Bounded>,
+-            source: Graph.Node<Tag>
+-        ) -> [Graph.Node<Tag>] {
+-            var path = [Graph.Node<Tag>]()
+-            var current: Graph.Node<Tag>? = target
+-
+-            while let node = current {
+-                path.append(node)
+-                if node == source { break }
+-                current = predecessors[node.retag((Graph.Node<Tag>?).self)]
+-            }
+-
+-            path.reverse()
+-            return path
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Path.swift b/Sources/Graph/Graph.Sequential.Path.swift
+index 60def08..b5ad1da 100644
+--- a/Sources/Graph/Graph.Sequential.Path.swift
++++ b/Sources/Graph/Graph.Sequential.Path.swift
+@@ -37,3 +37,148 @@
+         }
+     }
+ #endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Primitive
++    public import Buffer_Ring_Primitive
++    public import Collection
++    public import Memory
++    public import Memory_Allocator
++    public import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    public import Queue
++    public import Queue_Primitive
++    public import Storage
++    public import Tagged
++    import Vector
++
++    extension Graph.Sequential.Path {
++
++        @inlinable
++        public func exists(from source: Graph.Node<Tag>, to target: Graph.Node<Tag>) -> Bool {
++            let count = graph.count
++            guard count > .zero else { return false }
++
++            guard source < count else { return false }
++            guard target < count else { return false }
++
++            if source == target { return true }
++
++            let visited = Bit.Vector(capacity: count.retag(Bit.self))
++            var queue = __Queue<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Ring>()
++
++            visited[source.retag(Bit.self)] = true
++            queue.enqueue(source)
++
++            while let node = queue.dequeue() {
++                let payload = graph.storage[node]
++                for adjacent in extract.adjacent(payload) {
++                    if adjacent == target {
++                        return true
++                    }
++                    let adjIdx = adjacent.retag(Bit.self)
++                    if !visited[adjIdx] {
++                        visited[adjIdx] = true
++                        queue.enqueue(adjacent)
++                    }
++                }
++            }
++
++            return false
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Bounded_Primitive
++    public import Buffer_Linear_Primitive
++    public import Buffer_Ring_Primitive
++    public import Collection
++    public import Fixed
++    public import Memory
++    public import Memory_Allocator
++    public import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    public import Queue
++    public import Queue_Primitive
++    public import Storage
++    public import Tagged
++    import Vector
++
++    extension Graph.Sequential.Path {
++
++        @inlinable
++        public func shortest(
++            from source: Graph.Node<Tag>,
++            to target: Graph.Node<Tag>
++        ) -> [Graph.Node<Tag>]? {
++            let count = graph.count
++            guard count > .zero else { return nil }
++
++            guard source < count else { return nil }
++            guard target < count else { return nil }
++
++            if source == target { return [source] }
++
++            let visited = Bit.Vector(capacity: count.retag(Bit.self))
++            var predecessors = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>?>>.Linear.Bounded>(
++                repeating: nil,
++                count: count.retag((Graph.Node<Tag>?).self)
++            )
++            var queue = __Queue<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Ring>()
++
++            visited[source.retag(Bit.self)] = true
++            queue.enqueue(source)
++
++            while let node = queue.dequeue() {
++                let payload = graph.storage[node]
++                for adjacent in extract.adjacent(payload) {
++                    let adjIdx = adjacent.retag(Bit.self)
++                    if !visited[adjIdx] {
++                        visited[adjIdx] = true
++                        predecessors[adjacent.retag((Graph.Node<Tag>?).self)] = node
++                        queue.enqueue(adjacent)
++
++                        if adjacent == target {
++
++                            return reconstructPath(
++                                to: target,
++                                predecessors: predecessors,
++                                source: source
++                            )
++                        }
++                    }
++                }
++            }
++
++            return nil
++        }
++
++        @usableFromInline
++        func reconstructPath(
++            to target: Graph.Node<Tag>,
++            predecessors: borrowing __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>?>>.Linear.Bounded>,
++            source: Graph.Node<Tag>
++        ) -> [Graph.Node<Tag>] {
++            var path = [Graph.Node<Tag>]()
++            var current: Graph.Node<Tag>? = target
++
++            while let node = current {
++                path.append(node)
++                if node == source { break }
++                current = predecessors[node.retag((Graph.Node<Tag>?).self)]
++            }
++
++            path.reverse()
++            return path
++        }
++    }
++#endif
+diff --git a/Sources/Graph/Graph.Sequential.Reverse.Graph.swift b/Sources/Graph/Graph.Sequential.Reverse.Graph.swift
+deleted file mode 100644
+index 45ad0bf..0000000
+--- a/Sources/Graph/Graph.Sequential.Reverse.Graph.swift
++++ /dev/null
+@@ -1,53 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Bounded_Primitive
+-    public import Buffer_Linear_Primitive
+-    public import Collection
+-    public import Fixed
+-    public import Memory
+-    public import Memory_Allocator
+-    internal import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    public import Storage
+-    public import Tagged
+-    internal import Vector
+-
+-    extension Graph.Sequential.Reverse {
+-
+-        @inlinable
+-        public func reversed() -> Graph.Sequential<Tag, Graph.Adjacency.List<Tag>> {
+-            let count = graph.count
+-            guard count > .zero else {
+-                let builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder()
+-                return builder.build()
+-            }
+-
+-            var reversedAdjacent = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<[Graph.Node<Tag>]>>.Linear.Bounded>(
+-                repeating: [],
+-                count: count.retag([Graph.Node<Tag>].self)
+-            )
+-
+-            for source in graph.nodes {
+-                let payload = graph.storage[source]
+-
+-                for target in extract.adjacent(payload) {
+-
+-                    reversedAdjacent[target.retag([Graph.Node<Tag>].self)].append(source)
+-                }
+-            }
+-
+-            var builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder(capacity: count)
+-            for source in graph.nodes {
+-                _ = builder.allocate(
+-                    Graph.Adjacency.List(
+-                        adjacent: reversedAdjacent[source.retag([Graph.Node<Tag>].self)]
+-                    )
+-                )
+-            }
+-
+-            return builder.build()
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Reverse.Reachable.swift b/Sources/Graph/Graph.Sequential.Reverse.Reachable.swift
+deleted file mode 100644
+index c86296c..0000000
+--- a/Sources/Graph/Graph.Sequential.Reverse.Reachable.swift
++++ /dev/null
+@@ -1,60 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    public import Bit_Vector
+-    public import Buffer
+-    public import Buffer_Linear
+-    public import Buffer_Linear_Primitive
+-    public import Collection
+-    public import Hash_Indexed_Primitive
+-    public import Hash_Table_Primitive
+-    public import Memory
+-    public import Memory_Allocator
+-    internal import Memory_Allocator_Protocol
+-    public import Ownership_Shared_Primitive
+-    internal import Set
+-    public import Set_Ordered
+-    public import Set_Ordered_Primitive
+-    public import Stack
+-    public import Storage
+-    public import Tagged
+-    import Vector
+-
+-    extension Graph.Sequential.Reverse {
+-
+-        @inlinable
+-        public func reachable(
+-            to target: Graph.Node<Tag>
+-        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
+-            let count = graph.count
+-            var result = __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>>()
+-
+-            guard count > .zero else { return result }
+-
+-            guard target < count else { return result }
+-
+-            let reversedGraph = self.reversed()
+-
+-            let visited = Bit.Vector(capacity: count.retag(Bit.self))
+-            var stack = Stack<Graph.Node<Tag>>()
+-
+-            stack.push(target)
+-
+-            while let node = stack.pop() {
+-                let idx = node.retag(Bit.self)
+-                guard !visited[idx] else { continue }
+-                visited[idx] = true
+-                result.insert(node)
+-
+-                let payload = reversedGraph.storage[node]
+-                for adjacent in payload.adjacent {
+-                    let adjIdx = adjacent.retag(Bit.self)
+-                    if !visited[adjIdx] {
+-                        stack.push(adjacent)
+-                    }
+-                }
+-            }
+-
+-            return result
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Reverse.swift b/Sources/Graph/Graph.Sequential.Reverse.swift
+index 32943b0..5bebedb 100644
+--- a/Sources/Graph/Graph.Sequential.Reverse.swift
++++ b/Sources/Graph/Graph.Sequential.Reverse.swift
+@@ -37,3 +37,118 @@
+         }
+     }
+ #endif
++
++#if Algorithms
++    public import Array
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Bounded_Primitive
++    public import Buffer_Linear_Primitive
++    public import Collection
++    public import Fixed
++    public import Memory
++    public import Memory_Allocator
++    internal import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    public import Storage
++    public import Tagged
++    internal import Vector
++
++    extension Graph.Sequential.Reverse {
++
++        @inlinable
++        public func reversed() -> Graph.Sequential<Tag, Graph.Adjacency.List<Tag>> {
++            let count = graph.count
++            guard count > .zero else {
++                let builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder()
++                return builder.build()
++            }
++
++            var reversedAdjacent = __Fixed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<[Graph.Node<Tag>]>>.Linear.Bounded>(
++                repeating: [],
++                count: count.retag([Graph.Node<Tag>].self)
++            )
++
++            for source in graph.nodes {
++                let payload = graph.storage[source]
++
++                for target in extract.adjacent(payload) {
++
++                    reversedAdjacent[target.retag([Graph.Node<Tag>].self)].append(source)
++                }
++            }
++
++            var builder = Graph.Sequential<Tag, Graph.Adjacency.List<Tag>>.Builder(capacity: count)
++            for source in graph.nodes {
++                _ = builder.allocate(
++                    Graph.Adjacency.List(
++                        adjacent: reversedAdjacent[source.retag([Graph.Node<Tag>].self)]
++                    )
++                )
++            }
++
++            return builder.build()
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    public import Bit_Vector
++    public import Buffer
++    public import Buffer_Linear
++    public import Buffer_Linear_Primitive
++    public import Collection
++    public import Hash_Indexed_Primitive
++    public import Hash_Table_Primitive
++    public import Memory
++    public import Memory_Allocator
++    internal import Memory_Allocator_Protocol
++    public import Ownership_Shared_Primitive
++    internal import Set
++    public import Set_Ordered
++    public import Set_Ordered_Primitive
++    public import Stack
++    public import Storage
++    public import Tagged
++    import Vector
++
++    extension Graph.Sequential.Reverse {
++
++        @inlinable
++        public func reachable(
++            to target: Graph.Node<Tag>
++        ) -> __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>> {
++            let count = graph.count
++            var result = __SetOrdered<Hash.Indexed<Buffer<Storage<Memory.Allocator<Memory.Heap>>.Contiguous<Graph.Node<Tag>>>.Linear>>()
++
++            guard count > .zero else { return result }
++
++            guard target < count else { return result }
++
++            let reversedGraph = self.reversed()
++
++            let visited = Bit.Vector(capacity: count.retag(Bit.self))
++            var stack = Stack<Graph.Node<Tag>>()
++
++            stack.push(target)
++
++            while let node = stack.pop() {
++                let idx = node.retag(Bit.self)
++                guard !visited[idx] else { continue }
++                visited[idx] = true
++                result.insert(node)
++
++                let payload = reversedGraph.storage[node]
++                for adjacent in payload.adjacent {
++                    let adjIdx = adjacent.retag(Bit.self)
++                    if !visited[adjIdx] {
++                        stack.push(adjacent)
++                    }
++                }
++            }
++
++            return result
++        }
++    }
++#endif
+diff --git a/Sources/Graph/Graph.Sequential.Transform.Payloads.swift b/Sources/Graph/Graph.Sequential.Transform.Payloads.swift
+deleted file mode 100644
+index 0e8dd22..0000000
+--- a/Sources/Graph/Graph.Sequential.Transform.Payloads.swift
++++ /dev/null
+@@ -1,18 +0,0 @@
+-#if Algorithms
+-    internal import Array
+-    internal import Vector
+-
+-    extension Graph.Sequential.Transform {
+-
+-        @inlinable
+-        public func payloads<NewPayload>(
+-            _ transform: (Payload) -> NewPayload
+-        ) -> Graph.Sequential<Tag, NewPayload> {
+-            var builder = Graph.Sequential<Tag, NewPayload>.Builder(capacity: graph.count)
+-            for node in graph.nodes {
+-                _ = builder.allocate(transform(graph[node]))
+-            }
+-            return builder.build()
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Transform.swift b/Sources/Graph/Graph.Sequential.Transform.swift
+index 79ae59f..aec88a1 100644
+--- a/Sources/Graph/Graph.Sequential.Transform.swift
++++ b/Sources/Graph/Graph.Sequential.Transform.swift
+@@ -17,3 +17,22 @@
+         }
+     }
+ #endif
++
++#if Algorithms
++    internal import Array
++    internal import Vector
++
++    extension Graph.Sequential.Transform {
++
++        @inlinable
++        public func payloads<NewPayload>(
++            _ transform: (Payload) -> NewPayload
++        ) -> Graph.Sequential<Tag, NewPayload> {
++            var builder = Graph.Sequential<Tag, NewPayload>.Builder(capacity: graph.count)
++            for node in graph.nodes {
++                _ = builder.allocate(transform(graph[node]))
++            }
++            return builder.build()
++        }
++    }
++#endif
+diff --git a/Sources/Graph/Graph.Sequential.Traverse.First.breadth.swift b/Sources/Graph/Graph.Sequential.Traverse.First.breadth.swift
+deleted file mode 100644
+index f0a3a3d..0000000
+--- a/Sources/Graph/Graph.Sequential.Traverse.First.breadth.swift
++++ /dev/null
+@@ -1,21 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    internal import Buffer_Linear_Primitive
+-
+-    extension Graph.Sequential.Traverse.First {
+-
+-        @inlinable
+-        public func breadth(
+-            from roots: some Swift::Sequence<Graph.Node<Tag>>
+-        ) -> Graph.Traversal.First.Breadth<Tag, Payload, Adjacent> {
+-            Graph.Traversal.First.Breadth(storage: graph.storage, roots: roots, extract: extract)
+-        }
+-
+-        @inlinable
+-        public func breadth(
+-            from root: Graph.Node<Tag>
+-        ) -> Graph.Traversal.First.Breadth<Tag, Payload, Adjacent> {
+-            breadth(from: Swift::CollectionOfOne(root))
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Traverse.First.depth.swift b/Sources/Graph/Graph.Sequential.Traverse.First.depth.swift
+deleted file mode 100644
+index 3b98aec..0000000
+--- a/Sources/Graph/Graph.Sequential.Traverse.First.depth.swift
++++ /dev/null
+@@ -1,22 +0,0 @@
+-#if Algorithms
+-    public import Array
+-    internal import Buffer_Linear_Primitive
+-    import Ownership_Shared_Primitive
+-
+-    extension Graph.Sequential.Traverse.First {
+-
+-        @inlinable
+-        public func depth(
+-            from roots: some Swift::Sequence<Graph.Node<Tag>>
+-        ) -> Graph.Traversal.First.Depth<Tag, Payload, Adjacent> {
+-            Graph.Traversal.First.Depth(storage: graph.storage, roots: roots, extract: extract)
+-        }
+-
+-        @inlinable
+-        public func depth(
+-            from root: Graph.Node<Tag>
+-        ) -> Graph.Traversal.First.Depth<Tag, Payload, Adjacent> {
+-            depth(from: Swift::CollectionOfOne(root))
+-        }
+-    }
+-#endif
+diff --git a/Sources/Graph/Graph.Sequential.Traverse.First.swift b/Sources/Graph/Graph.Sequential.Traverse.First.swift
+index 700cfdf..daf8af3 100644
+--- a/Sources/Graph/Graph.Sequential.Traverse.First.swift
++++ b/Sources/Graph/Graph.Sequential.Traverse.First.swift
+@@ -37,3 +37,48 @@
+         }
+     }
+ #endif
++
++#if Algorithms
++    public import Array
++    internal import Buffer_Linear_Primitive
++
++    extension Graph.Sequential.Traverse.First {
++
++        @inlinable
++        public func breadth(
++            from roots: some Swift::Sequence<Graph.Node<Tag>>
++        ) -> Graph.Traversal.First.Breadth<Tag, Payload, Adjacent> {
++            Graph.Traversal.First.Breadth(storage: graph.storage, roots: roots, extract: extract)
++        }
++
++        @inlinable
++        public func breadth(
++            from root: Graph.Node<Tag>
++        ) -> Graph.Traversal.First.Breadth<Tag, Payload, Adjacent> {
++            breadth(from: Swift::CollectionOfOne(root))
++        }
++    }
++#endif
++
++#if Algorithms
++    public import Array
++    internal import Buffer_Linear_Primitive
++    import Ownership_Shared_Primitive
++
++    extension Graph.Sequential.Traverse.First {
++
++        @inlinable
++        public func depth(
++            from roots: some Swift::Sequence<Graph.Node<Tag>>
++        ) -> Graph.Traversal.First.Depth<Tag, Payload, Adjacent> {
++            Graph.Traversal.First.Depth(storage: graph.storage, roots: roots, extract: extract)
++        }
++
++        @inlinable
++        public func depth(
++            from root: Graph.Node<Tag>
++        ) -> Graph.Traversal.First.Depth<Tag, Payload, Adjacent> {
++            depth(from: Swift::CollectionOfOne(root))
++        }
++    }
++#endif
+diff --git a/Sources/Graph/Graph.swift b/Sources/Graph/Graph.swift
+index e563c17..1eb95fd 100644
+--- a/Sources/Graph/Graph.swift
++++ b/Sources/Graph/Graph.swift
+@@ -1,2 +1,13 @@
+ internal import Array
++public import Index
+ public enum Graph {}
++
++extension Graph {
++
++    public typealias Index<Tag: ~Copyable & ~Escapable> = Index::Index<Tag>
++}
++
++extension Graph {
++
++    public typealias Node<Tag: ~Copyable & ~Escapable> = Index<Tag>
++}
+-- 
+2.43.0
+

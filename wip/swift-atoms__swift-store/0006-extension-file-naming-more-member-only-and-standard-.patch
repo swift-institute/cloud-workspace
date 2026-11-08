@@ -1,0 +1,459 @@
+From 74465b79e16288d24ca4ffa278a2a12ffeb604d0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:29 +0000
+Subject: [PATCH 6/6] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ .../Store/Algebra/Store.Effect.Monoid.swift   | 14 ---
+ .../Store/Algebra/Store.Update.Monoid.swift   | 10 --
+ Sources/Store/Store.Effect.swift              | 15 +++
+ Sources/Store/Store.Initialization+ops.swift  | 92 -------------------
+ Sources/Store/Store.Initialization.swift      | 89 ++++++++++++++++++
+ Sources/Store/Store.Split+Planes.swift        | 45 ---------
+ Sources/Store/Store.Split.swift               | 46 ++++++++++
+ Sources/Store/Store.Update.Lift.swift         | 19 ----
+ Sources/Store/Store.Update.swift              | 31 +++++++
+ 9 files changed, 181 insertions(+), 180 deletions(-)
+ delete mode 100644 Sources/Store/Algebra/Store.Effect.Monoid.swift
+ delete mode 100644 Sources/Store/Algebra/Store.Update.Monoid.swift
+ delete mode 100644 Sources/Store/Store.Initialization+ops.swift
+ delete mode 100644 Sources/Store/Store.Split+Planes.swift
+ delete mode 100644 Sources/Store/Store.Update.Lift.swift
+
+diff --git a/Sources/Store/Algebra/Store.Effect.Monoid.swift b/Sources/Store/Algebra/Store.Effect.Monoid.swift
+deleted file mode 100644
+index 2d584d1..0000000
+--- a/Sources/Store/Algebra/Store.Effect.Monoid.swift
++++ /dev/null
+@@ -1,14 +0,0 @@
+-#if Algebra
+-    public import Algebra
+-
+-    extension Store::Store.Effect {
+-
+-        public static var merging: Algebra.Monoid<Self> {
+-            .init(identity: .none, combining: { $0.merged(with: $1) })
+-        }
+-
+-        public static var sequencing: Algebra.Monoid<Self> {
+-            .init(identity: .none, combining: { $0.followed(by: $1) })
+-        }
+-    }
+-#endif
+diff --git a/Sources/Store/Algebra/Store.Update.Monoid.swift b/Sources/Store/Algebra/Store.Update.Monoid.swift
+deleted file mode 100644
+index a86f4a2..0000000
+--- a/Sources/Store/Algebra/Store.Update.Monoid.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#if Algebra
+-    public import Algebra
+-
+-    extension Store::Store.Update {
+-
+-        public static var combining: Algebra.Monoid<Self> {
+-            .init(identity: .empty, combining: { $0.combined(with: $1) })
+-        }
+-    }
+-#endif
+diff --git a/Sources/Store/Store.Effect.swift b/Sources/Store/Store.Effect.swift
+index b9fde8f..63ea3c8 100644
+--- a/Sources/Store/Store.Effect.swift
++++ b/Sources/Store/Store.Effect.swift
+@@ -130,3 +130,18 @@ extension Store.Effect {
+         }
+     }
+ }
++
++#if Algebra
++    public import Algebra
++
++    extension Store::Store.Effect {
++
++        public static var merging: Algebra.Monoid<Self> {
++            .init(identity: .none, combining: { $0.merged(with: $1) })
++        }
++
++        public static var sequencing: Algebra.Monoid<Self> {
++            .init(identity: .none, combining: { $0.followed(by: $1) })
++        }
++    }
++#endif
+diff --git a/Sources/Store/Store.Initialization+ops.swift b/Sources/Store/Store.Initialization+ops.swift
+deleted file mode 100644
+index ca91328..0000000
+--- a/Sources/Store/Store.Initialization+ops.swift
++++ /dev/null
+@@ -1,92 +0,0 @@
+-public import Cardinal
+-public import Index
+-public import Ordinal
+-public import Tagged
+-
+-extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public var count: Index::Index<Element>.Count {
+-        switch self {
+-        case .empty:
+-            return .zero
+-
+-        case .one(let span):
+-            return span.count
+-
+-        case .two(let first, let second):
+-            return first.count + second.count
+-        }
+-    }
+-
+-    @inlinable
+-    public var isEmpty: Bool {
+-        switch self {
+-        case .empty:
+-            return true
+-
+-        case .one(let span):
+-            return span.isEmpty
+-
+-        case .two(let first, let second):
+-            return first.isEmpty && second.isEmpty
+-        }
+-    }
+-}
+-
+-extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public var isPrefixShaped: Bool {
+-        switch self {
+-        case .empty:
+-            return true
+-
+-        case .one(let range):
+-            return range.lowerBound == .zero
+-
+-        case .two:
+-            return false
+-        }
+-    }
+-}
+-
+-extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public func forEach(
+-        _ body: (Swift.Range<Index<Element>>) -> Void
+-    ) {
+-        switch self {
+-        case .empty: break
+-        case .one(let range): body(range)
+-
+-        case .two(let first, let second):
+-            body(first)
+-            body(second)
+-        }
+-    }
+-}
+-
+-extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public func linearize(
+-        _ body: (Swift.Range<Index<Element>>, _ offset: Index<Element>) -> Void
+-    ) {
+-        var offset: Index<Element> = .zero
+-        forEach { range in
+-            body(range, offset)
+-            offset += range.count
+-        }
+-    }
+-}
+-
+-extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    public static func linear(count: Index<Element>.Count) -> Self {
+-        guard count > .zero else { return .empty }
+-        return .one(Swift.Range<Index<Element>>(start: .zero, count: count))
+-    }
+-}
+diff --git a/Sources/Store/Store.Initialization.swift b/Sources/Store/Store.Initialization.swift
+index 656d1ac..96cec0f 100644
+--- a/Sources/Store/Store.Initialization.swift
++++ b/Sources/Store/Store.Initialization.swift
+@@ -1,6 +1,7 @@
+ public import Index
+ public import Ordinal
+ public import Tagged
++public import Cardinal
+ 
+ extension Store::Store {
+ 
+@@ -16,3 +17,91 @@ extension Store::Store {
+         )
+     }
+ }
++
++extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
++
++    @inlinable
++    public var count: Index::Index<Element>.Count {
++        switch self {
++        case .empty:
++            return .zero
++
++        case .one(let span):
++            return span.count
++
++        case .two(let first, let second):
++            return first.count + second.count
++        }
++    }
++
++    @inlinable
++    public var isEmpty: Bool {
++        switch self {
++        case .empty:
++            return true
++
++        case .one(let span):
++            return span.isEmpty
++
++        case .two(let first, let second):
++            return first.isEmpty && second.isEmpty
++        }
++    }
++}
++
++extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
++
++    @inlinable
++    public var isPrefixShaped: Bool {
++        switch self {
++        case .empty:
++            return true
++
++        case .one(let range):
++            return range.lowerBound == .zero
++
++        case .two:
++            return false
++        }
++    }
++}
++
++extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
++
++    @inlinable
++    public func forEach(
++        _ body: (Swift.Range<Index<Element>>) -> Void
++    ) {
++        switch self {
++        case .empty: break
++        case .one(let range): body(range)
++
++        case .two(let first, let second):
++            body(first)
++            body(second)
++        }
++    }
++}
++
++extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
++
++    @inlinable
++    public func linearize(
++        _ body: (Swift.Range<Index<Element>>, _ offset: Index<Element>) -> Void
++    ) {
++        var offset: Index<Element> = .zero
++        forEach { range in
++            body(range, offset)
++            offset += range.count
++        }
++    }
++}
++
++extension Store::Store.Initialization where Element: ~Copyable & ~Escapable {
++
++    @inlinable
++    public static func linear(count: Index<Element>.Count) -> Self {
++        guard count > .zero else { return .empty }
++        return .one(Swift.Range<Index<Element>>(start: .zero, count: count))
++    }
++}
+diff --git a/Sources/Store/Store.Split+Planes.swift b/Sources/Store/Store.Split+Planes.swift
+deleted file mode 100644
+index 658c188..0000000
+--- a/Sources/Store/Store.Split+Planes.swift
++++ /dev/null
+@@ -1,45 +0,0 @@
+-extension Store::Store.Split where Lanes: ~Copyable, Elements: ~Copyable {
+-
+-    @inlinable
+-    public var lanes: Lanes {
+-        _read { yield _lanes }
+-        _modify { yield &_lanes }
+-    }
+-
+-    @inlinable
+-    public var elements: Elements {
+-        _read { yield _elements }
+-        _modify { yield &_elements }
+-    }
+-}
+-
+-extension Store::Store.Split where Lanes: ~Copyable, Elements: ~Copyable {
+-
+-    @inlinable
+-    public func withLanes<R, Failure: Swift.Error>(
+-        _ body: (borrowing Lanes) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        try body(_lanes)
+-    }
+-
+-    @inlinable
+-    public mutating func withMutableLanes<R, Failure: Swift.Error>(
+-        _ body: (inout Lanes) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        try body(&_lanes)
+-    }
+-
+-    @inlinable
+-    public func withElements<R, Failure: Swift.Error>(
+-        _ body: (borrowing Elements) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        try body(_elements)
+-    }
+-
+-    @inlinable
+-    public mutating func withMutableElements<R, Failure: Swift.Error>(
+-        _ body: (inout Elements) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        try body(&_elements)
+-    }
+-}
+diff --git a/Sources/Store/Store.Split.swift b/Sources/Store/Store.Split.swift
+index b55a0e8..be70418 100644
+--- a/Sources/Store/Store.Split.swift
++++ b/Sources/Store/Store.Split.swift
+@@ -28,3 +28,49 @@ extension Store::Store.Split where Lanes: ~Copyable, Elements: ~Copyable {
+ }
+ 
+ extension Store::Store.Split: Swift.Copyable where Lanes: Swift.Copyable, Elements: Swift.Copyable {}
++
++extension Store::Store.Split where Lanes: ~Copyable, Elements: ~Copyable {
++
++    @inlinable
++    public var lanes: Lanes {
++        _read { yield _lanes }
++        _modify { yield &_lanes }
++    }
++
++    @inlinable
++    public var elements: Elements {
++        _read { yield _elements }
++        _modify { yield &_elements }
++    }
++}
++
++extension Store::Store.Split where Lanes: ~Copyable, Elements: ~Copyable {
++
++    @inlinable
++    public func withLanes<R, Failure: Swift.Error>(
++        _ body: (borrowing Lanes) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        try body(_lanes)
++    }
++
++    @inlinable
++    public mutating func withMutableLanes<R, Failure: Swift.Error>(
++        _ body: (inout Lanes) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        try body(&_lanes)
++    }
++
++    @inlinable
++    public func withElements<R, Failure: Swift.Error>(
++        _ body: (borrowing Elements) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        try body(_elements)
++    }
++
++    @inlinable
++    public mutating func withMutableElements<R, Failure: Swift.Error>(
++        _ body: (inout Elements) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        try body(&_elements)
++    }
++}
+diff --git a/Sources/Store/Store.Update.Lift.swift b/Sources/Store/Store.Update.Lift.swift
+deleted file mode 100644
+index 4228d1e..0000000
+--- a/Sources/Store/Store.Update.Lift.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-#if Optic
+-    @_exported public import Optic
+-
+-    extension Store.Update {
+-
+-        public func lift<Whole, Message>(
+-            state: Optic<Whole, Whole, State, State>.SendableLens,
+-            action: Optic<Message, Message, Action, Action>.SendablePrism
+-        ) -> Store.Update<Whole, Message, Operation> {
+-            .init { whole, message in
+-                guard let inner = action.extract(message) else { return .none }
+-                var part = state.get(whole)
+-                let effect = self.transition(&part, inner)
+-                whole = state.set(whole, part)
+-                return effect.map(action: action.embed)
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Store/Store.Update.swift b/Sources/Store/Store.Update.swift
+index 4edc626..5eb3775 100644
+--- a/Sources/Store/Store.Update.swift
++++ b/Sources/Store/Store.Update.swift
+@@ -57,3 +57,34 @@ extension Store.Update {
+         }
+     }
+ }
++
++#if Algebra
++    public import Algebra
++
++    extension Store::Store.Update {
++
++        public static var combining: Algebra.Monoid<Self> {
++            .init(identity: .empty, combining: { $0.combined(with: $1) })
++        }
++    }
++#endif
++
++#if Optic
++    @_exported public import Optic
++
++    extension Store.Update {
++
++        public func lift<Whole, Message>(
++            state: Optic<Whole, Whole, State, State>.SendableLens,
++            action: Optic<Message, Message, Action, Action>.SendablePrism
++        ) -> Store.Update<Whole, Message, Operation> {
++            .init { whole, message in
++                guard let inner = action.extract(message) else { return .none }
++                var part = state.get(whole)
++                let effect = self.transition(&part, inner)
++                whole = state.set(whole, part)
++                return effect.map(action: action.embed)
++            }
++        }
++    }
++#endif
+-- 
+2.43.0
+

@@ -1,0 +1,1338 @@
+From 06658b501b70b81ce554b8fe1e28e41d68942b0e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:29 +0000
+Subject: [PATCH 4/4] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ .../Version.Calendar+DebugDescription.swift   |  38 ----
+ .../Version.Calendar.Micro.Value.swift        |   8 -
+ .../Calendar/Version.Calendar.Micro.swift     |   9 +
+ .../Calendar/Version.Calendar.swift           |  95 ++++++++++
+ .../Parser/Parser.Version.Calendar.swift      |  42 -----
+ .../Parser/Version.Calendar+parser.swift      |  12 --
+ .../Parser/Version.Semantic+parser.swift      |  11 --
+ .../Parser/Version.Tools+parser.swift         |  11 --
+ Sources/Version/Version.Range+Algebra.swift   | 122 -------------
+ ....Range+Swift.CustomStringConvertible.swift |  29 ----
+ .../Version/Version.Range+SwiftRange.swift    |  10 --
+ ....Bound+Swift.CustomStringConvertible.swift |  16 --
+ Sources/Version/Version.Range.Bound.swift     |  17 ++
+ Sources/Version/Version.Range.swift           | 164 ++++++++++++++++++
+ .../Version.Semantic.Major.Value.swift        |   6 -
+ Sources/Version/Version.Semantic.Major.swift  |   7 +
+ .../Version.Semantic.Minor.Value.swift        |   6 -
+ Sources/Version/Version.Semantic.Minor.swift  |   7 +
+ .../Version.Semantic.Patch.Value.swift        |   6 -
+ Sources/Version/Version.Semantic.Patch.swift  |   7 +
+ ...e+Swift.CustomDebugStringConvertible.swift |  10 --
+ ....Phase+Swift.CustomStringConvertible.swift |  10 --
+ Sources/Version/Version.Semantic.Phase.swift  |  22 +++
+ Sources/Version/Version.Semantic.swift        |  12 ++
+ Sources/Version/Version.Set+Algebra.swift     |  92 ----------
+ ...t+Swift.CustomDebugStringConvertible.swift |  23 ---
+ ...on.Set+Swift.CustomStringConvertible.swift |  31 ----
+ Sources/Version/Version.Set.swift             | 149 ++++++++++++++++
+ .../Version/Version.Tools.Major.Value.swift   |   6 -
+ Sources/Version/Version.Tools.Major.swift     |   7 +
+ .../Version/Version.Tools.Minor.Value.swift   |   6 -
+ Sources/Version/Version.Tools.Minor.swift     |   7 +
+ .../Version/Version.Tools.Patch.Value.swift   |   6 -
+ Sources/Version/Version.Tools.Patch.swift     |   7 +
+ Sources/Version/Version.Tools.swift           |  12 ++
+ 35 files changed, 522 insertions(+), 501 deletions(-)
+ delete mode 100644 Sources/Version/Integrations/Calendar/Version.Calendar+DebugDescription.swift
+ delete mode 100644 Sources/Version/Integrations/Calendar/Version.Calendar.Micro.Value.swift
+ delete mode 100644 Sources/Version/Integrations/Parser/Parser.Version.Calendar.swift
+ delete mode 100644 Sources/Version/Integrations/Parser/Version.Calendar+parser.swift
+ delete mode 100644 Sources/Version/Integrations/Parser/Version.Semantic+parser.swift
+ delete mode 100644 Sources/Version/Integrations/Parser/Version.Tools+parser.swift
+ delete mode 100644 Sources/Version/Version.Range+Algebra.swift
+ delete mode 100644 Sources/Version/Version.Range+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Version/Version.Range+SwiftRange.swift
+ delete mode 100644 Sources/Version/Version.Range.Bound+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Version/Version.Semantic.Major.Value.swift
+ delete mode 100644 Sources/Version/Version.Semantic.Minor.Value.swift
+ delete mode 100644 Sources/Version/Version.Semantic.Patch.Value.swift
+ delete mode 100644 Sources/Version/Version.Semantic.Phase+Swift.CustomDebugStringConvertible.swift
+ delete mode 100644 Sources/Version/Version.Semantic.Phase+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Version/Version.Set+Algebra.swift
+ delete mode 100644 Sources/Version/Version.Set+Swift.CustomDebugStringConvertible.swift
+ delete mode 100644 Sources/Version/Version.Set+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Version/Version.Tools.Major.Value.swift
+ delete mode 100644 Sources/Version/Version.Tools.Minor.Value.swift
+ delete mode 100644 Sources/Version/Version.Tools.Patch.Value.swift
+
+diff --git a/Sources/Version/Integrations/Calendar/Version.Calendar+DebugDescription.swift b/Sources/Version/Integrations/Calendar/Version.Calendar+DebugDescription.swift
+deleted file mode 100644
+index b34a8ee..0000000
+--- a/Sources/Version/Integrations/Calendar/Version.Calendar+DebugDescription.swift
++++ /dev/null
+@@ -1,38 +0,0 @@
+-#if Calendar
+-    internal import Calendar_Gregorian
+-
+-    extension Version.Calendar: Swift::CustomDebugStringConvertible {
+-
+-        public var debugDescription: Swift::String {
+-            switch self {
+-            case .yearOnly(let year, let modifier):
+-                return ".yearOnly(year: " + Self.format(year.rawValue)
+-                    + ", modifier: " + Self.format(modifier) + ")"
+-
+-            case .yearMonth(let year, let month, let modifier):
+-                return ".yearMonth(year: " + Self.format(year.rawValue)
+-                    + ", month: " + Self.format(month.rawValue)
+-                    + ", modifier: " + Self.format(modifier) + ")"
+-
+-            case .full(let year, let month, let micro, let modifier):
+-                return ".full(year: " + Self.format(year.rawValue)
+-                    + ", month: " + Self.format(month.rawValue)
+-                    + ", micro: " + Swift::String(micro.underlying)
+-                    + ", modifier: " + Self.format(modifier) + ")"
+-            }
+-        }
+-
+-        @usableFromInline
+-        static func format(_ value: Swift::Int) -> Swift::String {
+-            Swift::String(value)
+-        }
+-
+-        @usableFromInline
+-        static func format(_ modifier: Swift::String?) -> Swift::String {
+-            switch modifier {
+-            case .none: return "nil"
+-            case .some(let value): return Swift::String(reflecting: value)
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.Value.swift b/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.Value.swift
+deleted file mode 100644
+index 3404d54..0000000
+--- a/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.Value.swift
++++ /dev/null
+@@ -1,8 +0,0 @@
+-#if Calendar
+-    public import Tagged
+-
+-    extension Version.Calendar.Micro {
+-
+-        public typealias Value = Tagged<Version.Calendar.Micro, Swift::UInt>
+-    }
+-#endif
+diff --git a/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.swift b/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.swift
+index 339d1d0..29ef2d3 100644
+--- a/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.swift
++++ b/Sources/Version/Integrations/Calendar/Version.Calendar.Micro.swift
+@@ -4,3 +4,12 @@
+         public enum Micro: Swift::Sendable {}
+     }
+ #endif
++
++#if Calendar
++    public import Tagged
++
++    extension Version.Calendar.Micro {
++
++        public typealias Value = Tagged<Version.Calendar.Micro, Swift::UInt>
++    }
++#endif
+diff --git a/Sources/Version/Integrations/Calendar/Version.Calendar.swift b/Sources/Version/Integrations/Calendar/Version.Calendar.swift
+index ab59436..2449696 100644
+--- a/Sources/Version/Integrations/Calendar/Version.Calendar.swift
++++ b/Sources/Version/Integrations/Calendar/Version.Calendar.swift
+@@ -75,3 +75,98 @@
+ 
+     }
+ #endif
++
++#if Calendar
++    internal import Calendar_Gregorian
++
++    extension Version.Calendar: Swift::CustomDebugStringConvertible {
++
++        public var debugDescription: Swift::String {
++            switch self {
++            case .yearOnly(let year, let modifier):
++                return ".yearOnly(year: " + Self.format(year.rawValue)
++                    + ", modifier: " + Self.format(modifier) + ")"
++
++            case .yearMonth(let year, let month, let modifier):
++                return ".yearMonth(year: " + Self.format(year.rawValue)
++                    + ", month: " + Self.format(month.rawValue)
++                    + ", modifier: " + Self.format(modifier) + ")"
++
++            case .full(let year, let month, let micro, let modifier):
++                return ".full(year: " + Self.format(year.rawValue)
++                    + ", month: " + Self.format(month.rawValue)
++                    + ", micro: " + Swift::String(micro.underlying)
++                    + ", modifier: " + Self.format(modifier) + ")"
++            }
++        }
++
++        @usableFromInline
++        static func format(_ value: Swift::Int) -> Swift::String {
++            Swift::String(value)
++        }
++
++        @usableFromInline
++        static func format(_ modifier: Swift::String?) -> Swift::String {
++            switch modifier {
++            case .none: return "nil"
++            case .some(let value): return Swift::String(reflecting: value)
++            }
++        }
++    }
++#endif
++
++#if Parser && Calendar
++
++    internal import Byte
++    internal import Cursor
++    public import Ordinal
++    internal import Parser
++    public import Text
++
++    extension Version.Calendar {
++
++        public init(parsing calverString: Swift::String) throws(Version.Calendar.Error) {
++            let totalBytes = Swift::UInt(calverString.utf8.count)
++            for (offset, byte) in calverString.utf8.enumerated() where byte >= 0x80 {
++                let position = Self.position(Swift::UInt(offset))
++                throw .nonASCIICharacters(
++                    input: calverString,
++                    range: Text.Range(start: position, end: Self.position(Swift::UInt(offset) + 1))
++                )
++            }
++            var input = [Byte](utf8: calverString)[...]
++            self = try Version.Calendar.Parser().parse(&input)
++            if !input.isEmpty {
++                let remaining = Swift::UInt(input.count)
++                let consumed = totalBytes - remaining
++                let trailing = Swift::String(decoding: input.map(\.bitPattern), as: Swift::UTF8.self)
++                throw .invalidCalendarIdentifier(
++                    input: calverString,
++                    identifier: trailing,
++                    range: Text.Range(
++                        start: Self.position(consumed),
++                        end: Self.position(totalBytes)
++                    )
++                )
++            }
++        }
++
++        @inlinable
++        package static func position(_ offset: Swift::UInt) -> Text.Position {
++            Text.Position(_unchecked: Ordinal(offset))
++        }
++    }
++#endif
++
++#if Parser && Calendar
++
++    public import Byte
++    public import Cursor
++    import Parser
++
++    extension Version.Calendar {
++
++        @inlinable
++        public static var parser: Version.Calendar.Parser<ArraySlice<Byte>> { Version.Calendar.Parser<ArraySlice<Byte>>() }
++    }
++#endif
+diff --git a/Sources/Version/Integrations/Parser/Parser.Version.Calendar.swift b/Sources/Version/Integrations/Parser/Parser.Version.Calendar.swift
+deleted file mode 100644
+index 0731cad..0000000
+--- a/Sources/Version/Integrations/Parser/Parser.Version.Calendar.swift
++++ /dev/null
+@@ -1,42 +0,0 @@
+-#if Parser && Calendar
+-
+-    internal import Byte
+-    internal import Cursor
+-    public import Ordinal
+-    internal import Parser
+-    public import Text
+-
+-    extension Version.Calendar {
+-
+-        public init(parsing calverString: Swift::String) throws(Version.Calendar.Error) {
+-            let totalBytes = Swift::UInt(calverString.utf8.count)
+-            for (offset, byte) in calverString.utf8.enumerated() where byte >= 0x80 {
+-                let position = Self.position(Swift::UInt(offset))
+-                throw .nonASCIICharacters(
+-                    input: calverString,
+-                    range: Text.Range(start: position, end: Self.position(Swift::UInt(offset) + 1))
+-                )
+-            }
+-            var input = [Byte](utf8: calverString)[...]
+-            self = try Version.Calendar.Parser().parse(&input)
+-            if !input.isEmpty {
+-                let remaining = Swift::UInt(input.count)
+-                let consumed = totalBytes - remaining
+-                let trailing = Swift::String(decoding: input.map(\.bitPattern), as: Swift::UTF8.self)
+-                throw .invalidCalendarIdentifier(
+-                    input: calverString,
+-                    identifier: trailing,
+-                    range: Text.Range(
+-                        start: Self.position(consumed),
+-                        end: Self.position(totalBytes)
+-                    )
+-                )
+-            }
+-        }
+-
+-        @inlinable
+-        package static func position(_ offset: Swift::UInt) -> Text.Position {
+-            Text.Position(_unchecked: Ordinal(offset))
+-        }
+-    }
+-#endif
+diff --git a/Sources/Version/Integrations/Parser/Version.Calendar+parser.swift b/Sources/Version/Integrations/Parser/Version.Calendar+parser.swift
+deleted file mode 100644
+index d7d8126..0000000
+--- a/Sources/Version/Integrations/Parser/Version.Calendar+parser.swift
++++ /dev/null
+@@ -1,12 +0,0 @@
+-#if Parser && Calendar
+-
+-    public import Byte
+-    public import Cursor
+-    import Parser
+-
+-    extension Version.Calendar {
+-
+-        @inlinable
+-        public static var parser: Version.Calendar.Parser<ArraySlice<Byte>> { Version.Calendar.Parser<ArraySlice<Byte>>() }
+-    }
+-#endif
+diff --git a/Sources/Version/Integrations/Parser/Version.Semantic+parser.swift b/Sources/Version/Integrations/Parser/Version.Semantic+parser.swift
+deleted file mode 100644
+index 6aa169d..0000000
+--- a/Sources/Version/Integrations/Parser/Version.Semantic+parser.swift
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#if Parser
+-
+-    import Byte
+-    import Parser
+-
+-    extension Version.Semantic {
+-
+-        @inlinable
+-        public static var parser: Version.Semantic.Parser { Version.Semantic.Parser() }
+-    }
+-#endif
+diff --git a/Sources/Version/Integrations/Parser/Version.Tools+parser.swift b/Sources/Version/Integrations/Parser/Version.Tools+parser.swift
+deleted file mode 100644
+index 4d4f6ed..0000000
+--- a/Sources/Version/Integrations/Parser/Version.Tools+parser.swift
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#if Parser
+-
+-    import Byte
+-    import Parser
+-
+-    extension Version.Tools {
+-
+-        @inlinable
+-        public static var parser: Version.Tools.Parser { Version.Tools.Parser() }
+-    }
+-#endif
+diff --git a/Sources/Version/Version.Range+Algebra.swift b/Sources/Version/Version.Range+Algebra.swift
+deleted file mode 100644
+index a3158e0..0000000
+--- a/Sources/Version/Version.Range+Algebra.swift
++++ /dev/null
+@@ -1,122 +0,0 @@
+-extension Version.Range {
+-
+-    @inlinable
+-    public var isEmpty: Swift::Bool {
+-        switch (self.lowerBound, self.upperBound) {
+-        case (.unbounded, _), (_, .unbounded):
+-            return false
+-
+-        case (.inclusive(let lo), .inclusive(let hi)):
+-            return lo > hi
+-
+-        case (.inclusive(let lo), .exclusive(let hi)),
+-            (.exclusive(let lo), .inclusive(let hi)):
+-            return lo >= hi
+-
+-        case (.exclusive(let lo), .exclusive(let hi)):
+-            return lo >= hi
+-        }
+-    }
+-
+-    @inlinable
+-    public func intersection(_ other: Self) -> Self {
+-        Self(
+-            lowerBound: Self.maxLowerBound(self.lowerBound, other.lowerBound),
+-            upperBound: Self.minUpperBound(self.upperBound, other.upperBound)
+-        )
+-    }
+-
+-    @inlinable
+-    public func overlaps(_ other: Self) -> Swift::Bool {
+-
+-        !self.intersection(other).isEmpty
+-    }
+-
+-    @inlinable
+-    public func isSubset(of other: Self) -> Swift::Bool {
+-        if self.isEmpty { return true }
+-        return Self.lowerCoversOrEqual(other.lowerBound, vs: self.lowerBound)
+-            && Self.upperCoversOrEqual(other.upperBound, vs: self.upperBound)
+-    }
+-
+-    @inlinable
+-    public func isSuperset(of other: Self) -> Swift::Bool {
+-        other.isSubset(of: self)
+-    }
+-
+-    @inlinable
+-    public func contains(_ other: Self) -> Swift::Bool {
+-        other.isSubset(of: self)
+-    }
+-
+-    @usableFromInline
+-    static func lowerCoversOrEqual(_ enclosing: Bound, vs enclosed: Bound) -> Swift::Bool {
+-        switch (enclosing, enclosed) {
+-        case (.unbounded, _): return true
+-        case (_, .unbounded): return false
+-
+-        case (.inclusive(let e), .inclusive(let i)): return e <= i
+-        case (.exclusive(let e), .exclusive(let i)): return e <= i
+-
+-        case (.inclusive(let e), .exclusive(let i)): return e <= i
+-
+-        case (.exclusive(let e), .inclusive(let i)): return e < i
+-        }
+-    }
+-
+-    @usableFromInline
+-    static func upperCoversOrEqual(_ enclosing: Bound, vs enclosed: Bound) -> Swift::Bool {
+-        switch (enclosing, enclosed) {
+-        case (.unbounded, _): return true
+-        case (_, .unbounded): return false
+-
+-        case (.inclusive(let e), .inclusive(let i)): return e >= i
+-        case (.exclusive(let e), .exclusive(let i)): return e >= i
+-
+-        case (.inclusive(let e), .exclusive(let i)): return e >= i
+-        case (.exclusive(let e), .inclusive(let i)): return e > i
+-        }
+-    }
+-
+-    @usableFromInline
+-    static func maxLowerBound(_ lhs: Bound, _ rhs: Bound) -> Bound {
+-        switch (lhs, rhs) {
+-        case (.unbounded, _): return rhs
+-        case (_, .unbounded): return lhs
+-
+-        case (.inclusive(let l), .inclusive(let r)):
+-            return .inclusive(Swift::max(l, r))
+-
+-        case (.exclusive(let l), .exclusive(let r)):
+-            return .exclusive(Swift::max(l, r))
+-
+-        case (.inclusive(let i), .exclusive(let e)),
+-            (.exclusive(let e), .inclusive(let i)):
+-            if e > i { return .exclusive(e) }
+-            if i > e { return .inclusive(i) }
+-
+-            return .exclusive(e)
+-        }
+-    }
+-
+-    @usableFromInline
+-    static func minUpperBound(_ lhs: Bound, _ rhs: Bound) -> Bound {
+-        switch (lhs, rhs) {
+-        case (.unbounded, _): return rhs
+-        case (_, .unbounded): return lhs
+-
+-        case (.inclusive(let l), .inclusive(let r)):
+-            return .inclusive(Swift::min(l, r))
+-
+-        case (.exclusive(let l), .exclusive(let r)):
+-            return .exclusive(Swift::min(l, r))
+-
+-        case (.inclusive(let i), .exclusive(let e)),
+-            (.exclusive(let e), .inclusive(let i)):
+-            if e < i { return .exclusive(e) }
+-            if i < e { return .inclusive(i) }
+-
+-            return .exclusive(e)
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Range+Swift.CustomStringConvertible.swift b/Sources/Version/Version.Range+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 4174072..0000000
+--- a/Sources/Version/Version.Range+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,29 +0,0 @@
+-extension Version.Range: Swift::CustomStringConvertible
+-where Underlying: Swift::CustomStringConvertible {
+-
+-    public var description: Swift::String {
+-        let left: Swift::String
+-        switch self.lowerBound {
+-        case .unbounded:
+-            left = "(-∞"
+-
+-        case .inclusive(let value):
+-            left = "[" + value.description
+-
+-        case .exclusive(let value):
+-            left = "(" + value.description
+-        }
+-        let right: Swift::String
+-        switch self.upperBound {
+-        case .unbounded:
+-            right = "+∞)"
+-
+-        case .inclusive(let value):
+-            right = value.description + "]"
+-
+-        case .exclusive(let value):
+-            right = value.description + ")"
+-        }
+-        return left + ", " + right
+-    }
+-}
+diff --git a/Sources/Version/Version.Range+SwiftRange.swift b/Sources/Version/Version.Range+SwiftRange.swift
+deleted file mode 100644
+index 60fe41d..0000000
+--- a/Sources/Version/Version.Range+SwiftRange.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Version.Range {
+-
+-    @inlinable
+-    public init(_ range: Swift::Range<Underlying>) {
+-        self.init(
+-            lowerBound: .inclusive(range.lowerBound),
+-            upperBound: .exclusive(range.upperBound)
+-        )
+-    }
+-}
+diff --git a/Sources/Version/Version.Range.Bound+Swift.CustomStringConvertible.swift b/Sources/Version/Version.Range.Bound+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 6f70831..0000000
+--- a/Sources/Version/Version.Range.Bound+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,16 +0,0 @@
+-extension Version.Range.Bound: Swift::CustomStringConvertible
+-where Underlying: Swift::CustomStringConvertible {
+-
+-    public var description: Swift::String {
+-        switch self {
+-        case .unbounded:
+-            return "unbounded"
+-
+-        case .inclusive(let value):
+-            return "inclusive(" + value.description + ")"
+-
+-        case .exclusive(let value):
+-            return "exclusive(" + value.description + ")"
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Range.Bound.swift b/Sources/Version/Version.Range.Bound.swift
+index d313314..bcd01b5 100644
+--- a/Sources/Version/Version.Range.Bound.swift
++++ b/Sources/Version/Version.Range.Bound.swift
+@@ -11,3 +11,20 @@ extension Version.Range {
+ }
+ 
+ extension Version.Range.Bound: Swift::Sendable where Underlying: Swift::Sendable {}
++
++extension Version.Range.Bound: Swift::CustomStringConvertible
++where Underlying: Swift::CustomStringConvertible {
++
++    public var description: Swift::String {
++        switch self {
++        case .unbounded:
++            return "unbounded"
++
++        case .inclusive(let value):
++            return "inclusive(" + value.description + ")"
++
++        case .exclusive(let value):
++            return "exclusive(" + value.description + ")"
++        }
++    }
++}
+diff --git a/Sources/Version/Version.Range.swift b/Sources/Version/Version.Range.swift
+index 54d7309..f6a0df6 100644
+--- a/Sources/Version/Version.Range.swift
++++ b/Sources/Version/Version.Range.swift
+@@ -42,3 +42,167 @@ extension Version.Range {
+ }
+ 
+ extension Version.Range: Swift::Sendable where Underlying: Swift::Sendable {}
++
++extension Version.Range {
++
++    @inlinable
++    public var isEmpty: Swift::Bool {
++        switch (self.lowerBound, self.upperBound) {
++        case (.unbounded, _), (_, .unbounded):
++            return false
++
++        case (.inclusive(let lo), .inclusive(let hi)):
++            return lo > hi
++
++        case (.inclusive(let lo), .exclusive(let hi)),
++            (.exclusive(let lo), .inclusive(let hi)):
++            return lo >= hi
++
++        case (.exclusive(let lo), .exclusive(let hi)):
++            return lo >= hi
++        }
++    }
++
++    @inlinable
++    public func intersection(_ other: Self) -> Self {
++        Self(
++            lowerBound: Self.maxLowerBound(self.lowerBound, other.lowerBound),
++            upperBound: Self.minUpperBound(self.upperBound, other.upperBound)
++        )
++    }
++
++    @inlinable
++    public func overlaps(_ other: Self) -> Swift::Bool {
++
++        !self.intersection(other).isEmpty
++    }
++
++    @inlinable
++    public func isSubset(of other: Self) -> Swift::Bool {
++        if self.isEmpty { return true }
++        return Self.lowerCoversOrEqual(other.lowerBound, vs: self.lowerBound)
++            && Self.upperCoversOrEqual(other.upperBound, vs: self.upperBound)
++    }
++
++    @inlinable
++    public func isSuperset(of other: Self) -> Swift::Bool {
++        other.isSubset(of: self)
++    }
++
++    @inlinable
++    public func contains(_ other: Self) -> Swift::Bool {
++        other.isSubset(of: self)
++    }
++
++    @usableFromInline
++    static func lowerCoversOrEqual(_ enclosing: Bound, vs enclosed: Bound) -> Swift::Bool {
++        switch (enclosing, enclosed) {
++        case (.unbounded, _): return true
++        case (_, .unbounded): return false
++
++        case (.inclusive(let e), .inclusive(let i)): return e <= i
++        case (.exclusive(let e), .exclusive(let i)): return e <= i
++
++        case (.inclusive(let e), .exclusive(let i)): return e <= i
++
++        case (.exclusive(let e), .inclusive(let i)): return e < i
++        }
++    }
++
++    @usableFromInline
++    static func upperCoversOrEqual(_ enclosing: Bound, vs enclosed: Bound) -> Swift::Bool {
++        switch (enclosing, enclosed) {
++        case (.unbounded, _): return true
++        case (_, .unbounded): return false
++
++        case (.inclusive(let e), .inclusive(let i)): return e >= i
++        case (.exclusive(let e), .exclusive(let i)): return e >= i
++
++        case (.inclusive(let e), .exclusive(let i)): return e >= i
++        case (.exclusive(let e), .inclusive(let i)): return e > i
++        }
++    }
++
++    @usableFromInline
++    static func maxLowerBound(_ lhs: Bound, _ rhs: Bound) -> Bound {
++        switch (lhs, rhs) {
++        case (.unbounded, _): return rhs
++        case (_, .unbounded): return lhs
++
++        case (.inclusive(let l), .inclusive(let r)):
++            return .inclusive(Swift::max(l, r))
++
++        case (.exclusive(let l), .exclusive(let r)):
++            return .exclusive(Swift::max(l, r))
++
++        case (.inclusive(let i), .exclusive(let e)),
++            (.exclusive(let e), .inclusive(let i)):
++            if e > i { return .exclusive(e) }
++            if i > e { return .inclusive(i) }
++
++            return .exclusive(e)
++        }
++    }
++
++    @usableFromInline
++    static func minUpperBound(_ lhs: Bound, _ rhs: Bound) -> Bound {
++        switch (lhs, rhs) {
++        case (.unbounded, _): return rhs
++        case (_, .unbounded): return lhs
++
++        case (.inclusive(let l), .inclusive(let r)):
++            return .inclusive(Swift::min(l, r))
++
++        case (.exclusive(let l), .exclusive(let r)):
++            return .exclusive(Swift::min(l, r))
++
++        case (.inclusive(let i), .exclusive(let e)),
++            (.exclusive(let e), .inclusive(let i)):
++            if e < i { return .exclusive(e) }
++            if i < e { return .inclusive(i) }
++
++            return .exclusive(e)
++        }
++    }
++}
++
++extension Version.Range: Swift::CustomStringConvertible
++where Underlying: Swift::CustomStringConvertible {
++
++    public var description: Swift::String {
++        let left: Swift::String
++        switch self.lowerBound {
++        case .unbounded:
++            left = "(-∞"
++
++        case .inclusive(let value):
++            left = "[" + value.description
++
++        case .exclusive(let value):
++            left = "(" + value.description
++        }
++        let right: Swift::String
++        switch self.upperBound {
++        case .unbounded:
++            right = "+∞)"
++
++        case .inclusive(let value):
++            right = value.description + "]"
++
++        case .exclusive(let value):
++            right = value.description + ")"
++        }
++        return left + ", " + right
++    }
++}
++
++extension Version.Range {
++
++    @inlinable
++    public init(_ range: Swift::Range<Underlying>) {
++        self.init(
++            lowerBound: .inclusive(range.lowerBound),
++            upperBound: .exclusive(range.upperBound)
++        )
++    }
++}
+diff --git a/Sources/Version/Version.Semantic.Major.Value.swift b/Sources/Version/Version.Semantic.Major.Value.swift
+deleted file mode 100644
+index 9d084aa..0000000
+--- a/Sources/Version/Version.Semantic.Major.Value.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Version.Semantic.Major {
+-
+-    public typealias Value = Tagged<Version.Semantic.Major, Swift::UInt>
+-}
+diff --git a/Sources/Version/Version.Semantic.Major.swift b/Sources/Version/Version.Semantic.Major.swift
+index 03c19ab..6382d7c 100644
+--- a/Sources/Version/Version.Semantic.Major.swift
++++ b/Sources/Version/Version.Semantic.Major.swift
+@@ -1,4 +1,11 @@
++public import Tagged
++
+ extension Version.Semantic {
+ 
+     public enum Major: Swift::Sendable {}
+ }
++
++extension Version.Semantic.Major {
++
++    public typealias Value = Tagged<Version.Semantic.Major, Swift::UInt>
++}
+diff --git a/Sources/Version/Version.Semantic.Minor.Value.swift b/Sources/Version/Version.Semantic.Minor.Value.swift
+deleted file mode 100644
+index 9e67dd3..0000000
+--- a/Sources/Version/Version.Semantic.Minor.Value.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Version.Semantic.Minor {
+-
+-    public typealias Value = Tagged<Version.Semantic.Minor, Swift::UInt>
+-}
+diff --git a/Sources/Version/Version.Semantic.Minor.swift b/Sources/Version/Version.Semantic.Minor.swift
+index 5347380..b7decbd 100644
+--- a/Sources/Version/Version.Semantic.Minor.swift
++++ b/Sources/Version/Version.Semantic.Minor.swift
+@@ -1,4 +1,11 @@
++public import Tagged
++
+ extension Version.Semantic {
+ 
+     public enum Minor: Swift::Sendable {}
+ }
++
++extension Version.Semantic.Minor {
++
++    public typealias Value = Tagged<Version.Semantic.Minor, Swift::UInt>
++}
+diff --git a/Sources/Version/Version.Semantic.Patch.Value.swift b/Sources/Version/Version.Semantic.Patch.Value.swift
+deleted file mode 100644
+index 36cf1c0..0000000
+--- a/Sources/Version/Version.Semantic.Patch.Value.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Version.Semantic.Patch {
+-
+-    public typealias Value = Tagged<Version.Semantic.Patch, Swift::UInt>
+-}
+diff --git a/Sources/Version/Version.Semantic.Patch.swift b/Sources/Version/Version.Semantic.Patch.swift
+index fb545fe..97096b6 100644
+--- a/Sources/Version/Version.Semantic.Patch.swift
++++ b/Sources/Version/Version.Semantic.Patch.swift
+@@ -1,4 +1,11 @@
++public import Tagged
++
+ extension Version.Semantic {
+ 
+     public enum Patch: Swift::Sendable {}
+ }
++
++extension Version.Semantic.Patch {
++
++    public typealias Value = Tagged<Version.Semantic.Patch, Swift::UInt>
++}
+diff --git a/Sources/Version/Version.Semantic.Phase+Swift.CustomDebugStringConvertible.swift b/Sources/Version/Version.Semantic.Phase+Swift.CustomDebugStringConvertible.swift
+deleted file mode 100644
+index 42940d1..0000000
+--- a/Sources/Version/Version.Semantic.Phase+Swift.CustomDebugStringConvertible.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Version.Semantic.Phase: Swift::CustomDebugStringConvertible {
+-
+-    @inlinable
+-    public var debugDescription: Swift::String {
+-        switch self {
+-        case .initial: return ".initial"
+-        case .stable: return ".stable"
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Semantic.Phase+Swift.CustomStringConvertible.swift b/Sources/Version/Version.Semantic.Phase+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 0312b59..0000000
+--- a/Sources/Version/Version.Semantic.Phase+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Version.Semantic.Phase: Swift::CustomStringConvertible {
+-
+-    @inlinable
+-    public var description: Swift::String {
+-        switch self {
+-        case .initial: return "initial"
+-        case .stable: return "stable"
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Semantic.Phase.swift b/Sources/Version/Version.Semantic.Phase.swift
+index fb05022..d975816 100644
+--- a/Sources/Version/Version.Semantic.Phase.swift
++++ b/Sources/Version/Version.Semantic.Phase.swift
+@@ -12,3 +12,25 @@ extension Version.Semantic {
+         self.major.underlying == 0 ? .initial : .stable
+     }
+ }
++
++extension Version.Semantic.Phase: Swift::CustomDebugStringConvertible {
++
++    @inlinable
++    public var debugDescription: Swift::String {
++        switch self {
++        case .initial: return ".initial"
++        case .stable: return ".stable"
++        }
++    }
++}
++
++extension Version.Semantic.Phase: Swift::CustomStringConvertible {
++
++    @inlinable
++    public var description: Swift::String {
++        switch self {
++        case .initial: return "initial"
++        case .stable: return "stable"
++        }
++    }
++}
+diff --git a/Sources/Version/Version.Semantic.swift b/Sources/Version/Version.Semantic.swift
+index 7970833..36cc94e 100644
+--- a/Sources/Version/Version.Semantic.swift
++++ b/Sources/Version/Version.Semantic.swift
+@@ -90,3 +90,15 @@ extension Version.Semantic {
+         return lhs.count < rhs.count
+     }
+ }
++
++#if Parser
++
++    import Byte
++    import Parser
++
++    extension Version.Semantic {
++
++        @inlinable
++        public static var parser: Version.Semantic.Parser { Version.Semantic.Parser() }
++    }
++#endif
+diff --git a/Sources/Version/Version.Set+Algebra.swift b/Sources/Version/Version.Set+Algebra.swift
+deleted file mode 100644
+index f771874..0000000
+--- a/Sources/Version/Version.Set+Algebra.swift
++++ /dev/null
+@@ -1,92 +0,0 @@
+-extension Version.Set {
+-
+-    @inlinable
+-    public var isEmpty: Swift::Bool {
+-        switch self {
+-        case .empty:
+-            return true
+-
+-        case .any, .exact:
+-            return false
+-
+-        case .range(let interval):
+-            return interval.isEmpty
+-
+-        case .union(let members):
+-            for member in members where !member.isEmpty {
+-                return false
+-            }
+-            return true
+-        }
+-    }
+-
+-    @inlinable
+-    public func normalized() -> Self {
+-        switch self {
+-        case .empty, .any, .exact:
+-            return self
+-
+-        case .range(let interval):
+-            return interval.isEmpty ? .empty : self
+-
+-        case .union(let members):
+-            var flattened: [Self] = []
+-            for member in members {
+-                let canonical = member.normalized()
+-                switch canonical {
+-                case .empty:
+-                    continue
+-
+-                case .any:
+-                    return .any
+-
+-                case .union(let nested):
+-                    flattened.append(contentsOf: nested)
+-
+-                default:
+-                    flattened.append(canonical)
+-                }
+-            }
+-            switch flattened.count {
+-            case 0: return .empty
+-            case 1: return flattened[0]
+-            default: return .union(flattened)
+-            }
+-        }
+-    }
+-
+-    @inlinable
+-    public func union(_ other: Self) -> Self {
+-        Self.union([self, other]).normalized()
+-    }
+-
+-    @inlinable
+-    public func intersection(_ other: Self) -> Self {
+-        switch (self, other) {
+-        case (.empty, _), (_, .empty):
+-            return .empty
+-
+-        case (.any, let value), (let value, .any):
+-            return value.normalized()
+-
+-        case (.exact(let lhs), .exact(let rhs)):
+-            return lhs == rhs ? .exact(lhs) : .empty
+-
+-        case (.exact(let value), _):
+-            return other.contains(value) ? .exact(value) : .empty
+-
+-        case (_, .exact(let value)):
+-            return self.contains(value) ? .exact(value) : .empty
+-
+-        case (.range(let lhs), .range(let rhs)):
+-            let intersected = lhs.intersection(rhs)
+-            return intersected.isEmpty ? .empty : .range(intersected)
+-
+-        case (.union(let members), _):
+-            return Self.union(members.map { $0.intersection(other) }).normalized()
+-
+-        case (_, .union(let members)):
+-            return Self.union(members.map { self.intersection($0) }).normalized()
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Set+Swift.CustomDebugStringConvertible.swift b/Sources/Version/Version.Set+Swift.CustomDebugStringConvertible.swift
+deleted file mode 100644
+index c78328c..0000000
+--- a/Sources/Version/Version.Set+Swift.CustomDebugStringConvertible.swift
++++ /dev/null
+@@ -1,23 +0,0 @@
+-extension Version.Set: Swift::CustomDebugStringConvertible
+-where Underlying: Swift::CustomStringConvertible {
+-
+-    public var debugDescription: Swift::String {
+-        switch self {
+-        case .empty:
+-            return ".empty"
+-
+-        case .any:
+-            return ".any"
+-
+-        case .exact(let value):
+-            return ".exact(" + value.description + ")"
+-
+-        case .range(let interval):
+-            return ".range(" + interval.description + ")"
+-
+-        case .union(let members):
+-            let inner = members.map(\.debugDescription).joined(separator: ", ")
+-            return ".union([" + inner + "])"
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Set+Swift.CustomStringConvertible.swift b/Sources/Version/Version.Set+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 636b4fe..0000000
+--- a/Sources/Version/Version.Set+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,31 +0,0 @@
+-extension Version.Set: Swift::CustomStringConvertible
+-where Underlying: Swift::CustomStringConvertible {
+-
+-    public var description: Swift::String {
+-        switch self {
+-        case .empty:
+-            return "∅"
+-
+-        case .any:
+-            return "*"
+-
+-        case .exact(let value):
+-            return "{" + value.description + "}"
+-
+-        case .range(let interval):
+-            return interval.description
+-
+-        case .union(let members):
+-            switch members.count {
+-            case 0:
+-                return "∅"
+-
+-            case 1:
+-                return members[0].description
+-
+-            default:
+-                return "(" + members.map(\.description).joined(separator: " ∪ ") + ")"
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Version/Version.Set.swift b/Sources/Version/Version.Set.swift
+index e7cd8be..0bfa690 100644
+--- a/Sources/Version/Version.Set.swift
++++ b/Sources/Version/Version.Set.swift
+@@ -41,3 +41,152 @@ extension Version.Set {
+ }
+ 
+ extension Version.Set: Swift::Sendable where Underlying: Swift::Sendable {}
++
++extension Version.Set {
++
++    @inlinable
++    public var isEmpty: Swift::Bool {
++        switch self {
++        case .empty:
++            return true
++
++        case .any, .exact:
++            return false
++
++        case .range(let interval):
++            return interval.isEmpty
++
++        case .union(let members):
++            for member in members where !member.isEmpty {
++                return false
++            }
++            return true
++        }
++    }
++
++    @inlinable
++    public func normalized() -> Self {
++        switch self {
++        case .empty, .any, .exact:
++            return self
++
++        case .range(let interval):
++            return interval.isEmpty ? .empty : self
++
++        case .union(let members):
++            var flattened: [Self] = []
++            for member in members {
++                let canonical = member.normalized()
++                switch canonical {
++                case .empty:
++                    continue
++
++                case .any:
++                    return .any
++
++                case .union(let nested):
++                    flattened.append(contentsOf: nested)
++
++                default:
++                    flattened.append(canonical)
++                }
++            }
++            switch flattened.count {
++            case 0: return .empty
++            case 1: return flattened[0]
++            default: return .union(flattened)
++            }
++        }
++    }
++
++    @inlinable
++    public func union(_ other: Self) -> Self {
++        Self.union([self, other]).normalized()
++    }
++
++    @inlinable
++    public func intersection(_ other: Self) -> Self {
++        switch (self, other) {
++        case (.empty, _), (_, .empty):
++            return .empty
++
++        case (.any, let value), (let value, .any):
++            return value.normalized()
++
++        case (.exact(let lhs), .exact(let rhs)):
++            return lhs == rhs ? .exact(lhs) : .empty
++
++        case (.exact(let value), _):
++            return other.contains(value) ? .exact(value) : .empty
++
++        case (_, .exact(let value)):
++            return self.contains(value) ? .exact(value) : .empty
++
++        case (.range(let lhs), .range(let rhs)):
++            let intersected = lhs.intersection(rhs)
++            return intersected.isEmpty ? .empty : .range(intersected)
++
++        case (.union(let members), _):
++            return Self.union(members.map { $0.intersection(other) }).normalized()
++
++        case (_, .union(let members)):
++            return Self.union(members.map { self.intersection($0) }).normalized()
++        }
++    }
++}
++
++extension Version.Set: Swift::CustomDebugStringConvertible
++where Underlying: Swift::CustomStringConvertible {
++
++    public var debugDescription: Swift::String {
++        switch self {
++        case .empty:
++            return ".empty"
++
++        case .any:
++            return ".any"
++
++        case .exact(let value):
++            return ".exact(" + value.description + ")"
++
++        case .range(let interval):
++            return ".range(" + interval.description + ")"
++
++        case .union(let members):
++            let inner = members.map(\.debugDescription).joined(separator: ", ")
++            return ".union([" + inner + "])"
++        }
++    }
++}
++
++extension Version.Set: Swift::CustomStringConvertible
++where Underlying: Swift::CustomStringConvertible {
++
++    public var description: Swift::String {
++        switch self {
++        case .empty:
++            return "∅"
++
++        case .any:
++            return "*"
++
++        case .exact(let value):
++            return "{" + value.description + "}"
++
++        case .range(let interval):
++            return interval.description
++
++        case .union(let members):
++            switch members.count {
++            case 0:
++                return "∅"
++
++            case 1:
++                return members[0].description
++
++            default:
++                return "(" + members.map(\.description).joined(separator: " ∪ ") + ")"
++            }
++        }
++    }
++}
+diff --git a/Sources/Version/Version.Tools.Major.Value.swift b/Sources/Version/Version.Tools.Major.Value.swift
+deleted file mode 100644
+index 7809448..0000000
+--- a/Sources/Version/Version.Tools.Major.Value.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Version.Tools.Major {
+-
+-    public typealias Value = Tagged<Version.Tools.Major, Swift::UInt>
+-}
+diff --git a/Sources/Version/Version.Tools.Major.swift b/Sources/Version/Version.Tools.Major.swift
+index c148d92..b5b2414 100644
+--- a/Sources/Version/Version.Tools.Major.swift
++++ b/Sources/Version/Version.Tools.Major.swift
+@@ -1,4 +1,11 @@
++public import Tagged
++
+ extension Version.Tools {
+ 
+     public enum Major: Swift::Sendable {}
+ }
++
++extension Version.Tools.Major {
++
++    public typealias Value = Tagged<Version.Tools.Major, Swift::UInt>
++}
+diff --git a/Sources/Version/Version.Tools.Minor.Value.swift b/Sources/Version/Version.Tools.Minor.Value.swift
+deleted file mode 100644
+index 89e179e..0000000
+--- a/Sources/Version/Version.Tools.Minor.Value.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Version.Tools.Minor {
+-
+-    public typealias Value = Tagged<Version.Tools.Minor, Swift::UInt>
+-}
+diff --git a/Sources/Version/Version.Tools.Minor.swift b/Sources/Version/Version.Tools.Minor.swift
+index 1ce685a..5a41822 100644
+--- a/Sources/Version/Version.Tools.Minor.swift
++++ b/Sources/Version/Version.Tools.Minor.swift
+@@ -1,4 +1,11 @@
++public import Tagged
++
+ extension Version.Tools {
+ 
+     public enum Minor: Swift::Sendable {}
+ }
++
++extension Version.Tools.Minor {
++
++    public typealias Value = Tagged<Version.Tools.Minor, Swift::UInt>
++}
+diff --git a/Sources/Version/Version.Tools.Patch.Value.swift b/Sources/Version/Version.Tools.Patch.Value.swift
+deleted file mode 100644
+index 7f47aff..0000000
+--- a/Sources/Version/Version.Tools.Patch.Value.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-public import Tagged
+-
+-extension Version.Tools.Patch {
+-
+-    public typealias Value = Tagged<Version.Tools.Patch, Swift::UInt>
+-}
+diff --git a/Sources/Version/Version.Tools.Patch.swift b/Sources/Version/Version.Tools.Patch.swift
+index fcd9aff..b20b222 100644
+--- a/Sources/Version/Version.Tools.Patch.swift
++++ b/Sources/Version/Version.Tools.Patch.swift
+@@ -1,4 +1,11 @@
++public import Tagged
++
+ extension Version.Tools {
+ 
+     public enum Patch: Swift::Sendable {}
+ }
++
++extension Version.Tools.Patch {
++
++    public typealias Value = Tagged<Version.Tools.Patch, Swift::UInt>
++}
+diff --git a/Sources/Version/Version.Tools.swift b/Sources/Version/Version.Tools.swift
+index e4f739b..340d71f 100644
+--- a/Sources/Version/Version.Tools.swift
++++ b/Sources/Version/Version.Tools.swift
+@@ -45,3 +45,15 @@ extension Version.Tools {
+     }
+ 
+ }
++
++#if Parser
++
++    import Byte
++    import Parser
++
++    extension Version.Tools {
++
++        @inlinable
++        public static var parser: Version.Tools.Parser { Version.Tools.Parser() }
++    }
++#endif
+-- 
+2.43.0
+

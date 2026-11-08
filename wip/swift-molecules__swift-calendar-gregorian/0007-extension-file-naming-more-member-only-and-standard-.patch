@@ -1,0 +1,346 @@
+From 0ddd869ca36ec4e6ac991e352959cff840ffebdd Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:30 +0000
+Subject: [PATCH 7/7] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ .../Gregorian+DayNumber.swift                 | 48 ------------
+ .../Gregorian.Date+Arithmetic.swift           | 45 -----------
+ .../Gregorian.Date+Time.Zone.Rule.swift       | 31 --------
+ .../Calendar Gregorian/Gregorian.Date.swift   | 76 +++++++++++++++++++
+ .../Gregorian.Year+Gregorian.swift            | 10 ---
+ .../Calendar Gregorian/Gregorian.Year.swift   | 11 +++
+ Sources/Calendar Gregorian/Gregorian.swift    | 47 ++++++++++++
+ 7 files changed, 134 insertions(+), 134 deletions(-)
+ delete mode 100644 Sources/Calendar Gregorian/Gregorian+DayNumber.swift
+ delete mode 100644 Sources/Calendar Gregorian/Gregorian.Date+Arithmetic.swift
+ delete mode 100644 Sources/Calendar Gregorian/Gregorian.Date+Time.Zone.Rule.swift
+ delete mode 100644 Sources/Calendar Gregorian/Gregorian.Year+Gregorian.swift
+
+diff --git a/Sources/Calendar Gregorian/Gregorian+DayNumber.swift b/Sources/Calendar Gregorian/Gregorian+DayNumber.swift
+deleted file mode 100644
+index f19671c..0000000
+--- a/Sources/Calendar Gregorian/Gregorian+DayNumber.swift	
++++ /dev/null
+@@ -1,48 +0,0 @@
+-public import Calendar
+-
+-extension Gregorian {
+-
+-    public static func dayNumber(of date: Date) throws(Calendar::Calendar<Gregorian.Date>.Encode.Error) -> DayNumber {
+-        let day = fixedDay(year: date.year, month: date.month, day: date.day)
+-        guard let rawValue = Int64(exactly: day) else { throw .unsupported }
+-        return DayNumber(rawValue: rawValue)
+-    }
+-
+-    public static func date(on day: DayNumber) throws(Calendar::Calendar<Gregorian.Date>.Decode.Error) -> Date {
+-
+-        let shifted = Int128(day.rawValue) + 305
+-        let era = floorDivide(shifted, by: 146_097)
+-        let dayOfEra = shifted - era * 146_097
+-        let yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
+-        let year = yearOfEra + era * 400
+-        let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+-        let shiftedMonth = (5 * dayOfYear + 2) / 153
+-        let dateDay = dayOfYear - (153 * shiftedMonth + 2) / 5 + 1
+-        let month = shiftedMonth + (shiftedMonth < 10 ? 3 : -9)
+-        guard let dateYear = Int(exactly: year + (month <= 2 ? 1 : 0)) else {
+-            throw .unsupported(day)
+-        }
+-
+-        let dateMonth = Month(unchecked: Int(month))
+-        do throws(Gregorian.Month.Day.Error) {
+-            return try Date(year: Year(dateYear), month: dateMonth, day: Int(dateDay))
+-        } catch {
+-            throw .unsupported(day)
+-        }
+-    }
+-
+-    static func fixedDay(year: Year, month: Month, day: Month.Day) -> Int128 {
+-        let year = Int128(year.rawValue) - (month.rawValue <= 2 ? 1 : 0)
+-        let era = floorDivide(year, by: 400)
+-        let yearOfEra = year - era * 400
+-        let month = Int128(month.rawValue) + (month.rawValue > 2 ? -3 : 9)
+-        let dayOfYear = (153 * month + 2) / 5 + Int128(day.rawValue) - 1
+-        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+-        return era * 146_097 + dayOfEra - 305
+-    }
+-
+-    private static func floorDivide(_ value: Int128, by divisor: Int128) -> Int128 {
+-        let quotient = value / divisor
+-        return value % divisor < 0 ? quotient - 1 : quotient
+-    }
+-}
+diff --git a/Sources/Calendar Gregorian/Gregorian.Date+Arithmetic.swift b/Sources/Calendar Gregorian/Gregorian.Date+Arithmetic.swift
+deleted file mode 100644
+index a48225f..0000000
+--- a/Sources/Calendar Gregorian/Gregorian.Date+Arithmetic.swift	
++++ /dev/null
+@@ -1,45 +0,0 @@
+-public import Calendar
+-
+-extension Gregorian.Date {
+-
+-    public func adding(months: Int) throws(Calendar<Self>.Error) -> Self {
+-        try shifted(by: Int128(months))
+-    }
+-
+-    public func adding(years: Int) throws(Calendar<Self>.Error) -> Self {
+-        try shifted(by: Int128(years) * 12)
+-    }
+-
+-    public var firstOfMonth: Self {
+-        Self(unchecked: year, month: month, day: Gregorian.Month.Day(unchecked: 1))
+-    }
+-
+-    public func next(_ weekday: Gregorian.Weekday) throws(Calendar<Self>.Error) -> Self {
+-        try self + Gregorian.Day((Self.number(of: weekday) - Self.number(of: self.weekday) + 6) % 7 + 1)
+-    }
+-
+-    private func shifted(by months: Int128) throws(Calendar<Self>.Error) -> Self {
+-        let index = Int128(year.rawValue) * 12 + Int128(month.rawValue - 1) + months
+-        let quotient = index / 12 - (index % 12 < 0 ? 1 : 0)
+-        guard let rawYear = Int(exactly: quotient) else { throw .arithmetic(.overflow) }
+-        let target = Gregorian.Year(rawYear)
+-        let targetMonth = Gregorian.Month(unchecked: Int(index - quotient * 12) + 1)
+-        return Self(
+-            unchecked: target,
+-            month: targetMonth,
+-            day: Gregorian.Month.Day(unchecked: Swift::min(day.rawValue, targetMonth.days(in: target)))
+-        )
+-    }
+-
+-    private static func number(of weekday: Gregorian.Weekday) -> Int {
+-        switch weekday {
+-        case .sunday: 0
+-        case .monday: 1
+-        case .tuesday: 2
+-        case .wednesday: 3
+-        case .thursday: 4
+-        case .friday: 5
+-        case .saturday: 6
+-        }
+-    }
+-}
+diff --git a/Sources/Calendar Gregorian/Gregorian.Date+Time.Zone.Rule.swift b/Sources/Calendar Gregorian/Gregorian.Date+Time.Zone.Rule.swift
+deleted file mode 100644
+index beef52d..0000000
+--- a/Sources/Calendar Gregorian/Gregorian.Date+Time.Zone.Rule.swift	
++++ /dev/null
+@@ -1,31 +0,0 @@
+-public import Calendar
+-public import Time
+-
+-extension Gregorian.Date {
+-
+-    public func start(in rule: Time.Zone.Rule) throws(Gregorian.Conversion.Error) -> Time.Instant {
+-        let days = Gregorian.fixedDay(year: year, month: month, day: day) - Gregorian.Conversion.unixEpochDay
+-        guard let seconds = Int64(exactly: days * Int128(Time.Conversion.secondsPerDay)) else {
+-            throw .overflow
+-        }
+-        do throws(Time.Instant.Error) {
+-            return try rule.instant(
+-                local: Time.Instant(secondsSinceUnixEpoch: seconds),
+-                ambiguous: .earlier,
+-                skipped: .later
+-            )
+-        } catch {
+-            throw .overflow
+-        }
+-    }
+-
+-    public func instants(in rule: Time.Zone.Rule) throws(Gregorian.Conversion.Error) -> Range<Time.Instant> {
+-        let next: Self
+-        do throws(Calendar<Self>.Error) {
+-            next = try self + Gregorian.Day(1)
+-        } catch {
+-            throw .overflow
+-        }
+-        return try start(in: rule)..<next.start(in: rule)
+-    }
+-}
+diff --git a/Sources/Calendar Gregorian/Gregorian.Date.swift b/Sources/Calendar Gregorian/Gregorian.Date.swift
+index 141b345..72252a2 100644
+--- a/Sources/Calendar Gregorian/Gregorian.Date.swift	
++++ b/Sources/Calendar Gregorian/Gregorian.Date.swift	
+@@ -1,3 +1,6 @@
++public import Calendar
++public import Time
++
+ extension Gregorian {
+ 
+     public struct Date {
+@@ -51,3 +54,76 @@ extension Gregorian.Date {
+         self.day = day
+     }
+ }
++
++extension Gregorian.Date {
++
++    public func adding(months: Int) throws(Calendar<Self>.Error) -> Self {
++        try shifted(by: Int128(months))
++    }
++
++    public func adding(years: Int) throws(Calendar<Self>.Error) -> Self {
++        try shifted(by: Int128(years) * 12)
++    }
++
++    public var firstOfMonth: Self {
++        Self(unchecked: year, month: month, day: Gregorian.Month.Day(unchecked: 1))
++    }
++
++    public func next(_ weekday: Gregorian.Weekday) throws(Calendar<Self>.Error) -> Self {
++        try self + Gregorian.Day((Self.number(of: weekday) - Self.number(of: self.weekday) + 6) % 7 + 1)
++    }
++
++    private func shifted(by months: Int128) throws(Calendar<Self>.Error) -> Self {
++        let index = Int128(year.rawValue) * 12 + Int128(month.rawValue - 1) + months
++        let quotient = index / 12 - (index % 12 < 0 ? 1 : 0)
++        guard let rawYear = Int(exactly: quotient) else { throw .arithmetic(.overflow) }
++        let target = Gregorian.Year(rawYear)
++        let targetMonth = Gregorian.Month(unchecked: Int(index - quotient * 12) + 1)
++        return Self(
++            unchecked: target,
++            month: targetMonth,
++            day: Gregorian.Month.Day(unchecked: Swift::min(day.rawValue, targetMonth.days(in: target)))
++        )
++    }
++
++    private static func number(of weekday: Gregorian.Weekday) -> Int {
++        switch weekday {
++        case .sunday: 0
++        case .monday: 1
++        case .tuesday: 2
++        case .wednesday: 3
++        case .thursday: 4
++        case .friday: 5
++        case .saturday: 6
++        }
++    }
++}
++
++extension Gregorian.Date {
++
++    public func start(in rule: Time.Zone.Rule) throws(Gregorian.Conversion.Error) -> Time.Instant {
++        let days = Gregorian.fixedDay(year: year, month: month, day: day) - Gregorian.Conversion.unixEpochDay
++        guard let seconds = Int64(exactly: days * Int128(Time.Conversion.secondsPerDay)) else {
++            throw .overflow
++        }
++        do throws(Time.Instant.Error) {
++            return try rule.instant(
++                local: Time.Instant(secondsSinceUnixEpoch: seconds),
++                ambiguous: .earlier,
++                skipped: .later
++            )
++        } catch {
++            throw .overflow
++        }
++    }
++
++    public func instants(in rule: Time.Zone.Rule) throws(Gregorian.Conversion.Error) -> Range<Time.Instant> {
++        let next: Self
++        do throws(Calendar<Self>.Error) {
++            next = try self + Gregorian.Day(1)
++        } catch {
++            throw .overflow
++        }
++        return try start(in: rule)..<next.start(in: rule)
++    }
++}
+diff --git a/Sources/Calendar Gregorian/Gregorian.Year+Gregorian.swift b/Sources/Calendar Gregorian/Gregorian.Year+Gregorian.swift
+deleted file mode 100644
+index 29ae6a5..0000000
+--- a/Sources/Calendar Gregorian/Gregorian.Year+Gregorian.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Gregorian.Year {
+-
+-    public var isLeapYear: Bool {
+-        Self.isLeapYear(self)
+-    }
+-
+-    public static func isLeapYear(_ year: Gregorian.Year) -> Bool {
+-        Gregorian.isLeapYear(year)
+-    }
+-}
+diff --git a/Sources/Calendar Gregorian/Gregorian.Year.swift b/Sources/Calendar Gregorian/Gregorian.Year.swift
+index 98da80d..0ceb3f7 100644
+--- a/Sources/Calendar Gregorian/Gregorian.Year.swift	
++++ b/Sources/Calendar Gregorian/Gregorian.Year.swift	
+@@ -33,3 +33,14 @@ extension Gregorian.Year: Comparable {}
+ extension Gregorian.Year {
+     public init(_ value: Int) { self.init(rawValue: value) }
+ }
++
++extension Gregorian.Year {
++
++    public var isLeapYear: Bool {
++        Self.isLeapYear(self)
++    }
++
++    public static func isLeapYear(_ year: Gregorian.Year) -> Bool {
++        Gregorian.isLeapYear(year)
++    }
++}
+diff --git a/Sources/Calendar Gregorian/Gregorian.swift b/Sources/Calendar Gregorian/Gregorian.swift
+index 5f06394..fdca984 100644
+--- a/Sources/Calendar Gregorian/Gregorian.swift	
++++ b/Sources/Calendar Gregorian/Gregorian.swift	
+@@ -46,3 +46,50 @@ extension Gregorian {
+         Calendar::Calendar(dayNumber: dayNumber, date: date)
+     }
+ }
++
++extension Gregorian {
++
++    public static func dayNumber(of date: Date) throws(Calendar::Calendar<Gregorian.Date>.Encode.Error) -> DayNumber {
++        let day = fixedDay(year: date.year, month: date.month, day: date.day)
++        guard let rawValue = Int64(exactly: day) else { throw .unsupported }
++        return DayNumber(rawValue: rawValue)
++    }
++
++    public static func date(on day: DayNumber) throws(Calendar::Calendar<Gregorian.Date>.Decode.Error) -> Date {
++
++        let shifted = Int128(day.rawValue) + 305
++        let era = floorDivide(shifted, by: 146_097)
++        let dayOfEra = shifted - era * 146_097
++        let yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
++        let year = yearOfEra + era * 400
++        let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
++        let shiftedMonth = (5 * dayOfYear + 2) / 153
++        let dateDay = dayOfYear - (153 * shiftedMonth + 2) / 5 + 1
++        let month = shiftedMonth + (shiftedMonth < 10 ? 3 : -9)
++        guard let dateYear = Int(exactly: year + (month <= 2 ? 1 : 0)) else {
++            throw .unsupported(day)
++        }
++
++        let dateMonth = Month(unchecked: Int(month))
++        do throws(Gregorian.Month.Day.Error) {
++            return try Date(year: Year(dateYear), month: dateMonth, day: Int(dateDay))
++        } catch {
++            throw .unsupported(day)
++        }
++    }
++
++    static func fixedDay(year: Year, month: Month, day: Month.Day) -> Int128 {
++        let year = Int128(year.rawValue) - (month.rawValue <= 2 ? 1 : 0)
++        let era = floorDivide(year, by: 400)
++        let yearOfEra = year - era * 400
++        let month = Int128(month.rawValue) + (month.rawValue > 2 ? -3 : 9)
++        let dayOfYear = (153 * month + 2) / 5 + Int128(day.rawValue) - 1
++        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
++        return era * 146_097 + dayOfEra - 305
++    }
++
++    private static func floorDivide(_ value: Int128, by divisor: Int128) -> Int128 {
++        let quotient = value / divisor
++        return value % divisor < 0 ? quotient - 1 : quotient
++    }
++}
+-- 
+2.43.0
+

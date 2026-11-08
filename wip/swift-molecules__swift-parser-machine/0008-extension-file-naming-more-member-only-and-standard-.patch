@@ -1,0 +1,300 @@
+From 4e99c3072a9a523b773f8fc9879e809683c7f571 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:30 +0000
+Subject: [PATCH 8/8] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ .../Machine.Parser.Compile.Witness.swift      | 39 +++++++++++++++++++
+ .../Machine.Parser.Compiled.Cache.swift       | 26 +++++++++++++
+ .../Machine.Parser.Compiled.Result.swift      | 25 ++++++++++++
+ .../Parser.Machine.Compile.Witness.swift      | 32 ---------------
+ .../Parser.Machine.Compiled.swift             | 37 ------------------
+ .../Machine.Parser.Failure.Recovery.swift     | 13 +++++++
+ .../Machine.Parser.Runtime.Error.swift        | 13 +++++++
+ .../Parser.Machine.Failure.swift              |  5 ---
+ .../Parser.Machine.Runtime.swift              |  6 ---
+ 9 files changed, 116 insertions(+), 80 deletions(-)
+ create mode 100644 Sources/Parser Machine Compile/Machine.Parser.Compile.Witness.swift
+ create mode 100644 Sources/Parser Machine Compile/Machine.Parser.Compiled.Cache.swift
+ create mode 100644 Sources/Parser Machine Compile/Machine.Parser.Compiled.Result.swift
+ create mode 100644 Sources/Parser Machine Runtime/Machine.Parser.Failure.Recovery.swift
+ create mode 100644 Sources/Parser Machine Runtime/Machine.Parser.Runtime.Error.swift
+
+diff --git a/Sources/Parser Machine Compile/Machine.Parser.Compile.Witness.swift b/Sources/Parser Machine Compile/Machine.Parser.Compile.Witness.swift
+new file mode 100644
+index 0000000..89c107d
+--- /dev/null
++++ b/Sources/Parser Machine Compile/Machine.Parser.Compile.Witness.swift	
+@@ -0,0 +1,39 @@
++import Checkpoint
++public import Cursor
++import Iterator
++public import Machine
++
++
++extension Machine.Parser.Compile {
++    public struct Witness<P: Parser::Parsing & ~Copyable>
++    where
++        P.Input: Cursor.`Protocol`,
++        P.Failure: Swift::Error
++    {
++        @usableFromInline
++        let _compile:
++            (
++                consuming P,
++                inout Machine.Parser.Builder<P.Input, P.Failure>
++            ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output>
++
++        @inlinable
++        public init(
++            compile:
++                @escaping (
++                    consuming P,
++                    inout Machine.Parser.Builder<P.Input, P.Failure>
++                ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output>
++        ) {
++            self._compile = compile
++        }
++
++        @inlinable
++        public func compile(
++            _ parser: consuming P,
++            into builder: inout Machine.Parser.Builder<P.Input, P.Failure>
++        ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output> {
++            _compile(parser, &builder)
++        }
++    }
++}
+diff --git a/Sources/Parser Machine Compile/Machine.Parser.Compiled.Cache.swift b/Sources/Parser Machine Compile/Machine.Parser.Compiled.Cache.swift
+new file mode 100644
+index 0000000..180a3b5
+--- /dev/null
++++ b/Sources/Parser Machine Compile/Machine.Parser.Compiled.Cache.swift	
+@@ -0,0 +1,26 @@
++import Checkpoint
++public import Cursor
++import Iterator
++public import Machine
++
++
++extension Machine.Parser.Compiled where P: ~Copyable {
++    @usableFromInline
++    final class Cache {
++        @usableFromInline
++        var compiled: Result?
++
++        @usableFromInline
++        var source: P?
++
++        @usableFromInline
++        let witness: Machine.Parser.Compile.Witness<P>
++
++        @usableFromInline
++        init(source: consuming P, witness: Machine.Parser.Compile.Witness<P>) {
++            self.compiled = nil
++            self.source = consume source
++            self.witness = witness
++        }
++    }
++}
+diff --git a/Sources/Parser Machine Compile/Machine.Parser.Compiled.Result.swift b/Sources/Parser Machine Compile/Machine.Parser.Compiled.Result.swift
+new file mode 100644
+index 0000000..2fc3489
+--- /dev/null
++++ b/Sources/Parser Machine Compile/Machine.Parser.Compiled.Result.swift	
+@@ -0,0 +1,25 @@
++import Checkpoint
++public import Cursor
++import Iterator
++public import Machine
++
++
++extension Machine.Parser.Compiled where P: ~Copyable {
++    @usableFromInline
++    struct Result {
++        @usableFromInline
++        let program: Machine.Parser.Program<P.Input, P.Failure>
++
++        @usableFromInline
++        let root: Machine.Parser.Node<P.Input, P.Failure>.ID
++
++        @usableFromInline
++        init(
++            program: Machine.Parser.Program<P.Input, P.Failure>,
++            root: Machine.Parser.Node<P.Input, P.Failure>.ID
++        ) {
++            self.program = program
++            self.root = root
++        }
++    }
++}
+diff --git a/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift b/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift
+index 04e16d2..83704d8 100644
+--- a/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift	
++++ b/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift	
+@@ -9,38 +9,6 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Compile {
+-
+-    public struct Witness<P: Parser::Parsing & ~Copyable>
+-    where
+-        P.Input: Cursor.`Protocol`,
+-        P.Failure: Swift::Error
+-    {
+-        @usableFromInline
+-        let _compile:
+-            (
+-                consuming P,
+-                inout Machine.Parser.Builder<P.Input, P.Failure>
+-            ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output>
+-
+-        @inlinable
+-        public init(
+-            compile:
+-                @escaping (
+-                    consuming P,
+-                    inout Machine.Parser.Builder<P.Input, P.Failure>
+-                ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output>
+-        ) {
+-            self._compile = compile
+-        }
+-
+-        @inlinable
+-        public func compile(
+-            _ parser: consuming P,
+-            into builder: inout Machine.Parser.Builder<P.Input, P.Failure>
+-        ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output> {
+-            _compile(parser, &builder)
+-        }
+-    }
+ }
+ 
+ extension Machine.Parser.Compile.Witness where P: ~Copyable {
+diff --git a/Sources/Parser Machine Compile/Parser.Machine.Compiled.swift b/Sources/Parser Machine Compile/Parser.Machine.Compiled.swift
+index 91a1b00..7b50e9b 100644
+--- a/Sources/Parser Machine Compile/Parser.Machine.Compiled.swift	
++++ b/Sources/Parser Machine Compile/Parser.Machine.Compiled.swift	
+@@ -30,46 +30,9 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Compiled where P: ~Copyable {
+-
+-    @usableFromInline
+-    struct Result {
+-        @usableFromInline
+-        let program: Machine.Parser.Program<P.Input, P.Failure>
+-
+-        @usableFromInline
+-        let root: Machine.Parser.Node<P.Input, P.Failure>.ID
+-
+-        @usableFromInline
+-        init(
+-            program: Machine.Parser.Program<P.Input, P.Failure>,
+-            root: Machine.Parser.Node<P.Input, P.Failure>.ID
+-        ) {
+-            self.program = program
+-            self.root = root
+-        }
+-    }
+ }
+ 
+ extension Machine.Parser.Compiled where P: ~Copyable {
+-
+-    @usableFromInline
+-    final class Cache {
+-        @usableFromInline
+-        var compiled: Result?
+-
+-        @usableFromInline
+-        var source: P?
+-
+-        @usableFromInline
+-        let witness: Machine.Parser.Compile.Witness<P>
+-
+-        @usableFromInline
+-        init(source: consuming P, witness: Machine.Parser.Compile.Witness<P>) {
+-            self.compiled = nil
+-            self.source = consume source
+-            self.witness = witness
+-        }
+-    }
+ }
+ 
+ extension Machine.Parser.Compiled.Cache where P: ~Copyable {
+diff --git a/Sources/Parser Machine Runtime/Machine.Parser.Failure.Recovery.swift b/Sources/Parser Machine Runtime/Machine.Parser.Failure.Recovery.swift
+new file mode 100644
+index 0000000..16beca6
+--- /dev/null
++++ b/Sources/Parser Machine Runtime/Machine.Parser.Failure.Recovery.swift	
+@@ -0,0 +1,13 @@
++package import Machine
++import Parser
++package import Parser_Machine_Program
++package import Tagged
++
++
++extension Machine.Parser.Failure {
++    package enum Recovery {
++        case continueWith(ID)
++        case handleReady(Machine.Parser.Value.Handle)
++        case propagate
++    }
++}
+diff --git a/Sources/Parser Machine Runtime/Machine.Parser.Runtime.Error.swift b/Sources/Parser Machine Runtime/Machine.Parser.Runtime.Error.swift
+new file mode 100644
+index 0000000..3066c40
+--- /dev/null
++++ b/Sources/Parser Machine Runtime/Machine.Parser.Runtime.Error.swift	
+@@ -0,0 +1,13 @@
++import Machine
++import Parser
++internal import Parser_Machine_Program
++
++
++extension Machine.Parser.Runtime {
++    package enum Error: Swift::Error, Sendable {
++        case depthExceeded(limit: Int)
++        case typeMismatch
++        case internalError(String)
++        case cachedFailure
++    }
++}
+diff --git a/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift b/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift
+index 9eeb567..663aa36 100644
+--- a/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift	
++++ b/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift	
+@@ -8,11 +8,6 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Failure {
+-    package enum Recovery {
+-        case continueWith(ID)
+-        case handleReady(Machine.Parser.Value.Handle)
+-        case propagate
+-    }
+ }
+ 
+ extension Machine.Parser.Failure.Recovery {
+diff --git a/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift b/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift
+index b61a6f3..352db05 100644
+--- a/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift	
++++ b/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift	
+@@ -7,10 +7,4 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Runtime {
+-    package enum Error: Swift::Error, Sendable {
+-        case depthExceeded(limit: Int)
+-        case typeMismatch
+-        case internalError(String)
+-        case cachedFailure
+-    }
+ }
+-- 
+2.43.0
+

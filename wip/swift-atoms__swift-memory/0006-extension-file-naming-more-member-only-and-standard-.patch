@@ -1,0 +1,432 @@
+From ce0ca6b020d3d0c9e1b326e7130644b261c82cf3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:37:27 +0000
+Subject: [PATCH 6/6] extension file naming: more member-only and
+ standard-library extension files merge into their type's file; single type
+ per file: more additional types move to their own files
+ (merge-extension-files.py, split-types.py); parse-checked; root build pending
+ (coenttb/work#242)
+
+---
+ .../Memory.Alignment+Carrier.Protocol.swift   | 26 ------------
+ .../Memory.Alignment+Swift.Comparable.swift   |  6 ---
+ ...gnment+Swift.CustomStringConvertible.swift |  6 ---
+ ....Error+Swift.CustomStringConvertible.swift | 12 ------
+ Sources/Memory/Memory.Alignment.Error.swift   | 13 ++++++
+ Sources/Memory/Memory.Alignment.swift         | 41 +++++++++++++++++++
+ Sources/Memory/Memory.Capacity.swift          |  7 ----
+ Sources/Memory/Memory.Heap+Raw.swift          | 35 ----------------
+ .../Memory/Memory.Heap+Swift.Sendable.swift   |  5 ---
+ Sources/Memory/Memory.Heap.swift              | 36 ++++++++++++++++
+ .../Memory.Shift+Swift.Comparable.swift       |  7 ----
+ ....Shift+Swift.CustomStringConvertible.swift |  6 ---
+ ...Shift+Swift.Equatable+Swift.Hashable.swift | 16 --------
+ ....Error+Swift.CustomStringConvertible.swift |  9 ----
+ Sources/Memory/Memory.Shift.Error.swift       | 10 +++++
+ Sources/Memory/Memory.Shift.swift             | 28 +++++++++++++
+ Sources/Memory/Memory.swift                   |  8 ++++
+ 17 files changed, 136 insertions(+), 135 deletions(-)
+ delete mode 100644 Sources/Memory/Absorbed swift-memory-carrier/Memory.Alignment+Carrier.Protocol.swift
+ delete mode 100644 Sources/Memory/Memory.Alignment+Swift.Comparable.swift
+ delete mode 100644 Sources/Memory/Memory.Alignment+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Memory/Memory.Alignment.Error+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Memory/Memory.Capacity.swift
+ delete mode 100644 Sources/Memory/Memory.Heap+Raw.swift
+ delete mode 100644 Sources/Memory/Memory.Heap+Swift.Sendable.swift
+ delete mode 100644 Sources/Memory/Memory.Shift+Swift.Comparable.swift
+ delete mode 100644 Sources/Memory/Memory.Shift+Swift.CustomStringConvertible.swift
+ delete mode 100644 Sources/Memory/Memory.Shift+Swift.Equatable+Swift.Hashable.swift
+ delete mode 100644 Sources/Memory/Memory.Shift.Error+Swift.CustomStringConvertible.swift
+
+diff --git a/Sources/Memory/Absorbed swift-memory-carrier/Memory.Alignment+Carrier.Protocol.swift b/Sources/Memory/Absorbed swift-memory-carrier/Memory.Alignment+Carrier.Protocol.swift
+deleted file mode 100644
+index f12f7bc..0000000
+--- a/Sources/Memory/Absorbed swift-memory-carrier/Memory.Alignment+Carrier.Protocol.swift	
++++ /dev/null
+@@ -1,26 +0,0 @@
+-#if Carrier
+-    public import Carrier
+-    extension Memory.Alignment {
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public func isAligned<C: Carrier.`Protocol`>(_ value: C) -> Bool
+-        where C.Underlying: FixedWidthInteger {
+-            isAligned(value.underlying)
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public func alignUp<C: Carrier.`Protocol`>(_ value: C) -> C
+-        where C.Underlying: FixedWidthInteger {
+-            C(alignUp(value.underlying))
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public func alignDown<C: Carrier.`Protocol`>(_ value: C) -> C
+-        where C.Underlying: FixedWidthInteger {
+-            C(alignDown(value.underlying))
+-        }
+-    }
+-#endif
+diff --git a/Sources/Memory/Memory.Alignment+Swift.Comparable.swift b/Sources/Memory/Memory.Alignment+Swift.Comparable.swift
+deleted file mode 100644
+index c7da207..0000000
+--- a/Sources/Memory/Memory.Alignment+Swift.Comparable.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-extension Memory.Alignment: Swift::Comparable {
+-
+-    public static func < (lhs: Memory.Alignment, rhs: Memory.Alignment) -> Bool {
+-        lhs.shift < rhs.shift
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Alignment+Swift.CustomStringConvertible.swift b/Sources/Memory/Memory.Alignment+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 9fc0bac..0000000
+--- a/Sources/Memory/Memory.Alignment+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-extension Memory.Alignment: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        "\(magnitude() as Int)"
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Alignment.Error+Swift.CustomStringConvertible.swift b/Sources/Memory/Memory.Alignment.Error+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 60897ba..0000000
+--- a/Sources/Memory/Memory.Alignment.Error+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,12 +0,0 @@
+-extension Memory.Alignment.Error: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        switch self {
+-        case .notPowerOfTwo(let value):
+-            return "alignment must be a power of 2 (was \(value))"
+-
+-        case .shiftExceedsBitWidth(let shift, let bitWidth):
+-            return "shift \(shift) exceeds carrier bit width \(bitWidth)"
+-        }
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Alignment.Error.swift b/Sources/Memory/Memory.Alignment.Error.swift
+index a7a9a03..27a4eaf 100644
+--- a/Sources/Memory/Memory.Alignment.Error.swift
++++ b/Sources/Memory/Memory.Alignment.Error.swift
+@@ -7,3 +7,16 @@ extension Memory.Alignment {
+         case shiftExceedsBitWidth(shift: UInt8, bitWidth: Int)
+     }
+ }
++
++extension Memory.Alignment.Error: Swift::CustomStringConvertible {
++
++    public var description: String {
++        switch self {
++        case .notPowerOfTwo(let value):
++            return "alignment must be a power of 2 (was \(value))"
++
++        case .shiftExceedsBitWidth(let shift, let bitWidth):
++            return "shift \(shift) exceeds carrier bit width \(bitWidth)"
++        }
++    }
++}
+diff --git a/Sources/Memory/Memory.Alignment.swift b/Sources/Memory/Memory.Alignment.swift
+index 14eb7fd..5d50e9d 100644
+--- a/Sources/Memory/Memory.Alignment.swift
++++ b/Sources/Memory/Memory.Alignment.swift
+@@ -119,3 +119,44 @@ extension Memory.Alignment {
+         return value & ~mask
+     }
+ }
++
++#if Carrier
++    public import Carrier
++    extension Memory.Alignment {
++
++        @_disfavoredOverload
++        @inlinable
++        public func isAligned<C: Carrier.`Protocol`>(_ value: C) -> Bool
++        where C.Underlying: FixedWidthInteger {
++            isAligned(value.underlying)
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public func alignUp<C: Carrier.`Protocol`>(_ value: C) -> C
++        where C.Underlying: FixedWidthInteger {
++            C(alignUp(value.underlying))
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public func alignDown<C: Carrier.`Protocol`>(_ value: C) -> C
++        where C.Underlying: FixedWidthInteger {
++            C(alignDown(value.underlying))
++        }
++    }
++#endif
++
++extension Memory.Alignment: Swift::Comparable {
++
++    public static func < (lhs: Memory.Alignment, rhs: Memory.Alignment) -> Bool {
++        lhs.shift < rhs.shift
++    }
++}
++
++extension Memory.Alignment: Swift::CustomStringConvertible {
++
++    public var description: String {
++        "\(magnitude() as Int)"
++    }
++}
+diff --git a/Sources/Memory/Memory.Capacity.swift b/Sources/Memory/Memory.Capacity.swift
+deleted file mode 100644
+index 755933f..0000000
+--- a/Sources/Memory/Memory.Capacity.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-public import Cardinal
+-public import Tagged
+-
+-extension Memory {
+-
+-    public typealias Capacity = Tagged<Memory, Cardinal>
+-}
+diff --git a/Sources/Memory/Memory.Heap+Raw.swift b/Sources/Memory/Memory.Heap+Raw.swift
+deleted file mode 100644
+index 120b989..0000000
+--- a/Sources/Memory/Memory.Heap+Raw.swift
++++ /dev/null
+@@ -1,35 +0,0 @@
+-public import Cardinal
+-public import Tagged
+-
+-extension Memory.Heap {
+-
+-    @unsafe
+-    @inlinable
+-    public consuming func take() -> (base: UnsafeMutableRawPointer, capacity: Memory.Address.Count) {
+-
+-        let result = unsafe (_base, _capacity)
+-        discard self
+-        return unsafe result
+-    }
+-
+-    @unsafe
+-    @inlinable
+-    public var unsafeBaseAddress: UnsafeRawPointer {
+-
+-        unsafe UnsafeRawPointer(_base)
+-    }
+-
+-    @unsafe
+-    @inlinable
+-    public borrowing func withUnsafeBytes<R: ~Copyable, E: Swift::Error>(
+-        _ body: (UnsafeRawBufferPointer) throws(E) -> R
+-    ) throws(E) -> R {
+-
+-        try unsafe body(
+-            unsafe UnsafeRawBufferPointer(
+-                start: _base,
+-                count: Int(bitPattern: _capacity.underlying.rawValue)
+-            )
+-        )
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Heap+Swift.Sendable.swift b/Sources/Memory/Memory.Heap+Swift.Sendable.swift
+deleted file mode 100644
+index 28beafa..0000000
+--- a/Sources/Memory/Memory.Heap+Swift.Sendable.swift
++++ /dev/null
+@@ -1,5 +0,0 @@
+-import Cardinal
+-import Ordinal
+-import Tagged
+-
+-extension Memory.Heap: @unchecked Swift::Sendable {}
+diff --git a/Sources/Memory/Memory.Heap.swift b/Sources/Memory/Memory.Heap.swift
+index 734a385..b19a871 100644
+--- a/Sources/Memory/Memory.Heap.swift
++++ b/Sources/Memory/Memory.Heap.swift
+@@ -1,5 +1,6 @@
+ public import Cardinal
+ public import Tagged
++import Ordinal
+ 
+ extension Memory {
+ 
+@@ -31,3 +32,38 @@ extension Memory {
+         }
+     }
+ }
++
++extension Memory.Heap {
++
++    @unsafe
++    @inlinable
++    public consuming func take() -> (base: UnsafeMutableRawPointer, capacity: Memory.Address.Count) {
++
++        let result = unsafe (_base, _capacity)
++        discard self
++        return unsafe result
++    }
++
++    @unsafe
++    @inlinable
++    public var unsafeBaseAddress: UnsafeRawPointer {
++
++        unsafe UnsafeRawPointer(_base)
++    }
++
++    @unsafe
++    @inlinable
++    public borrowing func withUnsafeBytes<R: ~Copyable, E: Swift::Error>(
++        _ body: (UnsafeRawBufferPointer) throws(E) -> R
++    ) throws(E) -> R {
++
++        try unsafe body(
++            unsafe UnsafeRawBufferPointer(
++                start: _base,
++                count: Int(bitPattern: _capacity.underlying.rawValue)
++            )
++        )
++    }
++}
++
++extension Memory.Heap: @unchecked Swift::Sendable {}
+diff --git a/Sources/Memory/Memory.Shift+Swift.Comparable.swift b/Sources/Memory/Memory.Shift+Swift.Comparable.swift
+deleted file mode 100644
+index 30f3bf0..0000000
+--- a/Sources/Memory/Memory.Shift+Swift.Comparable.swift
++++ /dev/null
+@@ -1,7 +0,0 @@
+-extension Memory.Shift: Swift::Comparable {
+-
+-    @inlinable
+-    public static func < (lhs: Memory.Shift, rhs: Memory.Shift) -> Bool {
+-        lhs.bitCount < rhs.bitCount
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Shift+Swift.CustomStringConvertible.swift b/Sources/Memory/Memory.Shift+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index fdea8eb..0000000
+--- a/Sources/Memory/Memory.Shift+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,6 +0,0 @@
+-extension Memory.Shift: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        "\(bitCount)"
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Shift+Swift.Equatable+Swift.Hashable.swift b/Sources/Memory/Memory.Shift+Swift.Equatable+Swift.Hashable.swift
+deleted file mode 100644
+index 8a3fecc..0000000
+--- a/Sources/Memory/Memory.Shift+Swift.Equatable+Swift.Hashable.swift
++++ /dev/null
+@@ -1,16 +0,0 @@
+-import Bit
+-import Cardinal
+-import Tagged
+-
+-extension Memory.Shift: Swift::Equatable, Swift::Hashable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        lhs.bitCount == rhs.bitCount
+-    }
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        hasher.combine(bitCount)
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Shift.Error+Swift.CustomStringConvertible.swift b/Sources/Memory/Memory.Shift.Error+Swift.CustomStringConvertible.swift
+deleted file mode 100644
+index 04ddf6a..0000000
+--- a/Sources/Memory/Memory.Shift.Error+Swift.CustomStringConvertible.swift
++++ /dev/null
+@@ -1,9 +0,0 @@
+-extension Memory.Shift.Error: Swift::CustomStringConvertible {
+-
+-    public var description: String {
+-        switch self {
+-        case .outOfRange(let value, let max):
+-            return "shift out of range (was \(value), valid: 0...\(max))"
+-        }
+-    }
+-}
+diff --git a/Sources/Memory/Memory.Shift.Error.swift b/Sources/Memory/Memory.Shift.Error.swift
+index 2a2426f..b640adb 100644
+--- a/Sources/Memory/Memory.Shift.Error.swift
++++ b/Sources/Memory/Memory.Shift.Error.swift
+@@ -5,3 +5,13 @@ extension Memory.Shift {
+         case outOfRange(value: Int, max: UInt8)
+     }
+ }
++
++extension Memory.Shift.Error: Swift::CustomStringConvertible {
++
++    public var description: String {
++        switch self {
++        case .outOfRange(let value, let max):
++            return "shift out of range (was \(value), valid: 0...\(max))"
++        }
++    }
++}
+diff --git a/Sources/Memory/Memory.Shift.swift b/Sources/Memory/Memory.Shift.swift
+index 6ef21d4..a798369 100644
+--- a/Sources/Memory/Memory.Shift.swift
++++ b/Sources/Memory/Memory.Shift.swift
+@@ -114,3 +114,31 @@ extension Memory.Shift {
+         return self
+     }
+ }
++
++extension Memory.Shift: Swift::Comparable {
++
++    @inlinable
++    public static func < (lhs: Memory.Shift, rhs: Memory.Shift) -> Bool {
++        lhs.bitCount < rhs.bitCount
++    }
++}
++
++extension Memory.Shift: Swift::CustomStringConvertible {
++
++    public var description: String {
++        "\(bitCount)"
++    }
++}
++
++extension Memory.Shift: Swift::Equatable, Swift::Hashable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        lhs.bitCount == rhs.bitCount
++    }
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(bitCount)
++    }
++}
+diff --git a/Sources/Memory/Memory.swift b/Sources/Memory/Memory.swift
+index 69cd3d9..47f5231 100644
+--- a/Sources/Memory/Memory.swift
++++ b/Sources/Memory/Memory.swift
+@@ -1 +1,9 @@
++public import Cardinal
++public import Tagged
++
+ public enum Memory {}
++
++extension Memory {
++
++    public typealias Capacity = Tagged<Memory, Cardinal>
++}
+-- 
+2.43.0
+
