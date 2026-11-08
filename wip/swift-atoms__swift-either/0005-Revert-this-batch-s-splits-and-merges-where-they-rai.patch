@@ -1,0 +1,344 @@
+From dc436c96ddd8457f587822521477cd78b26c142e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:42:31 +0000
+Subject: [PATCH 5/5] Revert this batch's splits and merges where they raised a
+ rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/Either/Either+Fold.swift              |  28 ++++
+ Sources/Either/Either+Swap.swift              |  23 +++
+ .../Either/Either+Swift.BitwiseCopyable.swift |   1 +
+ Sources/Either/Either+Swift.Comparable.swift  |  29 ++++
+ Sources/Either/Either+Swift.Equatable.swift   |  29 ++++
+ Sources/Either/Either+Swift.Error.swift       |   1 +
+ Sources/Either/Either+Swift.Hashable.swift    |  19 +++
+ Sources/Either/Either.swift                   | 137 ------------------
+ 8 files changed, 130 insertions(+), 137 deletions(-)
+ create mode 100644 Sources/Either/Either+Fold.swift
+ create mode 100644 Sources/Either/Either+Swap.swift
+ create mode 100644 Sources/Either/Either+Swift.BitwiseCopyable.swift
+ create mode 100644 Sources/Either/Either+Swift.Comparable.swift
+ create mode 100644 Sources/Either/Either+Swift.Equatable.swift
+ create mode 100644 Sources/Either/Either+Swift.Error.swift
+ create mode 100644 Sources/Either/Either+Swift.Hashable.swift
+
+diff --git a/Sources/Either/Either+Fold.swift b/Sources/Either/Either+Fold.swift
+new file mode 100644
+index 0000000..56a4b4d
+--- /dev/null
++++ b/Sources/Either/Either+Fold.swift
+@@ -0,0 +1,28 @@
++extension Either where Left: ~Copyable, Right: ~Copyable {
++
++    @inlinable
++    public static func fold<Result: ~Copyable, E: Swift.Error>(
++        _ either: consuming Either,
++        left leftHandler: (consuming Left) throws(E) -> Result,
++        right rightHandler: (consuming Right) throws(E) -> Result
++    ) throws(E) -> Result {
++        switch consume either {
++        case .left(let left):
++            try leftHandler(consume left)
++
++        case .right(let right):
++            try rightHandler(consume right)
++        }
++    }
++}
++
++extension Either where Left: ~Copyable, Right: ~Copyable {
++
++    @inlinable
++    public consuming func fold<Result: ~Copyable, E: Swift.Error>(
++        left leftHandler: (consuming Left) throws(E) -> Result,
++        right rightHandler: (consuming Right) throws(E) -> Result
++    ) throws(E) -> Result {
++        try Self.fold(self, left: leftHandler, right: rightHandler)
++    }
++}
+diff --git a/Sources/Either/Either+Swap.swift b/Sources/Either/Either+Swap.swift
+new file mode 100644
+index 0000000..e0830d3
+--- /dev/null
++++ b/Sources/Either/Either+Swap.swift
+@@ -0,0 +1,23 @@
++extension Either where Left: ~Copyable & ~Escapable, Right: ~Copyable & ~Escapable {
++
++    @inlinable
++    @_lifetime(copy either)
++    public static func swapped(_ either: consuming Either) -> Either<Right, Left> {
++        switch consume either {
++        case .left(let left):
++            .right(consume left)
++
++        case .right(let right):
++            .left(consume right)
++        }
++    }
++}
++
++extension Either where Left: ~Copyable & ~Escapable, Right: ~Copyable & ~Escapable {
++
++    @inlinable
++    @_lifetime(copy self)
++    public consuming func swapped() -> Either<Right, Left> {
++        Self.swapped(self)
++    }
++}
+diff --git a/Sources/Either/Either+Swift.BitwiseCopyable.swift b/Sources/Either/Either+Swift.BitwiseCopyable.swift
+new file mode 100644
+index 0000000..f46912b
+--- /dev/null
++++ b/Sources/Either/Either+Swift.BitwiseCopyable.swift
+@@ -0,0 +1 @@
++extension Either: Swift.BitwiseCopyable where Left: Swift.BitwiseCopyable, Right: Swift.BitwiseCopyable {}
+diff --git a/Sources/Either/Either+Swift.Comparable.swift b/Sources/Either/Either+Swift.Comparable.swift
+new file mode 100644
+index 0000000..4102942
+--- /dev/null
++++ b/Sources/Either/Either+Swift.Comparable.swift
+@@ -0,0 +1,29 @@
++extension Either: Swift.Comparable
++where
++    Left: Swift.Comparable & ~Copyable,
++    Right: Swift.Comparable & ~Copyable
++{
++
++    @inlinable
++    public static func < (lhs: borrowing Either, rhs: borrowing Either) -> Bool {
++        switch lhs {
++        case .left(let lLeft):
++            switch rhs {
++            case .left(let rLeft):
++                return lLeft < rLeft
++
++            case .right:
++                return true
++            }
++
++        case .right(let lRight):
++            switch rhs {
++            case .left:
++                return false
++
++            case .right(let rRight):
++                return lRight < rRight
++            }
++        }
++    }
++}
+diff --git a/Sources/Either/Either+Swift.Equatable.swift b/Sources/Either/Either+Swift.Equatable.swift
+new file mode 100644
+index 0000000..b30c887
+--- /dev/null
++++ b/Sources/Either/Either+Swift.Equatable.swift
+@@ -0,0 +1,29 @@
++extension Either: Swift.Equatable
++where
++    Left: Swift.Equatable & ~Copyable,
++    Right: Swift.Equatable & ~Copyable
++{
++
++    @inlinable
++    public static func == (lhs: borrowing Either, rhs: borrowing Either) -> Bool {
++        switch lhs {
++        case .left(let lLeft):
++            switch rhs {
++            case .left(let rLeft):
++                return lLeft == rLeft
++
++            case .right:
++                return false
++            }
++
++        case .right(let lRight):
++            switch rhs {
++            case .left:
++                return false
++
++            case .right(let rRight):
++                return lRight == rRight
++            }
++        }
++    }
++}
+diff --git a/Sources/Either/Either+Swift.Error.swift b/Sources/Either/Either+Swift.Error.swift
+new file mode 100644
+index 0000000..088fe74
+--- /dev/null
++++ b/Sources/Either/Either+Swift.Error.swift
+@@ -0,0 +1 @@
++extension Either: Swift.Error where Left: Swift.Error, Right: Swift.Error {}
+diff --git a/Sources/Either/Either+Swift.Hashable.swift b/Sources/Either/Either+Swift.Hashable.swift
+new file mode 100644
+index 0000000..e41db76
+--- /dev/null
++++ b/Sources/Either/Either+Swift.Hashable.swift
+@@ -0,0 +1,19 @@
++extension Either: Swift.Hashable
++where
++    Left: Swift.Hashable & ~Copyable,
++    Right: Swift.Hashable & ~Copyable
++{
++
++    @inlinable
++    public borrowing func hash(into hasher: inout Hasher) {
++        switch self {
++        case .left(let left):
++            hasher.combine(0 as UInt8)
++            left.hash(into: &hasher)
++
++        case .right(let right):
++            hasher.combine(1 as UInt8)
++            right.hash(into: &hasher)
++        }
++    }
++}
+diff --git a/Sources/Either/Either.swift b/Sources/Either/Either.swift
+index 092803b..6b4c7cf 100644
+--- a/Sources/Either/Either.swift
++++ b/Sources/Either/Either.swift
+@@ -19,140 +19,3 @@ where
+ #if !hasFeature(Embedded)
+     extension Either: Swift.Codable where Left: Swift.Codable, Right: Swift.Codable {}
+ #endif
+-
+-extension Either where Left: ~Copyable, Right: ~Copyable {
+-
+-    @inlinable
+-    public static func fold<Result: ~Copyable, E: Swift.Error>(
+-        _ either: consuming Either,
+-        left leftHandler: (consuming Left) throws(E) -> Result,
+-        right rightHandler: (consuming Right) throws(E) -> Result
+-    ) throws(E) -> Result {
+-        switch consume either {
+-        case .left(let left):
+-            try leftHandler(consume left)
+-
+-        case .right(let right):
+-            try rightHandler(consume right)
+-        }
+-    }
+-}
+-
+-extension Either where Left: ~Copyable, Right: ~Copyable {
+-
+-    @inlinable
+-    public consuming func fold<Result: ~Copyable, E: Swift.Error>(
+-        left leftHandler: (consuming Left) throws(E) -> Result,
+-        right rightHandler: (consuming Right) throws(E) -> Result
+-    ) throws(E) -> Result {
+-        try Self.fold(self, left: leftHandler, right: rightHandler)
+-    }
+-}
+-
+-extension Either where Left: ~Copyable & ~Escapable, Right: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    @_lifetime(copy either)
+-    public static func swapped(_ either: consuming Either) -> Either<Right, Left> {
+-        switch consume either {
+-        case .left(let left):
+-            .right(consume left)
+-
+-        case .right(let right):
+-            .left(consume right)
+-        }
+-    }
+-}
+-
+-extension Either where Left: ~Copyable & ~Escapable, Right: ~Copyable & ~Escapable {
+-
+-    @inlinable
+-    @_lifetime(copy self)
+-    public consuming func swapped() -> Either<Right, Left> {
+-        Self.swapped(self)
+-    }
+-}
+-
+-extension Either: Swift.BitwiseCopyable where Left: Swift.BitwiseCopyable, Right: Swift.BitwiseCopyable {}
+-
+-extension Either: Swift.Comparable
+-where
+-    Left: Swift.Comparable & ~Copyable,
+-    Right: Swift.Comparable & ~Copyable
+-{
+-
+-    @inlinable
+-    public static func < (lhs: borrowing Either, rhs: borrowing Either) -> Bool {
+-        switch lhs {
+-        case .left(let lLeft):
+-            switch rhs {
+-            case .left(let rLeft):
+-                return lLeft < rLeft
+-
+-            case .right:
+-                return true
+-            }
+-
+-        case .right(let lRight):
+-            switch rhs {
+-            case .left:
+-                return false
+-
+-            case .right(let rRight):
+-                return lRight < rRight
+-            }
+-        }
+-    }
+-}
+-
+-extension Either: Swift.Equatable
+-where
+-    Left: Swift.Equatable & ~Copyable,
+-    Right: Swift.Equatable & ~Copyable
+-{
+-
+-    @inlinable
+-    public static func == (lhs: borrowing Either, rhs: borrowing Either) -> Bool {
+-        switch lhs {
+-        case .left(let lLeft):
+-            switch rhs {
+-            case .left(let rLeft):
+-                return lLeft == rLeft
+-
+-            case .right:
+-                return false
+-            }
+-
+-        case .right(let lRight):
+-            switch rhs {
+-            case .left:
+-                return false
+-
+-            case .right(let rRight):
+-                return lRight == rRight
+-            }
+-        }
+-    }
+-}
+-
+-extension Either: Swift.Error where Left: Swift.Error, Right: Swift.Error {}
+-
+-extension Either: Swift.Hashable
+-where
+-    Left: Swift.Hashable & ~Copyable,
+-    Right: Swift.Hashable & ~Copyable
+-{
+-
+-    @inlinable
+-    public borrowing func hash(into hasher: inout Hasher) {
+-        switch self {
+-        case .left(let left):
+-            hasher.combine(0 as UInt8)
+-            left.hash(into: &hasher)
+-
+-        case .right(let right):
+-            hasher.combine(1 as UInt8)
+-            right.hash(into: &hasher)
+-        }
+-    }
+-}
+-- 
+2.43.0
+

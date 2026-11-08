@@ -1,0 +1,1632 @@
+From 44f0af7d44bf49e52667c1ab3769454c7362039d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:44:20 +0000
+Subject: [PATCH 7/7] Revert this batch's splits and merges in directories
+ where they raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ Sources/File System/File.Copy+Threads.swift   |  34 +++
+ Sources/File System/File.Copy.swift           |  35 ---
+ Sources/File System/File.Delete+Threads.swift |  33 +++
+ Sources/File System/File.Delete.swift         |  34 ---
+ .../File.Descriptor.Open.Error.swift          |  13 --
+ .../File System/File.Descriptor.Open.swift    |   9 +
+ .../File.Directory.Copy+Threads.swift         |  34 +++
+ Sources/File System/File.Directory.Copy.swift |  35 ---
+ .../File.Directory.Create+Threads.swift       |  33 +++
+ .../File System/File.Directory.Create.swift   |  34 ---
+ .../File.Directory.Delete+Threads.swift       |  41 ++++
+ .../File System/File.Directory.Delete.swift   |  42 ----
+ .../File.Directory.Directories+Threads.swift  |  20 ++
+ .../File.Directory.Directories.swift          |  21 --
+ .../File.Directory.Entries+Threads.swift      |  18 ++
+ .../File System/File.Directory.Entries.swift  |  19 --
+ .../File.Directory.Files+Threads.swift        |  20 ++
+ .../File System/File.Directory.Files.swift    |  21 --
+ .../File.Directory.Glob+call.swift            |  71 ++++++
+ .../File.Directory.Glob+directories.swift     |  69 ++++++
+ .../File.Directory.Glob+files.swift           |  67 ++++++
+ Sources/File System/File.Directory.Glob.swift | 210 ------------------
+ .../File.Directory.Move+Threads.swift         |  52 +++++
+ Sources/File System/File.Directory.Move.swift |  53 -----
+ .../File System/File.Handle.Open.Error.swift  |  13 --
+ Sources/File System/File.Handle.Open.swift    |  11 +
+ Sources/File System/File.Link.Target.swift    |   6 -
+ Sources/File System/File.Move+Threads.swift   |  52 +++++
+ Sources/File System/File.Move.swift           |  53 -----
+ Sources/File System/File.Read+Threads.swift   |  19 ++
+ Sources/File System/File.Read.swift           |  20 --
+ Sources/File System/File.Write+Threads.swift  |  56 +++++
+ Sources/File System/File.Write.swift          |  57 -----
+ Sources/File System/File.swift                |   4 +
+ 34 files changed, 643 insertions(+), 666 deletions(-)
+ create mode 100644 Sources/File System/File.Copy+Threads.swift
+ create mode 100644 Sources/File System/File.Delete+Threads.swift
+ delete mode 100644 Sources/File System/File.Descriptor.Open.Error.swift
+ create mode 100644 Sources/File System/File.Directory.Copy+Threads.swift
+ create mode 100644 Sources/File System/File.Directory.Create+Threads.swift
+ create mode 100644 Sources/File System/File.Directory.Delete+Threads.swift
+ create mode 100644 Sources/File System/File.Directory.Directories+Threads.swift
+ create mode 100644 Sources/File System/File.Directory.Entries+Threads.swift
+ create mode 100644 Sources/File System/File.Directory.Files+Threads.swift
+ create mode 100644 Sources/File System/File.Directory.Glob+call.swift
+ create mode 100644 Sources/File System/File.Directory.Glob+directories.swift
+ create mode 100644 Sources/File System/File.Directory.Glob+files.swift
+ create mode 100644 Sources/File System/File.Directory.Move+Threads.swift
+ delete mode 100644 Sources/File System/File.Handle.Open.Error.swift
+ delete mode 100644 Sources/File System/File.Link.Target.swift
+ create mode 100644 Sources/File System/File.Move+Threads.swift
+ create mode 100644 Sources/File System/File.Read+Threads.swift
+ create mode 100644 Sources/File System/File.Write+Threads.swift
+
+diff --git a/Sources/File System/File.Copy+Threads.swift b/Sources/File System/File.Copy+Threads.swift
+new file mode 100644
+index 0000000..b6d9e4e
+--- /dev/null
++++ b/Sources/File System/File.Copy+Threads.swift	
+@@ -0,0 +1,34 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Copy {
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File.Path,
++            options: File.System.Copy.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
++                try File.System.Copy.copy(from: source, to: destination, options: options)
++            }
++            return File(destination)
++        }
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File,
++            options: File.System.Copy.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
++                try File.System.Copy.copy(from: source, to: destination.path, options: options)
++            }
++            return destination
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Copy.swift b/Sources/File System/File.Copy.swift
+index a7b3c7a..a5b2c85 100644
+--- a/Sources/File System/File.Copy.swift	
++++ b/Sources/File System/File.Copy.swift	
+@@ -42,38 +42,3 @@ extension File {
+         Copy(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Copy {
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File.Path,
+-            options: File.System.Copy.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
+-                try File.System.Copy.copy(from: source, to: destination, options: options)
+-            }
+-            return File(destination)
+-        }
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File,
+-            options: File.System.Copy.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
+-                try File.System.Copy.copy(from: source, to: destination.path, options: options)
+-            }
+-            return destination
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Delete+Threads.swift b/Sources/File System/File.Delete+Threads.swift
+new file mode 100644
+index 0000000..7a44476
+--- /dev/null
++++ b/Sources/File System/File.Delete+Threads.swift	
+@@ -0,0 +1,33 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Delete {
++
++        @inlinable
++        public func callAsFunction() async throws(Either<
++            Kernel.Thread.Pool.Error, File.System.Delete.Error
++        >) {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
++                try File.System.Delete.delete(at: path)
++            }
++        }
++
++        @inlinable
++        public func ifExists() async throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
++            let path = self.path
++            do throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
++                try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
++                    try File.System.Delete.delete(at: path)
++                }
++            } catch {
++                if case .right(let deleteError) = error, deleteError.isNotFound {
++                    return
++                }
++                throw error
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Delete.swift b/Sources/File System/File.Delete.swift
+index 5b9c544..7854766 100644
+--- a/Sources/File System/File.Delete.swift	
++++ b/Sources/File System/File.Delete.swift	
+@@ -37,37 +37,3 @@ extension File {
+         Delete(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Delete {
+-
+-        @inlinable
+-        public func callAsFunction() async throws(Either<
+-            Kernel.Thread.Pool.Error, File.System.Delete.Error
+-        >) {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
+-                try File.System.Delete.delete(at: path)
+-            }
+-        }
+-
+-        @inlinable
+-        public func ifExists() async throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
+-            let path = self.path
+-            do throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
+-                try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
+-                    try File.System.Delete.delete(at: path)
+-                }
+-            } catch {
+-                if case .right(let deleteError) = error, deleteError.isNotFound {
+-                    return
+-                }
+-                throw error
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Descriptor.Open.Error.swift b/Sources/File System/File.Descriptor.Open.Error.swift
+deleted file mode 100644
+index 1e223a6..0000000
+--- a/Sources/File System/File.Descriptor.Open.Error.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-public import Kernel
+-
+-
+-extension File.Descriptor.Open {
+-    public enum Error<ClosureError: Swift.Error>: Swift.Error, Sendable {
+-
+-        case open(Kernel.File.Open.Error)
+-
+-        case operation(ClosureError)
+-
+-        case close(Kernel.Close.Error)
+-    }
+-}
+diff --git a/Sources/File System/File.Descriptor.Open.swift b/Sources/File System/File.Descriptor.Open.swift
+index 34e2823..ef34c16 100644
+--- a/Sources/File System/File.Descriptor.Open.swift	
++++ b/Sources/File System/File.Descriptor.Open.swift	
+@@ -17,6 +17,15 @@ extension File.Descriptor {
+ }
+ 
+ extension File.Descriptor.Open {
++
++    public enum Error<ClosureError: Swift.Error>: Swift.Error, Sendable {
++
++        case open(Kernel.File.Open.Error)
++
++        case operation(ClosureError)
++
++        case close(Kernel.Close.Error)
++    }
+ }
+ 
+ extension File.Descriptor.Open {
+diff --git a/Sources/File System/File.Directory.Copy+Threads.swift b/Sources/File System/File.Directory.Copy+Threads.swift
+new file mode 100644
+index 0000000..ee16896
+--- /dev/null
++++ b/Sources/File System/File.Directory.Copy+Threads.swift	
+@@ -0,0 +1,34 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Copy {
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File.Path,
++            options: File.System.Copy.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File.Directory {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
++                try File.System.Copy.recursive(from: source, to: destination, options: options)
++            }
++            return File.Directory(destination)
++        }
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File.Directory,
++            options: File.System.Copy.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File.Directory {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
++                try File.System.Copy.recursive(from: source, to: destination.path, options: options)
++            }
++            return destination
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Copy.swift b/Sources/File System/File.Directory.Copy.swift
+index aee398e..a40fbc0 100644
+--- a/Sources/File System/File.Directory.Copy.swift	
++++ b/Sources/File System/File.Directory.Copy.swift	
+@@ -42,38 +42,3 @@ extension File.Directory {
+         Copy(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Copy {
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File.Path,
+-            options: File.System.Copy.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File.Directory {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
+-                try File.System.Copy.recursive(from: source, to: destination, options: options)
+-            }
+-            return File.Directory(destination)
+-        }
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File.Directory,
+-            options: File.System.Copy.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Copy.Error>) -> File.Directory {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Copy.Error) in
+-                try File.System.Copy.recursive(from: source, to: destination.path, options: options)
+-            }
+-            return destination
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Create+Threads.swift b/Sources/File System/File.Directory.Create+Threads.swift
+new file mode 100644
+index 0000000..df6bb26
+--- /dev/null
++++ b/Sources/File System/File.Directory.Create+Threads.swift	
+@@ -0,0 +1,33 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Create {
++
++        @inlinable
++        public func callAsFunction(
++            options: File.System.Create.Directory.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Create.Directory.Error>) {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Create.Directory.Error) in
++                try File.System.Create.Directory.create(at: path, options: options)
++            }
++        }
++
++        @inlinable
++        public func recursive(
++            options: File.System.Create.Directory.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Create.Directory.Error>) {
++            let path = self.path
++            let opts = options
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Create.Directory.Error) in
++                try File.System.Create.Directory.create(
++                    at: path,
++                    options: opts,
++                    createIntermediates: true
++                )
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Create.swift b/Sources/File System/File.Directory.Create.swift
+index 630a819..532df39 100644
+--- a/Sources/File System/File.Directory.Create.swift	
++++ b/Sources/File System/File.Directory.Create.swift	
+@@ -38,37 +38,3 @@ extension File.Directory {
+         Create(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Create {
+-
+-        @inlinable
+-        public func callAsFunction(
+-            options: File.System.Create.Directory.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Create.Directory.Error>) {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Create.Directory.Error) in
+-                try File.System.Create.Directory.create(at: path, options: options)
+-            }
+-        }
+-
+-        @inlinable
+-        public func recursive(
+-            options: File.System.Create.Directory.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Create.Directory.Error>) {
+-            let path = self.path
+-            let opts = options
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Create.Directory.Error) in
+-                try File.System.Create.Directory.create(
+-                    at: path,
+-                    options: opts,
+-                    createIntermediates: true
+-                )
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Delete+Threads.swift b/Sources/File System/File.Directory.Delete+Threads.swift
+new file mode 100644
+index 0000000..3f8abc2
+--- /dev/null
++++ b/Sources/File System/File.Directory.Delete+Threads.swift	
+@@ -0,0 +1,41 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Delete {
++
++        @inlinable
++        public func callAsFunction() async throws(Either<
++            Kernel.Thread.Pool.Error, File.System.Delete.Error
++        >) {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
++                try File.System.Delete.delete(at: path)
++            }
++        }
++
++        @inlinable
++        public func recursive() async throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
++                try File.System.Delete.delete(at: path, recursive: true)
++            }
++        }
++
++        @inlinable
++        public func ifExists() async throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
++            let path = self.path
++            do throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
++                try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
++                    try File.System.Delete.delete(at: path)
++                }
++            } catch {
++                if case .right(let deleteError) = error, deleteError.isNotFound {
++                    return
++                }
++                throw error
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Delete.swift b/Sources/File System/File.Directory.Delete.swift
+index b851d70..ab1c839 100644
+--- a/Sources/File System/File.Directory.Delete.swift	
++++ b/Sources/File System/File.Directory.Delete.swift	
+@@ -42,45 +42,3 @@ extension File.Directory {
+         Delete(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Delete {
+-
+-        @inlinable
+-        public func callAsFunction() async throws(Either<
+-            Kernel.Thread.Pool.Error, File.System.Delete.Error
+-        >) {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
+-                try File.System.Delete.delete(at: path)
+-            }
+-        }
+-
+-        @inlinable
+-        public func recursive() async throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
+-                try File.System.Delete.delete(at: path, recursive: true)
+-            }
+-        }
+-
+-        @inlinable
+-        public func ifExists() async throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
+-            let path = self.path
+-            do throws(Either<Kernel.Thread.Pool.Error, File.System.Delete.Error>) {
+-                try await Kernel.Thread.Pool.shared.run { () throws(File.System.Delete.Error) in
+-                    try File.System.Delete.delete(at: path)
+-                }
+-            } catch {
+-                if case .right(let deleteError) = error, deleteError.isNotFound {
+-                    return
+-                }
+-                throw error
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Directories+Threads.swift b/Sources/File System/File.Directory.Directories+Threads.swift
+new file mode 100644
+index 0000000..92a2d68
+--- /dev/null
++++ b/Sources/File System/File.Directory.Directories+Threads.swift	
+@@ -0,0 +1,20 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Directories {
++
++        @inlinable
++        public func callAsFunction() async throws(Either<
++            Kernel.Thread.Pool.Error, File.Directory.Contents.Error
++        >) -> [File.Directory] {
++            let path = self.path
++            return try await Kernel.Thread.Pool.shared.run { () throws(File.Directory.Contents.Error) in
++                try File.Directory.Contents.list(at: File.Directory(path))
++                    .filter { $0.type == .directory }
++                    .compactMap { $0.pathIfValid.map { File.Directory($0) } }
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Directories.swift b/Sources/File System/File.Directory.Directories.swift
+index 7dfd5ec..69d3c34 100644
+--- a/Sources/File System/File.Directory.Directories.swift	
++++ b/Sources/File System/File.Directory.Directories.swift	
+@@ -27,24 +27,3 @@ extension File.Directory {
+         Directories(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Directories {
+-
+-        @inlinable
+-        public func callAsFunction() async throws(Either<
+-            Kernel.Thread.Pool.Error, File.Directory.Contents.Error
+-        >) -> [File.Directory] {
+-            let path = self.path
+-            return try await Kernel.Thread.Pool.shared.run { () throws(File.Directory.Contents.Error) in
+-                try File.Directory.Contents.list(at: File.Directory(path))
+-                    .filter { $0.type == .directory }
+-                    .compactMap { $0.pathIfValid.map { File.Directory($0) } }
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Entries+Threads.swift b/Sources/File System/File.Directory.Entries+Threads.swift
+new file mode 100644
+index 0000000..9f469ad
+--- /dev/null
++++ b/Sources/File System/File.Directory.Entries+Threads.swift	
+@@ -0,0 +1,18 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Entries {
++
++        @inlinable
++        public func callAsFunction() async throws(Either<
++            Kernel.Thread.Pool.Error, File.Directory.Contents.Error
++        >) -> [File.Directory.Entry] {
++            let path = self.path
++            return try await Kernel.Thread.Pool.shared.run { () throws(File.Directory.Contents.Error) in
++                try File.Directory.Contents.list(at: File.Directory(path))
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Entries.swift b/Sources/File System/File.Directory.Entries.swift
+index 3371c15..b57b0d9 100644
+--- a/Sources/File System/File.Directory.Entries.swift	
++++ b/Sources/File System/File.Directory.Entries.swift	
+@@ -25,22 +25,3 @@ extension File.Directory {
+         Entries(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Entries {
+-
+-        @inlinable
+-        public func callAsFunction() async throws(Either<
+-            Kernel.Thread.Pool.Error, File.Directory.Contents.Error
+-        >) -> [File.Directory.Entry] {
+-            let path = self.path
+-            return try await Kernel.Thread.Pool.shared.run { () throws(File.Directory.Contents.Error) in
+-                try File.Directory.Contents.list(at: File.Directory(path))
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Files+Threads.swift b/Sources/File System/File.Directory.Files+Threads.swift
+new file mode 100644
+index 0000000..c4428ab
+--- /dev/null
++++ b/Sources/File System/File.Directory.Files+Threads.swift	
+@@ -0,0 +1,20 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Files {
++
++        @inlinable
++        public func callAsFunction() async throws(Either<
++            Kernel.Thread.Pool.Error, File.Directory.Contents.Error
++        >) -> [File] {
++            let path = self.path
++            return try await Kernel.Thread.Pool.shared.run { () throws(File.Directory.Contents.Error) in
++                try File.Directory.Contents.list(at: File.Directory(path))
++                    .filter { $0.type == .file }
++                    .compactMap { $0.pathIfValid.map { File($0) } }
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Files.swift b/Sources/File System/File.Directory.Files.swift
+index c5cad9b..da0e6dd 100644
+--- a/Sources/File System/File.Directory.Files.swift	
++++ b/Sources/File System/File.Directory.Files.swift	
+@@ -27,24 +27,3 @@ extension File.Directory {
+         Files(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Files {
+-
+-        @inlinable
+-        public func callAsFunction() async throws(Either<
+-            Kernel.Thread.Pool.Error, File.Directory.Contents.Error
+-        >) -> [File] {
+-            let path = self.path
+-            return try await Kernel.Thread.Pool.shared.run { () throws(File.Directory.Contents.Error) in
+-                try File.Directory.Contents.list(at: File.Directory(path))
+-                    .filter { $0.type == .file }
+-                    .compactMap { $0.pathIfValid.map { File($0) } }
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Glob+call.swift b/Sources/File System/File.Directory.Glob+call.swift
+new file mode 100644
+index 0000000..0948810
+--- /dev/null
++++ b/Sources/File System/File.Directory.Glob+call.swift	
+@@ -0,0 +1,71 @@
++#if Glob
++    public import Either
++    public import Glob
++    import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Glob {
++
++        @inlinable
++        public func callAsFunction(
++            include: [Glob.Pattern],
++            excluding: [Glob.Pattern] = [],
++            options: Glob.Options = .init()
++        ) throws(Glob.Error) -> [Match] {
++            let paths = try matchPaths(include: include, excluding: excluding, options: options)
++            var results: [Match] = []
++            for pathString in paths {
++                let path = File.Path(__unchecked: (), pathString)
++                if File.System.Stat.isDirectory(at: path) {
++                    results.append(Match(directory: File.Directory(path)))
++                } else {
++                    results.append(Match(file: File(path)))
++                }
++            }
++            return results
++        }
++
++        @inlinable
++        public func callAsFunction(
++            include: [Glob.Pattern],
++            excluding: [Glob.Pattern] = [],
++            options: Glob.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [Match] {
++            let glob = self
++            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [Match] in
++                try glob.callAsFunction(include: include, excluding: excluding, options: options)
++            }
++        }
++
++        @inlinable
++        public func callAsFunction(
++            include: [Swift.String],
++            excluding: [Swift.String] = [],
++            options: Glob.Options = .init()
++        ) throws(Glob.Error) -> [Match] {
++            let paths = try matchPaths(include: include, excluding: excluding, options: options)
++            var results: [Match] = []
++            for pathString in paths {
++                let path = File.Path(__unchecked: (), pathString)
++                if File.System.Stat.isDirectory(at: path) {
++                    results.append(Match(directory: File.Directory(path)))
++                } else {
++                    results.append(Match(file: File(path)))
++                }
++            }
++            return results
++        }
++
++        @inlinable
++        public func callAsFunction(
++            include: [Swift.String],
++            excluding: [Swift.String] = [],
++            options: Glob.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [Match] {
++            let glob = self
++            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [Match] in
++                try glob.callAsFunction(include: include, excluding: excluding, options: options)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Glob+directories.swift b/Sources/File System/File.Directory.Glob+directories.swift
+new file mode 100644
+index 0000000..fa55cea
+--- /dev/null
++++ b/Sources/File System/File.Directory.Glob+directories.swift	
+@@ -0,0 +1,69 @@
++#if Glob
++    public import Either
++    public import Glob
++    import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Glob {
++
++        @inlinable
++        public func directories(
++            include: [Glob.Pattern],
++            excluding: [Glob.Pattern] = [],
++            options: Glob.Options = .init()
++        ) throws(Glob.Error) -> [File.Directory] {
++            let paths = try matchPaths(include: include, excluding: excluding, options: options)
++            var results: [File.Directory] = []
++            for pathString in paths {
++                let path = File.Path(__unchecked: (), pathString)
++                if File.System.Stat.isDirectory(at: path) {
++                    results.append(File.Directory(path))
++                }
++            }
++            return results
++        }
++
++        @inlinable
++        public func directories(
++            include: [Glob.Pattern],
++            excluding: [Glob.Pattern] = [],
++            options: Glob.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File.Directory] {
++            let glob = self
++            return try await Kernel.Thread.Pool.shared.run {
++                () throws(Glob.Error) -> [File.Directory] in
++                try glob.directories(include: include, excluding: excluding, options: options)
++            }
++        }
++
++        @inlinable
++        public func directories(
++            include: [Swift.String],
++            excluding: [Swift.String] = [],
++            options: Glob.Options = .init()
++        ) throws(Glob.Error) -> [File.Directory] {
++            let paths = try matchPaths(include: include, excluding: excluding, options: options)
++            var results: [File.Directory] = []
++            for pathString in paths {
++                let path = File.Path(__unchecked: (), pathString)
++                if File.System.Stat.isDirectory(at: path) {
++                    results.append(File.Directory(path))
++                }
++            }
++            return results
++        }
++
++        @inlinable
++        public func directories(
++            include: [Swift.String],
++            excluding: [Swift.String] = [],
++            options: Glob.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File.Directory] {
++            let glob = self
++            return try await Kernel.Thread.Pool.shared.run {
++                () throws(Glob.Error) -> [File.Directory] in
++                try glob.directories(include: include, excluding: excluding, options: options)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Glob+files.swift b/Sources/File System/File.Directory.Glob+files.swift
+new file mode 100644
+index 0000000..e0e0a40
+--- /dev/null
++++ b/Sources/File System/File.Directory.Glob+files.swift	
+@@ -0,0 +1,67 @@
++#if Glob
++    public import Either
++    public import Glob
++    import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Glob {
++
++        @inlinable
++        public func files(
++            include: [Glob.Pattern],
++            excluding: [Glob.Pattern] = [],
++            options: Glob.Options = .init()
++        ) throws(Glob.Error) -> [File] {
++            let paths = try matchPaths(include: include, excluding: excluding, options: options)
++            var results: [File] = []
++            for pathString in paths {
++                let path = File.Path(__unchecked: (), pathString)
++                if !File.System.Stat.isDirectory(at: path) {
++                    results.append(File(path))
++                }
++            }
++            return results
++        }
++
++        @inlinable
++        public func files(
++            include: [Glob.Pattern],
++            excluding: [Glob.Pattern] = [],
++            options: Glob.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File] {
++            let glob = self
++            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [File] in
++                try glob.files(include: include, excluding: excluding, options: options)
++            }
++        }
++
++        @inlinable
++        public func files(
++            include: [Swift.String],
++            excluding: [Swift.String] = [],
++            options: Glob.Options = .init()
++        ) throws(Glob.Error) -> [File] {
++            let paths = try matchPaths(include: include, excluding: excluding, options: options)
++            var results: [File] = []
++            for pathString in paths {
++                let path = File.Path(__unchecked: (), pathString)
++                if !File.System.Stat.isDirectory(at: path) {
++                    results.append(File(path))
++                }
++            }
++            return results
++        }
++
++        @inlinable
++        public func files(
++            include: [Swift.String],
++            excluding: [Swift.String] = [],
++            options: Glob.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File] {
++            let glob = self
++            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [File] in
++                try glob.files(include: include, excluding: excluding, options: options)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Glob.swift b/Sources/File System/File.Directory.Glob.swift
+index 0dacf7e..77c6e41 100644
+--- a/Sources/File System/File.Directory.Glob.swift	
++++ b/Sources/File System/File.Directory.Glob.swift	
+@@ -65,213 +65,3 @@
+         }
+     }
+ #endif
+-
+-#if Glob
+-    public import Either
+-    public import Glob
+-    import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Glob {
+-
+-        @inlinable
+-        public func callAsFunction(
+-            include: [Glob.Pattern],
+-            excluding: [Glob.Pattern] = [],
+-            options: Glob.Options = .init()
+-        ) throws(Glob.Error) -> [Match] {
+-            let paths = try matchPaths(include: include, excluding: excluding, options: options)
+-            var results: [Match] = []
+-            for pathString in paths {
+-                let path = File.Path(__unchecked: (), pathString)
+-                if File.System.Stat.isDirectory(at: path) {
+-                    results.append(Match(directory: File.Directory(path)))
+-                } else {
+-                    results.append(Match(file: File(path)))
+-                }
+-            }
+-            return results
+-        }
+-
+-        @inlinable
+-        public func callAsFunction(
+-            include: [Glob.Pattern],
+-            excluding: [Glob.Pattern] = [],
+-            options: Glob.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [Match] {
+-            let glob = self
+-            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [Match] in
+-                try glob.callAsFunction(include: include, excluding: excluding, options: options)
+-            }
+-        }
+-
+-        @inlinable
+-        public func callAsFunction(
+-            include: [Swift.String],
+-            excluding: [Swift.String] = [],
+-            options: Glob.Options = .init()
+-        ) throws(Glob.Error) -> [Match] {
+-            let paths = try matchPaths(include: include, excluding: excluding, options: options)
+-            var results: [Match] = []
+-            for pathString in paths {
+-                let path = File.Path(__unchecked: (), pathString)
+-                if File.System.Stat.isDirectory(at: path) {
+-                    results.append(Match(directory: File.Directory(path)))
+-                } else {
+-                    results.append(Match(file: File(path)))
+-                }
+-            }
+-            return results
+-        }
+-
+-        @inlinable
+-        public func callAsFunction(
+-            include: [Swift.String],
+-            excluding: [Swift.String] = [],
+-            options: Glob.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [Match] {
+-            let glob = self
+-            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [Match] in
+-                try glob.callAsFunction(include: include, excluding: excluding, options: options)
+-            }
+-        }
+-    }
+-#endif
+-
+-#if Glob
+-    public import Either
+-    public import Glob
+-    import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Glob {
+-
+-        @inlinable
+-        public func directories(
+-            include: [Glob.Pattern],
+-            excluding: [Glob.Pattern] = [],
+-            options: Glob.Options = .init()
+-        ) throws(Glob.Error) -> [File.Directory] {
+-            let paths = try matchPaths(include: include, excluding: excluding, options: options)
+-            var results: [File.Directory] = []
+-            for pathString in paths {
+-                let path = File.Path(__unchecked: (), pathString)
+-                if File.System.Stat.isDirectory(at: path) {
+-                    results.append(File.Directory(path))
+-                }
+-            }
+-            return results
+-        }
+-
+-        @inlinable
+-        public func directories(
+-            include: [Glob.Pattern],
+-            excluding: [Glob.Pattern] = [],
+-            options: Glob.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File.Directory] {
+-            let glob = self
+-            return try await Kernel.Thread.Pool.shared.run {
+-                () throws(Glob.Error) -> [File.Directory] in
+-                try glob.directories(include: include, excluding: excluding, options: options)
+-            }
+-        }
+-
+-        @inlinable
+-        public func directories(
+-            include: [Swift.String],
+-            excluding: [Swift.String] = [],
+-            options: Glob.Options = .init()
+-        ) throws(Glob.Error) -> [File.Directory] {
+-            let paths = try matchPaths(include: include, excluding: excluding, options: options)
+-            var results: [File.Directory] = []
+-            for pathString in paths {
+-                let path = File.Path(__unchecked: (), pathString)
+-                if File.System.Stat.isDirectory(at: path) {
+-                    results.append(File.Directory(path))
+-                }
+-            }
+-            return results
+-        }
+-
+-        @inlinable
+-        public func directories(
+-            include: [Swift.String],
+-            excluding: [Swift.String] = [],
+-            options: Glob.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File.Directory] {
+-            let glob = self
+-            return try await Kernel.Thread.Pool.shared.run {
+-                () throws(Glob.Error) -> [File.Directory] in
+-                try glob.directories(include: include, excluding: excluding, options: options)
+-            }
+-        }
+-    }
+-#endif
+-
+-#if Glob
+-    public import Either
+-    public import Glob
+-    import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Glob {
+-
+-        @inlinable
+-        public func files(
+-            include: [Glob.Pattern],
+-            excluding: [Glob.Pattern] = [],
+-            options: Glob.Options = .init()
+-        ) throws(Glob.Error) -> [File] {
+-            let paths = try matchPaths(include: include, excluding: excluding, options: options)
+-            var results: [File] = []
+-            for pathString in paths {
+-                let path = File.Path(__unchecked: (), pathString)
+-                if !File.System.Stat.isDirectory(at: path) {
+-                    results.append(File(path))
+-                }
+-            }
+-            return results
+-        }
+-
+-        @inlinable
+-        public func files(
+-            include: [Glob.Pattern],
+-            excluding: [Glob.Pattern] = [],
+-            options: Glob.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File] {
+-            let glob = self
+-            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [File] in
+-                try glob.files(include: include, excluding: excluding, options: options)
+-            }
+-        }
+-
+-        @inlinable
+-        public func files(
+-            include: [Swift.String],
+-            excluding: [Swift.String] = [],
+-            options: Glob.Options = .init()
+-        ) throws(Glob.Error) -> [File] {
+-            let paths = try matchPaths(include: include, excluding: excluding, options: options)
+-            var results: [File] = []
+-            for pathString in paths {
+-                let path = File.Path(__unchecked: (), pathString)
+-                if !File.System.Stat.isDirectory(at: path) {
+-                    results.append(File(path))
+-                }
+-            }
+-            return results
+-        }
+-
+-        @inlinable
+-        public func files(
+-            include: [Swift.String],
+-            excluding: [Swift.String] = [],
+-            options: Glob.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Glob.Error>) -> [File] {
+-            let glob = self
+-            return try await Kernel.Thread.Pool.shared.run { () throws(Glob.Error) -> [File] in
+-                try glob.files(include: include, excluding: excluding, options: options)
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Directory.Move+Threads.swift b/Sources/File System/File.Directory.Move+Threads.swift
+new file mode 100644
+index 0000000..a0580ca
+--- /dev/null
++++ b/Sources/File System/File.Directory.Move+Threads.swift	
+@@ -0,0 +1,52 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Directory.Move {
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File.Path,
++            options: File.System.Move.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File.Directory {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
++                try File.System.Move.move(from: source, to: destination, options: options)
++            }
++            return File.Directory(destination)
++        }
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File.Directory,
++            options: File.System.Move.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File.Directory {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
++                try File.System.Move.move(from: source, to: destination.path, options: options)
++            }
++            return destination
++        }
++
++        @discardableResult
++        @inlinable
++        public func rename(
++            to newName: File.Path.Component,
++            options: File.System.Move.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File.Directory {
++            guard let parent = path.parent else {
++
++                throw .right(.rename(.invalidArgument))
++            }
++            let destination = parent / newName
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
++                try File.System.Move.move(from: source, to: destination, options: options)
++            }
++            return File.Directory(destination)
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Directory.Move.swift b/Sources/File System/File.Directory.Move.swift
+index 063eacc..416c228 100644
+--- a/Sources/File System/File.Directory.Move.swift	
++++ b/Sources/File System/File.Directory.Move.swift	
+@@ -55,56 +55,3 @@ extension File.Directory {
+         Move(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Directory.Move {
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File.Path,
+-            options: File.System.Move.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File.Directory {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
+-                try File.System.Move.move(from: source, to: destination, options: options)
+-            }
+-            return File.Directory(destination)
+-        }
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File.Directory,
+-            options: File.System.Move.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File.Directory {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
+-                try File.System.Move.move(from: source, to: destination.path, options: options)
+-            }
+-            return destination
+-        }
+-
+-        @discardableResult
+-        @inlinable
+-        public func rename(
+-            to newName: File.Path.Component,
+-            options: File.System.Move.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File.Directory {
+-            guard let parent = path.parent else {
+-
+-                throw .right(.rename(.invalidArgument))
+-            }
+-            let destination = parent / newName
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
+-                try File.System.Move.move(from: source, to: destination, options: options)
+-            }
+-            return File.Directory(destination)
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Handle.Open.Error.swift b/Sources/File System/File.Handle.Open.Error.swift
+deleted file mode 100644
+index 81b7358..0000000
+--- a/Sources/File System/File.Handle.Open.Error.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-public import Kernel
+-
+-
+-extension File.Handle.Open {
+-    public enum Error<ClosureError: Swift.Error>: Swift.Error, Sendable {
+-
+-        case open(Kernel.File.Open.Error)
+-
+-        case operation(ClosureError)
+-
+-        case close(Kernel.Close.Error)
+-    }
+-}
+diff --git a/Sources/File System/File.Handle.Open.swift b/Sources/File System/File.Handle.Open.swift
+index f939c6f..9fc04f8 100644
+--- a/Sources/File System/File.Handle.Open.swift	
++++ b/Sources/File System/File.Handle.Open.swift	
+@@ -17,6 +17,15 @@ extension File.Handle {
+ }
+ 
+ extension File.Handle.Open {
++
++    public enum Error<ClosureError: Swift.Error>: Swift.Error, Sendable {
++
++        case open(Kernel.File.Open.Error)
++
++        case operation(ClosureError)
++
++        case close(Kernel.Close.Error)
++    }
+ }
+ 
+ extension File.Handle.Open {
+@@ -40,6 +49,7 @@ extension File.Handle.Open {
+             do throws(Kernel.Close.Error) {
+                 try handle.close()
+             } catch {
++
+             }
+             throw .operation(error)
+         }
+@@ -71,6 +81,7 @@ extension File.Handle.Open {
+             do throws(Kernel.Close.Error) {
+                 try handle.close()
+             } catch {
++
+             }
+             throw .operation(error)
+         }
+diff --git a/Sources/File System/File.Link.Target.swift b/Sources/File System/File.Link.Target.swift
+deleted file mode 100644
+index f432f3d..0000000
+--- a/Sources/File System/File.Link.Target.swift	
++++ /dev/null
+@@ -1,6 +0,0 @@
+-
+-extension File.Link {
+-    public struct Target: Sendable {
+-        let link: File.Link
+-    }
+-}
+diff --git a/Sources/File System/File.Move+Threads.swift b/Sources/File System/File.Move+Threads.swift
+new file mode 100644
+index 0000000..51f062b
+--- /dev/null
++++ b/Sources/File System/File.Move+Threads.swift	
+@@ -0,0 +1,52 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Move {
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File.Path,
++            options: File.System.Move.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
++                try File.System.Move.move(from: source, to: destination, options: options)
++            }
++            return File(destination)
++        }
++
++        @discardableResult
++        @inlinable
++        public func to(
++            _ destination: File,
++            options: File.System.Move.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File {
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
++                try File.System.Move.move(from: source, to: destination.path, options: options)
++            }
++            return destination
++        }
++
++        @discardableResult
++        @inlinable
++        public func rename(
++            to newName: File.Path.Component,
++            options: File.System.Move.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File {
++            guard let parent = path.parent else {
++
++                throw .right(.rename(.invalidArgument))
++            }
++            let destination = parent / newName
++            let source = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
++                try File.System.Move.move(from: source, to: destination, options: options)
++            }
++            return File(destination)
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Move.swift b/Sources/File System/File.Move.swift
+index fcb693f..9a02553 100644
+--- a/Sources/File System/File.Move.swift	
++++ b/Sources/File System/File.Move.swift	
+@@ -55,56 +55,3 @@ extension File {
+         Move(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Move {
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File.Path,
+-            options: File.System.Move.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
+-                try File.System.Move.move(from: source, to: destination, options: options)
+-            }
+-            return File(destination)
+-        }
+-
+-        @discardableResult
+-        @inlinable
+-        public func to(
+-            _ destination: File,
+-            options: File.System.Move.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File {
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
+-                try File.System.Move.move(from: source, to: destination.path, options: options)
+-            }
+-            return destination
+-        }
+-
+-        @discardableResult
+-        @inlinable
+-        public func rename(
+-            to newName: File.Path.Component,
+-            options: File.System.Move.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Move.Error>) -> File {
+-            guard let parent = path.parent else {
+-
+-                throw .right(.rename(.invalidArgument))
+-            }
+-            let destination = parent / newName
+-            let source = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Move.Error) in
+-                try File.System.Move.move(from: source, to: destination, options: options)
+-            }
+-            return File(destination)
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Read+Threads.swift b/Sources/File System/File.Read+Threads.swift
+new file mode 100644
+index 0000000..41149f1
+--- /dev/null
++++ b/Sources/File System/File.Read+Threads.swift	
+@@ -0,0 +1,19 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Read {
++
++        @inlinable
++        public func full<R: Sendable, E: Swift.Error>(
++            _ body: @escaping @Sendable (Swift.Span<Byte>) throws(E) -> R
++        ) async throws(Either<Kernel.Thread.Pool.Error, Either<File.System.Read.Full.Error, E>>) -> R {
++            let path = self.path
++            return try await Kernel.Thread.Pool.shared.run {
++                () throws(Either<File.System.Read.Full.Error, E>) -> R in
++                try File.System.Read.Full.read(from: path, body: body)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Read.swift b/Sources/File System/File.Read.swift
+index ba8a799..447b109 100644
+--- a/Sources/File System/File.Read.swift	
++++ b/Sources/File System/File.Read.swift	
+@@ -55,23 +55,3 @@ extension File {
+         Read(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Read {
+-
+-        @inlinable
+-        public func full<R: Sendable, E: Swift.Error>(
+-            _ body: @escaping @Sendable (Swift.Span<Byte>) throws(E) -> R
+-        ) async throws(Either<Kernel.Thread.Pool.Error, Either<File.System.Read.Full.Error, E>>) -> R {
+-            let path = self.path
+-            return try await Kernel.Thread.Pool.shared.run {
+-                () throws(Either<File.System.Read.Full.Error, E>) -> R in
+-                try File.System.Read.Full.read(from: path, body: body)
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.Write+Threads.swift b/Sources/File System/File.Write+Threads.swift
+new file mode 100644
+index 0000000..310b8b8
+--- /dev/null
++++ b/Sources/File System/File.Write+Threads.swift	
+@@ -0,0 +1,56 @@
++#if Threads
++    public import Either
++    public import Kernel
++    public import Thread_Pool
++
++    extension File.Write {
++
++        @inlinable
++        public func atomic(
++            _ string: Swift.String,
++            options: File.System.Write.Atomic.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Atomic.Error>) {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Atomic.Error) in
++                let utf8 = [Byte](utf8: string)
++                try File.System.Write.Atomic.write(utf8.span, to: path, options: options)
++            }
++        }
++
++        @inlinable
++        public func atomic<S: Swift.Sequence & Sendable>(
++            contentsOf bytes: S,
++            options: File.System.Write.Atomic.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Atomic.Error>)
++        where S.Element == Byte {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Atomic.Error) in
++                let array = Array(bytes)
++                try File.System.Write.Atomic.write(array.span, to: path, options: options)
++            }
++        }
++
++        @inlinable
++        public func append(
++            _ string: Swift.String
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Append.Error>) {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Append.Error) in
++                let utf8 = [Byte](utf8: string)
++                try File.System.Write.Append.append(utf8.span, to: path)
++            }
++        }
++
++        @inlinable
++        public func streaming<Chunks: Swift.Sequence & Sendable>(
++            _ chunks: Chunks,
++            options: File.System.Write.Streaming.Options = .init()
++        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Streaming.Error>)
++        where Chunks.Element == [Byte] {
++            let path = self.path
++            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Streaming.Error) in
++                try File.System.Write.Streaming.write(chunks, to: path, options: options)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/File System/File.Write.swift b/Sources/File System/File.Write.swift
+index 79ae6f8..6adb596 100644
+--- a/Sources/File System/File.Write.swift	
++++ b/Sources/File System/File.Write.swift	
+@@ -71,60 +71,3 @@ extension File {
+         Self.Write(path)
+     }
+ }
+-
+-#if Threads
+-    public import Either
+-    public import Kernel
+-    public import Thread_Pool
+-
+-    extension File.Write {
+-
+-        @inlinable
+-        public func atomic(
+-            _ string: Swift.String,
+-            options: File.System.Write.Atomic.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Atomic.Error>) {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Atomic.Error) in
+-                let utf8 = [Byte](utf8: string)
+-                try File.System.Write.Atomic.write(utf8.span, to: path, options: options)
+-            }
+-        }
+-
+-        @inlinable
+-        public func atomic<S: Swift.Sequence & Sendable>(
+-            contentsOf bytes: S,
+-            options: File.System.Write.Atomic.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Atomic.Error>)
+-        where S.Element == Byte {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Atomic.Error) in
+-                let array = Array(bytes)
+-                try File.System.Write.Atomic.write(array.span, to: path, options: options)
+-            }
+-        }
+-
+-        @inlinable
+-        public func append(
+-            _ string: Swift.String
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Append.Error>) {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Append.Error) in
+-                let utf8 = [Byte](utf8: string)
+-                try File.System.Write.Append.append(utf8.span, to: path)
+-            }
+-        }
+-
+-        @inlinable
+-        public func streaming<Chunks: Swift.Sequence & Sendable>(
+-            _ chunks: Chunks,
+-            options: File.System.Write.Streaming.Options = .init()
+-        ) async throws(Either<Kernel.Thread.Pool.Error, File.System.Write.Streaming.Error>)
+-        where Chunks.Element == [Byte] {
+-            let path = self.path
+-            try await Kernel.Thread.Pool.shared.run { () throws(File.System.Write.Streaming.Error) in
+-                try File.System.Write.Streaming.write(chunks, to: path, options: options)
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/File System/File.swift b/Sources/File System/File.swift
+index df16b12..f392c93 100644
+--- a/Sources/File System/File.swift	
++++ b/Sources/File System/File.swift	
+@@ -76,6 +76,10 @@ extension File.Link {
+ }
+ 
+ extension File.Link {
++
++    public struct Target: Sendable {
++        let link: File.Link
++    }
+ }
+ 
+ extension File.Link.Target {
+-- 
+2.43.0
+

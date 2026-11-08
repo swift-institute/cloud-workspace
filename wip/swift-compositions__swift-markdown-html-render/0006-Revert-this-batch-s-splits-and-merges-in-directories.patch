@@ -1,0 +1,657 @@
+From 0c45de846a049c444015e3f46dfa230c21afd435 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:44:20 +0000
+Subject: [PATCH 6/6] Revert this batch's splits and merges in directories
+ where they raised a rule over its ratchet limit (coenttb/work#242)
+
+---
+ .../Markdown.Configuration.Directive.swift    | 28 ++++++++++++
+ ...guration.Directives.Directive.Result.swift | 16 -------
+ ...n.Configuration.Directives.Directive.swift | 26 -----------
+ .../Markdown.Configuration.Slug.swift         |  8 ++++
+ ...wn.Configuration.SlugGenerator.Input.swift | 16 -------
+ ....Configuration.Style.BlockQuoteStyle.swift | 22 ----------
+ ....Configuration.Style.DiagnosticStyle.swift | 14 ------
+ ...ation.Style.Icons.DiagnosticIconKind.swift | 12 ------
+ .../Markdown.Configuration.Style.Icons.swift  | 19 --------
+ .../Markdown.Configuration.Style.swift        | 43 ++++++++++++++++++-
+ .../Markdown.Rendering.BlockQuote.Input.swift | 28 ------------
+ .../Markdown.Rendering.BlockQuote.swift       | 18 ++++++++
+ ...arkdown.Rendering.Frame.CaptureState.swift | 13 ------
+ ...Markdown.Rendering.Frame.Placeholder.swift | 12 ------
+ .../Markdown.Rendering.Frame.swift            |  8 ++++
+ .../Markdown.Rendering.Image.Input.swift      | 19 --------
+ .../Markdown.Rendering.Image.swift            | 11 +++++
+ .../Markdown.Rendering.Link.Input.swift       | 17 --------
+ .../Markdown.Rendering.Link.swift             | 11 +++++
+ .../Markdown.Rendering.Table.Input.swift      | 23 ----------
+ .../Markdown.Rendering.Table.swift            | 18 ++++++++
+ .../Markdown.Rendering.Text.Input.swift       | 10 -----
+ .../Markdown.Rendering.Text.swift             |  7 +++
+ 23 files changed, 151 insertions(+), 248 deletions(-)
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.Result.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.SlugGenerator.Input.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.Style.BlockQuoteStyle.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.Style.DiagnosticStyle.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.DiagnosticIconKind.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.Input.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.CaptureState.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.Placeholder.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.Image.Input.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.Link.Input.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.Table.Input.swift
+ delete mode 100644 Sources/Markdown HTML Rendering/Markdown.Rendering.Text.Input.swift
+
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Directive.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Directive.swift
+index 1f28d4f..cddde28 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Directive.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Configuration.Directive.swift	
+@@ -75,7 +75,35 @@ extension Markdown.Configuration.Directives {
+ }
+ 
+ extension Markdown.Configuration.Directives {
++
++    public struct Directive: Sendable {
++        public let name: String
++        public let rawArguments: String
++        public let arguments: [String: String]
++        public let children: HTML.AnyView
++
++        public init(
++            name: String,
++            rawArguments: String,
++            arguments: [String: String],
++            children: HTML.AnyView
++        ) {
++            self.name = name
++            self.rawArguments = rawArguments
++            self.arguments = arguments
++            self.children = children
++        }
++    }
+ }
+ 
+ extension Markdown.Configuration.Directives.Directive {
++
++    public enum Result: Sendable {
++
++        case rendered(HTML.AnyView)
++
++        case useDefault
++
++        case suppress
++    }
+ }
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.Result.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.Result.swift
+deleted file mode 100644
+index 0ec5f89..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.Result.swift	
++++ /dev/null
+@@ -1,16 +0,0 @@
+-import CSS_HTML_Layout_Rendering
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.Directives.Directive {
+-    public enum Result: Sendable {
+-
+-        case rendered(HTML.AnyView)
+-
+-        case useDefault
+-
+-        case suppress
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.swift
+deleted file mode 100644
+index 7ade9f6..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Directives.Directive.swift	
++++ /dev/null
+@@ -1,26 +0,0 @@
+-import CSS_HTML_Layout_Rendering
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.Directives {
+-    public struct Directive: Sendable {
+-        public let name: String
+-        public let rawArguments: String
+-        public let arguments: [String: String]
+-        public let children: HTML.AnyView
+-
+-        public init(
+-            name: String,
+-            rawArguments: String,
+-            arguments: [String: String],
+-            children: HTML.AnyView
+-        ) {
+-            self.name = name
+-            self.rawArguments = rawArguments
+-            self.arguments = arguments
+-            self.children = children
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Slug.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Slug.swift
+index 5c68263..493d552 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Slug.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Configuration.Slug.swift	
+@@ -14,7 +14,15 @@ extension Markdown.Configuration {
+ }
+ 
+ extension Markdown.Configuration.SlugGenerator {
++    public struct Input: Sendable {
++        public let text: String
++        public let existingSlugs: Swift.Set<String>
+ 
++        public init(text: String, existingSlugs: Swift.Set<String>) {
++            self.text = text
++            self.existingSlugs = existingSlugs
++        }
++    }
+ 
+     public static var `default`: Self {
+         .init { input in
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.SlugGenerator.Input.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.SlugGenerator.Input.swift
+deleted file mode 100644
+index c86f60c..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.SlugGenerator.Input.swift	
++++ /dev/null
+@@ -1,16 +0,0 @@
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.SlugGenerator {
+-    public struct Input: Sendable {
+-        public let text: String
+-        public let existingSlugs: Swift.Set<String>
+-
+-        public init(text: String, existingSlugs: Swift.Set<String>) {
+-            self.text = text
+-            self.existingSlugs = existingSlugs
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.BlockQuoteStyle.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.BlockQuoteStyle.swift
+deleted file mode 100644
+index ed0fbc0..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.BlockQuoteStyle.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.Style {
+-    public struct BlockQuoteStyle: Sendable {
+-        public var style:
+-            @Sendable (_ name: String) -> (
+-                backgroundColor: DarkModeColor, borderColor: DarkModeColor
+-            )
+-
+-        public init(
+-            _ style:
+-                @escaping @Sendable (_ name: String) -> (
+-                    backgroundColor: DarkModeColor, borderColor: DarkModeColor
+-                )
+-        ) {
+-            self.style = style
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.DiagnosticStyle.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.DiagnosticStyle.swift
+deleted file mode 100644
+index 8c76515..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.DiagnosticStyle.swift	
++++ /dev/null
+@@ -1,14 +0,0 @@
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.Style {
+-    public struct DiagnosticStyle: Sendable {
+-        public var level: @Sendable (_ name: String) -> Markdown.Diagnostic.Level?
+-
+-        public init(_ level: @escaping @Sendable (_ name: String) -> Markdown.Diagnostic.Level?) {
+-            self.level = level
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.DiagnosticIconKind.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.DiagnosticIconKind.swift
+deleted file mode 100644
+index 9d5a5f1..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.DiagnosticIconKind.swift	
++++ /dev/null
+@@ -1,12 +0,0 @@
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.Style.Icons {
+-    public enum DiagnosticIconKind: Sendable {
+-        case error
+-        case failure
+-        case warning
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.swift
+deleted file mode 100644
+index 3177920..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.Icons.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Configuration.Style {
+-    public struct Icons: Sendable {
+-        public var link: @Sendable () -> HTML.AnyView
+-        public var diagnostic: @Sendable (DiagnosticIconKind) -> HTML.AnyView
+-
+-        public init(
+-            link: @escaping @Sendable () -> HTML.AnyView,
+-            diagnostic: @escaping @Sendable (DiagnosticIconKind) -> HTML.AnyView
+-        ) {
+-            self.link = link
+-            self.diagnostic = diagnostic
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.swift b/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.swift
+index 6e1999e..fc0932d 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Configuration.Style.swift	
+@@ -26,6 +26,14 @@ extension Markdown.Configuration.Style {
+ }
+ 
+ extension Markdown.Configuration.Style {
++
++    public struct DiagnosticStyle: Sendable {
++        public var level: @Sendable (_ name: String) -> Markdown.Diagnostic.Level?
++
++        public init(_ level: @escaping @Sendable (_ name: String) -> Markdown.Diagnostic.Level?) {
++            self.level = level
++        }
++    }
+ }
+ 
+ extension Markdown.Configuration.Style.DiagnosticStyle {
+@@ -51,6 +59,22 @@ extension Markdown.Configuration.Style.DiagnosticStyle {
+ }
+ 
+ extension Markdown.Configuration.Style {
++
++    public struct BlockQuoteStyle: Sendable {
++        public var style:
++            @Sendable (_ name: String) -> (
++                backgroundColor: DarkModeColor, borderColor: DarkModeColor
++            )
++
++        public init(
++            _ style:
++                @escaping @Sendable (_ name: String) -> (
++                    backgroundColor: DarkModeColor, borderColor: DarkModeColor
++                )
++        ) {
++            self.style = style
++        }
++    }
+ }
+ 
+ extension Markdown.Configuration.Style.BlockQuoteStyle {
+@@ -87,10 +111,27 @@ extension Markdown.Configuration.Style.BlockQuoteStyle {
+ }
+ 
+ extension Markdown.Configuration.Style {
++
++    public struct Icons: Sendable {
++        public var link: @Sendable () -> HTML.AnyView
++        public var diagnostic: @Sendable (DiagnosticIconKind) -> HTML.AnyView
++
++        public init(
++            link: @escaping @Sendable () -> HTML.AnyView,
++            diagnostic: @escaping @Sendable (DiagnosticIconKind) -> HTML.AnyView
++        ) {
++            self.link = link
++            self.diagnostic = diagnostic
++        }
++    }
+ }
+ 
+ extension Markdown.Configuration.Style.Icons {
+-
++    public enum DiagnosticIconKind: Sendable {
++        case error
++        case failure
++        case warning
++    }
+ 
+     public static var `default`: Self {
+         .init(
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.Input.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.Input.swift
+deleted file mode 100644
+index 40432da..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.Input.swift	
++++ /dev/null
+@@ -1,28 +0,0 @@
+-import CSS_HTML_Layout_Rendering
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-@_spi(DynamicHTML) import HTML_Rendering_Core
+-import SwiftMarkdown
+-
+-
+-extension Markdown.Rendering.BlockQuote {
+-    public struct Input: Sendable {
+-        public let kind: String
+-        public let children: [Markdown.Rendering.Action]
+-        public let isDiagnostic: Bool
+-        public let diagnosticLevel: Markdown.Diagnostic.Level?
+-
+-        public init(
+-            kind: String,
+-            children: [Markdown.Rendering.Action],
+-            isDiagnostic: Bool,
+-            diagnosticLevel: Markdown.Diagnostic.Level?
+-        ) {
+-            self.kind = kind
+-            self.children = children
+-            self.isDiagnostic = isDiagnostic
+-            self.diagnosticLevel = diagnosticLevel
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift
+index 2e6e30c..75f90fc 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift	
+@@ -16,6 +16,24 @@ extension Markdown.Rendering {
+ }
+ 
+ extension Markdown.Rendering.BlockQuote {
++    public struct Input: Sendable {
++        public let kind: String
++        public let children: [Markdown.Rendering.Action]
++        public let isDiagnostic: Bool
++        public let diagnosticLevel: Markdown.Diagnostic.Level?
++
++        public init(
++            kind: String,
++            children: [Markdown.Rendering.Action],
++            isDiagnostic: Bool,
++            diagnosticLevel: Markdown.Diagnostic.Level?
++        ) {
++            self.kind = kind
++            self.children = children
++            self.isDiagnostic = isDiagnostic
++            self.diagnosticLevel = diagnosticLevel
++        }
++    }
+ }
+ 
+ extension Markdown.Rendering.BlockQuote {
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.CaptureState.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.CaptureState.swift
+deleted file mode 100644
+index 1a76ba7..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.CaptureState.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-import CSS_HTML_Rendering
+-import HTML_Rendering
+-@_spi(DynamicHTML) import HTML_Rendering_Core
+-import Ownership
+-import Renderer
+-
+-
+-extension Markdown.Rendering.Frame {
+-    struct CaptureState {
+-        var actions: [Renderer::Renderer.Document.Action] = []
+-        var childrenIndex: Int? = nil
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.Placeholder.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.Placeholder.swift
+deleted file mode 100644
+index fa8d8cf..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.Placeholder.swift	
++++ /dev/null
+@@ -1,12 +0,0 @@
+-import CSS_HTML_Rendering
+-import HTML_Rendering
+-@_spi(DynamicHTML) import HTML_Rendering_Core
+-import Ownership
+-import Renderer
+-
+-
+-extension Markdown.Rendering.Frame {
+-    public struct Placeholder: HTML.View, Sendable {
+-        public init() {}
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.swift
+index 9ef80e7..cb4b4dc 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.Frame.swift	
+@@ -64,6 +64,10 @@ extension Markdown.Rendering.Frame {
+ }
+ 
+ extension Markdown.Rendering.Frame {
++
++    public struct Placeholder: HTML.View, Sendable {
++        public init() {}
++    }
+ }
+ 
+ extension Markdown.Rendering.Frame.Placeholder {
+@@ -79,6 +83,10 @@ extension Markdown.Rendering.Frame.Placeholder {
+ }
+ 
+ extension Markdown.Rendering.Frame {
++    struct CaptureState {
++        var actions: [Renderer::Renderer.Document.Action] = []
++        var childrenIndex: Int? = nil
++    }
+ }
+ 
+ extension Renderer::Renderer.Document.Context {
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.Input.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.Input.swift
+deleted file mode 100644
+index 29969ef..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.Input.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-import CSS_HTML_Layout_Rendering
+-import CSS_HTML_Rendering
+-import CSS_Theming
+-import HTML_Rendering
+-
+-
+-extension Markdown.Rendering.Image {
+-    public struct Input: Sendable {
+-        public let source: String?
+-        public let alt: String?
+-        public let title: String?
+-
+-        public init(source: String?, alt: String?, title: String?) {
+-            self.source = source
+-            self.alt = alt
+-            self.title = title
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.swift
+index 5f0afb8..9c1e1c0 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.Image.swift	
+@@ -14,6 +14,17 @@ extension Markdown.Rendering {
+ }
+ 
+ extension Markdown.Rendering.Image {
++    public struct Input: Sendable {
++        public let source: String?
++        public let alt: String?
++        public let title: String?
++
++        public init(source: String?, alt: String?, title: String?) {
++            self.source = source
++            self.alt = alt
++            self.title = title
++        }
++    }
+ }
+ 
+ extension Markdown.Rendering.Image {
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.Input.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.Input.swift
+deleted file mode 100644
+index a542afb..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.Input.swift	
++++ /dev/null
+@@ -1,17 +0,0 @@
+-import CSS_HTML_Rendering
+-import HTML_Rendering
+-
+-
+-extension Markdown.Rendering.Link {
+-    public struct Input: Sendable {
+-        public let destination: String?
+-        public let title: String?
+-        public let children: [Markdown.Rendering.Action]
+-
+-        public init(destination: String?, title: String?, children: [Markdown.Rendering.Action]) {
+-            self.destination = destination
+-            self.title = title
+-            self.children = children
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.swift
+index 8bf157d..66bd3eb 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.Link.swift	
+@@ -12,6 +12,17 @@ extension Markdown.Rendering {
+ }
+ 
+ extension Markdown.Rendering.Link {
++    public struct Input: Sendable {
++        public let destination: String?
++        public let title: String?
++        public let children: [Markdown.Rendering.Action]
++
++        public init(destination: String?, title: String?, children: [Markdown.Rendering.Action]) {
++            self.destination = destination
++            self.title = title
++            self.children = children
++        }
++    }
+ }
+ 
+ extension Markdown.Rendering.Link {
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.Input.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.Input.swift
+deleted file mode 100644
+index c2800ed..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.Input.swift	
++++ /dev/null
+@@ -1,23 +0,0 @@
+-import HTML_Rendering
+-
+-
+-extension Markdown.Rendering.Table {
+-    public struct Input: Sendable {
+-        public let head: [Markdown.Rendering.Action]
+-        public let body: [Markdown.Rendering.Action]
+-        public let hasHead: Bool
+-        public let hasBody: Bool
+-
+-        public init(
+-            head: [Markdown.Rendering.Action],
+-            body: [Markdown.Rendering.Action],
+-            hasHead: Bool,
+-            hasBody: Bool
+-        ) {
+-            self.head = head
+-            self.body = body
+-            self.hasHead = hasHead
+-            self.hasBody = hasBody
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.swift
+index 1dcd039..a98852f 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.Table.swift	
+@@ -11,6 +11,24 @@ extension Markdown.Rendering {
+ }
+ 
+ extension Markdown.Rendering.Table {
++    public struct Input: Sendable {
++        public let head: [Markdown.Rendering.Action]
++        public let body: [Markdown.Rendering.Action]
++        public let hasHead: Bool
++        public let hasBody: Bool
++
++        public init(
++            head: [Markdown.Rendering.Action],
++            body: [Markdown.Rendering.Action],
++            hasHead: Bool,
++            hasBody: Bool
++        ) {
++            self.head = head
++            self.body = body
++            self.hasHead = hasHead
++            self.hasBody = hasBody
++        }
++    }
+ }
+ 
+ extension Markdown.Rendering.Table {
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.Input.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.Input.swift
+deleted file mode 100644
+index a260472..0000000
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.Input.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-
+-extension Markdown.Rendering.Text {
+-    public struct Input: Sendable {
+-        public let text: String
+-
+-        public init(text: String) {
+-            self.text = text
+-        }
+-    }
+-}
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.swift
+index ee9e902..3b7c156 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.Text.swift	
+@@ -9,6 +9,13 @@ extension Markdown.Rendering {
+ }
+ 
+ extension Markdown.Rendering.Text {
++    public struct Input: Sendable {
++        public let text: String
++
++        public init(text: String) {
++            self.text = text
++        }
++    }
+ }
+ 
+ extension Markdown.Rendering.Text {
+-- 
+2.43.0
+
