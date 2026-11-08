@@ -123,3 +123,31 @@ Linux x86_64, Swift 6.4.2, runner from institute 9205733. Start: full lint 23,76
 - To check before push: lines where a moved member's closing brace landed on the member's last line (`typealias X = S}`), left by `minimal-bodies.py`; they compile but swift-format will rewrite them.
 - **09:10 UTC, pre-push checks:** `lost-declarations.sh` reports no lost declaration in `Sources`; `@Test` counts in `Tests` equal origin/main in every changed repository; manifest changes are trait conditions only (38 packages). swift-format configuration regenerated (it was missing in this container, so earlier repairs got blank-line tidying only); `format-changed.py` formatted 1,165 changed files in 179 repositories whose origin/main versions were stable under it. 44 nested `*.exports.swift` files: imports left by the exports move made internal. Root build loop: round 15 running; then another loop on the formatted state.
 - **Checkpoint push (Coen, #242, 8 Nov 07:51):** each changed repository goes to main once it passes zero lost declarations, swift-format, test type-check plus root library build, and no rule over its ratchet limit; failing ones are held. 10:30 UTC: gate 1 clean everywhere (`lost-declarations.sh` empty); gate 2 done (`format-changed.py`); gate 3 running (`build-revert.sh 25`, `br-s3g.out`; swift-ratio `Sources` reset to origin/main); gate 4: full lint of the changed repositories running (`/home/user/lint-final`).
+
+### Checkpoint push, 8 Nov (running)
+
+Root build loop capped at 2 more rounds (Coen); not green at the cap (last round failed in swift-test). Gate stand-in for libraries: a fresh `typecheck-direct` of all 510 changed library targets. Count at the push: 18,992 findings, **11,444 fixed (37.6%)**, by lint of all 400 changed repositories. 379 repositories to push, tier by tier, without force (`overnight/push-checkpoint.sh`, log `overnight/pushes-checkpoint.txt`); the first 10 atoms pushed.
+
+**Held (22), committed locally and backed up on `findings-wip`:**
+- swift-atoms/swift-indexed: ratchet: single type per file 1>0
+- swift-compositions/swift-darwin: ratchet: exported import and architecture import boundary 9>0
+- swift-compositions/swift-linter-rules: ratchet: comment in source and path name grammar over the limit on origin/main already
+- swift-institute/institute: ratchet: comment in source 21>0 on origin/main already
+- swift-atoms/swift-slab: test targets on the fallback list (trait-gated Slab.Inline), not verified
+- swift-atoms/swift-finite: Finite Tests on the fallback list, not verified
+- swift-compositions/swift-email: Email Received Tests on the fallback list, not verified
+- swift-compositions/swift-email-html: Email HTML Rendering Tests on the fallback list, not verified
+- swift-compositions/swift-effects: Effects Built-in Tests on the fallback list, not verified
+- swift-atoms/swift-size: Size Tests on the fallback list, not verified
+- swift-ietf/swift-rfc-9293: Standard Library Integration Tests on the fallback list
+- swift-ietf/swift-rfc-8446: Standard Library Integration Tests on the fallback list (fails on origin/main too)
+- swift-ietf/swift-rfc-7519: Standard Library Integration Tests on the fallback list (fails on origin/main too)
+- swift-molecules/swift-test: root build: Test.Benchmark files failed in the last capped round
+- swift-atoms/swift-coder: type-check: String.Coder.Lossless
+- swift-atoms/swift-optic: type-check: tuple with noncopyable element
+- swift-compositions/swift-sqlite: type-check: SQLite.Schema (@Table) and an unused public import
+- swift-compositions/swift-witnesses: type-check: @preconcurrency import under strict memory safety
+- swift-ietf/swift-rfc-9111: type-check: HTTP.Cache.Expires.Coder
+- swift-ietf/swift-rfc-9112: type-check: HTTP.Connection.Coder
+- swift-molecules/swift-graph: type-check: duplicate import with differing access
+- swift-standards/swift-email-standard: type-check: unused public imports
