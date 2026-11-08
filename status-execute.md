@@ -108,4 +108,7 @@ Linux x86_64, Swift 6.4.2, runner from institute 9205733. Start: full lint 23,76
 - `counter loop iteration` 445→265 (`counter-loops.py`: range loops without break/return/try/await become `forEach`); `statement where expression fits` 179→58 (`if-expressions.py`).
 - `exported import` 606→75 and `architecture import boundary` 452→53 (`exports-file.py`: re-exports moved into the target's root `exports.swift`; the per-module re-export set is unchanged).
 - Rose: `single type per file` 1,034→1,181 (from the moves; ratchet check pending), `namespace adoption typealias` +15.
-- Next: `module-selectors.py` (285), `split-types.py` (482 movable), then the ratchet gate.
+- `module selector spelling` 286→59 (`module-selectors.py`); `single type per file` 1,181→757 (`split-types.py` again); batch 18 minimal bodies 1,173→1,081; `trait consistency` 323→19 (runner repair, 38 manifests, committed and re-localized).
+- `compound type name` 910→707 (`private-compound-types.py`: internal types named in no other file become `fileprivate`, which the rule exempts); `compound identifier` 3,236→3,138 (`package-to-internal.py`: `package` members used only in their own target become internal).
+- **Lint of changed packages at 03:50 UTC: 19,405, so 11,031 fixed (36.2%).** Root build with tests still looping (`build-revert.sh`); two restarts were caused by this session's own file moves during the build and a nested `exports.swift` (7 targets merged into their root file).
+- Next: the ratchet gate, then smaller rules.
