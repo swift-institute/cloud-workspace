@@ -1,0 +1,162 @@
+From 85b1c608942b184f4010e0d5595f41a0da3437a8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:34:01 +0000
+Subject: [PATCH 2/2] counter loop iteration: range loops without early exit
+ written as forEach (type-check follows; Linux x86_64, Swift 6.4.2)
+ (coenttb/work#242)
+
+---
+ Tests/Shared Tests/Shared Tests.swift          |  2 +-
+ .../Shared+Concurrency.Detach Tests.swift      | 10 +++++-----
+ .../Shared+Concurrency.Span Tests.swift        |  4 ++--
+ .../Shared+Concurrency.Storm Tests.swift       | 18 +++++++++---------
+ 4 files changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/Tests/Shared Tests/Shared Tests.swift b/Tests/Shared Tests/Shared Tests.swift
+index 3057a7a..d321976 100644
+--- a/Tests/Shared Tests/Shared Tests.swift	
++++ b/Tests/Shared Tests/Shared Tests.swift	
+@@ -165,7 +165,7 @@ struct `Shared Tests` {
+         a.append(3)
+         let sum = a.withSpan { span in
+             var acc = 0
+-            for i in 0..<span.count { acc += span[i] }
++            (0..<span.count).forEach { i in acc += span[i] }
+             return acc
+         }
+         #expect(sum == 6)
+diff --git a/Tests/Shared Tests/Shared+Concurrency.Detach Tests.swift b/Tests/Shared Tests/Shared+Concurrency.Detach Tests.swift
+index 9119f85..cbf26f0 100644
+--- a/Tests/Shared Tests/Shared+Concurrency.Detach Tests.swift	
++++ b/Tests/Shared Tests/Shared+Concurrency.Detach Tests.swift	
+@@ -66,13 +66,13 @@ extension `Shared+Concurrency.Detach Tests` {
+                         var mine = frozen
+                         mine.append(100 &+ t)
+                         mine.withMutableSpan { span in
+-                            for i in 0..<span.count { span[i] &+= t }
++                            (0..<span.count).forEach { i in span[i] &+= t }
+                         }
+                         _ = mine.removeLast()
+                         let snapshot = mine.withSpan { span in
+                             var out: [Int] = []
+                             out.reserveCapacity(span.count)
+-                            for i in 0..<span.count { out.append(span[i]) }
++                            (0..<span.count).forEach { i in out.append(span[i]) }
+                             return out
+                         }
+                         return (t, snapshot)
+@@ -92,7 +92,7 @@ extension `Shared+Concurrency.Detach Tests` {
+             }
+             let source = proto.withSpan { span in
+                 var out: [Int] = []
+-                for i in 0..<span.count { out.append(span[i]) }
++                (0..<span.count).forEach { i in out.append(span[i]) }
+                 return out
+             }
+             #expect(source == Array(0..<8))
+@@ -153,11 +153,11 @@ extension `Shared+Concurrency.Detach Tests` {
+                             let values = mine.withSpan { span in
+                                 var out: [Int] = []
+                                 out.reserveCapacity(span.count)
+-                                for i in 0..<span.count { out.append(span[i].value) }
++                                (0..<span.count).forEach { i in out.append(span[i].value) }
+                                 return out
+                             }
+                             var model: [Int] = []
+-                            for i in 0..<8 { model.append(i % 2 == 0 ? i &+ 1000 : i) }
++                            (0..<8).forEach { i in model.append(i % 2 == 0 ? i &+ 1000 : i) }
+                             model.append(1100 &+ t)
+                             return values == model
+                         }
+diff --git a/Tests/Shared Tests/Shared+Concurrency.Span Tests.swift b/Tests/Shared Tests/Shared+Concurrency.Span Tests.swift
+index dc1b30d..1dbe9d9 100644
+--- a/Tests/Shared Tests/Shared+Concurrency.Span Tests.swift	
++++ b/Tests/Shared Tests/Shared+Concurrency.Span Tests.swift	
+@@ -67,7 +67,7 @@ extension `Shared+Concurrency.Span Tests` {
+                         var mine = frozen
+                         let before = mine.withSpan { span in
+                             var acc = 0
+-                            for i in 0..<span.count { acc &+= span[i] }
++                            (0..<span.count).forEach { i in acc &+= span[i] }
+                             return acc
+                         }
+                         let sharedBefore = (mine._boxID == frozen._boxID)
+@@ -77,7 +77,7 @@ extension `Shared+Concurrency.Span Tests` {
+                         let diverged = (mine._boxID != frozen._boxID)
+                         let after = mine.withSpan { span in
+                             var acc = 0
+-                            for i in 0..<span.count { acc &+= span[i] }
++                            (0..<span.count).forEach { i in acc &+= span[i] }
+                             return acc
+                         }
+                         return before == 6 && sharedBefore && diverged && after == 46 &+ t
+diff --git a/Tests/Shared Tests/Shared+Concurrency.Storm Tests.swift b/Tests/Shared Tests/Shared+Concurrency.Storm Tests.swift
+index 7ff31b3..f24b448 100644
+--- a/Tests/Shared Tests/Shared+Concurrency.Storm Tests.swift	
++++ b/Tests/Shared Tests/Shared+Concurrency.Storm Tests.swift	
+@@ -73,7 +73,7 @@ extension `Shared+Concurrency.Storm Tests` {
+                 for t in 0..<8 {
+                     group.addTask {
+                         var mine = frozen
+-                        for k in 0..<99 {
++                        (0..<99).forEach { k in
+                             mine.append(t &* 1000 &+ k)
+                             if k % 3 == 0 { _ = mine.removeLast() }
+                         }
+@@ -126,7 +126,7 @@ extension `Shared+Concurrency.Storm Tests` {
+                                 let consistent = mine.withSpan { span in
+                                     guard span.count == model.count else { return false }
+                                     var same = true
+-                                    for i in 0..<span.count { same = same && (span[i] == model[i]) }
++                                    (0..<span.count).forEach { i in same = same && (span[i] == model[i]) }
+                                     return same
+                                 }
+                                 good = good && consistent
+@@ -135,7 +135,7 @@ extension `Shared+Concurrency.Storm Tests` {
+                         let final = mine.withSpan { span in
+                             guard span.count == model.count else { return false }
+                             var same = true
+-                            for i in 0..<span.count { same = same && (span[i] == model[i]) }
++                            (0..<span.count).forEach { i in same = same && (span[i] == model[i]) }
+                             return same
+                         }
+                         return good && final
+@@ -172,7 +172,7 @@ extension `Shared+Concurrency.Storm Tests` {
+                                 let values = mine.withSpan { span in
+                                     var out: [Int] = []
+                                     out.reserveCapacity(span.count)
+-                                    for i in 0..<span.count { out.append(span[i].value) }
++                                    (0..<span.count).forEach { i in out.append(span[i].value) }
+                                     return out
+                                 }
+                                 good = good && (values == [0, 1, 2, 3])
+@@ -183,21 +183,21 @@ extension `Shared+Concurrency.Storm Tests` {
+                     for t in 0..<6 {
+                         group.addTask {
+                             var mine = frozen
+-                            for k in 0..<20 {
++                            (0..<20).forEach { k in
+                                 mine.append(Payload(t &* 100 &+ k))
+                             }
+                             mine.withMutableSpan { span in
+-                                for i in 0..<4 { span[i] = Payload(span[i].value &+ 50) }
++                                (0..<4).forEach { i in span[i] = Payload(span[i].value &+ 50) }
+                             }
+                             let values = mine.withSpan { span in
+                                 var out: [Int] = []
+                                 out.reserveCapacity(span.count)
+-                                for i in 0..<span.count { out.append(span[i].value) }
++                                (0..<span.count).forEach { i in out.append(span[i].value) }
+                                 return out
+                             }
+                             var model: [Int] = []
+-                            for i in 0..<4 { model.append(i &+ 50) }
+-                            for k in 0..<20 { model.append(t &* 100 &+ k) }
++                            (0..<4).forEach { i in model.append(i &+ 50) }
++                            (0..<20).forEach { k in model.append(t &* 100 &+ k) }
+                             return values == model
+                         }
+                     }
+-- 
+2.43.0
+

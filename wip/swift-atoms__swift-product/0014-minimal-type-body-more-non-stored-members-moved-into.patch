@@ -1,0 +1,757 @@
+From 5ca711d58a7712f95ea8d79b9018dec403f3d733 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:27:41 +0000
+Subject: [PATCH 14/14] minimal type body: more non-stored members moved into
+ an extension of their type (batch 10; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ .../Product.Derivation.swift                  |  85 ++--
+ .../Product.Value.Derivation.swift            |   5 +-
+ Sources/Product Syntax/Product.Analysis.swift | 389 +++++++++---------
+ .../Structural.Analysis.swift                 |  24 +-
+ .../Structural.Derivation.swift               | 129 +++---
+ 5 files changed, 323 insertions(+), 309 deletions(-)
+
+diff --git a/Sources/Product Macro Core/Product.Derivation.swift b/Sources/Product Macro Core/Product.Derivation.swift
+index 16ff31b..440310e 100644
+--- a/Sources/Product Macro Core/Product.Derivation.swift	
++++ b/Sources/Product Macro Core/Product.Derivation.swift	
+@@ -6,51 +6,54 @@ import Type_Algebra_Syntax
+ 
+ extension Product {
+     public enum Derivation {
+-        public static func peers(of analysis: Analysis) -> [DeclSyntax] {
+-            do { return try derive(analysis) } catch { return [DeclSyntax(stringLiteral: "#error(\(String(reflecting: String(describing: error))))")] }
++    }
++}
++
++extension Product.Derivation {
++    public static func peers(of analysis: Analysis) -> [DeclSyntax] {
++        do { return try derive(analysis) } catch { return [DeclSyntax(stringLiteral: "#error(\(String(reflecting: String(describing: error))))")] }
++    }
++
++    private static func derive(_ analysis: Analysis) throws -> [DeclSyntax] {
++        let protocolDeclaration = analysis.declaration
++        let access = analysis.access.map { "\($0.name.text) " } ?? ""
++        let semantic = protocolDeclaration.name.trimmedDescription
++        let product = "Product"
++        let functions = analysis.functionCoordinates
++        let genericParameters = analysis.associatedTypeCoordinates.map { coordinate in
++            coordinate.constraint.map { "\(coordinate.name.text): \($0.trimmedDescription)" }
++                ?? coordinate.name.text
+         }
++        let genericClause =
++            genericParameters.isEmpty
++            ? ""
++            : "<\(genericParameters.joined(separator: ", "))>"
+ 
+-        private static func derive(_ analysis: Analysis) throws -> [DeclSyntax] {
+-            let protocolDeclaration = analysis.declaration
+-            let access = analysis.access.map { "\($0.name.text) " } ?? ""
+-            let semantic = protocolDeclaration.name.trimmedDescription
+-            let product = "Product"
+-            let functions = analysis.functionCoordinates
+-            let genericParameters = analysis.associatedTypeCoordinates.map { coordinate in
+-                coordinate.constraint.map { "\(coordinate.name.text): \($0.trimmedDescription)" }
+-                    ?? coordinate.name.text
+-            }
+-            let genericClause =
+-                genericParameters.isEmpty
+-                ? ""
+-                : "<\(genericParameters.joined(separator: ", "))>"
++        let record = try analysis.storage(privateFunctions: true)
++        let forwarding = functions.map { function in
++            let invocation = function.invocation.trimmedDescription.replacingOccurrences(
++                of: "self._\(function.storage)",
++                with: "self.\(Analysis.storageName(function.storage))"
++            )
++            let statement = function.returnsVoid ? invocation : "return \(invocation)"
++            return """
++                \(access)func \(function.name.trimmedDescription)\(function.declaration.signature.trimmedDescription) {
++                    \(statement)
++                }
++                """
++        }
+ 
+-            let record = try analysis.storage(privateFunctions: true)
+-            let forwarding = functions.map { function in
+-                let invocation = function.invocation.trimmedDescription.replacingOccurrences(
+-                    of: "self._\(function.storage)",
+-                    with: "self.\(Analysis.storageName(function.storage))"
+-                )
+-                let statement = function.returnsVoid ? invocation : "return \(invocation)"
+-                return """
+-                    \(access)func \(function.name.trimmedDescription)\(function.declaration.signature.trimmedDescription) {
+-                        \(statement)
++        let initializer = try record.initializer(access: access)
++        let members = (record.declarations(access: access) + [initializer] + forwarding)
++            .joined(separator: "\n\n")
++        return [
++            DeclSyntax(
++                stringLiteral: """
++                    \(access)struct \(product)\(genericClause): \(semantic) {
++                    \(members)
+                     }
+                     """
+-            }
+-
+-            let initializer = try record.initializer(access: access)
+-            let members = (record.declarations(access: access) + [initializer] + forwarding)
+-                .joined(separator: "\n\n")
+-            return [
+-                DeclSyntax(
+-                    stringLiteral: """
+-                        \(access)struct \(product)\(genericClause): \(semantic) {
+-                        \(members)
+-                        }
+-                        """
+-                )
+-            ]
+-        }
++            )
++        ]
+     }
+ }
+diff --git a/Sources/Product Macro Core/Product.Value.Derivation.swift b/Sources/Product Macro Core/Product.Value.Derivation.swift
+index 651eb8a..c941b5d 100644
+--- a/Sources/Product Macro Core/Product.Value.Derivation.swift	
++++ b/Sources/Product Macro Core/Product.Value.Derivation.swift	
+@@ -4,10 +4,13 @@ import Type_Algebra_Syntax
+ 
+ extension Product {
+     public enum Value {
+-        public enum Derivation {}
+     }
+ }
+ 
++extension Product.Value {
++    public enum Derivation {}
++}
++
+ extension Product.Value.Derivation {
+     private static func fields(of declaration: some DeclGroupSyntax) throws -> (StructDeclSyntax, [Type.Syntax.Properties.Field]) {
+         guard let structure = declaration.as(StructDeclSyntax.self) else {
+diff --git a/Sources/Product Syntax/Product.Analysis.swift b/Sources/Product Syntax/Product.Analysis.swift
+index bb7fb28..03befc2 100644
+--- a/Sources/Product Syntax/Product.Analysis.swift	
++++ b/Sources/Product Syntax/Product.Analysis.swift	
+@@ -4,85 +4,11 @@ public import Type_Algebra_Syntax
+ 
+ extension Product {
+     public struct Analysis {
+-        public typealias Function = Operation.Signature
+-        public typealias Parameter = Operation.Signature.Parameter
+-
+-        public enum Coordinate {
+-            case function(Function)
+-            case associatedType(AssociatedType)
+-            case property(Property)
+-        }
+-
+-        public struct AssociatedType {
+-            public let declaration: AssociatedTypeDeclSyntax
+-            public let name: TokenSyntax
+-            public let constraint: TypeSyntax?
+-        }
+-
+-        public struct Property {
+-            public let declaration: VariableDeclSyntax
+-            public let name: TokenSyntax
+-            public let type: TypeSyntax
+-        }
+-
+-        public var algebra: Type.Record {
+-            get throws {
+-                try Type.Record(
+-                    functionCoordinates.map { .init($0.storage, $0.algebra.implementation) }
+-                        + propertyCoordinates.map { .init($0.name.text, Type.Syntax.Expression($0.type, parameters: []).algebra) }
+-                )
+-            }
+-        }
+-
+-        public static func storageName(_ name: String) -> String { "`_" + name.filter { $0 != "`" } + "`" }
+-
+-        public func storage(privateFunctions: Bool = false, unlabelled: Set<String> = []) throws -> Type.Syntax.Record {
+-            try Type.Syntax.Record(algebra) { coordinate in
+-                if let function = functionCoordinates.first(where: { $0.storage == coordinate.name }) {
+-                    let type = (Type.Syntax.Conformance.contains("Sendable", in: declaration) ? "@Sendable " : "") + function.closureType.trimmedDescription
+-                    return .init(
+-                        privateFunctions ? Self.storageName(coordinate.name) : coordinate.name,
+-                        type: type,
+-                        label: unlabelled.contains(coordinate.name) ? "_" : coordinate.name,
+-                        binding: coordinate.name,
+-                        argument: "@escaping " + type,
+-                        mutable: false,
+-                        access: privateFunctions ? "private " : nil
+-                    )
+-                }
+-                guard let property = propertyCoordinates.first(where: { $0.name.text == coordinate.name }) else {
+-                    throw Type.Failure("missing Swift representation for product coordinate")
+-                }
+-                return .init(coordinate.name, type: property.type.trimmedDescription, mutable: true)
+-            }
+-        }
+-
+         public let declaration: ProtocolDeclSyntax
+         public let access: DeclModifierSyntax?
+         public let coordinates: [Coordinate]
+         public let diagnostics: [String]
+ 
+-        public var functionCoordinates: [Function] {
+-            coordinates.compactMap { coordinate in
+-                guard case .function(let function) = coordinate else { return nil }
+-                return function
+-            }
+-        }
+-
+-        public var associatedTypeCoordinates: [AssociatedType] {
+-            coordinates.compactMap { coordinate in
+-                guard case .associatedType(let associatedType) = coordinate else { return nil }
+-                return associatedType
+-            }
+-        }
+-
+-        public var propertyCoordinates: [Property] {
+-            coordinates.compactMap { coordinate in
+-                guard case .property(let property) = coordinate else { return nil }
+-                return property
+-            }
+-        }
+-
+         public init(_ declaration: ProtocolDeclSyntax) {
+             self.declaration = declaration
+             access = Self.access(of: declaration)
+@@ -142,143 +68,220 @@ extension Product {
+             }
+             self.diagnostics = diagnostics
+         }
++    }
++}
+ 
+-        private static func access(
+-            of declaration: ProtocolDeclSyntax
+-        ) -> DeclModifierSyntax? {
+-            for modifier in declaration.modifiers {
+-                switch modifier.name.tokenKind {
+-                case .keyword(.public), .keyword(.package), .keyword(.fileprivate):
+-                    return modifier
+-                case .keyword(.private):
+-                    return DeclModifierSyntax(name: .keyword(.fileprivate))
+-                default:
+-                    continue
+-                }
+-            }
+-            return nil
++extension Product.Analysis {
++    public typealias Function = Operation.Signature
++
++    public typealias Parameter = Operation.Signature.Parameter
++
++    public enum Coordinate {
++        case function(Function)
++        case associatedType(AssociatedType)
++        case property(Property)
++    }
++
++    public struct AssociatedType {
++        public let declaration: AssociatedTypeDeclSyntax
++        public let name: TokenSyntax
++        public let constraint: TypeSyntax?
++    }
++
++    public struct Property {
++        public let declaration: VariableDeclSyntax
++        public let name: TokenSyntax
++        public let type: TypeSyntax
++    }
++
++    public var algebra: Type.Record {
++        get throws {
++            try Type.Record(
++                functionCoordinates.map { .init($0.storage, $0.algebra.implementation) }
++                    + propertyCoordinates.map { .init($0.name.text, Type.Syntax.Expression($0.type, parameters: []).algebra) }
++            )
+         }
++    }
+ 
+-        private static func validate(
+-            _ associated: AssociatedTypeDeclSyntax,
+-            names: inout Set<String>,
+-            reasons: inout [String]
+-        ) {
+-            let name = associated.name.text
+-            if !names.insert(name).inserted {
+-                reasons.append("`\(name)` duplicates another product coordinate")
+-            }
+-            if !associated.attributes.isEmpty || !associated.modifiers.isEmpty {
+-                reasons.append("`\(name)` has attributes or modifiers that are not plain product structure")
+-            }
+-            if associated.initializer != nil || associated.genericWhereClause != nil {
+-                reasons.append("`\(name)` has a default or where clause that the product family cannot preserve")
++    public static func storageName(_ name: String) -> String { "`_" + name.filter { $0 != "`" } + "`" }
++
++    public func storage(privateFunctions: Bool = false, unlabelled: Set<String> = []) throws -> Type.Syntax.Record {
++        try Type.Syntax.Record(algebra) { coordinate in
++            if let function = functionCoordinates.first(where: { $0.storage == coordinate.name }) {
++                let type = (Type.Syntax.Conformance.contains("Sendable", in: declaration) ? "@Sendable " : "") + function.closureType.trimmedDescription
++                return .init(
++                    privateFunctions ? Self.storageName(coordinate.name) : coordinate.name,
++                    type: type,
++                    label: unlabelled.contains(coordinate.name) ? "_" : coordinate.name,
++                    binding: coordinate.name,
++                    argument: "@escaping " + type,
++                    mutable: false,
++                    access: privateFunctions ? "private " : nil
++                )
+             }
+-            if (associated.inheritanceClause?.inheritedTypes.count ?? 0) > 1 {
+-                reasons.append("`\(name)` has multiple constraints that the product family cannot preserve")
++            guard let property = propertyCoordinates.first(where: { $0.name.text == coordinate.name }) else {
++                throw Type.Failure("missing Swift representation for product coordinate")
+             }
++            return .init(coordinate.name, type: property.type.trimmedDescription, mutable: true)
+         }
++    }
+ 
+-        private static func validate(
+-            _ function: FunctionDeclSyntax,
+-            fullName: String,
+-            parameters: [Analysis.Parameter],
+-            isRethrowing: Bool,
+-            names: inout Set<String>,
+-            reasons: inout [String]
+-        ) {
+-            let name = function.name.trimmedDescription
+-            guard case .identifier = function.name.tokenKind else {
+-                reasons.append("`\(name)` is an operator requirement")
+-                return
+-            }
+-            if !names.insert(fullName).inserted {
+-                reasons.append("`\(fullName)` duplicates another product coordinate")
+-            }
+-            if !function.attributes.isEmpty {
+-                reasons.append("`\(name)` has attributes whose effects cannot be represented by the product field")
+-            }
+-            if !function.modifiers.isEmpty {
+-                reasons.append("`\(name)` has receiver or type modifiers whose effects cannot be represented by the product field")
+-            }
+-            if function.genericParameterClause != nil || function.genericWhereClause != nil {
+-                reasons.append("`\(name)` is generic; stored operation fields cannot be generic")
+-            }
+-            if isRethrowing {
+-                reasons.append("`\(name)` is rethrowing; stored function values cannot express rethrows")
+-            }
+-            if function.tokens(viewMode: .sourceAccurate).contains(where: {
+-                $0.tokenKind == .keyword(.Self)
+-            }) {
+-                reasons.append("`\(name)` refers to Self, which would change meaning on the generated product")
+-            }
++    public var functionCoordinates: [Function] {
++        coordinates.compactMap { coordinate in
++            guard case .function(let function) = coordinate else { return nil }
++            return function
++        }
++    }
+ 
+-            for parameter in parameters {
+-                let declaration = parameter.declaration
+-                let local = declaration.secondName ?? declaration.firstName
+-                if local.tokenKind == .wildcard {
+-                    reasons.append("`\(name)` has an unnamed parameter that cannot be forwarded")
+-                }
+-                if !declaration.attributes.isEmpty || !declaration.modifiers.isEmpty {
+-                    reasons.append("`\(name)` has a parameter convention whose effects cannot yet be represented")
+-                }
+-                if case .unsupported = parameter.convention {
+-                    reasons.append("`\(name)` has an unsupported parameter type specifier")
+-                }
+-                if declaration.ellipsis != nil {
+-                    reasons.append("`\(name)` has a variadic parameter; stored function values cannot be variadic")
+-                }
+-                if declaration.defaultValue != nil {
+-                    reasons.append("`\(name)` has a default argument that would be lost by the product field")
+-                }
++    public var associatedTypeCoordinates: [AssociatedType] {
++        coordinates.compactMap { coordinate in
++            guard case .associatedType(let associatedType) = coordinate else { return nil }
++            return associatedType
++        }
++    }
++
++    public var propertyCoordinates: [Property] {
++        coordinates.compactMap { coordinate in
++            guard case .property(let property) = coordinate else { return nil }
++            return property
++        }
++    }
++
++    private static func access(
++        of declaration: ProtocolDeclSyntax
++    ) -> DeclModifierSyntax? {
++        for modifier in declaration.modifiers {
++            switch modifier.name.tokenKind {
++            case .keyword(.public), .keyword(.package), .keyword(.fileprivate):
++                return modifier
++            case .keyword(.private):
++                return DeclModifierSyntax(name: .keyword(.fileprivate))
++            default:
++                continue
+             }
+         }
++        return nil
++    }
++
++    private static func validate(
++        _ associated: AssociatedTypeDeclSyntax,
++        names: inout Set<String>,
++        reasons: inout [String]
++    ) {
++        let name = associated.name.text
++        if !names.insert(name).inserted {
++            reasons.append("`\(name)` duplicates another product coordinate")
++        }
++        if !associated.attributes.isEmpty || !associated.modifiers.isEmpty {
++            reasons.append("`\(name)` has attributes or modifiers that are not plain product structure")
++        }
++        if associated.initializer != nil || associated.genericWhereClause != nil {
++            reasons.append("`\(name)` has a default or where clause that the product family cannot preserve")
++        }
++        if (associated.inheritanceClause?.inheritedTypes.count ?? 0) > 1 {
++            reasons.append("`\(name)` has multiple constraints that the product family cannot preserve")
++        }
++    }
++
++    private static func validate(
++        _ function: FunctionDeclSyntax,
++        fullName: String,
++        parameters: [Analysis.Parameter],
++        isRethrowing: Bool,
++        names: inout Set<String>,
++        reasons: inout [String]
++    ) {
++        let name = function.name.trimmedDescription
++        guard case .identifier = function.name.tokenKind else {
++            reasons.append("`\(name)` is an operator requirement")
++            return
++        }
++        if !names.insert(fullName).inserted {
++            reasons.append("`\(fullName)` duplicates another product coordinate")
++        }
++        if !function.attributes.isEmpty {
++            reasons.append("`\(name)` has attributes whose effects cannot be represented by the product field")
++        }
++        if !function.modifiers.isEmpty {
++            reasons.append("`\(name)` has receiver or type modifiers whose effects cannot be represented by the product field")
++        }
++        if function.genericParameterClause != nil || function.genericWhereClause != nil {
++            reasons.append("`\(name)` is generic; stored operation fields cannot be generic")
++        }
++        if isRethrowing {
++            reasons.append("`\(name)` is rethrowing; stored function values cannot express rethrows")
++        }
++        if function.tokens(viewMode: .sourceAccurate).contains(where: {
++            $0.tokenKind == .keyword(.Self)
++        }) {
++            reasons.append("`\(name)` refers to Self, which would change meaning on the generated product")
++        }
+ 
+-        private static func property(
+-            _ variable: VariableDeclSyntax,
+-            names: inout Set<String>,
+-            reasons: inout [String]
+-        ) -> Analysis.Property? {
+-            guard
+-                variable.bindingSpecifier.tokenKind == .keyword(.var),
+-                variable.bindings.count == 1,
+-                let binding = variable.bindings.first,
+-                let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier,
+-                let type = binding.typeAnnotation?.type,
+-                isGetterOnly(binding)
+-            else {
+-                reasons.append("`\(variable.trimmedDescription)` is not a getter-only property requirement")
+-                return nil
++        for parameter in parameters {
++            let declaration = parameter.declaration
++            let local = declaration.secondName ?? declaration.firstName
++            if local.tokenKind == .wildcard {
++                reasons.append("`\(name)` has an unnamed parameter that cannot be forwarded")
+             }
+-            if !variable.attributes.isEmpty || !variable.modifiers.isEmpty {
+-                reasons.append("`\(name.text)` has attributes or modifiers that are not plain product structure")
++            if !declaration.attributes.isEmpty || !declaration.modifiers.isEmpty {
++                reasons.append("`\(name)` has a parameter convention whose effects cannot yet be represented")
+             }
+-            if !names.insert(name.text).inserted {
+-                reasons.append("`\(name.text)` duplicates another product coordinate")
++            if case .unsupported = parameter.convention {
++                reasons.append("`\(name)` has an unsupported parameter type specifier")
++            }
++            if declaration.ellipsis != nil {
++                reasons.append("`\(name)` has a variadic parameter; stored function values cannot be variadic")
++            }
++            if declaration.defaultValue != nil {
++                reasons.append("`\(name)` has a default argument that would be lost by the product field")
+             }
+-            return Analysis.Property(declaration: variable, name: name, type: type)
+         }
++    }
+ 
+-        private static func associatedType(
+-            _ declaration: AssociatedTypeDeclSyntax
+-        ) -> Analysis.AssociatedType {
+-            Analysis.AssociatedType(
+-                declaration: declaration,
+-                name: declaration.name,
+-                constraint: declaration.inheritanceClause?.inheritedTypes.first?.type
+-            )
++    private static func property(
++        _ variable: VariableDeclSyntax,
++        names: inout Set<String>,
++        reasons: inout [String]
++    ) -> Analysis.Property? {
++        guard
++            variable.bindingSpecifier.tokenKind == .keyword(.var),
++            variable.bindings.count == 1,
++            let binding = variable.bindings.first,
++            let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier,
++            let type = binding.typeAnnotation?.type,
++            isGetterOnly(binding)
++        else {
++            reasons.append("`\(variable.trimmedDescription)` is not a getter-only property requirement")
++            return nil
++        }
++        if !variable.attributes.isEmpty || !variable.modifiers.isEmpty {
++            reasons.append("`\(name.text)` has attributes or modifiers that are not plain product structure")
+         }
++        if !names.insert(name.text).inserted {
++            reasons.append("`\(name.text)` duplicates another product coordinate")
++        }
++        return Analysis.Property(declaration: variable, name: name, type: type)
++    }
+ 
+-        private static func isGetterOnly(_ binding: PatternBindingSyntax) -> Bool {
+-            guard let accessors = binding.accessorBlock?.accessors else { return false }
+-            switch accessors {
+-            case .accessors(let list):
+-                guard list.count == 1, let accessor = list.first else { return false }
+-                return accessor.accessorSpecifier.tokenKind == .keyword(.get)
+-                    && accessor.body == nil
+-            case .getter:
+-                return false
+-            }
++    private static func associatedType(
++        _ declaration: AssociatedTypeDeclSyntax
++    ) -> Analysis.AssociatedType {
++        Analysis.AssociatedType(
++            declaration: declaration,
++            name: declaration.name,
++            constraint: declaration.inheritanceClause?.inheritedTypes.first?.type
++        )
++    }
++
++    private static func isGetterOnly(_ binding: PatternBindingSyntax) -> Bool {
++        guard let accessors = binding.accessorBlock?.accessors else { return false }
++        switch accessors {
++        case .accessors(let list):
++            guard list.count == 1, let accessor = list.first else { return false }
++            return accessor.accessorSpecifier.tokenKind == .keyword(.get)
++                && accessor.body == nil
++        case .getter:
++            return false
+         }
+     }
+ }
+diff --git a/Sources/Structural Macro Core/Structural.Analysis.swift b/Sources/Structural Macro Core/Structural.Analysis.swift
+index 2ae1ebb..82e7a26 100644
+--- a/Sources/Structural Macro Core/Structural.Analysis.swift	
++++ b/Sources/Structural Macro Core/Structural.Analysis.swift	
+@@ -3,17 +3,6 @@ import Type_Algebra_Syntax
+ 
+ extension Structural {
+     public struct Analysis {
+-        public struct Field {
+-            public let name: String
+-            public let type: String
+-        }
+-
+-        public struct Case {
+-            public let name: String
+-            public let arity: Int
+-            public let payloads: [TypeSyntax]
+-        }
+-
+         public let type: TypeSyntax
+         public let access: String
+         public let parameters: [String]
+@@ -72,6 +61,19 @@ extension Structural {
+     }
+ }
+ 
++extension Structural.Analysis {
++    public struct Field {
++        public let name: String
++        public let type: String
++    }
++
++    public struct Case {
++        public let name: String
++        public let arity: Int
++        public let payloads: [TypeSyntax]
++    }
++}
++
+ extension Structural.Analysis {
+     public static func coordinates(name: String, type: TypeSyntax) -> [Field] {
+         guard let tuple = type.as(TupleTypeSyntax.self) else { return [Field(name: name, type: type.trimmedDescription)] }
+diff --git a/Sources/Structural Macro Core/Structural.Derivation.swift b/Sources/Structural Macro Core/Structural.Derivation.swift
+index 4d777dc..172f954 100644
+--- a/Sources/Structural Macro Core/Structural.Derivation.swift	
++++ b/Sources/Structural Macro Core/Structural.Derivation.swift	
+@@ -3,77 +3,80 @@ import SwiftSyntaxBuilder
+ 
+ extension Structural {
+     public enum Derivation {
+-        public static func copyable(of analysis: Analysis) -> [ExtensionDeclSyntax] {
+-            return [DeclSyntax(stringLiteral: "extension \(analysis.type): Swift::Copyable\(analysis.requirements(for: "Swift::Copyable")) {}")]
+-                .compactMap { $0.as(ExtensionDeclSyntax.self) }
+-        }
++    }
++}
+ 
+-        public static func extensions(of analysis: Analysis, capability: String) -> [ExtensionDeclSyntax] {
+-            let capability = capability.hasPrefix("Swift.") ? "Swift::" + capability.dropFirst(6) : capability
+-            let isGeneric = !analysis.parameters.isEmpty
+-            func requirements(_ capability: String) -> String { analysis.requirements(for: capability) }
+-            var declarations: [String] = []
+-            if capability == "Swift::Sendable" { declarations.append("extension \(analysis.type): Swift::Sendable\(requirements("Swift::Sendable")) {}") }
+-            if !analysis.suppressesCopyable || isGeneric {
+-                if capability == "Swift::Equatable" {
+-                    declarations.append(
+-                        """
+-                        extension \(analysis.type): Swift::Equatable\(requirements("Swift::Equatable")) {
+-                            \(analysis.access)static func == (lhs: Self, rhs: Self) -> Swift::Bool {
+-                                \(equality(of: analysis))
+-                            }
++extension Structural.Derivation {
++    public static func copyable(of analysis: Analysis) -> [ExtensionDeclSyntax] {
++        return [DeclSyntax(stringLiteral: "extension \(analysis.type): Swift::Copyable\(analysis.requirements(for: "Swift::Copyable")) {}")]
++            .compactMap { $0.as(ExtensionDeclSyntax.self) }
++    }
++
++    public static func extensions(of analysis: Analysis, capability: String) -> [ExtensionDeclSyntax] {
++        let capability = capability.hasPrefix("Swift.") ? "Swift::" + capability.dropFirst(6) : capability
++        let isGeneric = !analysis.parameters.isEmpty
++        func requirements(_ capability: String) -> String { analysis.requirements(for: capability) }
++        var declarations: [String] = []
++        if capability == "Swift::Sendable" { declarations.append("extension \(analysis.type): Swift::Sendable\(requirements("Swift::Sendable")) {}") }
++        if !analysis.suppressesCopyable || isGeneric {
++            if capability == "Swift::Equatable" {
++                declarations.append(
++                    """
++                    extension \(analysis.type): Swift::Equatable\(requirements("Swift::Equatable")) {
++                        \(analysis.access)static func == (lhs: Self, rhs: Self) -> Swift::Bool {
++                            \(equality(of: analysis))
+                         }
+-                        """
+-                    )
+-                }
+-                if capability == "Swift::Hashable" {
+-                    declarations.append(
+-                        """
+-                        extension \(analysis.type): Swift::Hashable\(requirements("Swift::Hashable")) {
+-                            \(analysis.access)func hash(into hasher: inout Swift::Hasher) {
+-                                \(hashing(of: analysis))
+-                            }
++                    }
++                    """
++                )
++            }
++            if capability == "Swift::Hashable" {
++                declarations.append(
++                    """
++                    extension \(analysis.type): Swift::Hashable\(requirements("Swift::Hashable")) {
++                        \(analysis.access)func hash(into hasher: inout Swift::Hasher) {
++                            \(hashing(of: analysis))
+                         }
+-                        """
+-                    )
+-                }
++                    }
++                    """
++                )
+             }
+-            return declarations.compactMap { DeclSyntax(stringLiteral: $0).as(ExtensionDeclSyntax.self) }
+         }
++        return declarations.compactMap { DeclSyntax(stringLiteral: $0).as(ExtensionDeclSyntax.self) }
++    }
+ 
+-        private static func equality(of analysis: Analysis) -> String {
+-            guard analysis.isEnum else {
+-                return analysis.fields.map { "guard lhs.\($0.name) == rhs.\($0.name) else { return false }" }.joined(separator: "\n") + "\nreturn true"
+-            }
+-            guard !analysis.cases.isEmpty else { return "switch (lhs, rhs) {}" }
+-            let arms =
+-                analysis.cases.map { enumCase in
+-                    guard enumCase.arity > 0 else { return "case (.\(enumCase.name), .\(enumCase.name)): return true" }
+-                    let lhs = (0..<enumCase.arity).map { "lhs\($0)" }.joined(separator: ", ")
+-                    let rhs = (0..<enumCase.arity).map { "rhs\($0)" }.joined(separator: ", ")
+-                    let comparisons = enumCase.payloads.enumerated().flatMap { index, type in
+-                        Analysis.coordinates(name: "lhs\(index)", type: type).map { field in
+-                            let suffix = field.name.dropFirst(3)
+-                            return "guard \(field.name) == rhs\(suffix) else { return false }"
+-                        }
+-                    }.joined(separator: "\n")
+-                    return "case let (.\(enumCase.name)(\(lhs)), .\(enumCase.name)(\(rhs))):\n\(comparisons)\nreturn true"
+-                } + (analysis.cases.count > 1 ? ["default: return false"] : [])
+-            return "switch (lhs, rhs) {\n\(arms.joined(separator: "\n"))\n}"
++    private static func equality(of analysis: Analysis) -> String {
++        guard analysis.isEnum else {
++            return analysis.fields.map { "guard lhs.\($0.name) == rhs.\($0.name) else { return false }" }.joined(separator: "\n") + "\nreturn true"
+         }
++        guard !analysis.cases.isEmpty else { return "switch (lhs, rhs) {}" }
++        let arms =
++            analysis.cases.map { enumCase in
++                guard enumCase.arity > 0 else { return "case (.\(enumCase.name), .\(enumCase.name)): return true" }
++                let lhs = (0..<enumCase.arity).map { "lhs\($0)" }.joined(separator: ", ")
++                let rhs = (0..<enumCase.arity).map { "rhs\($0)" }.joined(separator: ", ")
++                let comparisons = enumCase.payloads.enumerated().flatMap { index, type in
++                    Analysis.coordinates(name: "lhs\(index)", type: type).map { field in
++                        let suffix = field.name.dropFirst(3)
++                        return "guard \(field.name) == rhs\(suffix) else { return false }"
++                    }
++                }.joined(separator: "\n")
++                return "case let (.\(enumCase.name)(\(lhs)), .\(enumCase.name)(\(rhs))):\n\(comparisons)\nreturn true"
++            } + (analysis.cases.count > 1 ? ["default: return false"] : [])
++        return "switch (lhs, rhs) {\n\(arms.joined(separator: "\n"))\n}"
++    }
+ 
+-        private static func hashing(of analysis: Analysis) -> String {
+-            guard analysis.isEnum else {
+-                return analysis.fields.map { "hasher.combine(\($0.name))" }.joined(separator: "\n")
+-            }
+-            guard !analysis.cases.isEmpty else { return "switch self {}" }
+-            let arms = analysis.cases.enumerated().map { offset, enumCase in
+-                guard enumCase.arity > 0 else { return "case .\(enumCase.name): hasher.combine(\(offset))" }
+-                let values = (0..<enumCase.arity).map { "value\($0)" }
+-                return "case let .\(enumCase.name)(\(values.joined(separator: ", "))): hasher.combine(\(offset)); "
+-                    + enumCase.payloads.enumerated().flatMap { Analysis.coordinates(name: "value\($0.offset)", type: $0.element).map { "hasher.combine(\($0.name))" } }.joined(separator: "; ")
+-            }
+-            return "switch self {\n\(arms.joined(separator: "\n"))\n}"
++    private static func hashing(of analysis: Analysis) -> String {
++        guard analysis.isEnum else {
++            return analysis.fields.map { "hasher.combine(\($0.name))" }.joined(separator: "\n")
++        }
++        guard !analysis.cases.isEmpty else { return "switch self {}" }
++        let arms = analysis.cases.enumerated().map { offset, enumCase in
++            guard enumCase.arity > 0 else { return "case .\(enumCase.name): hasher.combine(\(offset))" }
++            let values = (0..<enumCase.arity).map { "value\($0)" }
++            return "case let .\(enumCase.name)(\(values.joined(separator: ", "))): hasher.combine(\(offset)); "
++                + enumCase.payloads.enumerated().flatMap { Analysis.coordinates(name: "value\($0.offset)", type: $0.element).map { "hasher.combine(\($0.name))" } }.joined(separator: "; ")
+         }
++        return "switch self {\n\(arms.joined(separator: "\n"))\n}"
+     }
+ }
+-- 
+2.43.0
+

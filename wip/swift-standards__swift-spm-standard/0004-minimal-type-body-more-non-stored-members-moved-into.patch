@@ -1,0 +1,329 @@
+From 926f221607798442fbbb809abd8b1937ff950dec Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:27:45 +0000
+Subject: [PATCH 4/6] minimal type body: more non-stored members moved into an
+ extension of their type (batch 10; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ Sources/SPM Standard/Package.Dependency.swift | 21 +++--
+ ...kage.Manifest.Target._DependencyWire.swift | 73 +++++++--------
+ .../Package.Manifest._DependencyWire.swift    | 90 +++++++++----------
+ .../Package.Manifest._RequirementWire.swift   | 46 +++++-----
+ 4 files changed, 115 insertions(+), 115 deletions(-)
+
+diff --git a/Sources/SPM Standard/Package.Dependency.swift b/Sources/SPM Standard/Package.Dependency.swift
+index e3bc3a5..6d4b55e 100644
+--- a/Sources/SPM Standard/Package.Dependency.swift	
++++ b/Sources/SPM Standard/Package.Dependency.swift	
+@@ -1,16 +1,5 @@
+ extension Package {
+-
+     public struct Dependency: Swift::Sendable, Swift::Hashable {
+-
+-        public enum Source: Swift::Sendable, Swift::Hashable {
+-
+-            case path(Swift::String)
+-
+-            case url(URI, Package.Requirement)
+-
+-            case registry(Package.Identity, Package.Requirement)
+-        }
+-
+         public let source: Source
+ 
+         public let name: Package.Name
+@@ -24,3 +13,13 @@ extension Package {
+         }
+     }
+ }
++
++extension Package.Dependency {
++    public enum Source: Swift::Sendable, Swift::Hashable {
++        case path(Swift::String)
++
++        case url(URI, Package.Requirement)
++
++        case registry(Package.Identity, Package.Requirement)
++    }
++}
+diff --git a/Sources/SPM Standard/Package.Manifest.Target._DependencyWire.swift b/Sources/SPM Standard/Package.Manifest.Target._DependencyWire.swift
+index 7482f1d..3234230 100644
+--- a/Sources/SPM Standard/Package.Manifest.Target._DependencyWire.swift	
++++ b/Sources/SPM Standard/Package.Manifest.Target._DependencyWire.swift	
+@@ -1,6 +1,5 @@
+ #if !hasFeature(Embedded)
+     extension Package.Manifest.Target {
+-
+         /// A target dependency as `dump-package` writes it: the dependency, followed in the same
+         /// array by its condition (`product: [name, package, moduleAliases, condition]`,
+         /// `target: [name, condition]`, `byName: [name, condition]`).
+@@ -8,12 +7,6 @@
+             let dependency: Package::Target.Dependency
+             let condition: Package.Manifest.Condition?
+ 
+-            private enum CodingKeys: Swift::String, CodingKey {
+-                case product
+-                case target
+-                case byName
+-            }
+-
+             init(dependency: Package::Target.Dependency, condition: Package.Manifest.Condition?) {
+                 self.dependency = dependency
+                 self.condition = condition
+@@ -35,41 +28,49 @@
+                 }
+                 self.condition = arm.isAtEnd ? nil : try arm.decodeIfPresent(Package.Manifest.Condition.self)
+             }
++        }
++    }
+ 
+-            func encode(to encoder: any Encoder) throws {
+-                var container = encoder.container(keyedBy: CodingKeys.self)
+-                switch self.dependency {
+-                case .product(let name, let package):
+-                    var arm = container.nestedUnkeyedContainer(forKey: .product)
+-                    try arm.encode(name.underlying)
+-                    try arm.encode(package.underlying)
+-                    try arm.encodeNil()
+-                    try self.encode(condition: &arm)
++extension Package.Manifest.Target._DependencyWire {
++        private enum CodingKeys: Swift::String, CodingKey {
++            case product
++            case target
++            case byName
++        }
+ 
+-                case .target(let name):
+-                    var arm = container.nestedUnkeyedContainer(forKey: .target)
+-                    try arm.encode(name.underlying)
+-                    try self.encode(condition: &arm)
++        func encode(to encoder: any Encoder) throws {
++            var container = encoder.container(keyedBy: CodingKeys.self)
++            switch self.dependency {
++            case .product(let name, let package):
++                var arm = container.nestedUnkeyedContainer(forKey: .product)
++                try arm.encode(name.underlying)
++                try arm.encode(package.underlying)
++                try arm.encodeNil()
++                try self.encode(condition: &arm)
+ 
+-                case .byName(let name):
+-                    var arm = container.nestedUnkeyedContainer(forKey: .byName)
+-                    try arm.encode(name)
+-                    try self.encode(condition: &arm)
+-                }
+-            }
++            case .target(let name):
++                var arm = container.nestedUnkeyedContainer(forKey: .target)
++                try arm.encode(name.underlying)
++                try self.encode(condition: &arm)
+ 
+-            private func encode(condition arm: inout any UnkeyedEncodingContainer) throws {
+-                if let condition = self.condition {
+-                    try arm.encode(condition)
+-                } else {
+-                    try arm.encodeNil()
+-                }
++            case .byName(let name):
++                var arm = container.nestedUnkeyedContainer(forKey: .byName)
++                try arm.encode(name)
++                try self.encode(condition: &arm)
+             }
++        }
+ 
+-            /// Any JSON value in a position the wire does not model (`moduleAliases`).
+-            private struct _Skipped: Decodable {
+-                init(from decoder: any Decoder) throws {}
++        private func encode(condition arm: inout any UnkeyedEncodingContainer) throws {
++            if let condition = self.condition {
++                try arm.encode(condition)
++            } else {
++                try arm.encodeNil()
+             }
+         }
+-    }
++
++        /// Any JSON value in a position the wire does not model (`moduleAliases`).
++        private struct _Skipped: Decodable {
++            init(from decoder: any Decoder) throws {}
++        }
++}
+ #endif
+diff --git a/Sources/SPM Standard/Package.Manifest._DependencyWire.swift b/Sources/SPM Standard/Package.Manifest._DependencyWire.swift
+index bf2f121..ee36b76 100644
+--- a/Sources/SPM Standard/Package.Manifest._DependencyWire.swift	
++++ b/Sources/SPM Standard/Package.Manifest._DependencyWire.swift	
+@@ -1,5 +1,4 @@
+ extension Package.Manifest {
+-
+     internal struct _DependencyWire: Codable {
+         let fileSystem: [_FileSystemRecord]?
+         let sourceControl: [_SourceControlRecord]?
+@@ -41,55 +40,56 @@ extension Package.Manifest {
+                 ])
+             }
+         }
++    }
++}
+ 
+-        func toDependency() throws -> Package.Dependency {
+-            if let record = fileSystem?.first {
+-                return Package.Dependency(
+-                    source: .path(record.path),
+-                    name: Package.Name(_unchecked: record.identity),
+-                    products: []
+-                )
+-            }
+-            if let record = sourceControl?.first {
+-                let urlString = record.location.remote.first?.urlString ?? ""
+-                let url: URI
+-                do {
+-                    url = try URI(urlString)
+-                } catch {
+-                    throw DecodingError.dataCorrupted(
+-                        DecodingError.Context(
+-                            codingPath: [],
+-                            debugDescription:
+-                                "Invalid URI '\(urlString)' in sourceControl dependency: \(error)"
+-                        )
++extension Package.Manifest._DependencyWire {
++    func toDependency() throws -> Package.Dependency {
++        if let record = fileSystem?.first {
++            return Package.Dependency(
++                source: .path(record.path),
++                name: Package.Name(_unchecked: record.identity),
++                products: []
++            )
++        }
++        if let record = sourceControl?.first {
++            let urlString = record.location.remote.first?.urlString ?? ""
++            let url: URI
++            do {
++                url = try URI(urlString)
++            } catch {
++                throw DecodingError.dataCorrupted(
++                    DecodingError.Context(
++                        codingPath: [],
++                        debugDescription:
++                            "Invalid URI '\(urlString)' in sourceControl dependency: \(error)"
+                     )
+-                }
+-                let requirement = try record.requirement.toRequirement()
+-                return Package.Dependency(
+-                    source: .url(url, requirement),
+-                    name: Package.Name(_unchecked: record.identity),
+-                    products: []
+                 )
+             }
+-            if let record = registry?.first {
+-                let requirement = try record.requirement.toRequirement()
+-                return Package.Dependency(
+-                    source: .registry(
+-                        try _parseIdentity(record.identity),
+-                        requirement
+-                    ),
+-                    name: Package.Name(_unchecked: record.identity),
+-                    products: []
+-                )
+-            }
+-            throw DecodingError.dataCorrupted(
+-                DecodingError.Context(
+-                    codingPath: [],
+-                    debugDescription:
+-                        "Dependency record matched none of fileSystem/sourceControl/registry"
+-                )
++            let requirement = try record.requirement.toRequirement()
++            return Package.Dependency(
++                source: .url(url, requirement),
++                name: Package.Name(_unchecked: record.identity),
++                products: []
+             )
+         }
+-
++        if let record = registry?.first {
++            let requirement = try record.requirement.toRequirement()
++            return Package.Dependency(
++                source: .registry(
++                    try _parseIdentity(record.identity),
++                    requirement
++                ),
++                name: Package.Name(_unchecked: record.identity),
++                products: []
++            )
++        }
++        throw DecodingError.dataCorrupted(
++            DecodingError.Context(
++                codingPath: [],
++                debugDescription:
++                    "Dependency record matched none of fileSystem/sourceControl/registry"
++            )
++        )
+     }
+ }
+diff --git a/Sources/SPM Standard/Package.Manifest._RequirementWire.swift b/Sources/SPM Standard/Package.Manifest._RequirementWire.swift
+index 52ced7b..c76977e 100644
+--- a/Sources/SPM Standard/Package.Manifest._RequirementWire.swift	
++++ b/Sources/SPM Standard/Package.Manifest._RequirementWire.swift	
+@@ -1,5 +1,4 @@
+ extension Package.Manifest {
+-
+     internal struct _RequirementWire: Codable {
+         let exact: [Swift::String]?
+         let range: [_RangeBounds]?
+@@ -52,29 +51,30 @@ extension Package.Manifest {
+                 self.init(range: [_RangeBounds(lowerBound: v.description, upperBound: upper)])
+             }
+         }
++    }
++}
+ 
+-        func toRequirement() throws -> Package.Requirement {
+-            if let v = exact?.first {
+-                return .exact(try _parseSemantic(v))
+-            }
+-            if let bounds = range?.first {
+-                let lower = try _parseSemantic(bounds.lowerBound)
+-                let upper = try _parseSemantic(bounds.upperBound)
+-                return lower..<upper
+-            }
+-            if let name = branch?.first {
+-                return .branch(name)
+-            }
+-            if let sha = revision?.first {
+-                return .revision(sha)
+-            }
+-            throw DecodingError.dataCorrupted(
+-                DecodingError.Context(
+-                    codingPath: [],
+-                    debugDescription: "Requirement matched none of exact/range/branch/revision"
+-                )
+-            )
++extension Package.Manifest._RequirementWire {
++    func toRequirement() throws -> Package.Requirement {
++        if let v = exact?.first {
++            return .exact(try _parseSemantic(v))
+         }
+-
++        if let bounds = range?.first {
++            let lower = try _parseSemantic(bounds.lowerBound)
++            let upper = try _parseSemantic(bounds.upperBound)
++            return lower..<upper
++        }
++        if let name = branch?.first {
++            return .branch(name)
++        }
++        if let sha = revision?.first {
++            return .revision(sha)
++        }
++        throw DecodingError.dataCorrupted(
++            DecodingError.Context(
++                codingPath: [],
++                debugDescription: "Requirement matched none of exact/range/branch/revision"
++            )
++        )
+     }
+ }
+-- 
+2.43.0
+

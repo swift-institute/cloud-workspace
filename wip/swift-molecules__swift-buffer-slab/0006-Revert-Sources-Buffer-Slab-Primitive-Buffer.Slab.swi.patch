@@ -1,0 +1,142 @@
+From af11b9eec0b3ad677e14004f13a7983d24c7eb2b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:21:37 +0000
+Subject: [PATCH 6/7] Revert Sources/Buffer Slab Primitive/Buffer.Slab.swift:
+ it broke the type-check (coenttb/work#242)
+
+---
+ .../Buffer Slab Primitive/Buffer.Slab.swift   | 114 ------------------
+ 1 file changed, 114 deletions(-)
+
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab.swift b/Sources/Buffer Slab Primitive/Buffer.Slab.swift
+index 424ddc1..a4cd057 100644
+--- a/Sources/Buffer Slab Primitive/Buffer.Slab.swift	
++++ b/Sources/Buffer Slab Primitive/Buffer.Slab.swift	
+@@ -3,9 +3,6 @@ import Bit_Vector_Bounded
+ import Index
+ import Ordinal
+ import Storage
+-import Growth
+-public import Memory_Allocator
+-public import Memory_Allocator_Protocol
+ 
+ extension Buffer where S: Store.`Protocol`, S: ~Copyable {
+ 
+@@ -61,114 +58,3 @@ extension Buffer.Slab where S: ~Copyable {
+ }
+ 
+ extension Buffer.Slab: @unsafe @unchecked Sendable where S: Sendable {}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public static func insert(
+-        _ element: consuming S.Element,
+-        at slot: Index::Index<Bit::Bit>,
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        storage.initialize(at: slot.retag(S.Element.self), to: consume element)
+-        header.bitmap[slot] = true
+-    }
+-
+-    @inlinable
+-    public static func remove(
+-        at slot: Index::Index<Bit::Bit>,
+-        header: inout Header,
+-        storage: inout S
+-    ) -> S.Element {
+-        let element = storage.move(at: slot.retag(S.Element.self))
+-        header.bitmap[slot] = false
+-        return element
+-    }
+-
+-    @inlinable
+-    public static func update(
+-        at slot: Index::Index<Bit::Bit>,
+-        with element: consuming S.Element,
+-        storage: inout S
+-    ) -> S.Element {
+-        let storageIndex = slot.retag(S.Element.self)
+-        let old = storage.move(at: storageIndex)
+-        storage.initialize(at: storageIndex, to: consume element)
+-        return old
+-    }
+-
+-    @inlinable
+-    public static func forEachOccupied(
+-        header: borrowing Header,
+-        storage: borrowing S,
+-        _ body: (Index<S.Element>) -> Void
+-    ) {
+-        header.bitmap.ones.forEach { bitIndex in
+-            body(bitIndex.retag(S.Element.self))
+-        }
+-    }
+-
+-    @inlinable
+-    public static func firstVacant(
+-        header: borrowing Header
+-    ) -> Index::Index<Bit::Bit>? {
+-        header.firstVacant(max: header.bitmap.capacity.maximum)
+-    }
+-
+-    @inlinable
+-    public static func deinitializeAll(
+-        header: inout Header,
+-        storage: inout S
+-    ) {
+-        header.bitmap.ones.forEach { bitIndex in
+-
+-            _ = storage.move(at: bitIndex.retag(S.Element.self))
+-            header.bitmap[bitIndex] = false
+-        }
+-    }
+-}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public var capacity: Tagged<Bit, Cardinal> {
+-        header.bitmap.capacity.maximum
+-    }
+-}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public subscript(slot: Index::Index<Bit::Bit>) -> S.Element {
+-        _read {
+-            yield storage[slot.retag(S.Element.self)]
+-        }
+-    }
+-}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public var forEach: Property<Sequence.ForEach, Self>.Borrow {
+-        _read {
+-            yield Property<Sequence.ForEach, Self>.Borrow(self)
+-        }
+-    }
+-}
+-
+-extension Buffer.Slab where S: ~Copyable {
+-
+-    @inlinable
+-    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
+-    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
+-        let capacity = storage.capacity
+-        var fresh = S.create(minimumCapacity: capacity)
+-        header.bitmap.ones.forEach { bitIndex in
+-            let index = bitIndex.retag(E.self)
+-            let element = storage[index]
+-            fresh.initialize(at: index, to: element)
+-        }
+-        return Self(header: header, storage: fresh)
+-    }
+-}
+-- 
+2.43.0
+

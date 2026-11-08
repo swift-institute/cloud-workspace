@@ -1,0 +1,125 @@
+From eb5351ff8a50b5ef8c95cc967e64bb678cbeb27d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:31:09 +0000
+Subject: [PATCH 6/6] Revert Sources/ISO 9075 Foundation to before batch 10:
+ the moves broke the type-check (coenttb/work#242)
+
+---
+ .../ISO_9075.Literal.swift                    | 97 +++++++++----------
+ 1 file changed, 47 insertions(+), 50 deletions(-)
+
+diff --git a/Sources/ISO 9075 Foundation/ISO_9075.Literal.swift b/Sources/ISO 9075 Foundation/ISO_9075.Literal.swift
+index 1a6aa66..cb5c6d8 100644
+--- a/Sources/ISO 9075 Foundation/ISO_9075.Literal.swift	
++++ b/Sources/ISO 9075 Foundation/ISO_9075.Literal.swift	
+@@ -4,60 +4,57 @@ public import Time
+ 
+ extension ISO_9075 {
+     public enum Literal {
+-    }
+-}
+-
+-extension ISO_9075.Literal {
+-    public static func timestamp(_ instant: Time.Instant) throws(Value.Failure) -> String {
+-        let dateTime: ISO_8601.DateTime
+-        do throws(ISO_8601.DateTime.Error) {
+-            dateTime = try ISO_8601.DateTime(instant)
+-        } catch {
+-            throw Value.Failure(error)
++        public static func timestamp(_ instant: Time.Instant) throws(Value.Failure) -> String {
++            let dateTime: ISO_8601.DateTime
++            do throws(ISO_8601.DateTime.Error) {
++                dateTime = try ISO_8601.DateTime(instant)
++            } catch {
++                throw Value.Failure(error)
++            }
++            return padded(dateTime.date.year, 4) + "-" + padded(dateTime.date.month, 2) + "-"
++                + padded(dateTime.date.day, 2) + " " + padded(dateTime.hour, 2) + ":"
++                + padded(dateTime.minute, 2) + ":" + padded(dateTime.second, 2) + "."
++                + padded(dateTime.nanoseconds / 1_000_000, 3)
+         }
+-        return padded(dateTime.date.year, 4) + "-" + padded(dateTime.date.month, 2) + "-"
+-            + padded(dateTime.date.day, 2) + " " + padded(dateTime.hour, 2) + ":"
+-            + padded(dateTime.minute, 2) + ":" + padded(dateTime.second, 2) + "."
+-            + padded(dateTime.nanoseconds / 1_000_000, 3)
+-    }
+ 
+-    public static func instant(_ text: some StringProtocol) throws(Value.Failure) -> Time.Instant {
+-        let fields = text.split(omittingEmptySubsequences: false, whereSeparator: { " T-:.".contains($0) })
+-        guard fields.count == 6 || fields.count == 7,
+-            fields.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy { (0x30...0x39).contains($0) } })
+-        else {
+-            throw Value.Failure("\(text) is not a timestamp")
++        public static func instant(_ text: some StringProtocol) throws(Value.Failure) -> Time.Instant {
++            let fields = text.split(omittingEmptySubsequences: false, whereSeparator: { " T-:.".contains($0) })
++            guard fields.count == 6 || fields.count == 7,
++                fields.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy { (0x30...0x39).contains($0) } })
++            else {
++                throw Value.Failure("\(text) is not a timestamp")
++            }
++            let values = fields.prefix(6).compactMap { Int($0) }
++            guard values.count == 6,
++                (0...23).contains(values[3]),
++                (0...59).contains(values[4]),
++                (0...59).contains(values[5])
++            else {
++                throw Value.Failure("\(text) is not a timestamp")
++            }
++            let days: Int
++            do throws(ISO_8601.CalendarDate.Error) {
++                days = try ISO_8601.CalendarDate(year: values[0], month: values[1], day: values[2]).daysSinceUnixEpoch
++            } catch {
++                throw Value.Failure(error)
++            }
++            let (daySeconds, dayOverflow) = Int64(days).multipliedReportingOverflow(by: 86_400)
++            let (seconds, secondOverflow) = daySeconds.addingReportingOverflow(Int64(values[3] * 3_600 + values[4] * 60 + values[5]))
++            guard !dayOverflow, !secondOverflow else {
++                throw Value.Failure("\(text) is out of range")
++            }
++            let fraction = fields.count == 7 ? String(fields[6].prefix(9)) : ""
++            return Time.Instant(
++                _unchecked: (),
++                secondsSinceUnixEpoch: seconds,
++                nanosecondFraction: Int32(fraction + String(repeating: "0", count: 9 - fraction.count)) ?? 0
++            )
+         }
+-        let values = fields.prefix(6).compactMap { Int($0) }
+-        guard values.count == 6,
+-            (0...23).contains(values[3]),
+-            (0...59).contains(values[4]),
+-            (0...59).contains(values[5])
+-        else {
+-            throw Value.Failure("\(text) is not a timestamp")
+-        }
+-        let days: Int
+-        do throws(ISO_8601.CalendarDate.Error) {
+-            days = try ISO_8601.CalendarDate(year: values[0], month: values[1], day: values[2]).daysSinceUnixEpoch
+-        } catch {
+-            throw Value.Failure(error)
+-        }
+-        let (daySeconds, dayOverflow) = Int64(days).multipliedReportingOverflow(by: 86_400)
+-        let (seconds, secondOverflow) = daySeconds.addingReportingOverflow(Int64(values[3] * 3_600 + values[4] * 60 + values[5]))
+-        guard !dayOverflow, !secondOverflow else {
+-            throw Value.Failure("\(text) is out of range")
+-        }
+-        let fraction = fields.count == 7 ? String(fields[6].prefix(9)) : ""
+-        return Time.Instant(
+-            _unchecked: (),
+-            secondsSinceUnixEpoch: seconds,
+-            nanosecondFraction: Int32(fraction + String(repeating: "0", count: 9 - fraction.count)) ?? 0
+-        )
+-    }
+ 
+-    private static func padded(_ value: some BinaryInteger, _ width: Int) -> String {
+-        let digits = String(value)
+-        return String(repeating: "0", count: max(0, width - digits.count)) + digits
++        private static func padded(_ value: some BinaryInteger, _ width: Int) -> String {
++            let digits = String(value)
++            return String(repeating: "0", count: max(0, width - digits.count)) + digits
++        }
+     }
+ }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,606 @@
+From d6ecb1caae6bc717311b1d16ae6069153947e5a7 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:27:44 +0000
+Subject: [PATCH 11/12] minimal type body: more non-stored members moved into
+ an extension of their type (batch 10; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ .../HTTP.Field.Value.List.swift               | 237 +++++++++---------
+ .../HTTP.Negotiation.Weighted.swift           | 154 ++++++------
+ .../HTTP.Token.Coder.swift                    |  48 ++--
+ 3 files changed, 217 insertions(+), 222 deletions(-)
+
+diff --git a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Field.Value.List.swift b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Field.Value.List.swift
+index 36dd46e..3a133e4 100644
+--- a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Field.Value.List.swift	
++++ b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Field.Value.List.swift	
+@@ -7,22 +7,12 @@
+     import Serializer
+ 
+     extension RFC_9110.Field.Value {
+-
+         public struct List<Element: Coding>: Coding
+         where
+             Element.Input: Cursor.`Protocol`<Byte, Never> & Copyable & Escapable,
+             Element.Buffer: RangeReplaceableCollection<Byte>,
+             Element.Output: Copyable & Escapable
+         {
+-
+-            public typealias Input = Element.Input
+-
+-            public typealias Buffer = Element.Buffer
+-
+-            public typealias Output = [Element.Output]
+-
+-            public typealias Failure = Error
+-
+             public let element: Element
+             public let rejected: (Element.Failure) -> Bool
+ 
+@@ -30,68 +20,77 @@
+                 self.element = element
+                 self.rejected = rejected
+             }
++        }
++    }
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
++extension RFC_9110.Field.Value.List {
++        public typealias Input = Element.Input
+ 
+-                let mark = input.checkpoint
+-                do throws(RFC_9110.Field.Value.Delimiter.Error) {
+-                    try RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>().parse(&input)
+-                } catch {
+-                    input.seek(to: mark)
+-                }
++        public typealias Buffer = Element.Buffer
+ 
+-                let probe = input.checkpoint
+-                let hasElement = input.next() != nil
+-                input.seek(to: probe)
+-                if !hasElement { return [] }
+-
+-                do throws(Parser::Many<Input, Element>.Separated<RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>>.Error) {
+-                    return try Parser::Many.Separated(
+-                        element,
+-                        separator: RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>(),
+-                        rejected: rejected,
+-                        separatorRejected: {
+-                            if case .expectedComma = $0 { return true }
+-                            return false
+-                        }
+-                    )
+-                    .parse(&input)
+-                } catch {
+-                    throw Self.error(error)
+-                }
++        public typealias Output = [Element.Output]
++
++        public typealias Failure = Error
++
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
++
++            let mark = input.checkpoint
++            do throws(RFC_9110.Field.Value.Delimiter.Error) {
++                try RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>().parse(&input)
++            } catch {
++                input.seek(to: mark)
+             }
+ 
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                do throws(Parser::Many<Input, Element>.Separated<RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>>.Error) {
+-                    try Parser::Many.Separated(
+-                        element,
+-                        separator: RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>(),
+-                        rejected: rejected,
+-                        separatorRejected: {
+-                            if case .expectedComma = $0 { return true }
+-                            return false
+-                        }
+-                    )
+-                    .serialize(output, into: &buffer)
+-                } catch {
+-                    throw Self.error(error)
+-                }
++            let probe = input.checkpoint
++            let hasElement = input.next() != nil
++            input.seek(to: probe)
++            if !hasElement { return [] }
++
++            do throws(Parser::Many<Input, Element>.Separated<RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>>.Error) {
++                return try Parser::Many.Separated(
++                    element,
++                    separator: RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>(),
++                    rejected: rejected,
++                    separatorRejected: {
++                        if case .expectedComma = $0 { return true }
++                        return false
++                    }
++                )
++                .parse(&input)
++            } catch {
++                throw Self.error(error)
+             }
++        }
+ 
+-            static func error(
+-                _ failure: Parser::Many<Input, Element>.Separated<RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>>.Error
+-            ) -> Failure {
+-                switch failure {
+-                case .element(let error): .element(error)
+-                default: .delimiter
+-                }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            do throws(Parser::Many<Input, Element>.Separated<RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>>.Error) {
++                try Parser::Many.Separated(
++                    element,
++                    separator: RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>(),
++                    rejected: rejected,
++                    separatorRejected: {
++                        if case .expectedComma = $0 { return true }
++                        return false
++                    }
++                )
++                .serialize(output, into: &buffer)
++            } catch {
++                throw Self.error(error)
+             }
+         }
+-    }
+ 
+-    extension RFC_9110.Field.Value.List {
++        static func error(
++            _ failure: Parser::Many<Input, Element>.Separated<RFC_9110.Field.Value.Delimiter.Coder<Input, Buffer>>.Error
++        ) -> Failure {
++            switch failure {
++            case .element(let error): .element(error)
++            default: .delimiter
++            }
++        }
++}
+ 
++    extension RFC_9110.Field.Value.List {
+         public enum Error: Swift::Error {
+             case element(Element.Failure)
+             case delimiter
+@@ -101,42 +100,16 @@
+     extension RFC_9110.Field.Value.List.Error: Equatable where Element.Failure: Equatable {}
+ 
+     extension RFC_9110.Field.Value {
+-
+         public enum Delimiter {}
+     }
+ 
+     extension RFC_9110.Field.Value.Delimiter {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-
+-            public typealias Output = Void
+-
+-            public typealias Failure = Error
+-
+             public let canonical: [Byte]
+ 
+             public init(canonical: [Byte] = [Byte(bitPattern: 0x2C), Byte(bitPattern: 0x20)]) {
+                 self.canonical = canonical
+             }
+-
+-            public borrowing func parse(_ input: inout Input) throws(Failure) {
+-                var commas = 0
+-                while true {
+-                    let mark = input.checkpoint
+-                    _ = RFC_9110.Whitespace.skip(&input)
+-                    guard let byte = input.next(), byte.bitPattern == 0x2C else {
+-                        input.seek(to: mark)
+-                        break
+-                    }
+-                    commas += 1
+-                }
+-                guard commas > 0 else { throw .expectedComma }
+-                _ = RFC_9110.Whitespace.skip(&input)
+-            }
+-
+-            public borrowing func serialize(_ output: Void, into buffer: inout Buffer) throws(Failure) {
+-                buffer.append(contentsOf: canonical)
+-            }
+         }
+ 
+         public enum Error: Swift::Error, Equatable {
+@@ -144,8 +117,32 @@
+         }
+     }
+ 
+-    extension RFC_9110.Field.Value {
++extension RFC_9110.Field.Value.Delimiter.Coder {
++        public typealias Output = Void
++
++        public typealias Failure = Error
+ 
++        public borrowing func parse(_ input: inout Input) throws(Failure) {
++            var commas = 0
++            while true {
++                let mark = input.checkpoint
++                _ = RFC_9110.Whitespace.skip(&input)
++                guard let byte = input.next(), byte.bitPattern == 0x2C else {
++                    input.seek(to: mark)
++                    break
++                }
++                commas += 1
++            }
++            guard commas > 0 else { throw .expectedComma }
++            _ = RFC_9110.Whitespace.skip(&input)
++        }
++
++        public borrowing func serialize(_ output: Void, into buffer: inout Buffer) throws(Failure) {
++            buffer.append(contentsOf: canonical)
++        }
++}
++
++    extension RFC_9110.Field.Value {
+         public static func tokens(in headerValue: String) -> [String] {
+             var input = [Byte](utf8: headerValue)[...]
+             let tokens = (try? List(RFC_9110.Token.coder, rejected: { $0 == .empty }).parse(&input)) ?? []
+@@ -159,51 +156,51 @@
+     }
+ 
+     extension RFC_9110.Field.Value {
+-
+         enum Directive {}
+     }
+ 
+     extension RFC_9110.Field.Value.Directive {
+-
+         struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++        }
++    }
+ 
+-            typealias Output = (name: String, value: String?)
+-
+-            typealias Failure = RFC_9110.Token.Error
++extension RFC_9110.Field.Value.Directive.Coder {
++        typealias Output = (name: String, value: String?)
+ 
+-            borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let name = try RFC_9110.Token.Coder<Input, Buffer>().parse(&input)
++        typealias Failure = RFC_9110.Token.Error
+ 
+-                let mark = input.checkpoint
+-                RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
+-                guard let equals = input.next(), equals.bitPattern == 0x3D else {
+-                    input.seek(to: mark)
+-                    return (name: name.rawValue, value: nil)
+-                }
+-                RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
++        borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let name = try RFC_9110.Token.Coder<Input, Buffer>().parse(&input)
+ 
+-                let beforeValue = input.checkpoint
+-                if let quoted = try? RFC_9110.QuotedString.Coder<Input, Buffer>().parse(&input) {
+-                    return (name: name.rawValue, value: quoted)
+-                }
+-                input.seek(to: beforeValue)
+-                if let token = try? RFC_9110.Token.Coder<Input, Buffer>().parse(&input) {
+-                    return (name: name.rawValue, value: token.rawValue)
+-                }
++            let mark = input.checkpoint
++            RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
++            guard let equals = input.next(), equals.bitPattern == 0x3D else {
+                 input.seek(to: mark)
+                 return (name: name.rawValue, value: nil)
+             }
++            RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
+ 
+-            borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                try RFC_9110.Token.Coder<Input, Buffer>().serialize(RFC_9110.Token(unchecked: output.name), into: &buffer)
+-                guard let value = output.value else { return }
+-                buffer.append(Byte(bitPattern: 0x3D))
+-                do throws(RFC_9110.Token.Error) {
+-                    try RFC_9110.Token.Coder<Input, Buffer>().serialize(RFC_9110.Token(unchecked: value), into: &buffer)
+-                } catch {
+-                    try? RFC_9110.QuotedString.Coder<Input, Buffer>().serialize(value, into: &buffer)
+-                }
++            let beforeValue = input.checkpoint
++            if let quoted = try? RFC_9110.QuotedString.Coder<Input, Buffer>().parse(&input) {
++                return (name: name.rawValue, value: quoted)
++            }
++            input.seek(to: beforeValue)
++            if let token = try? RFC_9110.Token.Coder<Input, Buffer>().parse(&input) {
++                return (name: name.rawValue, value: token.rawValue)
+             }
++            input.seek(to: mark)
++            return (name: name.rawValue, value: nil)
+         }
+-    }
++
++        borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            try RFC_9110.Token.Coder<Input, Buffer>().serialize(RFC_9110.Token(unchecked: output.name), into: &buffer)
++            guard let value = output.value else { return }
++            buffer.append(Byte(bitPattern: 0x3D))
++            do throws(RFC_9110.Token.Error) {
++                try RFC_9110.Token.Coder<Input, Buffer>().serialize(RFC_9110.Token(unchecked: value), into: &buffer)
++            } catch {
++                try? RFC_9110.QuotedString.Coder<Input, Buffer>().serialize(value, into: &buffer)
++            }
++        }
++}
+ #endif
+diff --git a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Negotiation.Weighted.swift b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Negotiation.Weighted.swift
+index 9ba81e4..d081641 100644
+--- a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Negotiation.Weighted.swift	
++++ b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Negotiation.Weighted.swift	
+@@ -7,76 +7,75 @@
+     import Serializer
+ 
+     extension RFC_9110.Negotiation {
+-
+         public struct Weighted<Value: Coding>: Coding
+         where
+             Value.Input: Cursor.`Protocol`<Byte, Never> & Copyable & Escapable,
+             Value.Buffer: RangeReplaceableCollection<Byte>,
+             Value.Output: Copyable & Escapable
+         {
++            public let value: Value
+ 
+-            public typealias Input = Value.Input
++            public init(_ value: Value) {
++                self.value = value
++            }
++        }
++    }
+ 
+-            public typealias Buffer = Value.Buffer
++extension RFC_9110.Negotiation.Weighted {
++        public typealias Input = Value.Input
+ 
+-            public typealias Output = (
+-                value: Value.Output,
+-                quality: RFC_9110.Negotiation.QualityValue
+-            )
++        public typealias Buffer = Value.Buffer
+ 
+-            public typealias Failure = Error
++        public typealias Output = (
++            value: Value.Output,
++            quality: RFC_9110.Negotiation.QualityValue
++        )
+ 
+-            public let value: Value
++        public typealias Failure = Error
+ 
+-            public init(_ value: Value) {
+-                self.value = value
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let parsed: Value.Output
++            do throws(Value.Failure) {
++                parsed = try value.parse(&input)
++            } catch {
++                throw .value(error)
+             }
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let parsed: Value.Output
+-                do throws(Value.Failure) {
+-                    parsed = try value.parse(&input)
+-                } catch {
+-                    throw .value(error)
+-                }
+-
+-                let mark = input.checkpoint
+-                RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
+-                guard let semicolon = input.next(), semicolon.bitPattern == 0x3B else {
+-                    input.seek(to: mark)
+-                    return (value: parsed, quality: .default)
+-                }
++            let mark = input.checkpoint
++            RFC_9110.OWS.Coder<Input, Buffer>().parse(&input)
++            guard let semicolon = input.next(), semicolon.bitPattern == 0x3B else {
+                 input.seek(to: mark)
++                return (value: parsed, quality: .default)
++            }
++            input.seek(to: mark)
+ 
+-                do throws(RFC_9110.Negotiation.Weight.Error) {
+-                    let quality = try RFC_9110.Negotiation.Weight.Coder<Input, Buffer>().parse(&input)
+-                    return (value: parsed, quality: quality)
+-                } catch {
+-                    input.seek(to: mark)
+-                    throw .weight(error)
+-                }
++            do throws(RFC_9110.Negotiation.Weight.Error) {
++                let quality = try RFC_9110.Negotiation.Weight.Coder<Input, Buffer>().parse(&input)
++                return (value: parsed, quality: quality)
++            } catch {
++                input.seek(to: mark)
++                throw .weight(error)
+             }
++        }
+ 
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                do throws(Value.Failure) {
+-                    try value.serialize(output.value, into: &buffer)
+-                } catch {
+-                    throw .value(error)
+-                }
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            do throws(Value.Failure) {
++                try value.serialize(output.value, into: &buffer)
++            } catch {
++                throw .value(error)
++            }
+ 
+-                guard output.quality != .default else { return }
+-                do throws(RFC_9110.Negotiation.Weight.Error) {
+-                    try RFC_9110.Negotiation.Weight.Coder<Input, Buffer>()
+-                        .serialize(output.quality, into: &buffer)
+-                } catch {
+-                    throw .weight(error)
+-                }
++            guard output.quality != .default else { return }
++            do throws(RFC_9110.Negotiation.Weight.Error) {
++                try RFC_9110.Negotiation.Weight.Coder<Input, Buffer>()
++                    .serialize(output.quality, into: &buffer)
++            } catch {
++                throw .weight(error)
+             }
+         }
+-    }
++}
+ 
+     extension RFC_9110.Negotiation.Weighted {
+-
+         public enum Error: Swift::Error {
+             case value(Value.Failure)
+             case weight(RFC_9110.Negotiation.Weight.Error)
+@@ -86,43 +85,12 @@
+     extension RFC_9110.Negotiation.Weighted.Error: Equatable where Value.Failure: Equatable {}
+ 
+     extension RFC_9110.Negotiation {
+-
+         public enum Weight {}
+     }
+ 
+     extension RFC_9110.Negotiation.Weight {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-
+-            public typealias Failure = RFC_9110.Negotiation.Weight.Error
+-
+             public init() {}
+-
+-            @Coder::Builder<Input, Buffer>
+-            public var body:
+-                some Coding
+-                    & Parsing<Input, RFC_9110.Negotiation.QualityValue, Failure>
+-                    & Serializing<RFC_9110.Negotiation.QualityValue, Buffer, Failure>
+-            {
+-                Coder::Coder(Input.self, Buffer.self) {
+-                    RFC_9110.OWS.Coder()
+-                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ";"))
+-                    RFC_9110.OWS.Coder()
+-                    Parser::OneOf.Two(
+-                        Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "q=")),
+-                        Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "Q=")),
+-                        rejectFirst: { _ in true },
+-                        rejectSecond: { _ in true }
+-                    )
+-                    RFC_9110.Negotiation.QualityValue.Coder()
+-                }
+-                .mapFailure { (failure) -> Failure in
+-                    switch failure {
+-                    case .right(let error): .quality(error)
+-                    default: .expectedWeight
+-                    }
+-                }
+-            }
+         }
+ 
+         public enum Error: Swift::Error, Equatable {
+@@ -130,4 +98,34 @@
+             case quality(RFC_9110.Negotiation.QualityValue.Error)
+         }
+     }
++
++extension RFC_9110.Negotiation.Weight.Coder {
++        public typealias Failure = RFC_9110.Negotiation.Weight.Error
++
++        @Coder::Builder<Input, Buffer>
++        public var body:
++            some Coding
++                & Parsing<Input, RFC_9110.Negotiation.QualityValue, Failure>
++                & Serializing<RFC_9110.Negotiation.QualityValue, Buffer, Failure>
++        {
++            Coder::Coder(Input.self, Buffer.self) {
++                RFC_9110.OWS.Coder()
++                Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ";"))
++                RFC_9110.OWS.Coder()
++                Parser::OneOf.Two(
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "q=")),
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "Q=")),
++                    rejectFirst: { _ in true },
++                    rejectSecond: { _ in true }
++                )
++                RFC_9110.Negotiation.QualityValue.Coder()
++            }
++            .mapFailure { (failure) -> Failure in
++                switch failure {
++                case .right(let error): .quality(error)
++                default: .expectedWeight
++                }
++            }
++        }
++}
+ #endif
+diff --git a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Token.Coder.swift b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Token.Coder.swift
+index 5fda17a..3a04135 100644
+--- a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Token.Coder.swift	
++++ b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Token.Coder.swift	
+@@ -6,38 +6,38 @@
+     import Serializer
+ 
+     extension RFC_9110.Token {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++            public init() {}
++        }
+ 
+-            public typealias Output = RFC_9110.Token
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+-            public typealias Failure = RFC_9110.Token.Error
++extension RFC_9110.Token.Coder {
++        public typealias Output = RFC_9110.Token
+ 
+-            public init() {}
++        public typealias Failure = RFC_9110.Token.Error
+ 
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> RFC_9110.Token {
+-                var bytes: [UInt8] = []
+-                while true {
+-                    let mark = input.checkpoint
+-                    guard let byte = input.next(), RFC_9110.Token.isTchar(byte.bitPattern) else {
+-                        input.seek(to: mark)
+-                        break
+-                    }
+-                    bytes.append(byte.bitPattern)
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> RFC_9110.Token {
++            var bytes: [UInt8] = []
++            while true {
++                let mark = input.checkpoint
++                guard let byte = input.next(), RFC_9110.Token.isTchar(byte.bitPattern) else {
++                    input.seek(to: mark)
++                    break
+                 }
+-                guard !bytes.isEmpty else { throw .empty }
+-                return RFC_9110.Token(unchecked: String(decoding: bytes, as: UTF8.self))
++                bytes.append(byte.bitPattern)
+             }
++            guard !bytes.isEmpty else { throw .empty }
++            return RFC_9110.Token(unchecked: String(decoding: bytes, as: UTF8.self))
++        }
+ 
+-            public borrowing func serialize(_ output: RFC_9110.Token, into buffer: inout Buffer) throws(Failure) {
+-                guard !output.rawValue.isEmpty else { throw .empty }
+-                for byte in output.rawValue.utf8 {
+-                    guard RFC_9110.Token.isTchar(byte) else { throw .invalidCharacter(byte) }
+-                    buffer.append(Byte(bitPattern: byte))
+-                }
++        public borrowing func serialize(_ output: RFC_9110.Token, into buffer: inout Buffer) throws(Failure) {
++            guard !output.rawValue.isEmpty else { throw .empty }
++            for byte in output.rawValue.utf8 {
++                guard RFC_9110.Token.isTchar(byte) else { throw .invalidCharacter(byte) }
++                buffer.append(Byte(bitPattern: byte))
+             }
+         }
+-
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++}
+ #endif
+-- 
+2.43.0
+

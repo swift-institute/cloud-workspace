@@ -1,0 +1,1474 @@
+From 29e34a8e54e50fd9f909cfef717a03339d6b6ebd Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:29:36 +0000
+Subject: [PATCH 10/10] Revert Sources/ISO 8825/ISO_8825.DER.Serializer.swift:
+ it broke the type-check (coenttb/work#242)
+
+---
+ Sources/ISO 8825/ArraySlice.Length.swift      |  10 -
+ Sources/ISO 8825/ISO 8825.BER.swift           |  18 +
+ Sources/ISO 8825/ISO 8825.DER.swift           | 241 ++++++++++++++
+ Sources/ISO 8825/ISO 8825.Integer.swift       |   9 +
+ Sources/ISO 8825/ISO 8825.Node.swift          | 308 +++++++++++++++++-
+ .../ISO_8825.BER.ImplicitlyTaggable.swift     |  16 -
+ Sources/ISO 8825/ISO_8825.BER.Parseable.swift |   9 -
+ .../ISO 8825/ISO_8825.BER.Serializable.swift  |   7 -
+ .../ISO_8825.DER.ImplicitlyTaggable.swift     |  19 --
+ Sources/ISO 8825/ISO_8825.DER.Parseable.swift |   9 -
+ .../ISO 8825/ISO_8825.DER.Serializable.swift  |   9 -
+ .../ISO 8825/ISO_8825.DER.Serializer.swift    | 219 -------------
+ .../ISO_8825.Integer.Representable.swift      |  13 -
+ .../ISO 8825/ISO_8825.LazySetOfSequence.swift |  43 ---
+ .../ISO_8825.Node.Collection.Iterator.swift   |  47 ---
+ .../ISO 8825/ISO_8825.Node.Collection.swift   |  22 --
+ Sources/ISO 8825/ISO_8825.Node.Content.swift  |  11 -
+ Sources/ISO 8825/ISO_8825.Node.swift          |  24 --
+ Sources/ISO 8825/ISO_8825.TLV.Parser.swift    | 152 ---------
+ Sources/ISO 8825/ISO_8825.TLV.swift           |  38 ---
+ 20 files changed, 575 insertions(+), 649 deletions(-)
+ delete mode 100644 Sources/ISO 8825/ArraySlice.Length.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.BER.ImplicitlyTaggable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.BER.Parseable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.BER.Serializable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.DER.ImplicitlyTaggable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.DER.Parseable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.DER.Serializable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.DER.Serializer.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.Integer.Representable.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.LazySetOfSequence.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.Node.Collection.Iterator.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.Node.Collection.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.Node.Content.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.Node.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.TLV.Parser.swift
+ delete mode 100644 Sources/ISO 8825/ISO_8825.TLV.swift
+
+diff --git a/Sources/ISO 8825/ArraySlice.Length.swift b/Sources/ISO 8825/ArraySlice.Length.swift
+deleted file mode 100644
+index 568ac5d..0000000
+--- a/Sources/ISO 8825/ArraySlice.Length.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ArraySlice where Element == UInt8 {
+-    @usableFromInline
+-    package enum Length: Sendable {
+-        case indefinite
+-        case definite(_: UInt)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO 8825.BER.swift b/Sources/ISO 8825/ISO 8825.BER.swift
+index c5bfa5d..b08e704 100644
+--- a/Sources/ISO 8825/ISO 8825.BER.swift	
++++ b/Sources/ISO 8825/ISO 8825.BER.swift	
+@@ -348,6 +348,10 @@ extension ISO_8825.BER {
+ }
+ 
+ extension ISO_8825.BER {
++    public protocol Parseable: ISO_8825.DER.Parseable {
++
++        init(berEncoded node: ISO_8825.Node) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.BER.Parseable {
+@@ -382,9 +386,23 @@ extension ISO_8825.BER.Parseable {
+ }
+ 
+ extension ISO_8825.BER {
++    public protocol Serializable: ISO_8825.DER.Serializable {
++    }
+ }
+ 
+ extension ISO_8825.BER {
++
++    public protocol ImplicitlyTaggable: ISO_8825.BER.Parseable, ISO_8825.BER.Serializable, ISO_8825
++            .DER.ImplicitlyTaggable
++    {
++
++        static var defaultIdentifier: ISO_8824.Identifier { get }
++
++        init(
++            berEncoded: ISO_8825.Node,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.BER.ImplicitlyTaggable {
+diff --git a/Sources/ISO 8825/ISO 8825.DER.swift b/Sources/ISO 8825/ISO 8825.DER.swift
+index 7a1fde3..1a8ac32 100644
+--- a/Sources/ISO 8825/ISO 8825.DER.swift	
++++ b/Sources/ISO 8825/ISO 8825.DER.swift	
+@@ -419,9 +419,231 @@ extension ISO_8825.DER {
+ }
+ 
+ extension ISO_8825.DER {
++
++    public struct Serializer: Sendable {
++        @usableFromInline
++        var _serializedBytes: [UInt8]
++
++        @inlinable
++        public var serializedBytes: [UInt8] {
++            self._serializedBytes
++        }
++
++        @inlinable
++        public init() {
++
++            self._serializedBytes = []
++            self._serializedBytes.reserveCapacity(1024)
++        }
++
++        @inlinable
++        public mutating func appendPrimitiveNode<E: Swift.Error>(
++            identifier: ISO_8824.Identifier,
++            _ contentWriter: (inout [UInt8]) throws(E) -> Void
++        ) throws(E) {
++            try self._appendNode(identifier: identifier, constructed: false) {
++                (serializer: inout Serializer) throws(E) in
++                try contentWriter(&serializer._serializedBytes)
++            }
++        }
++
++        @inlinable
++        public mutating func appendConstructedNode<E: Swift.Error>(
++            identifier: ISO_8824.Identifier,
++            _ contentWriter: (inout Serializer) throws(E) -> Void
++        ) throws(E) {
++            try self._appendNode(identifier: identifier, constructed: true, contentWriter)
++        }
++
++        @inlinable
++        public mutating func serialize<T: ISO_8825.DER.Serializable>(
++            _ node: T
++        ) throws(ISO_8824.Error) {
++            try node.serialize(into: &self)
++        }
++
++        @inlinable
++        public mutating func serialize<T: ISO_8825.DER.Serializable>(
++            _ node: T,
++            explicitlyTaggedWithTagNumber tagNumber: UInt,
++            tagClass: ISO_8824.Identifier.Class
++        ) throws(ISO_8824.Error) {
++            let identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
++            return try self.serialize(node, explicitlyTaggedWithIdentifier: identifier)
++        }
++
++        @inlinable
++        public mutating func serialize<T: ISO_8825.DER.Serializable>(
++            _ node: T,
++            explicitlyTaggedWithIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error) {
++            try self.appendConstructedNode(identifier: identifier) {
++                (coder: inout Serializer) throws(ISO_8824.Error) in
++                try coder.serialize(node)
++            }
++        }
++
++        @inlinable
++        public mutating func serializeOptionalImplicitlyTagged<T: ISO_8825.DER.Serializable>(
++            _ node: T?
++        ) throws(ISO_8824.Error) {
++            if let node {
++                try self.serialize(node)
++            }
++        }
++
++        @inlinable
++        public mutating func serializeOptionalImplicitlyTagged<T: ISO_8825.DER.ImplicitlyTaggable>(
++            _ node: T?,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error) {
++            if let node {
++                try node.serialize(into: &self, withIdentifier: identifier)
++            }
++        }
++
++        @inlinable
++        public mutating func serialize<E: Swift.Error>(
++            explicitlyTaggedWithTagNumber tagNumber: UInt,
++            tagClass: ISO_8824.Identifier.Class,
++            _ block: (inout Serializer) throws(E) -> Void
++        ) throws(E) {
++            let identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
++            try self.appendConstructedNode(identifier: identifier) {
++                (coder: inout Serializer) throws(E) in
++                try block(&coder)
++            }
++        }
++
++        @inlinable
++        public mutating func serializeSequenceOf<Elements: Swift.Sequence>(
++            _ elements: Elements,
++            identifier: ISO_8824.Identifier = .sequence
++        ) throws(ISO_8824.Error) where Elements.Element: ISO_8825.DER.Serializable {
++            try self.appendConstructedNode(identifier: identifier) {
++                (coder: inout Serializer) throws(ISO_8824.Error) in
++                for element in elements {
++                    try coder.serialize(element)
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func serializeSetOf<Elements: Swift.Sequence>(
++            _ elements: Elements,
++            identifier: ISO_8824.Identifier = .set
++        ) throws(ISO_8824.Error) where Elements.Element: ISO_8825.DER.Serializable {
++
++            var intermediateSerializer = ISO_8825.DER.Serializer()
++            let serializedRanges = try elements.map {
++                (element: Elements.Element) throws(ISO_8824.Error) -> Range<Int> in
++                let startIndex = intermediateSerializer.serializedBytes.endIndex
++                try intermediateSerializer.serialize(element)
++                let endIndex = intermediateSerializer.serializedBytes.endIndex
++
++                return startIndex..<endIndex
++            }
++
++            let serializedBytes = intermediateSerializer.serializedBytes
++
++            let sortedRanges = serializedRanges.sorted { lhs, rhs in
++                asn1SetElementLessThan(serializedBytes[lhs], serializedBytes[rhs])
++            }
++
++            self.appendConstructedNode(identifier: identifier) { serializer in
++                for range in sortedRanges {
++                    serializer.serializeRawBytes(serializedBytes[range])
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func serialize(_ node: ISO_8825.Node) {
++            let identifier = node.identifier
++            let constructed: Bool
++
++            if case .constructed = node.content {
++                constructed = true
++            } else {
++                constructed = false
++            }
++
++            self._appendNode(identifier: identifier, constructed: constructed) { coder in
++                switch node.content {
++                case .constructed(let nodes):
++                    for node in nodes {
++                        coder.serialize(node)
++                    }
++
++                case .primitive(let baseData):
++                    coder.serializeRawBytes(baseData)
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func serializeRawBytes<Bytes: Swift.Sequence>(_ bytes: Bytes)
++        where Bytes.Element == UInt8 {
++            self._serializedBytes.append(contentsOf: bytes)
++        }
++
++        @inlinable
++        package mutating func _appendNode<E: Swift.Error>(
++            identifier: ISO_8824.Identifier,
++            constructed: Bool,
++            _ contentWriter: (inout Serializer) throws(E) -> Void
++        ) throws(E) {
++
++            self._serializedBytes.writeIdentifier(identifier, constructed: constructed)
++
++            self._serializedBytes.append(0)
++
++            let originalEndIndex = self._serializedBytes.endIndex
++            let lengthIndex = self._serializedBytes.index(before: originalEndIndex)
++
++            try contentWriter(&self)
++
++            let contentLength = self._serializedBytes.distance(
++                from: originalEndIndex,
++                to: self._serializedBytes.endIndex
++            )
++            let lengthBytesNeeded = contentLength._bytesNeededToEncode
++            if lengthBytesNeeded == 1 {
++
++                assert(contentLength <= 0x7F)
++                self._serializedBytes[lengthIndex] = UInt8(contentLength)
++                return
++            }
++
++            self._serializedBytes._moveRange(
++                offset: lengthBytesNeeded - 1,
++                range: originalEndIndex..<self._serializedBytes.endIndex
++            )
++
++            self._serializedBytes[lengthIndex] = 0x80 | UInt8(lengthBytesNeeded - 1)
++            var writeIndex = lengthIndex
++
++            (0..<(lengthBytesNeeded - 1)).reversed().forEach { shift in
++
++                self._serializedBytes.formIndex(after: &writeIndex)
++                self._serializedBytes[writeIndex] = UInt8(
++                    truncatingIfNeeded: (contentLength >> (shift * 8))
++                )
++            }
++
++            assert(
++                writeIndex
++                    == self._serializedBytes.index(lengthIndex, offsetBy: lengthBytesNeeded - 1)
++            )
++        }
++    }
+ }
+ 
+ extension ISO_8825.DER {
++    public protocol Parseable {
++
++        init(derEncoded node: ISO_8825.Node) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.DER.Parseable {
+@@ -451,9 +673,28 @@ extension ISO_8825.DER.Parseable {
+ }
+ 
+ extension ISO_8825.DER {
++    public protocol Serializable {
++
++        func serialize(into coder: inout ISO_8825.DER.Serializer) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.DER {
++
++    public protocol ImplicitlyTaggable: ISO_8825.DER.Parseable, ISO_8825.DER.Serializable {
++
++        static var defaultIdentifier: ISO_8824.Identifier { get }
++
++        init(
++            derEncoded: ISO_8825.Node,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error)
++
++        func serialize(
++            into coder: inout ISO_8825.DER.Serializer,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.DER.ImplicitlyTaggable {
+diff --git a/Sources/ISO 8825/ISO 8825.Integer.swift b/Sources/ISO 8825/ISO 8825.Integer.swift
+index cc6d5c1..bea90e1 100644
+--- a/Sources/ISO 8825/ISO 8825.Integer.swift	
++++ b/Sources/ISO 8825/ISO 8825.Integer.swift	
+@@ -9,6 +9,15 @@ extension ISO_8825 {
+ extension ISO_8825.Integer: Sendable {}
+ 
+ extension ISO_8825.Integer {
++
++    public protocol Representable: ISO_8824.Integer.Representable, ISO_8825.DER.ImplicitlyTaggable,
++        ISO_8825.BER.ImplicitlyTaggable
++    {
++
++        init(derIntegerBytes: ArraySlice<UInt8>) throws(ISO_8824.Error)
++
++        init(berIntegerBytes: ArraySlice<UInt8>) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.Integer.Representable {
+diff --git a/Sources/ISO 8825/ISO 8825.Node.swift b/Sources/ISO 8825/ISO 8825.Node.swift
+index f2466c7..53198ee 100644
+--- a/Sources/ISO 8825/ISO 8825.Node.swift	
++++ b/Sources/ISO 8825/ISO 8825.Node.swift	
+@@ -36,6 +36,40 @@ extension ISO_8825.EncodingRules {
+ }
+ 
+ extension ISO_8825 {
++
++    @usableFromInline
++    struct TLV {
++
++        @usableFromInline
++        var identifier: ISO_8824.Identifier
++
++        @usableFromInline
++        var depth: Int
++
++        @usableFromInline
++        var isConstructed: Bool
++
++        @usableFromInline
++        var encodedBytes: ArraySlice<UInt8>
++
++        @usableFromInline
++        var dataBytes: ArraySlice<UInt8>?
++
++        @inlinable
++        init(
++            identifier: ISO_8824.Identifier,
++            depth: Int,
++            isConstructed: Bool,
++            encodedBytes: ArraySlice<UInt8>,
++            dataBytes: ArraySlice<UInt8>? = nil
++        ) {
++            self.identifier = identifier
++            self.depth = depth
++            self.isConstructed = isConstructed
++            self.encodedBytes = encodedBytes
++            self.dataBytes = dataBytes
++        }
++    }
+ }
+ 
+ extension ISO_8825.TLV: Hashable {}
+@@ -61,11 +95,195 @@ extension ISO_8825.TLV {
+ }
+ 
+ extension ISO_8825.TLV {
++    @usableFromInline
++    struct Parser: Sendable {
++        @inlinable
++        static var _maximumNodeDepth: Int { 50 }
++
++        @usableFromInline
++        var nodes: ArraySlice<ISO_8825.TLV>
++
++        @inlinable
++        init(_ nodes: ArraySlice<ISO_8825.TLV>) {
++            self.nodes = nodes
++        }
++
++        @inlinable
++        static func parse(
++            _ data: ArraySlice<UInt8>,
++            encoding rules: ISO_8825.EncodingRules
++        ) throws(ISO_8824.Error) -> Parser {
++            var data = data
++            var nodes = [ISO_8825.TLV]()
++            nodes.reserveCapacity(16)
++            try _parseNode(from: &data, encoding: rules, depth: 1, into: &nodes)
++            guard data.count == 0 else {
++                throw ISO_8824.Error.invalidASN1Object(reason: "Trailing unparsed data is present")
++            }
++            return Parser(nodes[...])
++        }
++
++        @inlinable
++        static func _parseNode(
++            from data: inout ArraySlice<UInt8>,
++            encoding rules: ISO_8825.EncodingRules,
++            depth: Int,
++            into nodes: inout [ISO_8825.TLV]
++        ) throws(ISO_8824.Error) {
++            guard depth <= Parser._maximumNodeDepth else {
++                throw ISO_8824.Error.invalidASN1Object(reason: "Excessive stack depth was reached")
++            }
++
++            let originalData = data
++
++            guard let rawIdentifier = data.popFirst() else {
++                throw ISO_8824.Error.truncatedASN1Field()
++            }
++
++            let constructed = (rawIdentifier & 0x20) != 0
++            let identifier: ISO_8824.Identifier
++            if (rawIdentifier & 0x1f) == 0x1f {
++                let tagClass = ISO_8824.Identifier.Class(topByteInWireFormat: rawIdentifier)
++
++                let tagNumber = try data.readUIntUsing8BitBytesASN1Discipline()
++
++                guard tagNumber >= 0x1f else {
++                    throw ISO_8824.Error.invalidASN1Object(
++                        reason: "ASN.1 tag incorrectly encoded in long form: \(tagNumber)"
++                    )
++                }
++                identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
++            } else {
++                identifier = ISO_8824.Identifier(shortIdentifier: rawIdentifier)
++            }
++
++            guard let wideLength = try data._readLength(!rules.nonMinimalEncodedLengthsAllowed)
++            else {
++                throw ISO_8824.Error.truncatedASN1Field()
++            }
++
++            switch wideLength {
++            case .definite(let wideLength):
++                guard let length = Int(exactly: wideLength) else {
++                    throw ISO_8824.Error.invalidASN1Object(
++                        reason: "Excessively large field: \(wideLength)"
++                    )
++                }
++
++                var subData = data.prefix(length)
++                data = data.dropFirst(length)
++
++                guard subData.count == length else {
++                    throw ISO_8824.Error.truncatedASN1Field()
++                }
++
++                let encodedBytes = originalData[..<subData.endIndex]
++
++                if constructed {
++                    nodes.append(
++                        ISO_8825.TLV(
++                            identifier: identifier,
++                            depth: depth,
++                            isConstructed: true,
++                            encodedBytes: encodedBytes
++                        )
++                    )
++                    while subData.count > 0 {
++                        try _parseNode(
++                            from: &subData,
++                            encoding: rules,
++                            depth: depth + 1,
++                            into: &nodes
++                        )
++                    }
++                } else {
++                    nodes.append(
++                        ISO_8825.TLV(
++                            identifier: identifier,
++                            depth: depth,
++                            isConstructed: false,
++                            encodedBytes: encodedBytes,
++                            dataBytes: subData
++                        )
++                    )
++                }
++
++            case .indefinite:
++                guard rules.indefiniteLengthAllowed == true else {
++
++                    throw ISO_8824.Error.unsupportedFieldLength(
++                        reason: "Indefinite form of field length not supported in DER."
++                    )
++                }
++
++                guard constructed == true else {
++                    throw ISO_8824.Error.unsupportedFieldLength(
++                        reason: "Indefinite-length field must have constructed identifier"
++                    )
++                }
++
++                nodes.append(
++                    ISO_8825.TLV(
++                        identifier: identifier,
++                        depth: depth,
++                        isConstructed: true,
++                        encodedBytes: []
++                    )
++                )
++                let lastIndex = nodes.endIndex - 1
++                repeat {
++                    try _parseNode(from: &data, encoding: rules, depth: depth + 1, into: &nodes)
++                } while data.count > 0 && nodes.last?.isEndMarker == false
++                guard let endMarker = nodes.popLast() else {
++                    preconditionFailure("Parsing a constructed indefinite-length TLV always appends nodes")
++                }
++                let encodedBytes = originalData[..<endMarker.encodedBytes.endIndex]
++                nodes[lastIndex].encodedBytes = encodedBytes
++            }
++        }
++    }
+ }
+ 
+ extension ISO_8825.TLV.Parser: Hashable {}
+ 
+ extension ISO_8825 {
++
++    public struct LazySetOfSequence<T>: Swift.Sequence {
++        public typealias Element = Result<T, ISO_8824.Error>
++
++        @usableFromInline
++        package typealias Wrapped = LazyMapSequence<
++            LazySequence<(ISO_8825.Node.Collection)>.Elements, Result<T, ISO_8824.Error>
++        >
++
++        public struct Iterator: IteratorProtocol {
++            @usableFromInline
++            var wrapped: Wrapped.Iterator
++
++            @inlinable
++            public mutating func next() -> Element? {
++                wrapped.next()
++            }
++
++            @inlinable
++            package init(_ wrapped: Wrapped.Iterator) {
++                self.wrapped = wrapped
++            }
++        }
++
++        @usableFromInline
++        var wrapped: Wrapped
++
++        @inlinable
++        package init(_ wrapped: Wrapped) {
++            self.wrapped = wrapped
++        }
++
++        @inlinable
++        public func makeIterator() -> Iterator {
++            .init(wrapped.makeIterator())
++        }
++    }
+ }
+ 
+ @available(*, unavailable)
+@@ -75,6 +293,23 @@ extension ISO_8825.LazySetOfSequence: Sendable {}
+ extension ISO_8825.LazySetOfSequence.Iterator: Sendable {}
+ 
+ extension ISO_8825.Node {
++    public struct Collection {
++        @usableFromInline var _nodes: ArraySlice<ISO_8825.TLV>
++
++        @usableFromInline var _depth: Int
++
++        @inlinable
++
++        init(nodes: ArraySlice<ISO_8825.TLV>, depth: Int) {
++            self._nodes = nodes
++            self._depth = depth
++
++            precondition(self._nodes.allSatisfy({ $0.depth > depth }))
++            if let firstDepth = self._nodes.first?.depth {
++                precondition(firstDepth == depth + 1)
++            }
++        }
++    }
+ }
+ 
+ extension ISO_8825.Node.Collection: Hashable {}
+@@ -83,6 +318,47 @@ extension ISO_8825.Node.Collection: Sendable {}
+ 
+ extension ISO_8825.Node.Collection: Swift.Sequence {
+ 
++    public struct Iterator: IteratorProtocol, Sendable {
++        @usableFromInline
++        var _nodes: ArraySlice<ISO_8825.TLV>
++
++        @usableFromInline
++        var _depth: Int
++
++        @inlinable
++
++        init(nodes: ArraySlice<ISO_8825.TLV>, depth: Int) {
++            self._nodes = nodes
++            self._depth = depth
++        }
++
++        @inlinable
++        public mutating func next() -> ISO_8825.Node? {
++            guard let nextNode = self._nodes.popFirst() else {
++                return nil
++            }
++
++            assert(nextNode.depth == self._depth + 1)
++            guard nextNode.isConstructed else {
++                guard let dataBytes = nextNode.dataBytes else {
++                    preconditionFailure("A primitive TLV always carries its data bytes")
++                }
++                return ISO_8825.Node(
++                    identifier: nextNode.identifier,
++                    content: .primitive(dataBytes),
++                    encodedBytes: nextNode.encodedBytes
++                )
++            }
++
++            let nodeCollection = self._nodes.prefix { $0.depth > nextNode.depth }
++            self._nodes = self._nodes.dropFirst(nodeCollection.count)
++            return ISO_8825.Node(
++                identifier: nextNode.identifier,
++                content: .constructed(.init(nodes: nodeCollection, depth: nextNode.depth)),
++                encodedBytes: nextNode.encodedBytes
++            )
++        }
++    }
+ 
+     @inlinable
+     public func makeIterator() -> Iterator {
+@@ -91,13 +367,43 @@ extension ISO_8825.Node.Collection: Swift.Sequence {
+ }
+ 
+ extension ISO_8825 {
++    public struct Node: Hashable, Sendable {
++
++        public var identifier: ISO_8824.Identifier
++
++        public var content: Content
++
++        public var encodedBytes: ArraySlice<UInt8>
++
++        @inlinable
++        package init(
++            identifier: ISO_8824.Identifier,
++            content: ISO_8825.Node.Content,
++            encodedBytes: ArraySlice<UInt8>
++        ) {
++            self.identifier = identifier
++            self.content = content
++            self.encodedBytes = encodedBytes
++        }
++    }
+ }
+ 
+ extension ISO_8825.Node {
++
++    public enum Content: Hashable, Sendable {
++
++        case constructed(ISO_8825.Node.Collection)
++
++        case primitive(ArraySlice<UInt8>)
++    }
+ }
+ 
+ extension ArraySlice where Element == UInt8 {
+-
++    @usableFromInline
++    package enum Length: Sendable {
++        case indefinite
++        case definite(_: UInt)
++    }
+ 
+     @inlinable
+     package mutating func _readLength(_ minimalEncoding: Bool) throws(ISO_8824.Error) -> Length? {
+diff --git a/Sources/ISO 8825/ISO_8825.BER.ImplicitlyTaggable.swift b/Sources/ISO 8825/ISO_8825.BER.ImplicitlyTaggable.swift
+deleted file mode 100644
+index bc10bfd..0000000
+--- a/Sources/ISO 8825/ISO_8825.BER.ImplicitlyTaggable.swift	
++++ /dev/null
+@@ -1,16 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.BER {
+-    public protocol ImplicitlyTaggable: ISO_8825.BER.Parseable, ISO_8825.BER.Serializable, ISO_8825
+-            .DER.ImplicitlyTaggable
+-    {
+-
+-        static var defaultIdentifier: ISO_8824.Identifier { get }
+-
+-        init(
+-            berEncoded: ISO_8825.Node,
+-            withIdentifier identifier: ISO_8824.Identifier
+-        ) throws(ISO_8824.Error)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.BER.Parseable.swift b/Sources/ISO 8825/ISO_8825.BER.Parseable.swift
+deleted file mode 100644
+index 875e5c5..0000000
+--- a/Sources/ISO 8825/ISO_8825.BER.Parseable.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.BER {
+-    public protocol Parseable: ISO_8825.DER.Parseable {
+-
+-        init(berEncoded node: ISO_8825.Node) throws(ISO_8824.Error)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.BER.Serializable.swift b/Sources/ISO 8825/ISO_8825.BER.Serializable.swift
+deleted file mode 100644
+index 04e405d..0000000
+--- a/Sources/ISO 8825/ISO_8825.BER.Serializable.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-import ISO_8824
+-
+-
+-extension ISO_8825.BER {
+-    public protocol Serializable: ISO_8825.DER.Serializable {
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.DER.ImplicitlyTaggable.swift b/Sources/ISO 8825/ISO_8825.DER.ImplicitlyTaggable.swift
+deleted file mode 100644
+index 155d6a7..0000000
+--- a/Sources/ISO 8825/ISO_8825.DER.ImplicitlyTaggable.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.DER {
+-    public protocol ImplicitlyTaggable: ISO_8825.DER.Parseable, ISO_8825.DER.Serializable {
+-
+-        static var defaultIdentifier: ISO_8824.Identifier { get }
+-
+-        init(
+-            derEncoded: ISO_8825.Node,
+-            withIdentifier identifier: ISO_8824.Identifier
+-        ) throws(ISO_8824.Error)
+-
+-        func serialize(
+-            into coder: inout ISO_8825.DER.Serializer,
+-            withIdentifier identifier: ISO_8824.Identifier
+-        ) throws(ISO_8824.Error)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.DER.Parseable.swift b/Sources/ISO 8825/ISO_8825.DER.Parseable.swift
+deleted file mode 100644
+index 9233646..0000000
+--- a/Sources/ISO 8825/ISO_8825.DER.Parseable.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.DER {
+-    public protocol Parseable {
+-
+-        init(derEncoded node: ISO_8825.Node) throws(ISO_8824.Error)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.DER.Serializable.swift b/Sources/ISO 8825/ISO_8825.DER.Serializable.swift
+deleted file mode 100644
+index f4bb3a5..0000000
+--- a/Sources/ISO 8825/ISO_8825.DER.Serializable.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.DER {
+-    public protocol Serializable {
+-
+-        func serialize(into coder: inout ISO_8825.DER.Serializer) throws(ISO_8824.Error)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.DER.Serializer.swift b/Sources/ISO 8825/ISO_8825.DER.Serializer.swift
+deleted file mode 100644
+index 3acd50d..0000000
+--- a/Sources/ISO 8825/ISO_8825.DER.Serializer.swift	
++++ /dev/null
+@@ -1,219 +0,0 @@
+-public import ISO_8824
+-
+-extension ISO_8825.DER {
+-    public struct Serializer: Sendable {
+-        @usableFromInline
+-        var _serializedBytes: [UInt8]
+-
+-        @inlinable
+-        public init() {
+-            self._serializedBytes = []
+-            self._serializedBytes.reserveCapacity(1024)
+-        }
+-    }
+-}
+-
+-extension ISO_8825.DER.Serializer {
+-    @inlinable
+-    public var serializedBytes: [UInt8] {
+-        self._serializedBytes
+-    }
+-
+-    @inlinable
+-    public mutating func appendPrimitiveNode<E: Swift.Error>(
+-        identifier: ISO_8824.Identifier,
+-        _ contentWriter: (inout [UInt8]) throws(E) -> Void
+-    ) throws(E) {
+-        try self._appendNode(identifier: identifier, constructed: false) {
+-            (serializer: inout Serializer) throws(E) in
+-            try contentWriter(&serializer._serializedBytes)
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func appendConstructedNode<E: Swift.Error>(
+-        identifier: ISO_8824.Identifier,
+-        _ contentWriter: (inout Serializer) throws(E) -> Void
+-    ) throws(E) {
+-        try self._appendNode(identifier: identifier, constructed: true, contentWriter)
+-    }
+-
+-    @inlinable
+-    public mutating func serialize<T: ISO_8825.DER.Serializable>(
+-        _ node: T
+-    ) throws(ISO_8824.Error) {
+-        try node.serialize(into: &self)
+-    }
+-
+-    @inlinable
+-    public mutating func serialize<T: ISO_8825.DER.Serializable>(
+-        _ node: T,
+-        explicitlyTaggedWithTagNumber tagNumber: UInt,
+-        tagClass: ISO_8824.Identifier.Class
+-    ) throws(ISO_8824.Error) {
+-        let identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
+-        return try self.serialize(node, explicitlyTaggedWithIdentifier: identifier)
+-    }
+-
+-    @inlinable
+-    public mutating func serialize<T: ISO_8825.DER.Serializable>(
+-        _ node: T,
+-        explicitlyTaggedWithIdentifier identifier: ISO_8824.Identifier
+-    ) throws(ISO_8824.Error) {
+-        try self.appendConstructedNode(identifier: identifier) {
+-            (coder: inout Serializer) throws(ISO_8824.Error) in
+-            try coder.serialize(node)
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serializeOptionalImplicitlyTagged<T: ISO_8825.DER.Serializable>(
+-        _ node: T?
+-    ) throws(ISO_8824.Error) {
+-        if let node {
+-            try self.serialize(node)
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serializeOptionalImplicitlyTagged<T: ISO_8825.DER.ImplicitlyTaggable>(
+-        _ node: T?,
+-        withIdentifier identifier: ISO_8824.Identifier
+-    ) throws(ISO_8824.Error) {
+-        if let node {
+-            try node.serialize(into: &self, withIdentifier: identifier)
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serialize<E: Swift.Error>(
+-        explicitlyTaggedWithTagNumber tagNumber: UInt,
+-        tagClass: ISO_8824.Identifier.Class,
+-        _ block: (inout Serializer) throws(E) -> Void
+-    ) throws(E) {
+-        let identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
+-        try self.appendConstructedNode(identifier: identifier) {
+-            (coder: inout Serializer) throws(E) in
+-            try block(&coder)
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serializeSequenceOf<Elements: Swift.Sequence>(
+-        _ elements: Elements,
+-        identifier: ISO_8824.Identifier = .sequence
+-    ) throws(ISO_8824.Error) where Elements.Element: ISO_8825.DER.Serializable {
+-        try self.appendConstructedNode(identifier: identifier) {
+-            (coder: inout Serializer) throws(ISO_8824.Error) in
+-            for element in elements {
+-                try coder.serialize(element)
+-            }
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serializeSetOf<Elements: Swift.Sequence>(
+-        _ elements: Elements,
+-        identifier: ISO_8824.Identifier = .set
+-    ) throws(ISO_8824.Error) where Elements.Element: ISO_8825.DER.Serializable {
+-        var intermediateSerializer = ISO_8825.DER.Serializer()
+-        let serializedRanges = try elements.map {
+-            (element: Elements.Element) throws(ISO_8824.Error) -> Range<Int> in
+-            let startIndex = intermediateSerializer.serializedBytes.endIndex
+-            try intermediateSerializer.serialize(element)
+-            let endIndex = intermediateSerializer.serializedBytes.endIndex
+-
+-            return startIndex..<endIndex
+-        }
+-
+-        let serializedBytes = intermediateSerializer.serializedBytes
+-
+-        let sortedRanges = serializedRanges.sorted { lhs, rhs in
+-            asn1SetElementLessThan(serializedBytes[lhs], serializedBytes[rhs])
+-        }
+-
+-        self.appendConstructedNode(identifier: identifier) { serializer in
+-            for range in sortedRanges {
+-                serializer.serializeRawBytes(serializedBytes[range])
+-            }
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serialize(_ node: ISO_8825.Node) {
+-        let identifier = node.identifier
+-        let constructed: Bool
+-
+-        if case .constructed = node.content {
+-            constructed = true
+-        } else {
+-            constructed = false
+-        }
+-
+-        self._appendNode(identifier: identifier, constructed: constructed) { coder in
+-            switch node.content {
+-            case .constructed(let nodes):
+-                for node in nodes {
+-                    coder.serialize(node)
+-                }
+-
+-            case .primitive(let baseData):
+-                coder.serializeRawBytes(baseData)
+-            }
+-        }
+-    }
+-
+-    @inlinable
+-    public mutating func serializeRawBytes<Bytes: Swift.Sequence>(_ bytes: Bytes)
+-    where Bytes.Element == UInt8 {
+-        self._serializedBytes.append(contentsOf: bytes)
+-    }
+-
+-    @inlinable
+-    package mutating func _appendNode<E: Swift.Error>(
+-        identifier: ISO_8824.Identifier,
+-        constructed: Bool,
+-        _ contentWriter: (inout Serializer) throws(E) -> Void
+-    ) throws(E) {
+-        self._serializedBytes.writeIdentifier(identifier, constructed: constructed)
+-
+-        self._serializedBytes.append(0)
+-
+-        let originalEndIndex = self._serializedBytes.endIndex
+-        let lengthIndex = self._serializedBytes.index(before: originalEndIndex)
+-
+-        try contentWriter(&self)
+-
+-        let contentLength = self._serializedBytes.distance(
+-            from: originalEndIndex,
+-            to: self._serializedBytes.endIndex
+-        )
+-        let lengthBytesNeeded = contentLength._bytesNeededToEncode
+-        if lengthBytesNeeded == 1 {
+-            assert(contentLength <= 0x7F)
+-            self._serializedBytes[lengthIndex] = UInt8(contentLength)
+-            return
+-        }
+-
+-        self._serializedBytes._moveRange(
+-            offset: lengthBytesNeeded - 1,
+-            range: originalEndIndex..<self._serializedBytes.endIndex
+-        )
+-
+-        self._serializedBytes[lengthIndex] = 0x80 | UInt8(lengthBytesNeeded - 1)
+-        var writeIndex = lengthIndex
+-
+-        (0..<(lengthBytesNeeded - 1)).reversed().forEach { shift in
+-
+-            self._serializedBytes.formIndex(after: &writeIndex)
+-            self._serializedBytes[writeIndex] = UInt8(
+-                truncatingIfNeeded: (contentLength >> (shift * 8))
+-            )
+-        }
+-
+-        assert(
+-            writeIndex
+-                == self._serializedBytes.index(lengthIndex, offsetBy: lengthBytesNeeded - 1)
+-        )
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.Integer.Representable.swift b/Sources/ISO 8825/ISO_8825.Integer.Representable.swift
+deleted file mode 100644
+index 92a963a..0000000
+--- a/Sources/ISO 8825/ISO_8825.Integer.Representable.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.Integer {
+-    public protocol Representable: ISO_8824.Integer.Representable, ISO_8825.DER.ImplicitlyTaggable,
+-        ISO_8825.BER.ImplicitlyTaggable
+-    {
+-
+-        init(derIntegerBytes: ArraySlice<UInt8>) throws(ISO_8824.Error)
+-
+-        init(berIntegerBytes: ArraySlice<UInt8>) throws(ISO_8824.Error)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.LazySetOfSequence.swift b/Sources/ISO 8825/ISO_8825.LazySetOfSequence.swift
+deleted file mode 100644
+index c1ab1ed..0000000
+--- a/Sources/ISO 8825/ISO_8825.LazySetOfSequence.swift	
++++ /dev/null
+@@ -1,43 +0,0 @@
+-public import ISO_8824
+-
+-extension ISO_8825 {
+-    public struct LazySetOfSequence<T>: Swift.Sequence {
+-            LazySequence<(ISO_8825.Node.Collection)>.Elements, Result<T, ISO_8824.Error>
+-        >
+-
+-        @usableFromInline
+-        var wrapped: Wrapped
+-
+-        @inlinable
+-        package init(_ wrapped: Wrapped) {
+-            self.wrapped = wrapped
+-        }
+-    }
+-}
+-
+-extension ISO_8825.LazySetOfSequence {
+-    public typealias Element = Result<T, ISO_8824.Error>
+-
+-    @usableFromInline
+-    package typealias Wrapped = LazyMapSequence<
+-
+-    public struct Iterator: IteratorProtocol {
+-        @usableFromInline
+-        var wrapped: Wrapped.Iterator
+-
+-        @inlinable
+-        public mutating func next() -> Element? {
+-            wrapped.next()
+-        }
+-
+-        @inlinable
+-        package init(_ wrapped: Wrapped.Iterator) {
+-            self.wrapped = wrapped
+-        }
+-    }
+-
+-    @inlinable
+-    public func makeIterator() -> Iterator {
+-        .init(wrapped.makeIterator())
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.Node.Collection.Iterator.swift b/Sources/ISO 8825/ISO_8825.Node.Collection.Iterator.swift
+deleted file mode 100644
+index b3ff24b..0000000
+--- a/Sources/ISO 8825/ISO_8825.Node.Collection.Iterator.swift	
++++ /dev/null
+@@ -1,47 +0,0 @@
+-public import ISO_8824
+-
+-extension ISO_8825.Node.Collection: Swift.Sequence {
+-    public struct Iterator: IteratorProtocol, Sendable {
+-        @usableFromInline
+-        var _nodes: ArraySlice<ISO_8825.TLV>
+-
+-        @usableFromInline
+-        var _depth: Int
+-
+-        @inlinable
+-
+-        init(nodes: ArraySlice<ISO_8825.TLV>, depth: Int) {
+-            self._nodes = nodes
+-            self._depth = depth
+-        }
+-    }
+-}
+-
+-extension ISO_8825.Node.Collection.Iterator {
+-    @inlinable
+-    public mutating func next() -> ISO_8825.Node? {
+-        guard let nextNode = self._nodes.popFirst() else {
+-            return nil
+-        }
+-
+-        assert(nextNode.depth == self._depth + 1)
+-        guard nextNode.isConstructed else {
+-            guard let dataBytes = nextNode.dataBytes else {
+-                preconditionFailure("A primitive TLV always carries its data bytes")
+-            }
+-            return ISO_8825.Node(
+-                identifier: nextNode.identifier,
+-                content: .primitive(dataBytes),
+-                encodedBytes: nextNode.encodedBytes
+-            )
+-        }
+-
+-        let nodeCollection = self._nodes.prefix { $0.depth > nextNode.depth }
+-        self._nodes = self._nodes.dropFirst(nodeCollection.count)
+-        return ISO_8825.Node(
+-            identifier: nextNode.identifier,
+-            content: .constructed(.init(nodes: nodeCollection, depth: nextNode.depth)),
+-            encodedBytes: nextNode.encodedBytes
+-        )
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.Node.Collection.swift b/Sources/ISO 8825/ISO_8825.Node.Collection.swift
+deleted file mode 100644
+index dba52bd..0000000
+--- a/Sources/ISO 8825/ISO_8825.Node.Collection.swift	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-import ISO_8824
+-
+-
+-extension ISO_8825.Node {
+-    public struct Collection {
+-        @usableFromInline var _nodes: ArraySlice<ISO_8825.TLV>
+-
+-        @usableFromInline var _depth: Int
+-
+-        @inlinable
+-
+-        init(nodes: ArraySlice<ISO_8825.TLV>, depth: Int) {
+-            self._nodes = nodes
+-            self._depth = depth
+-
+-            precondition(self._nodes.allSatisfy({ $0.depth > depth }))
+-            if let firstDepth = self._nodes.first?.depth {
+-                precondition(firstDepth == depth + 1)
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.Node.Content.swift b/Sources/ISO 8825/ISO_8825.Node.Content.swift
+deleted file mode 100644
+index 31752d1..0000000
+--- a/Sources/ISO 8825/ISO_8825.Node.Content.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825.Node {
+-    public enum Content: Hashable, Sendable {
+-
+-        case constructed(ISO_8825.Node.Collection)
+-
+-        case primitive(ArraySlice<UInt8>)
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.Node.swift b/Sources/ISO 8825/ISO_8825.Node.swift
+deleted file mode 100644
+index 8a70e7a..0000000
+--- a/Sources/ISO 8825/ISO_8825.Node.swift	
++++ /dev/null
+@@ -1,24 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825 {
+-    public struct Node: Hashable, Sendable {
+-
+-        public var identifier: ISO_8824.Identifier
+-
+-        public var content: Content
+-
+-        public var encodedBytes: ArraySlice<UInt8>
+-
+-        @inlinable
+-        package init(
+-            identifier: ISO_8824.Identifier,
+-            content: ISO_8825.Node.Content,
+-            encodedBytes: ArraySlice<UInt8>
+-        ) {
+-            self.identifier = identifier
+-            self.content = content
+-            self.encodedBytes = encodedBytes
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.TLV.Parser.swift b/Sources/ISO 8825/ISO_8825.TLV.Parser.swift
+deleted file mode 100644
+index b344b97..0000000
+--- a/Sources/ISO 8825/ISO_8825.TLV.Parser.swift	
++++ /dev/null
+@@ -1,152 +0,0 @@
+-public import ISO_8824
+-
+-extension ISO_8825.TLV {
+-    @usableFromInline
+-    struct Parser: Sendable {
+-        @usableFromInline
+-        var nodes: ArraySlice<ISO_8825.TLV>
+-
+-        @inlinable
+-        init(_ nodes: ArraySlice<ISO_8825.TLV>) {
+-            self.nodes = nodes
+-        }
+-    }
+-}
+-
+-extension ISO_8825.TLV.Parser {
+-    @inlinable
+-    static var _maximumNodeDepth: Int { 50 }
+-
+-    @inlinable
+-    static func parse(
+-        _ data: ArraySlice<UInt8>,
+-        encoding rules: ISO_8825.EncodingRules
+-    ) throws(ISO_8824.Error) -> Parser {
+-        var data = data
+-        var nodes = [ISO_8825.TLV]()
+-        nodes.reserveCapacity(16)
+-        try _parseNode(from: &data, encoding: rules, depth: 1, into: &nodes)
+-        guard data.count == 0 else {
+-            throw ISO_8824.Error.invalidASN1Object(reason: "Trailing unparsed data is present")
+-        }
+-        return Parser(nodes[...])
+-    }
+-
+-    @inlinable
+-    static func _parseNode(
+-        from data: inout ArraySlice<UInt8>,
+-        encoding rules: ISO_8825.EncodingRules,
+-        depth: Int,
+-        into nodes: inout [ISO_8825.TLV]
+-    ) throws(ISO_8824.Error) {
+-        guard depth <= Parser._maximumNodeDepth else {
+-            throw ISO_8824.Error.invalidASN1Object(reason: "Excessive stack depth was reached")
+-        }
+-
+-        let originalData = data
+-
+-        guard let rawIdentifier = data.popFirst() else {
+-            throw ISO_8824.Error.truncatedASN1Field()
+-        }
+-
+-        let constructed = (rawIdentifier & 0x20) != 0
+-        let identifier: ISO_8824.Identifier
+-        if (rawIdentifier & 0x1f) == 0x1f {
+-            let tagClass = ISO_8824.Identifier.Class(topByteInWireFormat: rawIdentifier)
+-
+-            let tagNumber = try data.readUIntUsing8BitBytesASN1Discipline()
+-
+-            guard tagNumber >= 0x1f else {
+-                throw ISO_8824.Error.invalidASN1Object(
+-                    reason: "ASN.1 tag incorrectly encoded in long form: \(tagNumber)"
+-                )
+-            }
+-            identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
+-        } else {
+-            identifier = ISO_8824.Identifier(shortIdentifier: rawIdentifier)
+-        }
+-
+-        guard let wideLength = try data._readLength(!rules.nonMinimalEncodedLengthsAllowed)
+-        else {
+-            throw ISO_8824.Error.truncatedASN1Field()
+-        }
+-
+-        switch wideLength {
+-        case .definite(let wideLength):
+-            guard let length = Int(exactly: wideLength) else {
+-                throw ISO_8824.Error.invalidASN1Object(
+-                    reason: "Excessively large field: \(wideLength)"
+-                )
+-            }
+-
+-            var subData = data.prefix(length)
+-            data = data.dropFirst(length)
+-
+-            guard subData.count == length else {
+-                throw ISO_8824.Error.truncatedASN1Field()
+-            }
+-
+-            let encodedBytes = originalData[..<subData.endIndex]
+-
+-            if constructed {
+-                nodes.append(
+-                    ISO_8825.TLV(
+-                        identifier: identifier,
+-                        depth: depth,
+-                        isConstructed: true,
+-                        encodedBytes: encodedBytes
+-                    )
+-                )
+-                while subData.count > 0 {
+-                    try _parseNode(
+-                        from: &subData,
+-                        encoding: rules,
+-                        depth: depth + 1,
+-                        into: &nodes
+-                    )
+-                }
+-            } else {
+-                nodes.append(
+-                    ISO_8825.TLV(
+-                        identifier: identifier,
+-                        depth: depth,
+-                        isConstructed: false,
+-                        encodedBytes: encodedBytes,
+-                        dataBytes: subData
+-                    )
+-                )
+-            }
+-
+-        case .indefinite:
+-            guard rules.indefiniteLengthAllowed == true else {
+-                throw ISO_8824.Error.unsupportedFieldLength(
+-                    reason: "Indefinite form of field length not supported in DER."
+-                )
+-            }
+-
+-            guard constructed == true else {
+-                throw ISO_8824.Error.unsupportedFieldLength(
+-                    reason: "Indefinite-length field must have constructed identifier"
+-                )
+-            }
+-
+-            nodes.append(
+-                ISO_8825.TLV(
+-                    identifier: identifier,
+-                    depth: depth,
+-                    isConstructed: true,
+-                    encodedBytes: []
+-                )
+-            )
+-            let lastIndex = nodes.endIndex - 1
+-            repeat {
+-                try _parseNode(from: &data, encoding: rules, depth: depth + 1, into: &nodes)
+-            } while data.count > 0 && nodes.last?.isEndMarker == false
+-            guard let endMarker = nodes.popLast() else {
+-                preconditionFailure("Parsing a constructed indefinite-length TLV always appends nodes")
+-            }
+-            let encodedBytes = originalData[..<endMarker.encodedBytes.endIndex]
+-            nodes[lastIndex].encodedBytes = encodedBytes
+-        }
+-    }
+-}
+diff --git a/Sources/ISO 8825/ISO_8825.TLV.swift b/Sources/ISO 8825/ISO_8825.TLV.swift
+deleted file mode 100644
+index b826d75..0000000
+--- a/Sources/ISO 8825/ISO_8825.TLV.swift	
++++ /dev/null
+@@ -1,38 +0,0 @@
+-public import ISO_8824
+-
+-
+-extension ISO_8825 {
+-    @usableFromInline
+-    struct TLV {
+-
+-        @usableFromInline
+-        var identifier: ISO_8824.Identifier
+-
+-        @usableFromInline
+-        var depth: Int
+-
+-        @usableFromInline
+-        var isConstructed: Bool
+-
+-        @usableFromInline
+-        var encodedBytes: ArraySlice<UInt8>
+-
+-        @usableFromInline
+-        var dataBytes: ArraySlice<UInt8>?
+-
+-        @inlinable
+-        init(
+-            identifier: ISO_8824.Identifier,
+-            depth: Int,
+-            isConstructed: Bool,
+-            encodedBytes: ArraySlice<UInt8>,
+-            dataBytes: ArraySlice<UInt8>? = nil
+-        ) {
+-            self.identifier = identifier
+-            self.depth = depth
+-            self.isConstructed = isConstructed
+-            self.encodedBytes = encodedBytes
+-            self.dataBytes = dataBytes
+-        }
+-    }
+-}
+-- 
+2.43.0
+

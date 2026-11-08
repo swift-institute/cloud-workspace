@@ -1,0 +1,93 @@
+From b07654cfa06c8d4a5304adcdfbf6ed75007f1685 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:27:41 +0000
+Subject: [PATCH 6/7] minimal type body: more non-stored members moved into an
+ extension of their type (batch 10; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ Sources/Iterator/Iterator.Buffered.swift  | 31 ++++++++++++-----------
+ Sources/Iterator/Iterator.Flattened.swift |  9 ++++---
+ 2 files changed, 21 insertions(+), 19 deletions(-)
+
+diff --git a/Sources/Iterator/Iterator.Buffered.swift b/Sources/Iterator/Iterator.Buffered.swift
+index ee543c8..e9c183e 100644
+--- a/Sources/Iterator/Iterator.Buffered.swift
++++ b/Sources/Iterator/Iterator.Buffered.swift
+@@ -1,12 +1,24 @@
+ extension Iterator {
+-
+     public struct Buffered<Base: Iterating & ~Copyable & ~Escapable, SourceFailure: Swift::Error>: Iterating, ~Copyable, ~Escapable
+     where Base.Element: ~Copyable & Escapable, Base.Failure == SourceFailure {
+-        public typealias Element = Base.Element
+-        public typealias Failure = Base.Failure
+         private var base: Base
+         private var pending: Node?
+ 
++        @_lifetime(copy base)
++        public init(_ base: consuming Base) {
++            self.base = base
++            self.pending = nil
++        }
++    }
++}
++
++extension Iterator::Iterator.Buffered: Escapable
++where Base: ~Copyable & Escapable, Base.Element: ~Copyable & Escapable {}
++
++extension Iterator.Buffered where Base: ~Copyable & ~Escapable {
++        public typealias Element = Base.Element
++        public typealias Failure = Base.Failure
++
+         private final class Node {
+             var element: Element?
+             let next: Node?
+@@ -16,12 +28,6 @@ extension Iterator {
+             }
+         }
+ 
+-        @_lifetime(copy base)
+-        public init(_ base: consuming Base) {
+-            self.base = base
+-            self.pending = nil
+-        }
+-
+         public mutating func next() throws(Failure) -> Element? {
+             if let node = pending {
+                 pending = node.next
+@@ -34,9 +40,4 @@ extension Iterator {
+ 
+         public mutating func unread(_ element: consuming Element) {
+             pending = Node(element, next: pending)
+-        }
+-    }
+-}
+-
+-extension Iterator::Iterator.Buffered: Escapable
+-where Base: ~Copyable & Escapable, Base.Element: ~Copyable & Escapable {}
++        }}
+diff --git a/Sources/Iterator/Iterator.Flattened.swift b/Sources/Iterator/Iterator.Flattened.swift
+index 38d9e72..3498dea 100644
+--- a/Sources/Iterator/Iterator.Flattened.swift
++++ b/Sources/Iterator/Iterator.Flattened.swift
+@@ -1,12 +1,13 @@
+ extension Iterator {
+-
+     public struct Flattened<Source: __IteratorChunkProtocol & ~Copyable & ~Escapable>: Iterating, ~Copyable, ~Escapable
+     where Source.Element: Copyable & Escapable {
+         private var source: Source
+         @_lifetime(copy source)
+         public init(_ source: consuming Source) { self.source = source }
+-        public mutating func next() throws(Source.Failure) -> Source.Element? {
+-            try source.next()
+-        }
+     }
+ }
++
++extension Iterator.Flattened where Source: ~Copyable & ~Escapable {
++        public mutating func next() throws(Source.Failure) -> Source.Element? {
++            try source.next()
++        }}
+-- 
+2.43.0
+

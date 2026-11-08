@@ -1,0 +1,844 @@
+From 515e4f5f74022c599390779a7c68bb181d17852c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:27:46 +0000
+Subject: [PATCH 13/15] minimal type body: more non-stored members moved into
+ an extension of their type (batch 10; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ .../ColumnCheckMacro.swift                    |   3 +
+ Sources/SQL Test Support/TestDatabase.swift   |  40 +--
+ Sources/SQL/CaseColumn.swift                  |  35 ++-
+ Sources/SQL/CaseExpression.swift              |   9 +-
+ Sources/SQL/Operators.swift                   |  36 +--
+ Sources/SQL/Seeds.swift                       |   8 +-
+ .../Statements/CommonTableExpression.swift    |  26 +-
+ Sources/SQL/Statements/CompoundSelect.swift   |  19 +-
+ Sources/SQL/Statements/Insert.swift           |   9 +-
+ Sources/SQL/Statements/Select.swift           | 236 +++++++++---------
+ Sources/SQL/Statements/ValuesElement.swift    |   3 +-
+ Sources/SQL/Updates.swift                     |  19 +-
+ Sources/SQL/UpdatesGroup.swift                |  19 +-
+ 13 files changed, 257 insertions(+), 205 deletions(-)
+
+diff --git a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift
+index 9e38e7f..e3ee28f 100644
+--- a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
++++ b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
+@@ -14,6 +14,9 @@ package enum ColumnCheckFailRawRepresentableMacro: PeerMacro {
+ 
+ #if CasePaths
+     package enum CaseCheckFailMacro: PeerMacro {
++    }
++
++    extension CaseCheckFailMacro {
+         package static func expansion(
+             of node: AttributeSyntax,
+             providingPeersOf declaration: some DeclSyntaxProtocol,
+diff --git a/Sources/SQL Test Support/TestDatabase.swift b/Sources/SQL Test Support/TestDatabase.swift
+index 254e56f..b74c661 100644
+--- a/Sources/SQL Test Support/TestDatabase.swift	
++++ b/Sources/SQL Test Support/TestDatabase.swift	
+@@ -25,7 +25,6 @@ extension TestDatabase {
+     }
+ 
+     public struct Dialect: ISO_9075.Dialect {
+-        public func placeholder(_ offset: Int) -> String { "$\(offset)" }
+     }
+ 
+     public struct Row: ISO_9075.Row, Sendable {
+@@ -36,11 +35,6 @@ extension TestDatabase {
+             self.columns = pairs.map(\.key)
+             self.values = pairs.map(\.value)
+         }
+-
+-        public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
+-            guard values.indices.contains(index) else { throw .decoding("no column at \(index)") }
+-            return values[index]
+-        }
+     }
+ 
+     public func script(_ rows: [Row]) {
+@@ -81,20 +75,34 @@ extension TestDatabase {
+     }
+ }
+ 
++extension TestDatabase.Dialect {
++    public func placeholder(_ offset: Int) -> String { "$\(offset)" }
++}
++
++extension TestDatabase.Row {
++    public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
++        guard values.indices.contains(index) else { throw .decoding("no column at \(index)") }
++        return values[index]
++    }
++}
++
+ extension TestDatabase {
+     public struct Connection: ISO_9075.Connection {
+         let database: TestDatabase
+-        public var dialect: Dialect { Dialect() }
++    }
++}
+ 
+-        public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
+-            database.record(statement).count
+-        }
++extension TestDatabase.Connection {
++    public var dialect: Dialect { Dialect() }
+ 
+-        public func fetchAll<Value>(
+-            _ statement: ISO_9075.Rendering,
+-            decode: (Row) throws(ISO_9075.Error) -> Value
+-        ) throws(ISO_9075.Error) -> [Value] {
+-            try database.record(statement).map { row throws(ISO_9075.Error) in try decode(row) }
+-        }
++    public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
++        database.record(statement).count
++    }
++
++    public func fetchAll<Value>(
++        _ statement: ISO_9075.Rendering,
++        decode: (Row) throws(ISO_9075.Error) -> Value
++    ) throws(ISO_9075.Error) -> [Value] {
++        try database.record(statement).map { row throws(ISO_9075.Error) in try decode(row) }
+     }
+ }
+diff --git a/Sources/SQL/CaseColumn.swift b/Sources/SQL/CaseColumn.swift
+index 5b07409..cfa1aaf 100644
+--- a/Sources/SQL/CaseColumn.swift
++++ b/Sources/SQL/CaseColumn.swift
+@@ -4,14 +4,17 @@
+     public struct CaseColumn<Root: Table, Payload: QueryRepresentable & QueryBindable>:
+         WritableTableColumnExpression
+     {
+-        public typealias QueryValue = Payload?
+-        public typealias Value = Payload?
+-
+         package let base: TableColumn<Root, Payload?>
+ 
+         package init(base: TableColumn<Root, Payload?>) {
+             self.base = base
+         }
++    }
++
++    extension CaseColumn {
++        public typealias QueryValue = Payload?
++
++        public typealias Value = Payload?
+ 
+         public var name: String { base.name }
+ 
+@@ -29,14 +32,17 @@
+     @dynamicMemberLookup
+     public struct CaseColumnGroup<Root: Table, Payload: Table>: _TableColumnExpression
+     where Payload.QueryOutput: Table {
+-        public typealias QueryValue = Payload?
+-        public typealias Value = Payload?
+-
+         package let base: ColumnGroup<Root, Payload?>
+ 
+         package init(base: ColumnGroup<Root, Payload?>) {
+             self.base = base
+         }
++    }
++
++    extension CaseColumnGroup {
++        public typealias QueryValue = Payload?
++
++        public typealias Value = Payload?
+ 
+         public var groupName: String { base.groupName }
+ 
+@@ -120,6 +126,9 @@
+     }
+ 
+     public enum _CaseColumn<Root: Table, Value> {
++    }
++
++    extension _CaseColumn {
+         public static func `for`(
+             _ name: String,
+             keyPath: @autoclosure @escaping () -> KeyPath<Root, Value.QueryOutput?>,
+@@ -237,6 +246,15 @@
+             unavailable,
+             message: "Assign the entire case, instead: '$0.enum = .case(value)'"
+         )
++
++        @available(
++            *,
++            unavailable,
++            message: "Assign the entire case, instead: '$0.enum = .case(value)'"
++        )
++    }
++
++    extension _CaseGroupUpdate {
+         public subscript<Member>(
+             dynamicMember keyPath: KeyPath<
+                 Payload.TableColumns, TableColumn<Payload.QueryOutput, Member>
+@@ -246,11 +264,6 @@
+             set {}
+         }
+ 
+-        @available(
+-            *,
+-            unavailable,
+-            message: "Assign the entire case, instead: '$0.enum = .case(value)'"
+-        )
+         public subscript<Member>(
+             dynamicMember keyPath: KeyPath<
+                 Payload.TableColumns, ColumnGroup<Payload.QueryOutput, Member>
+diff --git a/Sources/SQL/CaseExpression.swift b/Sources/SQL/CaseExpression.swift
+index 1ad3f1b..ae8d003 100644
+--- a/Sources/SQL/CaseExpression.swift
++++ b/Sources/SQL/CaseExpression.swift
+@@ -89,12 +89,13 @@ extension Cases {
+ }
+ 
+ private struct When: QueryExpression {
+-    typealias QueryValue = Never
+-
+     let predicate: ISO_9075.Fragment
+     let expression: ISO_9075.Fragment
++}
++
++extension When {
++    typealias QueryValue = Never
+ 
+     public var queryFragment: ISO_9075.Fragment {
+         "WHEN \(predicate) THEN \(expression)"
+-    }
+-}
++    }}
+diff --git a/Sources/SQL/Operators.swift b/Sources/SQL/Operators.swift
+index 856c1a8..60ff479 100644
+--- a/Sources/SQL/Operators.swift
++++ b/Sources/SQL/Operators.swift
+@@ -473,10 +473,6 @@ private struct UnaryOperator<QueryValue>: QueryExpression {
+         self.base = base.queryFragment
+         self.separator = separator
+     }
+-
+-    var queryFragment: ISO_9075.Fragment {
+-        "\(`operator`)\(separator)(\(base))"
+-    }
+ }
+ 
+ public struct BinaryOperator<QueryValue>: QueryExpression {
+@@ -505,20 +501,9 @@ private struct LikeOperator<
+     LHS: QueryExpression<String>,
+     RHS: QueryExpression<String>
+ >: QueryExpression {
+-    typealias QueryValue = Bool
+-
+     let string: LHS
+     let pattern: RHS
+     let escape: Character?
+-
+-    var queryFragment: ISO_9075.Fragment {
+-        var query: ISO_9075.Fragment = "(\(string.queryFragment) LIKE \(pattern.queryFragment)"
+-        if let escape {
+-            query.append(" ESCAPE \(bind: String(escape))")
+-        }
+-        query.append(")")
+-        return query
+-    }
+ }
+ 
+ extension Sequence where Element: QueryExpression, Element.QueryValue: QueryExpression {
+@@ -527,9 +512,28 @@ extension Sequence where Element: QueryExpression, Element.QueryValue: QueryExpr
+ 
+ private struct _SequenceExpression<S: Swift.Sequence>: QueryExpression
+ where S.Element: QueryExpression, S.Element.QueryValue: QueryExpression {
+-    typealias QueryValue = S
+     let queryFragment: ISO_9075.Fragment
+     init(elements: S) {
+         queryFragment = elements.map { "(\($0.queryFragment))" }.joined(separator: ", ")
+     }
+ }
++
++extension UnaryOperator {
++    var queryFragment: ISO_9075.Fragment {
++        "\(`operator`)\(separator)(\(base))"
++    }}
++
++extension LikeOperator {
++    typealias QueryValue = Bool
++
++    var queryFragment: ISO_9075.Fragment {
++        var query: ISO_9075.Fragment = "(\(string.queryFragment) LIKE \(pattern.queryFragment)"
++        if let escape {
++            query.append(" ESCAPE \(bind: String(escape))")
++        }
++        query.append(")")
++        return query
++    }}
++
++extension _SequenceExpression {
++    typealias QueryValue = S}
+diff --git a/Sources/SQL/Seeds.swift b/Sources/SQL/Seeds.swift
+index e491382..fbb5bd0 100644
+--- a/Sources/SQL/Seeds.swift
++++ b/Sources/SQL/Seeds.swift
+@@ -7,10 +7,6 @@ public struct Seeds: Swift.Sequence {
+         self.seeds = build()
+     }
+ 
+-    public func makeIterator() -> Iterator {
+-        Iterator(seeds: seeds[...])
+-    }
+-
+     public struct Iterator: IteratorProtocol {
+         var seeds: ArraySlice<Seed>
+ 
+@@ -23,4 +19,8 @@ public struct Seeds: Swift.Sequence {
+     }
+ }
+ 
++extension Seeds {
++    public func makeIterator() -> Iterator {
++        Iterator(seeds: seeds[...])
++    }}
+ 
+diff --git a/Sources/SQL/Statements/CommonTableExpression.swift b/Sources/SQL/Statements/CommonTableExpression.swift
+index 4c98cf8..47544f9 100644
+--- a/Sources/SQL/Statements/CommonTableExpression.swift
++++ b/Sources/SQL/Statements/CommonTableExpression.swift
+@@ -1,9 +1,6 @@
+ public import ISO_9075_Foundation
+ 
+ public struct With<Base: Statement>: Statement, Sendable {
+-    public typealias QueryValue = Base.QueryValue
+-    public typealias From = Never
+-
+     var ctes: [CommonTableExpressionClause]
+     var statement: ISO_9075.Fragment
+     var hasUpsertParsingAmbiguity: Bool
+@@ -49,6 +46,12 @@ public struct With<Base: Statement>: Statement, Sendable {
+         self.statement = statement.query
+         hasUpsertParsingAmbiguity = statement._hasUpsertParsingAmbiguity
+     }
++}
++
++extension With {
++    public typealias QueryValue = Base.QueryValue
++
++    public typealias From = Never
+ 
+     public var _hasUpsertParsingAmbiguity: Bool { hasUpsertParsingAmbiguity }
+ 
+@@ -71,7 +74,6 @@ extension ISO_9075.Fragment {
+ }
+ 
+ public struct CommonTableExpressionClause: QueryExpression, Sendable {
+-    public typealias QueryValue = ()
+     let tableName: ISO_9075.Fragment
+     let select: ISO_9075.Fragment
+     let materialization: Materialization?
+@@ -81,6 +83,10 @@ public struct CommonTableExpressionClause: QueryExpression, Sendable {
+         self.select = select
+         self.materialization = materialization
+     }
++}
++
++extension CommonTableExpressionClause {
++    public typealias QueryValue = ()
+ 
+     public var queryFragment: ISO_9075.Fragment {
+         guard !select.isEmpty else { return "" }
+@@ -92,12 +98,14 @@ extension CommonTableExpressionClause {
+     public enum Materialization: Hashable, Sendable {
+         case materialized
+         case notMaterialized
++    }
++}
+ 
+-        var queryFragment: ISO_9075.Fragment {
+-            switch self {
+-            case .materialized: "MATERIALIZED "
+-            case .notMaterialized: "NOT MATERIALIZED "
+-            }
++extension CommonTableExpressionClause.Materialization {
++    var queryFragment: ISO_9075.Fragment {
++        switch self {
++        case .materialized: "MATERIALIZED "
++        case .notMaterialized: "NOT MATERIALIZED "
+         }
+     }
+ }
+diff --git a/Sources/SQL/Statements/CompoundSelect.swift b/Sources/SQL/Statements/CompoundSelect.swift
+index 1af184c..ddee67f 100644
+--- a/Sources/SQL/Statements/CompoundSelect.swift
++++ b/Sources/SQL/Statements/CompoundSelect.swift
+@@ -22,9 +22,6 @@ extension PartialSelectStatement {
+ }
+ 
+ private struct CompoundSelect<QueryValue>: PartialSelectStatement {
+-    typealias From = Never
+-    typealias Joins = Never
+-
+     struct Operator {
+         static var except: Self { Self(queryFragment: "EXCEPT") }
+         static var intersect: Self { Self(queryFragment: "INTERSECT") }
+@@ -45,14 +42,18 @@ private struct CompoundSelect<QueryValue>: PartialSelectStatement {
+         hasUpsertParsingAmbiguity =
+             self.rhs.isEmpty ? lhs._hasUpsertParsingAmbiguity : rhs._hasUpsertParsingAmbiguity
+     }
+-
+-    var query: ISO_9075.Fragment {
+-        guard !lhs.isEmpty else { return rhs }
+-        guard !rhs.isEmpty else { return lhs }
+-        return "\(lhs)\(.newlineOrSpace)\(`operator`.indented())\(.newlineOrSpace)\(rhs)"
+-    }
+ }
+ 
+ extension CompoundSelect {
+     var _hasUpsertParsingAmbiguity: Bool { hasUpsertParsingAmbiguity }
+ }
++
++extension CompoundSelect {
++    typealias From = Never
++    typealias Joins = Never
++
++    var query: ISO_9075.Fragment {
++        guard !lhs.isEmpty else { return rhs }
++        guard !rhs.isEmpty else { return lhs }
++        return "\(lhs)\(.newlineOrSpace)\(`operator`.indented())\(.newlineOrSpace)\(rhs)"
++    }}
+diff --git a/Sources/SQL/Statements/Insert.swift b/Sources/SQL/Statements/Insert.swift
+index 1c7b897..4f2f6bb 100644
+--- a/Sources/SQL/Statements/Insert.swift
++++ b/Sources/SQL/Statements/Insert.swift
+@@ -442,10 +442,6 @@ private enum InsertValues {
+     case `default`
+     case values([[ISO_9075.Fragment]])
+     case selection(ISO_9075.Fragment, hasUpsertParsingAmbiguity: Bool)
+-
+-    static func select(_ statement: some PartialSelectStatement) -> Self {
+-        .selection(statement.query, hasUpsertParsingAmbiguity: statement._hasUpsertParsingAmbiguity)
+-    }
+ }
+ 
+ public struct Insert<Into: Table, Returning> {
+@@ -789,3 +785,8 @@ extension Insert {
+         return insert
+     }
+ }
++
++extension InsertValues {
++    static func select(_ statement: some PartialSelectStatement) -> Self {
++        .selection(statement.query, hasUpsertParsingAmbiguity: statement._hasUpsertParsingAmbiguity)
++    }}
+diff --git a/Sources/SQL/Statements/Select.swift b/Sources/SQL/Statements/Select.swift
+index f9fd7e4..2832799 100644
+--- a/Sources/SQL/Statements/Select.swift
++++ b/Sources/SQL/Statements/Select.swift
+@@ -223,62 +223,6 @@ public struct _SelectClauses: Sendable {
+ public struct Select<Columns, From: _SelectSource, Joins>: Sendable {
+     @CopyOnWrite var clauses = _SelectClauses()
+ 
+-    fileprivate var isEmpty: Bool {
+-        get { clauses.isEmpty }
+-        set { clauses.isEmpty = newValue }
+-        _modify { yield &clauses.isEmpty }
+-    }
+-    fileprivate var distinct: Bool {
+-        get { clauses.distinct }
+-        set { clauses.distinct = newValue }
+-        _modify { yield &clauses.distinct }
+-    }
+-    fileprivate var columns: [ISO_9075.Fragment] {
+-        get { clauses.columns }
+-        set { clauses.columns = newValue }
+-        _modify { yield &clauses.columns }
+-    }
+-    fileprivate var from: ISO_9075.Fragment? {
+-        get { clauses.from }
+-        set { clauses.from = newValue }
+-        _modify { yield &clauses.from }
+-    }
+-    fileprivate var joins: [_JoinClause] {
+-        get { clauses.joins }
+-        set { clauses.joins = newValue }
+-        _modify { yield &clauses.joins }
+-    }
+-    fileprivate var `where`: [ISO_9075.Fragment] {
+-        get { clauses.where }
+-        set { clauses.where = newValue }
+-        _modify { yield &clauses.where }
+-    }
+-    fileprivate var group: [ISO_9075.Fragment] {
+-        get { clauses.group }
+-        set { clauses.group = newValue }
+-        _modify { yield &clauses.group }
+-    }
+-    fileprivate var having: [ISO_9075.Fragment] {
+-        get { clauses.having }
+-        set { clauses.having = newValue }
+-        _modify { yield &clauses.having }
+-    }
+-    fileprivate var window: [ISO_9075.Fragment] {
+-        get { clauses.window }
+-        set { clauses.window = newValue }
+-        _modify { yield &clauses.window }
+-    }
+-    fileprivate var order: [ISO_9075.Fragment] {
+-        get { clauses.order }
+-        set { clauses.order = newValue }
+-        _modify { yield &clauses.order }
+-    }
+-    fileprivate var limit: _LimitClause? {
+-        get { clauses.limit }
+-        set { clauses.limit = newValue }
+-        _modify { yield &clauses.limit }
+-    }
+-
+     fileprivate init(
+         isEmpty: Bool,
+         distinct: Bool,
+@@ -308,17 +252,10 @@ public struct Select<Columns, From: _SelectSource, Joins>: Sendable {
+     init(clauses: _SelectClauses) {
+         self.clauses = clauses
+     }
+-
+-    public var tableReference: ISO_9075.Fragment? {
+-        get { clauses.from }
+-        set { clauses.from = newValue }
+-    }
+ }
+ 
+ @dynamicMemberLookup
+ public struct ValuesColumns<Value>: QueryExpression, _SelectSource, Sendable {
+-    public typealias QueryValue = Value
+-
+     let columns: [ISO_9075.Fragment]
+     let elements: [ValuesElement]?
+ 
+@@ -326,23 +263,6 @@ public struct ValuesColumns<Value>: QueryExpression, _SelectSource, Sendable {
+         self.columns = columns
+         self.elements = elements
+     }
+-
+-    public var queryFragment: ISO_9075.Fragment {
+-        columns.joined(separator: ", ")
+-    }
+-
+-    public subscript<Member>(
+-        dynamicMember keyPath: KeyPath<Value, Member>
+-    ) -> SQLQueryExpression<Member> {
+-        column(at: (elements ?? []).columnIndex(of: keyPath), as: Member.self)
+-    }
+-
+-    private func column<Member>(at index: Int?, as _: Member.Type) -> SQLQueryExpression<Member> {
+-        guard let index, columns.indices.contains(index) else {
+-            preconditionFailure("Could not determine the column for the given key path")
+-        }
+-        return SQLQueryExpression(columns[index], as: Member.self)
+-    }
+ }
+ 
+ extension ValuesColumns where Value: QueryRepresentable {
+@@ -1863,8 +1783,6 @@ public typealias SelectOf<From: Table, each Join: Table> =
+     Select<(), From, (repeat each Join)>
+ 
+ public struct _JoinClause: QueryExpression, Sendable {
+-    public typealias QueryValue = Never
+-
+     struct Operator {
+         static let full = Self(queryFragment: "FULL")
+         static let inner = Self(queryFragment: "INNER")
+@@ -1892,19 +1810,6 @@ public struct _JoinClause: QueryExpression, Sendable {
+         self.tableReference = tableReference ?? table.tableFragment
+     }
+ 
+-    public var queryFragment: ISO_9075.Fragment {
+-        var query: ISO_9075.Fragment = ""
+-        if let `operator` {
+-            query.append("\(`operator`) ")
+-        }
+-        query.append("JOIN \(tableReference) ")
+-        if let tableAlias = tableAlias {
+-            query.append("AS \(quote: tableAlias) ")
+-        }
+-        query.append("ON \(constraint)")
+-        return query
+-    }
+-
+     private init(
+         constraint: ISO_9075.Fragment,
+         operator: ISO_9075.Fragment?,
+@@ -1918,6 +1823,122 @@ public struct _JoinClause: QueryExpression, Sendable {
+         self.tableColumns = tableColumns
+         self.tableReference = tableReference
+     }
++}
++
++public struct _LimitClause: QueryExpression, Sendable {
++    let maxLength: ISO_9075.Fragment?
++    let offset: ISO_9075.Fragment?
++}
++
++@propertyWrapper
++private struct CopyOnWrite<Value> {
++    var storage: Storage
++    init(wrappedValue: Value) {
++        self.storage = Storage(value: wrappedValue)
++    }
++}
++
++extension CopyOnWrite: Sendable where Value: Sendable {}
++
++extension CopyOnWrite.Storage: @unchecked Sendable where Value: Sendable {}
++
++extension Select {
++    fileprivate var isEmpty: Bool {
++        get { clauses.isEmpty }
++        set { clauses.isEmpty = newValue }
++        _modify { yield &clauses.isEmpty }
++    }
++    fileprivate var distinct: Bool {
++        get { clauses.distinct }
++        set { clauses.distinct = newValue }
++        _modify { yield &clauses.distinct }
++    }
++    fileprivate var columns: [ISO_9075.Fragment] {
++        get { clauses.columns }
++        set { clauses.columns = newValue }
++        _modify { yield &clauses.columns }
++    }
++    fileprivate var from: ISO_9075.Fragment? {
++        get { clauses.from }
++        set { clauses.from = newValue }
++        _modify { yield &clauses.from }
++    }
++    fileprivate var joins: [_JoinClause] {
++        get { clauses.joins }
++        set { clauses.joins = newValue }
++        _modify { yield &clauses.joins }
++    }
++    fileprivate var `where`: [ISO_9075.Fragment] {
++        get { clauses.where }
++        set { clauses.where = newValue }
++        _modify { yield &clauses.where }
++    }
++    fileprivate var group: [ISO_9075.Fragment] {
++        get { clauses.group }
++        set { clauses.group = newValue }
++        _modify { yield &clauses.group }
++    }
++    fileprivate var having: [ISO_9075.Fragment] {
++        get { clauses.having }
++        set { clauses.having = newValue }
++        _modify { yield &clauses.having }
++    }
++    fileprivate var window: [ISO_9075.Fragment] {
++        get { clauses.window }
++        set { clauses.window = newValue }
++        _modify { yield &clauses.window }
++    }
++    fileprivate var order: [ISO_9075.Fragment] {
++        get { clauses.order }
++        set { clauses.order = newValue }
++        _modify { yield &clauses.order }
++    }
++    fileprivate var limit: _LimitClause? {
++        get { clauses.limit }
++        set { clauses.limit = newValue }
++        _modify { yield &clauses.limit }
++    }
++
++    public var tableReference: ISO_9075.Fragment? {
++        get { clauses.from }
++        set { clauses.from = newValue }
++    }}
++
++extension ValuesColumns {
++    public typealias QueryValue = Value
++
++    public var queryFragment: ISO_9075.Fragment {
++        columns.joined(separator: ", ")
++    }
++
++    public subscript<Member>(
++        dynamicMember keyPath: KeyPath<Value, Member>
++    ) -> SQLQueryExpression<Member> {
++        column(at: (elements ?? []).columnIndex(of: keyPath), as: Member.self)
++    }
++
++    private func column<Member>(at index: Int?, as _: Member.Type) -> SQLQueryExpression<Member> {
++        guard let index, columns.indices.contains(index) else {
++            preconditionFailure("Could not determine the column for the given key path")
++        }
++        return SQLQueryExpression(columns[index], as: Member.self)
++    }}
++
++extension _JoinClause {
++    public typealias QueryValue = Never
++
++    public var queryFragment: ISO_9075.Fragment {
++        var query: ISO_9075.Fragment = ""
++        if let `operator` {
++            query.append("\(`operator`) ")
++        }
++        query.append("JOIN \(tableReference) ")
++        if let tableAlias = tableAlias {
++            query.append("AS \(quote: tableAlias) ")
++        }
++        query.append("ON \(constraint)")
++        return query
++    }
+ 
+     fileprivate func aliasing<T: Table, Name: AliasName>(
+         _ table: T.Type,
+@@ -1930,15 +1951,11 @@ public struct _JoinClause: QueryExpression, Sendable {
+             tableColumns: tableColumns.aliasing(table, as: alias),
+             tableReference: tableReference.aliasing(table, as: alias)
+         )
+-    }
+-}
++    }}
+ 
+-public struct _LimitClause: QueryExpression, Sendable {
++extension _LimitClause {
+     public typealias QueryValue = Never
+ 
+-    let maxLength: ISO_9075.Fragment?
+-    let offset: ISO_9075.Fragment?
+-
+     public var queryFragment: ISO_9075.Fragment {
+         var query: ISO_9075.Fragment = "LIMIT \(maxLength ?? "\(ISO_9075.Keyword.unboundedLimit)")"
+         if let offset {
+@@ -1955,21 +1972,15 @@ public struct _LimitClause: QueryExpression, Sendable {
+             maxLength: maxLength.map { $0.aliasing(table, as: alias) },
+             offset: offset.map { $0.aliasing(table, as: alias) }
+         )
+-    }
+-}
++    }}
+ 
+-@propertyWrapper
+-private struct CopyOnWrite<Value> {
++extension CopyOnWrite {
+     final class Storage {
+         var value: Value
+         init(value: Value) {
+             self.value = value
+         }
+     }
+-    var storage: Storage
+-    init(wrappedValue: Value) {
+-        self.storage = Storage(value: wrappedValue)
+-    }
+     var wrappedValue: Value {
+         get { storage.value }
+         set {
+@@ -1979,9 +1990,4 @@ private struct CopyOnWrite<Value> {
+                 storage = Storage(value: newValue)
+             }
+         }
+-    }
+-}
+-
+-extension CopyOnWrite: Sendable where Value: Sendable {}
+-
+-extension CopyOnWrite.Storage: @unchecked Sendable where Value: Sendable {}
++    }}
+diff --git a/Sources/SQL/Statements/ValuesElement.swift b/Sources/SQL/Statements/ValuesElement.swift
+index 6cb3984..eca9a98 100644
+--- a/Sources/SQL/Statements/ValuesElement.swift
++++ b/Sources/SQL/Statements/ValuesElement.swift
+@@ -10,7 +10,9 @@ public struct ValuesElement: Sendable {
+         self.columns = columns
+         self.fieldOffsets = fieldOffsets
+     }
++}
+ 
++extension ValuesElement {
+     public struct Column: Sendable {
+         package let name: String?
+         package let decoding: @Sendable (ISO_9075.Fragment) -> ISO_9075.Fragment
+@@ -19,7 +21,6 @@ public struct ValuesElement: Sendable {
+             self.name = name
+             self.decoding = decoding
+         }
+-
+     }
+ 
+     package static func elements<each V: QueryRepresentable>(for types: repeat (each V).Type) -> [ValuesElement] {
+diff --git a/Sources/SQL/Updates.swift b/Sources/SQL/Updates.swift
+index 1045c72..9d2f206 100644
+--- a/Sources/SQL/Updates.swift
++++ b/Sources/SQL/Updates.swift
+@@ -8,6 +8,17 @@ public struct Updates<Base: Table> {
+         body(&self)
+     }
+ 
++    @_disfavoredOverload
++    @available(
++        *,
++        unavailable,
++        message: """
++            Use '#bind' to explicitly wrap this value in a query expression: '$0.column = #bind(value)'
++            """
++    )
++}
++
++extension Updates {
+     var isEmpty: Bool {
+         updates.isEmpty
+     }
+@@ -34,14 +45,6 @@ public struct Updates<Base: Table> {
+         set { updates.append((Base.columns[keyPath: keyPath].name, newValue.queryFragment)) }
+     }
+ 
+-    @_disfavoredOverload
+-    @available(
+-        *,
+-        unavailable,
+-        message: """
+-            Use '#bind' to explicitly wrap this value in a query expression: '$0.column = #bind(value)'
+-            """
+-    )
+     public subscript<Value: QueryExpression>(
+         dynamicMember keyPath: KeyPath<Base.TableColumns, TableColumn<Base, Value>>
+     ) -> Value.QueryOutput {
+diff --git a/Sources/SQL/UpdatesGroup.swift b/Sources/SQL/UpdatesGroup.swift
+index e8a4cc7..2042c1f 100644
+--- a/Sources/SQL/UpdatesGroup.swift
++++ b/Sources/SQL/UpdatesGroup.swift
+@@ -9,6 +9,17 @@ public struct UpdatesGroup<Base: Table, Values: Table> where Values.QueryOutput:
+         self.group = group
+     }
+ 
++    @_disfavoredOverload
++    @available(
++        *,
++        unavailable,
++        message: """
++            Use '#bind' to explicitly wrap this value in a query expression: '$0.column = #bind(value)'
++            """
++    )
++}
++
++extension UpdatesGroup {
+     public subscript<Member>(
+         dynamicMember keyPath: KeyPath<Values.TableColumns, TableColumn<Values.QueryOutput, Member>>
+     ) -> any QueryExpression<Member> {
+@@ -24,14 +35,6 @@ public struct UpdatesGroup<Base: Table, Values: Table> where Values.QueryOutput:
+         set { updates.append((group[dynamicMember: keyPath].name, newValue.queryFragment)) }
+     }
+ 
+-    @_disfavoredOverload
+-    @available(
+-        *,
+-        unavailable,
+-        message: """
+-            Use '#bind' to explicitly wrap this value in a query expression: '$0.column = #bind(value)'
+-            """
+-    )
+     public subscript<Member: QueryExpression>(
+         dynamicMember keyPath: KeyPath<Values.TableColumns, TableColumn<Values.QueryOutput, Member>>
+     ) -> Member.QueryOutput {
+-- 
+2.43.0
+

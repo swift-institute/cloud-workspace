@@ -1,0 +1,151 @@
+From cefe02058dd2a23af2730dd52ef3023b3f408aae Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:29:37 +0000
+Subject: [PATCH 5/6] Revert Sources/ISO 9075
+ Foundation/ISO_9075.Fragment.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../ISO_9075.Fragment.swift                   | 100 +++++++++---------
+ 1 file changed, 48 insertions(+), 52 deletions(-)
+
+diff --git a/Sources/ISO 9075 Foundation/ISO_9075.Fragment.swift b/Sources/ISO 9075 Foundation/ISO_9075.Fragment.swift
+index 53362f8..083f0aa 100644
+--- a/Sources/ISO 9075 Foundation/ISO_9075.Fragment.swift	
++++ b/Sources/ISO 9075 Foundation/ISO_9075.Fragment.swift	
+@@ -1,5 +1,12 @@
+ extension ISO_9075 {
+     public struct Fragment: Hashable, Sendable {
++        public enum Segment: Hashable, Sendable {
++            case sql(String)
++            case value(Value)
++            case identifier(Identifier)
++            case keyword(Keyword)
++        }
++
+         public var segments: [Segment]
+ 
+         public init() {
+@@ -20,15 +27,6 @@ extension ISO_9075 {
+     }
+ }
+ 
+-extension ISO_9075.Fragment {
+-    public enum Segment: Hashable, Sendable {
+-        case sql(String)
+-        case value(Value)
+-        case identifier(Identifier)
+-        case keyword(Keyword)
+-    }
+-}
+-
+ extension ISO_9075.Fragment {
+     public var isEmpty: Bool {
+         segments.allSatisfy { segment in
+@@ -80,62 +78,60 @@ extension ISO_9075.Fragment: ExpressibleByStringInterpolation {
+             segments.reserveCapacity(interpolationCount + 1)
+             buffer.reserveCapacity(literalCapacity)
+         }
+-    }
+-}
+ 
+-extension ISO_9075.Fragment.StringInterpolation {
+-    fileprivate var flushed: [ISO_9075.Fragment.Segment] {
+-        buffer.isEmpty ? segments : segments + [.sql(buffer)]
+-    }
++        fileprivate var flushed: [ISO_9075.Fragment.Segment] {
++            buffer.isEmpty ? segments : segments + [.sql(buffer)]
++        }
+ 
+-    public mutating func appendLiteral(_ literal: String) {
+-        buffer.append(literal)
+-    }
++        public mutating func appendLiteral(_ literal: String) {
++            buffer.append(literal)
++        }
+ 
+-    public mutating func appendSegment(_ segment: ISO_9075.Fragment.Segment) {
+-        switch segment {
+-        case .sql(let sql):
+-            buffer.append(sql)
+-        case .value, .identifier, .keyword:
+-            if !buffer.isEmpty {
+-                segments.append(.sql(buffer))
+-                buffer.removeAll(keepingCapacity: true)
++        public mutating func appendSegment(_ segment: ISO_9075.Fragment.Segment) {
++            switch segment {
++            case .sql(let sql):
++                buffer.append(sql)
++            case .value, .identifier, .keyword:
++                if !buffer.isEmpty {
++                    segments.append(.sql(buffer))
++                    buffer.removeAll(keepingCapacity: true)
++                }
++                segments.append(segment)
+             }
+-            segments.append(segment)
+         }
+-    }
+ 
+-    public mutating func appendInterpolation(raw sql: String) {
+-        appendLiteral(sql)
+-    }
++        public mutating func appendInterpolation(raw sql: String) {
++            appendLiteral(sql)
++        }
+ 
+-    public mutating func appendInterpolation(raw sql: some LosslessStringConvertible) {
+-        appendLiteral(sql.description)
+-    }
++        public mutating func appendInterpolation(raw sql: some LosslessStringConvertible) {
++            appendLiteral(sql.description)
++        }
+ 
+-    public mutating func appendInterpolation(quote name: String) {
+-        appendLiteral(ISO_9075.Identifier(name).delimited)
+-    }
++        public mutating func appendInterpolation(quote name: String) {
++            appendLiteral(ISO_9075.Identifier(name).delimited)
++        }
+ 
+-    public mutating func appendInterpolation(text: String) {
+-        appendLiteral("'" + text.replacing("'", with: "''") + "'")
+-    }
++        public mutating func appendInterpolation(text: String) {
++            appendLiteral("'" + text.replacing("'", with: "''") + "'")
++        }
+ 
+-    public mutating func appendInterpolation(_ value: ISO_9075.Value) {
+-        appendSegment(.value(value))
+-    }
++        public mutating func appendInterpolation(_ value: ISO_9075.Value) {
++            appendSegment(.value(value))
++        }
+ 
+-    public mutating func appendInterpolation(_ identifier: ISO_9075.Identifier) {
+-        appendSegment(.identifier(identifier))
+-    }
++        public mutating func appendInterpolation(_ identifier: ISO_9075.Identifier) {
++            appendSegment(.identifier(identifier))
++        }
+ 
+-    public mutating func appendInterpolation(_ keyword: ISO_9075.Keyword) {
+-        appendSegment(.keyword(keyword))
+-    }
++        public mutating func appendInterpolation(_ keyword: ISO_9075.Keyword) {
++            appendSegment(.keyword(keyword))
++        }
+ 
+-    public mutating func appendInterpolation(_ fragment: ISO_9075.Fragment) {
+-        for segment in fragment.segments {
+-            appendSegment(segment)
++        public mutating func appendInterpolation(_ fragment: ISO_9075.Fragment) {
++            for segment in fragment.segments {
++                appendSegment(segment)
++            }
+         }
+     }
+ }
+-- 
+2.43.0
+

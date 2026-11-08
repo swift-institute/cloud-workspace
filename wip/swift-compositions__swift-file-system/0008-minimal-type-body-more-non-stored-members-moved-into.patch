@@ -1,0 +1,135 @@
+From e24489034e3c15f73f17345e13c0752ca258a148 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:27:46 +0000
+Subject: [PATCH 08/10] minimal type body: more non-stored members moved into
+ an extension of their type (batch 10; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ .../File.Directory.Watch.Iterator.swift       | 32 +++++++++----------
+ .../File.Directory.Watch.State.swift          | 23 ++++++-------
+ 2 files changed, 26 insertions(+), 29 deletions(-)
+
+diff --git a/Sources/File System/File.Directory.Watch.Iterator.swift b/Sources/File System/File.Directory.Watch.Iterator.swift
+index 40378a8..07b7991 100644
+--- a/Sources/File System/File.Directory.Watch.Iterator.swift	
++++ b/Sources/File System/File.Directory.Watch.Iterator.swift	
+@@ -2,9 +2,7 @@
+     #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+ 
+         extension File.Directory.Watch {
+-
+             public struct Iterator: AsyncIteratorProtocol, Sendable {
+-
+                 private let path: File.Path
+ 
+                 private let options: Options
+@@ -15,23 +13,25 @@
+                     self.path = path
+                     self.options = options
+                 }
++            }
++        }
+ 
+-                public mutating func next(
+-                    isolation actor: isolated (any Actor)? = #isolation
+-                ) async throws(File.Directory.Watch.Error) -> File.Directory? {
+-                    if state == nil {
+-                        state = try State(path: path, options: options)
+-                    }
+-                    guard let state else { return nil }
+-                    let result = await withTaskCancellationHandler {
+-                        await state.next()
+-                    } onCancel: {
+-                        state.wakeup.wake()
+-                    }
+-                    return try result.get()
++extension File.Directory.Watch.Iterator {
++            public mutating func next(
++                isolation actor: isolated (any Actor)? = #isolation
++            ) async throws(File.Directory.Watch.Error) -> File.Directory? {
++                if state == nil {
++                    state = try State(path: path, options: options)
++                }
++                guard let state else { return nil }
++                let result = await withTaskCancellationHandler {
++                    await state.next()
++                } onCancel: {
++                    state.wakeup.wake()
+                 }
++                return try result.get()
+             }
+-        }
++}
+ 
+     #endif
+ #endif
+diff --git a/Sources/File System/File.Directory.Watch.State.swift b/Sources/File System/File.Directory.Watch.State.swift
+index aa4281f..4c844a2 100644
+--- a/Sources/File System/File.Directory.Watch.State.swift	
++++ b/Sources/File System/File.Directory.Watch.State.swift	
+@@ -5,15 +5,9 @@
+         import Kernel
+ 
+         extension File.Directory.Watch {
+-
+             /// The running watch: the event source, the directories it watches, and the directories
+             /// waiting to be yielded. It runs on a thread of its own, which blocks in `poll`.
+             internal actor State {
+-
+-                private static let interest: Kernel.Event.Interest = [.change, .rename, .delete, .revoke]
+-
+-                private static let gone: Kernel.Event.Interest = [.rename, .delete, .revoke]
+-
+                 nonisolated internal let executor: Kernel.Thread.Executor
+ 
+                 nonisolated internal let wakeup: Kernel.Wakeup.Channel
+@@ -34,10 +28,6 @@
+ 
+                 private var events: [Kernel.Event] = Array(repeating: Kernel.Event.empty, count: 64)
+ 
+-                nonisolated internal var unownedExecutor: UnownedSerialExecutor {
+-                    unsafe executor.asUnownedSerialExecutor()
+-                }
+-
+                 internal init(path: File.Path, options: Options) throws(File.Directory.Watch.Error) {
+                     let source: Kernel.Event.Source
+                     do throws(Kernel.Event.Driver.Error) {
+@@ -58,8 +48,17 @@
+             }
+         }
+ 
+-        extension File.Directory.Watch.State {
++extension File.Directory.Watch.State {
++            private static let interest: Kernel.Event.Interest = [.change, .rename, .delete, .revoke]
+ 
++            private static let gone: Kernel.Event.Interest = [.rename, .delete, .revoke]
++
++            nonisolated internal var unownedExecutor: UnownedSerialExecutor {
++                unsafe executor.asUnownedSerialExecutor()
++            }
++}
++
++        extension File.Directory.Watch.State {
+             /// The next directory to rescan, or nil once the task is cancelled.
+             internal func next() -> Result<File.Directory?, File.Directory.Watch.Error> {
+                 do throws(File.Directory.Watch.Error) {
+@@ -130,7 +129,6 @@
+         }
+ 
+         extension File.Directory.Watch.State {
+-
+             /// Watches the subdirectories that appeared in a changed directory, drops the ones that
+             /// went, and queues the directory itself.
+             private func rescan(_ path: File.Path) throws(File.Directory.Watch.Error) {
+@@ -218,7 +216,6 @@
+         }
+ 
+         extension File.Directory.Watch.State {
+-
+             /// Stops watching a directory and everything below it, closing their descriptors.
+             private func drop(_ path: File.Path) {
+                 for (watched, id) in ids where watched.hasPrefix(path) {
+-- 
+2.43.0
+
