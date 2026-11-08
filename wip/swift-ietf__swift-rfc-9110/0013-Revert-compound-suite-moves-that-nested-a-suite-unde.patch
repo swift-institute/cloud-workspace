@@ -1,0 +1,221 @@
+From bff5531e61c0acb67c908adb6b20be3d35761775 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 02:41:07 +0000
+Subject: [PATCH 13/13] Revert compound-suite moves that nested a suite under a
+ namespace of its own name (coenttb/work#242)
+
+---
+ .../HTTP.Coder Round Trip Tests.swift         | 180 +++++++++---------
+ 1 file changed, 89 insertions(+), 91 deletions(-)
+
+diff --git a/Tests/RFC 9110 Tests/HTTP.Coder Round Trip Tests.swift b/Tests/RFC 9110 Tests/HTTP.Coder Round Trip Tests.swift
+index 0ecd251..e83c089 100644
+--- a/Tests/RFC 9110 Tests/HTTP.Coder Round Trip Tests.swift	
++++ b/Tests/RFC 9110 Tests/HTTP.Coder Round Trip Tests.swift	
+@@ -7,114 +7,112 @@
+     import Serializer
+     import Testing
+ 
+-extension `HTTP.Coder Round Trip Tests`.`HTTP.Coder Round Trip Tests` {
+-        @Suite
+-        struct `HTTP.Coder Round Trip Tests` {
++    @Suite
++    struct `HTTP.Coder Round Trip Tests` {
++
++        @Test
++        func `A media type with parameters round-trips`() throws {
++            let mediaType = HTTP.MediaType("text", "html", parameters: ["charset": "utf-8"])
++            var bytes: [Byte] = []
++            try HTTP.MediaType.coder.serialize(mediaType, into: &bytes)
++            #expect(bytes == "text/html; charset=utf-8".utf8.map(Byte.init(bitPattern:)))
++
++            var input = bytes[...]
++            let decoded = try HTTP.MediaType.coder.parse(&input)
++            #expect(decoded == mediaType)
++            #expect(decoded.parameters == mediaType.parameters)
++            #expect(input.isEmpty)
++        }
+ 
+-            @Test
+-            func `A media type with parameters round-trips`() throws {
+-                let mediaType = HTTP.MediaType("text", "html", parameters: ["charset": "utf-8"])
++        @Test
++        func `An entity tag round-trips in both strengths`() throws {
++            for tag in [HTTP.Representation.Validator.EntityTag.strong("abc"), HTTP.Representation.Validator.EntityTag.weak("abc")] {
+                 var bytes: [Byte] = []
+-                try HTTP.MediaType.coder.serialize(mediaType, into: &bytes)
+-                #expect(bytes == "text/html; charset=utf-8".utf8.map(Byte.init(bitPattern:)))
++                try HTTP.Representation.Validator.EntityTag.coder.serialize(tag, into: &bytes)
++                #expect(bytes == tag.headerValue.utf8.map(Byte.init(bitPattern:)))
+ 
+                 var input = bytes[...]
+-                let decoded = try HTTP.MediaType.coder.parse(&input)
+-                #expect(decoded == mediaType)
+-                #expect(decoded.parameters == mediaType.parameters)
+-                #expect(input.isEmpty)
+-            }
+-
+-            @Test
+-            func `An entity tag round-trips in both strengths`() throws {
+-                for tag in [HTTP.Representation.Validator.EntityTag.strong("abc"), HTTP.Representation.Validator.EntityTag.weak("abc")] {
+-                    var bytes: [Byte] = []
+-                    try HTTP.Representation.Validator.EntityTag.coder.serialize(tag, into: &bytes)
+-                    #expect(bytes == tag.headerValue.utf8.map(Byte.init(bitPattern:)))
+-
+-                    var input = bytes[...]
+-                    #expect(try HTTP.Representation.Validator.EntityTag.coder.parse(&input) == tag)
+-                }
+-            }
+-
+-            @Test
+-            func `A quality value round-trips through its canonical spelling`() throws {
+-                for thousandths in [0, 1, 100, 500, 999, 1000] {
+-                    let quality = try #require(HTTP.Negotiation.QualityValue(thousandths))
+-                    var bytes: [Byte] = []
+-                    try HTTP.Negotiation.QualityValue.coder.serialize(quality, into: &bytes)
+-
+-                    var input = bytes[...]
+-                    #expect(try HTTP.Negotiation.QualityValue.coder.parse(&input) == quality)
+-                    #expect(input.isEmpty)
+-                }
++                #expect(try HTTP.Representation.Validator.EntityTag.coder.parse(&input) == tag)
+             }
++        }
+ 
+-            @Test
+-            func `A media type preference serializes its weight only when it is not the default`() throws {
+-                let plain = HTTP.Negotiation.MediaTypePreference(mediaType: .json)
++        @Test
++        func `A quality value round-trips through its canonical spelling`() throws {
++            for thousandths in [0, 1, 100, 500, 999, 1000] {
++                let quality = try #require(HTTP.Negotiation.QualityValue(thousandths))
+                 var bytes: [Byte] = []
+-                try HTTP.Negotiation.MediaTypePreference.coder.serialize(plain, into: &bytes)
+-                #expect(bytes == "application/json".utf8.map(Byte.init(bitPattern:)))
+-
+-                let weighted = HTTP.Negotiation.MediaTypePreference(
+-                    mediaType: .json,
+-                    quality: try #require(HTTP.Negotiation.QualityValue(900))
+-                )
+-                bytes = []
+-                try HTTP.Negotiation.MediaTypePreference.coder.serialize(weighted, into: &bytes)
+-                #expect(bytes == "application/json;q=0.9".utf8.map(Byte.init(bitPattern:)))
++                try HTTP.Negotiation.QualityValue.coder.serialize(quality, into: &bytes)
+ 
+                 var input = bytes[...]
+-                let decoded = try HTTP.Negotiation.MediaTypePreference.coder.parse(&input)
+-                #expect(decoded == weighted)
++                #expect(try HTTP.Negotiation.QualityValue.coder.parse(&input) == quality)
++                #expect(input.isEmpty)
+             }
++        }
+ 
+-            @Test
+-            func `A charset preference is a weighted token`() throws {
+-                var input = [Byte](utf8: "utf-8;q=0.5")[...]
+-                let preference = try HTTP.Negotiation.CharsetPreference.coder.parse(&input)
+-                #expect(preference.charset == "utf-8")
+-                #expect(preference.quality.thousandths == 500)
++        @Test
++        func `A media type preference serializes its weight only when it is not the default`() throws {
++            let plain = HTTP.Negotiation.MediaTypePreference(mediaType: .json)
++            var bytes: [Byte] = []
++            try HTTP.Negotiation.MediaTypePreference.coder.serialize(plain, into: &bytes)
++            #expect(bytes == "application/json".utf8.map(Byte.init(bitPattern:)))
++
++            let weighted = HTTP.Negotiation.MediaTypePreference(
++                mediaType: .json,
++                quality: try #require(HTTP.Negotiation.QualityValue(900))
++            )
++            bytes = []
++            try HTTP.Negotiation.MediaTypePreference.coder.serialize(weighted, into: &bytes)
++            #expect(bytes == "application/json;q=0.9".utf8.map(Byte.init(bitPattern:)))
++
++            var input = bytes[...]
++            let decoded = try HTTP.Negotiation.MediaTypePreference.coder.parse(&input)
++            #expect(decoded == weighted)
++        }
+ 
+-                var bytes: [Byte] = []
+-                try HTTP.Negotiation.CharsetPreference.coder.serialize(preference, into: &bytes)
+-                #expect(bytes == "utf-8;q=0.5".utf8.map(Byte.init(bitPattern:)))
+-            }
++        @Test
++        func `A charset preference is a weighted token`() throws {
++            var input = [Byte](utf8: "utf-8;q=0.5")[...]
++            let preference = try HTTP.Negotiation.CharsetPreference.coder.parse(&input)
++            #expect(preference.charset == "utf-8")
++            #expect(preference.quality.thousandths == 500)
+ 
+-            @Test
+-            func `A challenge round-trips its parameters`() throws {
+-                let challenge = HTTP.Authentication.Challenge(
+-                    scheme: .bearer,
+-                    parameters: ["realm": "example", "scope": "read write"]
+-                )
+-                var bytes: [Byte] = []
+-                try HTTP.Authentication.Challenge.coder.serialize(challenge, into: &bytes)
+-                #expect(bytes == "Bearer realm=example, scope=\"read write\"".utf8.map(Byte.init(bitPattern:)))
++            var bytes: [Byte] = []
++            try HTTP.Negotiation.CharsetPreference.coder.serialize(preference, into: &bytes)
++            #expect(bytes == "utf-8;q=0.5".utf8.map(Byte.init(bitPattern:)))
++        }
+ 
+-                var input = bytes[...]
+-                #expect(try HTTP.Authentication.Challenge.coder.parse(&input) == challenge)
+-            }
++        @Test
++        func `A challenge round-trips its parameters`() throws {
++            let challenge = HTTP.Authentication.Challenge(
++                scheme: .bearer,
++                parameters: ["realm": "example", "scope": "read write"]
++            )
++            var bytes: [Byte] = []
++            try HTTP.Authentication.Challenge.coder.serialize(challenge, into: &bytes)
++            #expect(bytes == "Bearer realm=example, scope=\"read write\"".utf8.map(Byte.init(bitPattern:)))
++
++            var input = bytes[...]
++            #expect(try HTTP.Authentication.Challenge.coder.parse(&input) == challenge)
++        }
+ 
+-            @Test
+-            func `Credentials round-trip`() throws {
+-                let credentials = HTTP.Authentication.Credentials.bearer("token123")
+-                var bytes: [Byte] = []
+-                try HTTP.Authentication.Credentials.coder.serialize(credentials, into: &bytes)
+-                #expect(bytes == "Bearer token123".utf8.map(Byte.init(bitPattern:)))
++        @Test
++        func `Credentials round-trip`() throws {
++            let credentials = HTTP.Authentication.Credentials.bearer("token123")
++            var bytes: [Byte] = []
++            try HTTP.Authentication.Credentials.coder.serialize(credentials, into: &bytes)
++            #expect(bytes == "Bearer token123".utf8.map(Byte.init(bitPattern:)))
+ 
+-                var input = bytes[...]
+-                #expect(try HTTP.Authentication.Credentials.coder.parse(&input) == credentials)
+-            }
++            var input = bytes[...]
++            #expect(try HTTP.Authentication.Credentials.coder.parse(&input) == credentials)
++        }
+ 
+-            @Test
+-            func `Preconditions parse entity tag lists and wildcards`() throws {
+-                let list = HTTP.Precondition.parseIfMatch("\"a\", W/\"b\"")
+-                #expect(list == .ifMatch([.strong("a"), .weak("b")]))
++        @Test
++        func `Preconditions parse entity tag lists and wildcards`() throws {
++            let list = HTTP.Precondition.parseIfMatch("\"a\", W/\"b\"")
++            #expect(list == .ifMatch([.strong("a"), .weak("b")]))
+ 
+-                #expect(HTTP.Precondition.parseIfNoneMatch(" * ") == .ifNoneMatch([HTTP.Precondition.wildcardTag]))
+-                #expect(HTTP.Precondition.parseIfMatch("nonsense") == nil)
+-            }
++            #expect(HTTP.Precondition.parseIfNoneMatch(" * ") == .ifNoneMatch([HTTP.Precondition.wildcardTag]))
++            #expect(HTTP.Precondition.parseIfMatch("nonsense") == nil)
+         }
+-}
++    }
+ #endif
+-- 
+2.43.0
+
