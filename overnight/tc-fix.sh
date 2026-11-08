@@ -8,7 +8,7 @@ log=$1
 grep -oE "/home/user/cloud-workspace/repos/[^:]+\.swift:[0-9]+:[0-9]+: error: .*" "$log" | sort -u > /tmp/tcfix.$$
 # Mechanical ones first.
 grep -E "UnusedImportAccess|is imported as" /tmp/tcfix.$$ | while IFS=: read -r f l c rest; do
-  if echo "$rest" | grep -q UnusedImportAccess; then sed -i "${l}s/^public import /import /" "$f"
+  if echo "$rest" | grep -q UnusedImportAccess; then sed -i "${l}s/^\([[:space:]]*\)public import /\1import /" "$f"
   else sed -i "${l}s/^.*import .*$/__DROP__/" "$f"; fi
 done
 grep -E "is imported as" /tmp/tcfix.$$ | cut -d: -f1 | sort -u | while IFS= read -r f; do sed -i "/^__DROP__$/d" "$f"; done

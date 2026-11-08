@@ -188,6 +188,8 @@ def process(p, rel, lines, tests, types):
             if not host:
                 stats["no host"] = stats.get("no host", 0) + 1; continue
             if un in CATS: continue
+            if stem and un == stem + " Tests":
+                stats["named as host"] = stats.get("named as host", 0) + 1; continue
             tops.append((start, end, name))
         else:
             kind, pname, suite, pstart = info(t, mask, par)
