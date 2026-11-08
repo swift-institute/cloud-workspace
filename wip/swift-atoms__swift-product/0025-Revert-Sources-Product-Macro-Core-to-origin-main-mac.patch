@@ -1,0 +1,121 @@
+From 14b3c9b91c6aa2c11542183f03e4fcef17133235 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 07:06:20 +0000
+Subject: [PATCH 25/28] Revert Sources/Product Macro Core to origin/main: macro
+ targets aren't type-checkable outside the build (coenttb/work#242)
+
+---
+ .../Product.Derivation.swift                  | 85 +++++++++----------
+ Sources/Product Macro Core/exports.swift      |  2 +-
+ 2 files changed, 42 insertions(+), 45 deletions(-)
+
+diff --git a/Sources/Product Macro Core/Product.Derivation.swift b/Sources/Product Macro Core/Product.Derivation.swift
+index 440310e..16ff31b 100644
+--- a/Sources/Product Macro Core/Product.Derivation.swift	
++++ b/Sources/Product Macro Core/Product.Derivation.swift	
+@@ -6,54 +6,51 @@ import Type_Algebra_Syntax
+ 
+ extension Product {
+     public enum Derivation {
+-    }
+-}
+-
+-extension Product.Derivation {
+-    public static func peers(of analysis: Analysis) -> [DeclSyntax] {
+-        do { return try derive(analysis) } catch { return [DeclSyntax(stringLiteral: "#error(\(String(reflecting: String(describing: error))))")] }
+-    }
+-
+-    private static func derive(_ analysis: Analysis) throws -> [DeclSyntax] {
+-        let protocolDeclaration = analysis.declaration
+-        let access = analysis.access.map { "\($0.name.text) " } ?? ""
+-        let semantic = protocolDeclaration.name.trimmedDescription
+-        let product = "Product"
+-        let functions = analysis.functionCoordinates
+-        let genericParameters = analysis.associatedTypeCoordinates.map { coordinate in
+-            coordinate.constraint.map { "\(coordinate.name.text): \($0.trimmedDescription)" }
+-                ?? coordinate.name.text
++        public static func peers(of analysis: Analysis) -> [DeclSyntax] {
++            do { return try derive(analysis) } catch { return [DeclSyntax(stringLiteral: "#error(\(String(reflecting: String(describing: error))))")] }
+         }
+-        let genericClause =
+-            genericParameters.isEmpty
+-            ? ""
+-            : "<\(genericParameters.joined(separator: ", "))>"
+ 
+-        let record = try analysis.storage(privateFunctions: true)
+-        let forwarding = functions.map { function in
+-            let invocation = function.invocation.trimmedDescription.replacingOccurrences(
+-                of: "self._\(function.storage)",
+-                with: "self.\(Analysis.storageName(function.storage))"
+-            )
+-            let statement = function.returnsVoid ? invocation : "return \(invocation)"
+-            return """
+-                \(access)func \(function.name.trimmedDescription)\(function.declaration.signature.trimmedDescription) {
+-                    \(statement)
+-                }
+-                """
+-        }
++        private static func derive(_ analysis: Analysis) throws -> [DeclSyntax] {
++            let protocolDeclaration = analysis.declaration
++            let access = analysis.access.map { "\($0.name.text) " } ?? ""
++            let semantic = protocolDeclaration.name.trimmedDescription
++            let product = "Product"
++            let functions = analysis.functionCoordinates
++            let genericParameters = analysis.associatedTypeCoordinates.map { coordinate in
++                coordinate.constraint.map { "\(coordinate.name.text): \($0.trimmedDescription)" }
++                    ?? coordinate.name.text
++            }
++            let genericClause =
++                genericParameters.isEmpty
++                ? ""
++                : "<\(genericParameters.joined(separator: ", "))>"
+ 
+-        let initializer = try record.initializer(access: access)
+-        let members = (record.declarations(access: access) + [initializer] + forwarding)
+-            .joined(separator: "\n\n")
+-        return [
+-            DeclSyntax(
+-                stringLiteral: """
+-                    \(access)struct \(product)\(genericClause): \(semantic) {
+-                    \(members)
++            let record = try analysis.storage(privateFunctions: true)
++            let forwarding = functions.map { function in
++                let invocation = function.invocation.trimmedDescription.replacingOccurrences(
++                    of: "self._\(function.storage)",
++                    with: "self.\(Analysis.storageName(function.storage))"
++                )
++                let statement = function.returnsVoid ? invocation : "return \(invocation)"
++                return """
++                    \(access)func \(function.name.trimmedDescription)\(function.declaration.signature.trimmedDescription) {
++                        \(statement)
+                     }
+                     """
+-            )
+-        ]
++            }
++
++            let initializer = try record.initializer(access: access)
++            let members = (record.declarations(access: access) + [initializer] + forwarding)
++                .joined(separator: "\n\n")
++            return [
++                DeclSyntax(
++                    stringLiteral: """
++                        \(access)struct \(product)\(genericClause): \(semantic) {
++                        \(members)
++                        }
++                        """
++                )
++            ]
++        }
+     }
+ }
+diff --git a/Sources/Product Macro Core/exports.swift b/Sources/Product Macro Core/exports.swift
+index c3a28ec..d0236d5 100644
+--- a/Sources/Product Macro Core/exports.swift	
++++ b/Sources/Product Macro Core/exports.swift	
+@@ -1 +1 @@
+-@_exported public import Product_Syntax
++@_exported import Product_Syntax
+-- 
+2.43.0
+

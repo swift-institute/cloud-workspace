@@ -1,0 +1,134 @@
+From d446f03d40c16bf73f6d4a71f90b1c3cf9cb8ce9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 08:24:49 +0000
+Subject: [PATCH 13/13] Revert Sources/Test/Test.Benchmark.Complexity.swift: it
+ broke the root build (coenttb/work#242)
+
+---
+ Sources/Test/Test.Benchmark.Complexity.swift | 112 -------------------
+ 1 file changed, 112 deletions(-)
+
+diff --git a/Sources/Test/Test.Benchmark.Complexity.swift b/Sources/Test/Test.Benchmark.Complexity.swift
+index 53f7828..82d8412 100644
+--- a/Sources/Test/Test.Benchmark.Complexity.swift
++++ b/Sources/Test/Test.Benchmark.Complexity.swift
+@@ -1,116 +1,4 @@
+-import Numeric
+-public import Sample
+-
+ extension Test.Benchmark {
+ 
+     public enum Complexity {}
+ }
+-
+-extension Test.Benchmark.Complexity {
+-
+-    public static func evidence(
+-        from points: [(size: Int, metric: Duration)],
+-        classes: [Class]
+-    ) -> Evidence {
+-        let averaging = Sample.Averaging<Duration>.duration
+-
+-        var data = points.map { (size: $0.size, seconds: averaging.project($0.metric)) }
+-        data.sort { $0.size < $1.size }
+-
+-        let valid = data.filter { $0.size > 0 && $0.seconds > 0 }
+-
+-        guard valid.count >= 2 else {
+-            let emptyFit = Sample.Regression.Fit(
+-                slope: 0,
+-                intercept: 0,
+-                rSquared: 0,
+-                meanSquaredError: 0
+-            )
+-            return Evidence(
+-                exponent: Exponent(value: 0, coefficient: 0, fit: emptyFit),
+-                candidates: [],
+-                growthRatios: [],
+-                monotonicity: Test.Benchmark.Trend(z: 0, interpretation: .none),
+-                points: valid.map { (size: $0.size, metric: Duration.seconds($0.seconds)) },
+-                metricCV: .infinity
+-            )
+-        }
+-
+-        let logX = valid.map { Double.math.log2(Double($0.size)) }
+-        let logY = valid.map { Double.math.log2($0.seconds) }
+-        let logLogFit = Sample.Regression.linear(x: logX, y: logY)
+-        let exponent = Exponent(
+-            value: logLogFit.slope,
+-            coefficient: Double.math.exp2(logLogFit.intercept),
+-            fit: logLogFit
+-        )
+-
+-        let seconds = valid.map(\.seconds)
+-        var candidates: [Candidate.Fit] = []
+-        for cls in classes {
+-            let transformed = valid.map { cls.transform(Double($0.size)) }
+-            let fit = Sample.Regression.linear(x: transformed, y: seconds)
+-
+-            var logSizesForExp: [Double] = []
+-            var logTransformsForExp: [Double] = []
+-            for i in valid.indices {
+-                let t = transformed[i]
+-                if t > 0 {
+-                    logSizesForExp.append(logX[i])
+-                    logTransformsForExp.append(Double.math.log2(t))
+-                }
+-            }
+-            let effectiveExp: Double
+-            if logTransformsForExp.count >= 2 {
+-                effectiveExp =
+-                    Sample.Regression.linear(
+-                        x: logSizesForExp,
+-                        y: logTransformsForExp
+-                    ).slope
+-            } else {
+-                effectiveExp = cls.theoreticalExponent ?? 0
+-            }
+-
+-            candidates.append(
+-                Candidate.Fit(
+-                    complexity: cls,
+-                    regression: fit,
+-                    effectiveExponent: effectiveExp
+-                )
+-            )
+-        }
+-        candidates.sort { $0.regression.rSquared > $1.regression.rSquared }
+-
+-        var growthRatios: [Double] = []
+-        (1..<valid.count).forEach { i in
+-            guard valid[i - 1].seconds > 0 else { return }
+-            growthRatios.append(valid[i].seconds / valid[i - 1].seconds)
+-        }
+-
+-        let durations = valid.map { Duration.seconds($0.seconds) }
+-        let monotonicity = Test.Benchmark.Trend.mannKendall(durations)
+-
+-        let metricCV: Double
+-        do {
+-            let mean = seconds.reduce(0, +) / Double(seconds.count)
+-            if mean > 0 {
+-
+-                let variance =
+-                    seconds.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) }
+-                    / Double(seconds.count - 1)
+-                metricCV = variance.squareRoot() / mean
+-            } else {
+-                metricCV = .infinity
+-            }
+-        }
+-
+-        return Evidence(
+-            exponent: exponent,
+-            candidates: candidates,
+-            growthRatios: growthRatios,
+-            monotonicity: monotonicity,
+-            points: valid.map { (size: $0.size, metric: Duration.seconds($0.seconds)) },
+-            metricCV: metricCV
+-        )
+-    }
+-}
+-- 
+2.43.0
+

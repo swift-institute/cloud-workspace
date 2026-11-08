@@ -1,0 +1,132 @@
+From 59ddf87cd96eb8b57f38262a7ffb5fddcb4bacd0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 06:09:36 +0000
+Subject: [PATCH 18/19] Revert Sources/Plist
+ Binary/Plist.Binary.Serializer.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../Plist.Binary.Serializer.swift             | 33 ++++++++++++-------
+ 1 file changed, 21 insertions(+), 12 deletions(-)
+
+diff --git a/Sources/Plist Binary/Plist.Binary.Serializer.swift b/Sources/Plist Binary/Plist.Binary.Serializer.swift
+index 417e74f..b12bc30 100644
+--- a/Sources/Plist Binary/Plist.Binary.Serializer.swift	
++++ b/Sources/Plist Binary/Plist.Binary.Serializer.swift	
+@@ -1,6 +1,7 @@
+ import Plist_Core
+ 
+ extension Plist.Binary {
++
+     public static func serialize(_ plist: Plist) -> [UInt8] {
+         let writer = Writer()
+         writer.write(plist)
+@@ -9,6 +10,7 @@ extension Plist.Binary {
+ }
+ 
+ extension Plist.Binary {
++
+     final class Writer {
+         var bytes: [UInt8] = []
+         var objects: [ObjectRef] = []
+@@ -18,7 +20,7 @@ extension Plist.Binary {
+ }
+ 
+ extension Plist.Binary.Writer {
+-    fileprivate struct ObjectRef {
++    struct ObjectRef {
+         let value: Plist.Value
+         var offset: Int = 0
+     }
+@@ -26,11 +28,12 @@ extension Plist.Binary.Writer {
+ 
+ extension Plist.Binary.Writer {
+     func write(_ plist: Plist) {
++
+         let rootIndex = collectObjects(plist.value)
+ 
+         writeHeader()
+ 
+-        (0..<objects.count).forEach { i in
++        for i in 0..<objects.count {
+             objectOffsets.append(bytes.count)
+             writeObject(objects[i].value)
+         }
+@@ -53,6 +56,7 @@ extension Plist.Binary.Writer {
+ 
+ extension Plist.Binary.Writer {
+     func collectObjects(_ value: Plist.Value) -> Int {
++
+         if let existingIndex = uniqueObjects[value] {
+             return existingIndex
+         }
+@@ -83,6 +87,7 @@ extension Plist.Binary.Writer {
+ 
+ extension Plist.Binary.Writer {
+     func writeHeader() {
++
+         bytes.append(contentsOf: [0x62, 0x70, 0x6C, 0x69, 0x73, 0x74, 0x30, 0x30])
+     }
+ }
+@@ -126,24 +131,25 @@ extension Plist.Binary.Writer {
+         let size: Int
+ 
+         if value >= 0 {
+-            size = if unsigned <= 0xFF {
+-                1
++            if unsigned <= 0xFF {
++                size = 1
+             } else if unsigned <= 0xFFFF {
+-                2
++                size = 2
+             } else if unsigned <= 0xFFFF_FFFF {
+-                4
++                size = 4
+             } else {
+-                8
++                size = 8
+             }
+         } else {
+-            size = if value >= Int8.min {
+-                1
++
++            if value >= Int8.min {
++                size = 1
+             } else if value >= Int16.min {
+-                2
++                size = 2
+             } else if value >= Int32.min {
+-                4
++                size = 4
+             } else {
+-                8
++                size = 8
+             }
+         }
+ 
+@@ -176,12 +182,14 @@ extension Plist.Binary.Writer {
+     }
+ 
+     func writeString(_ text: String) {
++
+         let isASCII = text.utf8.allSatisfy { $0 < 128 }
+ 
+         if isASCII {
+             writeMarkerWithLength(Plist.Binary.Marker.asciiType, length: text.utf8.count)
+             bytes.append(contentsOf: text.utf8)
+         } else {
++
+             let utf16 = Array(text.utf16)
+             writeMarkerWithLength(Plist.Binary.Marker.unicodeType, length: utf16.count)
+             for codeUnit in utf16 {
+@@ -251,6 +259,7 @@ extension Plist.Binary.Writer {
+         topObject: UInt64,
+         offsetTableOffset: UInt64
+     ) {
++
+         bytes.append(contentsOf: [0, 0, 0, 0, 0])
+ 
+         bytes.append(0)
+-- 
+2.43.0
+

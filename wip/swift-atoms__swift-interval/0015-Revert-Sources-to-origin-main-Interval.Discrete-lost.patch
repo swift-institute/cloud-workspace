@@ -1,0 +1,312 @@
+From 7659392517645bce7dc72b52d907efa4e4e65c6a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 07:20:39 +0000
+Subject: [PATCH 15/16] Revert Sources to origin/main: Interval.Discrete lost
+ its Equatable and Hashable conformances (coenttb/work#242)
+
+---
+ Sources/Interval/Finite/Finite.exports.swift  | 10 +--
+ .../Interval.Discrete+Swift.Equatable.swift   | 13 +++
+ .../Interval.Discrete+Swift.Hashable.swift    | 13 +++
+ .../Interval.Unit+Swift.Codable.swift         | 24 ++++++
+ .../Interval.Unit+Swift.Comparable.swift      |  7 ++
+ .../Interval.Unit+Swift.Equatable.swift       |  7 ++
+ ...Unit+Swift.ExpressibleByFloatLiteral.swift | 16 ++++
+ ...it+Swift.ExpressibleByIntegerLiteral.swift | 16 ++++
+ .../Interval.Unit+Swift.Hashable.swift        |  7 ++
+ Sources/Interval/Interval.Unit.swift          | 83 -------------------
+ ...ocol`.swift => Swift.Range+Interval.swift} |  0
+ Sources/Interval/exports.swift                |  8 --
+ 12 files changed, 108 insertions(+), 96 deletions(-)
+ create mode 100644 Sources/Interval/Interval.Discrete+Swift.Equatable.swift
+ create mode 100644 Sources/Interval/Interval.Discrete+Swift.Hashable.swift
+ create mode 100644 Sources/Interval/Interval.Unit+Swift.Codable.swift
+ create mode 100644 Sources/Interval/Interval.Unit+Swift.Comparable.swift
+ create mode 100644 Sources/Interval/Interval.Unit+Swift.Equatable.swift
+ create mode 100644 Sources/Interval/Interval.Unit+Swift.ExpressibleByFloatLiteral.swift
+ create mode 100644 Sources/Interval/Interval.Unit+Swift.ExpressibleByIntegerLiteral.swift
+ create mode 100644 Sources/Interval/Interval.Unit+Swift.Hashable.swift
+ rename Sources/Interval/{Swift.Range where Bound is Ordinal.`Protocol`.swift => Swift.Range+Interval.swift} (100%)
+
+diff --git a/Sources/Interval/Finite/Finite.exports.swift b/Sources/Interval/Finite/Finite.exports.swift
+index 1426613..9fbcd0b 100644
+--- a/Sources/Interval/Finite/Finite.exports.swift
++++ b/Sources/Interval/Finite/Finite.exports.swift
+@@ -1,7 +1,7 @@
+ #if Finite
+-    import Finite
+-    import Cardinal
+-    import Index
+-    import Ordinal
+-    import Tagged
++    @_exported public import Finite
++    @_exported public import Cardinal
++    @_exported public import Index
++    @_exported public import Ordinal
++    @_exported public import Tagged
+ #endif
+diff --git a/Sources/Interval/Interval.Discrete+Swift.Equatable.swift b/Sources/Interval/Interval.Discrete+Swift.Equatable.swift
+new file mode 100644
+index 0000000..115f333
+--- /dev/null
++++ b/Sources/Interval/Interval.Discrete+Swift.Equatable.swift
+@@ -0,0 +1,13 @@
++internal import Advancement
++internal import Cardinal
++internal import Carrier
++internal import Distance
++import Ordinal
++
++extension Interval.Discrete: Swift::Equatable {
++
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        lhs.start.ordinal.rawValue == rhs.start.ordinal.rawValue
++            && lhs.end.ordinal.rawValue == rhs.end.ordinal.rawValue
++    }
++}
+diff --git a/Sources/Interval/Interval.Discrete+Swift.Hashable.swift b/Sources/Interval/Interval.Discrete+Swift.Hashable.swift
+new file mode 100644
+index 0000000..d0f1ce7
+--- /dev/null
++++ b/Sources/Interval/Interval.Discrete+Swift.Hashable.swift
+@@ -0,0 +1,13 @@
++internal import Advancement
++internal import Cardinal
++internal import Carrier
++internal import Distance
++import Ordinal
++
++extension Interval.Discrete: Swift::Hashable {
++
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(start.ordinal.rawValue)
++        hasher.combine(end.ordinal.rawValue)
++    }
++}
+diff --git a/Sources/Interval/Interval.Unit+Swift.Codable.swift b/Sources/Interval/Interval.Unit+Swift.Codable.swift
+new file mode 100644
+index 0000000..237dda0
+--- /dev/null
++++ b/Sources/Interval/Interval.Unit+Swift.Codable.swift
+@@ -0,0 +1,24 @@
++#if !hasFeature(Embedded)
++    extension Interval.Unit: Swift::Codable where Scalar: Swift::Codable {
++
++        public init(from decoder: any Decoder) throws {
++            let container = try decoder.singleValueContainer()
++            let value = try container.decode(Scalar.self)
++            guard let unit = Self(value) else {
++                throw DecodingError.dataCorrupted(
++                    DecodingError.Context(
++                        codingPath: decoder.codingPath,
++                        debugDescription:
++                            "Value \(value) out of bounds for Interval.Unit (expected [0, 1])"
++                    )
++                )
++            }
++            self = unit
++        }
++
++        public func encode(to encoder: any Encoder) throws {
++            var container = encoder.singleValueContainer()
++            try container.encode(_storage)
++        }
++    }
++#endif
+diff --git a/Sources/Interval/Interval.Unit+Swift.Comparable.swift b/Sources/Interval/Interval.Unit+Swift.Comparable.swift
+new file mode 100644
+index 0000000..0bb0d85
+--- /dev/null
++++ b/Sources/Interval/Interval.Unit+Swift.Comparable.swift
+@@ -0,0 +1,7 @@
++extension Interval.Unit: Swift::Comparable {
++
++    @inlinable
++    public static func < (lhs: Self, rhs: Self) -> Bool {
++        lhs._storage < rhs._storage
++    }
++}
+diff --git a/Sources/Interval/Interval.Unit+Swift.Equatable.swift b/Sources/Interval/Interval.Unit+Swift.Equatable.swift
+new file mode 100644
+index 0000000..110a5a7
+--- /dev/null
++++ b/Sources/Interval/Interval.Unit+Swift.Equatable.swift
+@@ -0,0 +1,7 @@
++extension Interval.Unit: Swift::Equatable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        lhs._storage == rhs._storage
++    }
++}
+diff --git a/Sources/Interval/Interval.Unit+Swift.ExpressibleByFloatLiteral.swift b/Sources/Interval/Interval.Unit+Swift.ExpressibleByFloatLiteral.swift
+new file mode 100644
+index 0000000..957361a
+--- /dev/null
++++ b/Sources/Interval/Interval.Unit+Swift.ExpressibleByFloatLiteral.swift
+@@ -0,0 +1,16 @@
++extension Interval.Unit: Swift::ExpressibleByFloatLiteral
++where Scalar: Swift::ExpressibleByFloatLiteral {
++
++    public typealias FloatLiteralType = Scalar.FloatLiteralType
++
++    @inlinable
++    public init(floatLiteral value: FloatLiteralType) {
++        let scalar = Scalar(floatLiteral: value)
++        precondition(
++            scalar.isFinite && scalar >= 0 && scalar <= 1,
++            "Float literal must be finite and in [0, 1]"
++        )
++
++        self._storage = scalar
++    }
++}
+diff --git a/Sources/Interval/Interval.Unit+Swift.ExpressibleByIntegerLiteral.swift b/Sources/Interval/Interval.Unit+Swift.ExpressibleByIntegerLiteral.swift
+new file mode 100644
+index 0000000..70fb40e
+--- /dev/null
++++ b/Sources/Interval/Interval.Unit+Swift.ExpressibleByIntegerLiteral.swift
+@@ -0,0 +1,16 @@
++extension Interval.Unit: Swift::ExpressibleByIntegerLiteral
++where Scalar: Swift::ExpressibleByIntegerLiteral {
++
++    public typealias IntegerLiteralType = Scalar.IntegerLiteralType
++
++    @inlinable
++    public init(integerLiteral value: IntegerLiteralType) {
++        let scalar = Scalar(integerLiteral: value)
++        precondition(
++            scalar >= 0 && scalar <= 1,
++            "Integer literal must be 0 or 1"
++        )
++
++        self._storage = scalar
++    }
++}
+diff --git a/Sources/Interval/Interval.Unit+Swift.Hashable.swift b/Sources/Interval/Interval.Unit+Swift.Hashable.swift
+new file mode 100644
+index 0000000..3c8fa62
+--- /dev/null
++++ b/Sources/Interval/Interval.Unit+Swift.Hashable.swift
+@@ -0,0 +1,7 @@
++extension Interval.Unit: Swift::Hashable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(_storage)
++    }
++}
+diff --git a/Sources/Interval/Interval.Unit.swift b/Sources/Interval/Interval.Unit.swift
+index 905ae4f..1eb27b8 100644
+--- a/Sources/Interval/Interval.Unit.swift
++++ b/Sources/Interval/Interval.Unit.swift
+@@ -84,86 +84,3 @@ extension Interval.Unit {
+ public typealias Opacity<Scalar: BinaryFloatingPoint> = Interval.Unit<Scalar>
+ 
+ public typealias Alpha<Scalar: BinaryFloatingPoint> = Opacity<Scalar>
+-
+-#if !hasFeature(Embedded)
+-    extension Interval.Unit: Swift::Codable where Scalar: Swift::Codable {
+-
+-        public init(from decoder: any Decoder) throws {
+-            let container = try decoder.singleValueContainer()
+-            let value = try container.decode(Scalar.self)
+-            guard let unit = Self(value) else {
+-                throw DecodingError.dataCorrupted(
+-                    DecodingError.Context(
+-                        codingPath: decoder.codingPath,
+-                        debugDescription:
+-                            "Value \(value) out of bounds for Interval.Unit (expected [0, 1])"
+-                    )
+-                )
+-            }
+-            self = unit
+-        }
+-
+-        public func encode(to encoder: any Encoder) throws {
+-            var container = encoder.singleValueContainer()
+-            try container.encode(_storage)
+-        }
+-    }
+-#endif
+-
+-extension Interval.Unit: Swift::Comparable {
+-
+-    @inlinable
+-    public static func < (lhs: Self, rhs: Self) -> Bool {
+-        lhs._storage < rhs._storage
+-    }
+-}
+-
+-extension Interval.Unit: Swift::Equatable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        lhs._storage == rhs._storage
+-    }
+-}
+-
+-extension Interval.Unit: Swift::ExpressibleByFloatLiteral
+-where Scalar: Swift::ExpressibleByFloatLiteral {
+-
+-    public typealias FloatLiteralType = Scalar.FloatLiteralType
+-
+-    @inlinable
+-    public init(floatLiteral value: FloatLiteralType) {
+-        let scalar = Scalar(floatLiteral: value)
+-        precondition(
+-            scalar.isFinite && scalar >= 0 && scalar <= 1,
+-            "Float literal must be finite and in [0, 1]"
+-        )
+-
+-        self._storage = scalar
+-    }
+-}
+-
+-extension Interval.Unit: Swift::ExpressibleByIntegerLiteral
+-where Scalar: Swift::ExpressibleByIntegerLiteral {
+-
+-    public typealias IntegerLiteralType = Scalar.IntegerLiteralType
+-
+-    @inlinable
+-    public init(integerLiteral value: IntegerLiteralType) {
+-        let scalar = Scalar(integerLiteral: value)
+-        precondition(
+-            scalar >= 0 && scalar <= 1,
+-            "Integer literal must be 0 or 1"
+-        )
+-
+-        self._storage = scalar
+-    }
+-}
+-
+-extension Interval.Unit: Swift::Hashable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        hasher.combine(_storage)
+-    }
+-}
+diff --git a/Sources/Interval/Swift.Range where Bound is Ordinal.`Protocol`.swift b/Sources/Interval/Swift.Range+Interval.swift
+similarity index 100%
+rename from Sources/Interval/Swift.Range where Bound is Ordinal.`Protocol`.swift
+rename to Sources/Interval/Swift.Range+Interval.swift
+diff --git a/Sources/Interval/exports.swift b/Sources/Interval/exports.swift
+index b0e34dd..b7270e1 100644
+--- a/Sources/Interval/exports.swift
++++ b/Sources/Interval/exports.swift
+@@ -6,11 +6,3 @@
+ #if Pair
+     @_exported public import Pair
+ #endif
+-
+-#if Finite
+-    @_exported public import Finite
+-    @_exported public import Cardinal
+-    @_exported public import Index
+-    @_exported public import Ordinal
+-    @_exported public import Tagged
+-#endif
+-- 
+2.43.0
+

@@ -1,0 +1,936 @@
+From 8f0bf469df687e44f5aa83dd62a33599408928c2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 06:11:15 +0000
+Subject: [PATCH 19/19] Revert Sources to origin/main: partial ratchet reverts
+ left it inconsistent (coenttb/work#242)
+
+---
+ Sources/Plist Binary/exports.swift            |   2 +-
+ .../{Bool.swift => Bool+Plist.swift}          |   0
+ Sources/Plist Core/Plist.Access.swift         |  40 +++
+ Sources/Plist Core/Plist.Factories.swift      |  52 ++++
+ Sources/Plist Core/Plist.Literals.swift       |  50 +++
+ Sources/Plist Core/Plist.Subscripts.swift     |  31 ++
+ Sources/Plist Core/Plist.TypeChecking.swift   |  56 ++++
+ .../{String.swift => String+Plist.swift}      |   0
+ Sources/Plist XML/Plist.XML.Parser.swift      | 186 ++++++++++++
+ Sources/Plist XML/Plist.XML.Serializer.swift  | 110 +++++++
+ Sources/Plist XML/Plist.XML.swift             | 287 ------------------
+ Sources/Plist XML/exports.swift               |   4 +-
+ Sources/Plist/exports.swift                   |   6 +-
+ 13 files changed, 531 insertions(+), 293 deletions(-)
+ rename Sources/Plist Core/{Bool.swift => Bool+Plist.swift} (100%)
+ create mode 100644 Sources/Plist Core/Plist.Access.swift
+ create mode 100644 Sources/Plist Core/Plist.Factories.swift
+ create mode 100644 Sources/Plist Core/Plist.Literals.swift
+ create mode 100644 Sources/Plist Core/Plist.Subscripts.swift
+ create mode 100644 Sources/Plist Core/Plist.TypeChecking.swift
+ rename Sources/Plist Core/{String.swift => String+Plist.swift} (100%)
+ create mode 100644 Sources/Plist XML/Plist.XML.Parser.swift
+ create mode 100644 Sources/Plist XML/Plist.XML.Serializer.swift
+
+diff --git a/Sources/Plist Binary/exports.swift b/Sources/Plist Binary/exports.swift
+index 1bf2657..96d7168 100644
+--- a/Sources/Plist Binary/exports.swift	
++++ b/Sources/Plist Binary/exports.swift	
+@@ -1 +1 @@
+-@_exported public import Plist_Core
++@_exported import Plist_Core
+diff --git a/Sources/Plist Core/Bool.swift b/Sources/Plist Core/Bool+Plist.swift
+similarity index 100%
+rename from Sources/Plist Core/Bool.swift
+rename to Sources/Plist Core/Bool+Plist.swift
+diff --git a/Sources/Plist Core/Plist.Access.swift b/Sources/Plist Core/Plist.Access.swift
+new file mode 100644
+index 0000000..5adae9c
+--- /dev/null
++++ b/Sources/Plist Core/Plist.Access.swift	
+@@ -0,0 +1,40 @@
++extension Plist {
++
++    @inlinable
++    public var data: [UInt8]? {
++        if case .data(let value) = raw { return value }
++        return nil
++    }
++
++    @inlinable
++    public var date: Double? {
++        if case .date(let value) = raw { return value }
++        return nil
++    }
++
++    @inlinable
++    public var array: [Plist]? {
++        if case .array(let value) = raw {
++            return value.map { Plist($0) }
++        }
++        return nil
++    }
++
++    @inlinable
++    public var dictionary: [(key: String, value: Plist)]? {
++        if case .dictionary(let value) = raw {
++            return value.map { (key: $0.key, value: Plist($0.value)) }
++        }
++        return nil
++    }
++
++    @inlinable
++    public var dictionaryValue: [String: Plist]? {
++        guard let members = dictionary else { return nil }
++        var result: [String: Plist] = [:]
++        for member in members {
++            result[member.key] = member.value
++        }
++        return result
++    }
++}
+diff --git a/Sources/Plist Core/Plist.Factories.swift b/Sources/Plist Core/Plist.Factories.swift
+new file mode 100644
+index 0000000..1b3650d
+--- /dev/null
++++ b/Sources/Plist Core/Plist.Factories.swift	
+@@ -0,0 +1,52 @@
++extension Plist {
++
++    @inlinable
++    public static func string(_ value: String) -> Plist {
++        Plist(.string(value))
++    }
++
++    @inlinable
++    public static func integer(_ value: Int64) -> Plist {
++        Plist(.integer(value))
++    }
++
++    @inlinable
++    public static func integer(_ value: Int) -> Plist {
++        Plist(.integer(Int64(value)))
++    }
++
++    @inlinable
++    public static func real(_ value: Double) -> Plist {
++        Plist(.real(value))
++    }
++
++    @inlinable
++    public static func bool(_ value: Bool) -> Plist {
++        Plist(.bool(value))
++    }
++
++    @inlinable
++    public static func data(_ value: [UInt8]) -> Plist {
++        Plist(.data(value))
++    }
++
++    @inlinable
++    public static func date(secondsSinceReferenceDate: Double) -> Plist {
++        Plist(.date(secondsSinceReferenceDate))
++    }
++
++    @inlinable
++    public static func array(_ elements: [Plist]) -> Plist {
++        Plist(.array(elements.map(\.raw)))
++    }
++
++    @inlinable
++    public static func dictionary(_ members: [(String, Plist)]) -> Plist {
++        Plist(.dictionary(members.map { ($0.0, $0.1.raw) }))
++    }
++
++    @inlinable
++    public static var null: Plist {
++        Plist(.null)
++    }
++}
+diff --git a/Sources/Plist Core/Plist.Literals.swift b/Sources/Plist Core/Plist.Literals.swift
+new file mode 100644
+index 0000000..7d45af0
+--- /dev/null
++++ b/Sources/Plist Core/Plist.Literals.swift	
+@@ -0,0 +1,50 @@
++extension Plist: ExpressibleByNilLiteral {
++    @inlinable
++    public init(nilLiteral: ()) {
++        self.raw = .null
++    }
++}
++
++extension Plist: ExpressibleByBooleanLiteral {
++    @inlinable
++    public init(booleanLiteral value: Bool) {
++        self.raw = .bool(value)
++    }
++}
++
++extension Plist: ExpressibleByIntegerLiteral {
++    @inlinable
++    public init(integerLiteral value: Int) {
++        self.raw = .integer(Int64(value))
++    }
++}
++
++extension Plist: ExpressibleByFloatLiteral {
++    @inlinable
++    public init(floatLiteral value: Double) {
++        self.raw = .real(value)
++    }
++}
++
++extension Plist: ExpressibleByStringLiteral {
++    @inlinable
++    public init(stringLiteral value: String) {
++        self.raw = .string(value)
++    }
++}
++
++extension Plist: ExpressibleByArrayLiteral {
++    @inlinable
++    public init(arrayLiteral elements: Plist.Value...) {
++        self.raw = .array(elements)
++    }
++}
++
++extension Plist: ExpressibleByDictionaryLiteral {
++    public typealias Key = String
++
++    @inlinable
++    public init(dictionaryLiteral elements: (String, Plist.Value)...) {
++        self.raw = .dictionary(elements.map { ($0.0, $0.1) })
++    }
++}
+diff --git a/Sources/Plist Core/Plist.Subscripts.swift b/Sources/Plist Core/Plist.Subscripts.swift
+new file mode 100644
+index 0000000..b66f92c
+--- /dev/null
++++ b/Sources/Plist Core/Plist.Subscripts.swift	
+@@ -0,0 +1,31 @@
++extension Plist {
++
++    @inlinable
++    public subscript(key: String) -> Plist {
++        guard case .dictionary(let members) = raw else {
++            return .null
++        }
++        for member in members {
++            if member.key == key {
++                return Plist(member.value)
++            }
++        }
++        return .null
++    }
++
++    @inlinable
++    public subscript(index: Int) -> Plist {
++        guard case .array(let elements) = raw else {
++            return .null
++        }
++        guard index >= 0, index < elements.count else {
++            return .null
++        }
++        return Plist(elements[index])
++    }
++
++    @inlinable
++    public subscript(dynamicMember member: String) -> Plist {
++        self[member]
++    }
++}
+diff --git a/Sources/Plist Core/Plist.TypeChecking.swift b/Sources/Plist Core/Plist.TypeChecking.swift
+new file mode 100644
+index 0000000..2b0943c
+--- /dev/null
++++ b/Sources/Plist Core/Plist.TypeChecking.swift	
+@@ -0,0 +1,56 @@
++extension Plist {
++
++    @inlinable
++    public var isString: Bool {
++        if case .string = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isInteger: Bool {
++        if case .integer = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isReal: Bool {
++        if case .real = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isBool: Bool {
++        if case .bool = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isData: Bool {
++        if case .data = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isDate: Bool {
++        if case .date = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isArray: Bool {
++        if case .array = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isDictionary: Bool {
++        if case .dictionary = raw { return true }
++        return false
++    }
++
++    @inlinable
++    public var isNull: Bool {
++        if case .null = raw { return true }
++        return false
++    }
++}
+diff --git a/Sources/Plist Core/String.swift b/Sources/Plist Core/String+Plist.swift
+similarity index 100%
+rename from Sources/Plist Core/String.swift
+rename to Sources/Plist Core/String+Plist.swift
+diff --git a/Sources/Plist XML/Plist.XML.Parser.swift b/Sources/Plist XML/Plist.XML.Parser.swift
+new file mode 100644
+index 0000000..4939efe
+--- /dev/null
++++ b/Sources/Plist XML/Plist.XML.Parser.swift	
+@@ -0,0 +1,186 @@
++internal import Byte
++import ISO_8601
++import Plist_Core
++import RFC_4648
++import XML
++
++extension Plist.XML {
++
++    public static func parse(_ string: String) throws(Plist.Error) -> Plist {
++        let doc: XML.Document
++        do throws(XML.Error) {
++            doc = try XML.parse(removingDoctype(string))
++        } catch {
++            throw .invalidXML(message: "\(error)", line: 0, column: 0)
++        }
++
++        return try parseDocument(doc)
++    }
++
++    private static func removingDoctype(_ string: String) -> String {
++        guard let declaration = string.firstRange(of: "<!DOCTYPE") else { return string }
++
++        var index = declaration.upperBound
++        var depth = 0
++        while index < string.endIndex {
++            let character = string[index]
++            index = string.index(after: index)
++            if character == "[" {
++                depth += 1
++            } else if character == "]" {
++                depth -= 1
++            } else if character == ">", depth <= 0 {
++                break
++            }
++        }
++
++        return String(string[string.startIndex..<declaration.lowerBound]) + String(string[index...])
++    }
++
++    public static func parse<Bytes>(
++        _ bytes: Bytes
++    ) throws(Plist.Error) -> Plist
++    where Bytes: Swift.Collection<UInt8>, Bytes: Sendable {
++        try parse(String(decoding: bytes, as: UTF8.self))
++    }
++}
++
++extension Plist.XML {
++    private static func parseDocument(_ doc: XML.Document) throws(Plist.Error) -> Plist {
++        let root = doc.root
++
++        guard root.element.name == "plist" else {
++            throw .unexpectedElement(expected: "plist", got: root.element.name)
++        }
++
++        let children = root.children()
++        guard let content = children.first else {
++            throw .missingRequiredElement("plist content")
++        }
++
++        return try parseElement(content)
++    }
++}
++
++extension Plist.XML {
++    private static func parseElement(_ element: XML) throws(Plist.Error) -> Plist {
++        let name = element.element.name
++
++        switch name {
++        case "string":
++            return Plist(.string(String(element)))
++
++        case "integer":
++            let text = String(element)
++            guard !text.isEmpty, let value = Int64(text) else {
++                throw .typeMismatch(expected: "integer", got: text.isEmpty ? "empty" : text)
++            }
++            return Plist(.integer(value))
++
++        case "real":
++            let text = String(element)
++            guard !text.isEmpty, let value = Double(text) else {
++                throw .typeMismatch(expected: "real", got: text.isEmpty ? "empty" : text)
++            }
++            return Plist(.real(value))
++
++        case "true":
++            return Plist(.bool(true))
++
++        case "false":
++            return Plist(.bool(false))
++
++        case "data":
++            let text = element.text.all
++
++            let stripped = text.filter { !$0.isWhitespace }
++            guard let bytes = RFC_4648.Base64.decode(stripped) else {
++                throw .invalidBase64Data
++            }
++            return Plist(.data(bytes.map(\.underlying)))
++
++        case "date":
++            let text = String(element)
++            guard !text.isEmpty else {
++                throw .invalidDateFormat("empty")
++            }
++            return try parseDate(text)
++
++        case "array":
++            var elements: [Plist.Value] = []
++            for child in element.children() {
++                let parsed = try parseElement(child)
++                elements.append(parsed.value)
++            }
++            return Plist(.array(elements))
++
++        case "dict":
++            return try parseDictionary(element)
++
++        default:
++            throw .unexpectedElement(expected: "plist element", got: name)
++        }
++    }
++}
++
++extension Plist.XML {
++    private static func parseDictionary(_ element: XML) throws(Plist.Error) -> Plist {
++        var members: [(key: String, value: Plist.Value)] = []
++        let children = element.children()
++
++        var index = 0
++        while index < children.count {
++            let keyElement = children[index]
++
++            guard keyElement.element.name == "key" else {
++                throw .unexpectedElement(expected: "key", got: keyElement.element.name)
++            }
++
++            let key = String(keyElement)
++            guard !key.isEmpty else {
++                throw .missingRequiredElement("key text")
++            }
++
++            index += 1
++
++            guard index < children.count else {
++                throw .missingRequiredElement("value for key '\(key)'")
++            }
++
++            let valueElement = children[index]
++            let parsedValue = try parseElement(valueElement)
++            members.append((key: key, value: parsedValue.value))
++
++            index += 1
++        }
++
++        return Plist(.dictionary(members))
++    }
++}
++
++extension Plist.XML {
++
++    @usableFromInline
++    static let appleReferenceEpochOffset: Int = 978_307_200
++
++    private static func parseDate(_ text: String) throws(Plist.Error) -> Plist {
++
++        let dateTime: ISO_8601.DateTime
++        do throws(ISO_8601.DateTime.Parser.Error) {
++            dateTime = try ISO_8601.DateTime(text)
++        } catch {
++            throw .invalidDateFormat(text)
++        }
++
++        let unixSeconds =
++            dateTime.date.daysSinceUnixEpoch * 86_400
++            + dateTime.hour * 3_600 + dateTime.minute * 60 + dateTime.second
++            - dateTime.offset.seconds
++        let nanoseconds = dateTime.nanoseconds
++        let appleSeconds =
++            Double(unixSeconds - appleReferenceEpochOffset)
++            + Double(nanoseconds) / 1_000_000_000
++
++        return Plist(.date(appleSeconds))
++    }
++}
+diff --git a/Sources/Plist XML/Plist.XML.Serializer.swift b/Sources/Plist XML/Plist.XML.Serializer.swift
+new file mode 100644
+index 0000000..f3cbb7c
+--- /dev/null
++++ b/Sources/Plist XML/Plist.XML.Serializer.swift	
+@@ -0,0 +1,110 @@
++internal import Byte
++import ISO_8601
++import Plist_Core
++import RFC_4648
++import XML
++
++extension Plist.XML {
++
++    private static let xmlDeclaration = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
++
++    private static let doctype =
++        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">"
++}
++
++extension Plist.XML {
++
++    public static func serialize(_ plist: Plist, pretty: Bool = false) -> [UInt8] {
++        let rootElement = serializeValue(plist.value)
++        let plistElement = XML.element(
++            "plist",
++            attributes: [XML.Attribute(name: "version", value: "1.0")],
++            children: [rootElement]
++        )
++
++        var bytes = Array((xmlDeclaration + "\n" + doctype + "\n").utf8)
++        bytes.append(contentsOf: plistElement.serialize.bytes(pretty: pretty))
++        return bytes
++    }
++
++    public static func serializeString(_ plist: Plist, pretty: Bool = false) -> String {
++        String(decoding: serialize(plist, pretty: pretty), as: UTF8.self)
++    }
++}
++
++extension Plist.XML {
++    private static func serializeValue(_ value: Plist.Value) -> XML {
++        switch value {
++        case .string(let text):
++            return XML.element("string", text: text)
++
++        case .integer(let number):
++            return XML.element("integer", text: String(number))
++
++        case .real(let number):
++
++            let text: String
++            if number.truncatingRemainder(dividingBy: 1) == 0 {
++
++                let intPart = Int(number)
++                text = "\(intPart).0"
++            } else {
++                text = String(number)
++            }
++            return XML.element("real", text: text)
++
++        case .bool(let flag):
++            return flag ? XML.element("true") : XML.element("false")
++
++        case .data(let bytes):
++            let base64 = RFC_4648.Base64.encode(bytes.lazy.map(Byte.init(bitPattern:)), padding: true)
++            let base64String = String(decoding: base64.lazy.map(\.underlying), as: UTF8.self)
++            return XML.element("data", text: base64String)
++
++        case .date(let secondsSinceRef):
++            let text = formatDate(secondsSinceRef)
++            return XML.element("date", text: text)
++
++        case .array(let elements):
++            let children = elements.map { serializeValue($0) }
++            return XML.element("array", children: children)
++
++        case .dictionary(let members):
++            var children: [XML] = []
++            for member in members {
++                children.append(XML.element("key", text: member.key))
++                children.append(serializeValue(member.value))
++            }
++            return XML.element("dict", children: children)
++
++        case .null:
++
++            return XML.element("string", text: "")
++        }
++    }
++}
++
++extension Plist.XML {
++    private static func formatDate(_ secondsSinceRef: Double) -> String {
++
++        let wholeSeconds = secondsSinceRef.rounded(.down)
++        let unixSeconds = Int(wholeSeconds) + appleReferenceEpochOffset
++        let nanoseconds = Int((secondsSinceRef - wholeSeconds) * 1_000_000_000)
++        let secondOfDay = (unixSeconds % 86_400 + 86_400) % 86_400
++
++        guard
++            let date = try? ISO_8601.CalendarDate(daysSinceUnixEpoch: (unixSeconds - secondOfDay) / 86_400),
++            let dateTime = try? ISO_8601.DateTime(
++                date: date,
++                hour: secondOfDay / 3_600,
++                minute: secondOfDay % 3_600 / 60,
++                second: secondOfDay % 60,
++                nanoseconds: nanoseconds
++            )
++        else {
++            return "2001-01-01T00:00:00Z"
++        }
++
++        return ISO_8601.DateTime.Formatter.format(dateTime)
++    }
++}
+diff --git a/Sources/Plist XML/Plist.XML.swift b/Sources/Plist XML/Plist.XML.swift
+index ac24f96..2ee6b3c 100644
+--- a/Sources/Plist XML/Plist.XML.swift	
++++ b/Sources/Plist XML/Plist.XML.swift	
+@@ -2,295 +2,8 @@ import ISO_8601
+ public import Plist_Core
+ import RFC_4648
+ import XML
+-internal import Byte
+ 
+ extension Plist {
+ 
+     public enum XML {}
+ }
+-
+-extension Plist.XML {
+-
+-    public static func parse(_ string: String) throws(Plist.Error) -> Plist {
+-        let doc: XML.Document
+-        do throws(XML.Error) {
+-            doc = try XML.parse(removingDoctype(string))
+-        } catch {
+-            throw .invalidXML(message: "\(error)", line: 0, column: 0)
+-        }
+-
+-        return try parseDocument(doc)
+-    }
+-
+-    private static func removingDoctype(_ string: String) -> String {
+-        guard let declaration = string.firstRange(of: "<!DOCTYPE") else { return string }
+-
+-        var index = declaration.upperBound
+-        var depth = 0
+-        while index < string.endIndex {
+-            let character = string[index]
+-            index = string.index(after: index)
+-            if character == "[" {
+-                depth += 1
+-            } else if character == "]" {
+-                depth -= 1
+-            } else if character == ">", depth <= 0 {
+-                break
+-            }
+-        }
+-
+-        return String(string[string.startIndex..<declaration.lowerBound]) + String(string[index...])
+-    }
+-
+-    public static func parse<Bytes>(
+-        _ bytes: Bytes
+-    ) throws(Plist.Error) -> Plist
+-    where Bytes: Swift.Collection<UInt8>, Bytes: Sendable {
+-        try parse(String(decoding: bytes, as: UTF8.self))
+-    }
+-}
+-
+-extension Plist.XML {
+-    private static func parseDocument(_ doc: XML.Document) throws(Plist.Error) -> Plist {
+-        let root = doc.root
+-
+-        guard root.element.name == "plist" else {
+-            throw .unexpectedElement(expected: "plist", got: root.element.name)
+-        }
+-
+-        let children = root.children()
+-        guard let content = children.first else {
+-            throw .missingRequiredElement("plist content")
+-        }
+-
+-        return try parseElement(content)
+-    }
+-}
+-
+-extension Plist.XML {
+-    private static func parseElement(_ element: XML) throws(Plist.Error) -> Plist {
+-        let name = element.element.name
+-
+-        switch name {
+-        case "string":
+-            return Plist(.string(String(element)))
+-
+-        case "integer":
+-            let text = String(element)
+-            guard !text.isEmpty, let value = Int64(text) else {
+-                throw .typeMismatch(expected: "integer", got: text.isEmpty ? "empty" : text)
+-            }
+-            return Plist(.integer(value))
+-
+-        case "real":
+-            let text = String(element)
+-            guard !text.isEmpty, let value = Double(text) else {
+-                throw .typeMismatch(expected: "real", got: text.isEmpty ? "empty" : text)
+-            }
+-            return Plist(.real(value))
+-
+-        case "true":
+-            return Plist(.bool(true))
+-
+-        case "false":
+-            return Plist(.bool(false))
+-
+-        case "data":
+-            let text = element.text.all
+-
+-            let stripped = text.filter { !$0.isWhitespace }
+-            guard let bytes = RFC_4648.Base64.decode(stripped) else {
+-                throw .invalidBase64Data
+-            }
+-            return Plist(.data(bytes.map(\.underlying)))
+-
+-        case "date":
+-            let text = String(element)
+-            guard !text.isEmpty else {
+-                throw .invalidDateFormat("empty")
+-            }
+-            return try parseDate(text)
+-
+-        case "array":
+-            var elements: [Plist.Value] = []
+-            for child in element.children() {
+-                let parsed = try parseElement(child)
+-                elements.append(parsed.value)
+-            }
+-            return Plist(.array(elements))
+-
+-        case "dict":
+-            return try parseDictionary(element)
+-
+-        default:
+-            throw .unexpectedElement(expected: "plist element", got: name)
+-        }
+-    }
+-}
+-
+-extension Plist.XML {
+-    private static func parseDictionary(_ element: XML) throws(Plist.Error) -> Plist {
+-        var members: [(key: String, value: Plist.Value)] = []
+-        let children = element.children()
+-
+-        var index = 0
+-        while index < children.count {
+-            let keyElement = children[index]
+-
+-            guard keyElement.element.name == "key" else {
+-                throw .unexpectedElement(expected: "key", got: keyElement.element.name)
+-            }
+-
+-            let key = String(keyElement)
+-            guard !key.isEmpty else {
+-                throw .missingRequiredElement("key text")
+-            }
+-
+-            index += 1
+-
+-            guard index < children.count else {
+-                throw .missingRequiredElement("value for key '\(key)'")
+-            }
+-
+-            let valueElement = children[index]
+-            let parsedValue = try parseElement(valueElement)
+-            members.append((key: key, value: parsedValue.value))
+-
+-            index += 1
+-        }
+-
+-        return Plist(.dictionary(members))
+-    }
+-}
+-
+-extension Plist.XML {
+-
+-    @usableFromInline
+-    static let appleReferenceEpochOffset: Int = 978_307_200
+-
+-    private static func parseDate(_ text: String) throws(Plist.Error) -> Plist {
+-
+-        let dateTime: ISO_8601.DateTime
+-        do throws(ISO_8601.DateTime.Parser.Error) {
+-            dateTime = try ISO_8601.DateTime(text)
+-        } catch {
+-            throw .invalidDateFormat(text)
+-        }
+-
+-        let unixSeconds =
+-            dateTime.date.daysSinceUnixEpoch * 86_400
+-            + dateTime.hour * 3_600 + dateTime.minute * 60 + dateTime.second
+-            - dateTime.offset.seconds
+-        let nanoseconds = dateTime.nanoseconds
+-        let appleSeconds =
+-            Double(unixSeconds - appleReferenceEpochOffset)
+-            + Double(nanoseconds) / 1_000_000_000
+-
+-        return Plist(.date(appleSeconds))
+-    }
+-}
+-
+-extension Plist.XML {
+-
+-    private static let xmlDeclaration = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+-
+-    private static let doctype =
+-        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">"
+-}
+-
+-extension Plist.XML {
+-
+-    public static func serialize(_ plist: Plist, pretty: Bool = false) -> [UInt8] {
+-        let rootElement = serializeValue(plist.value)
+-        let plistElement = XML.element(
+-            "plist",
+-            attributes: [XML.Attribute(name: "version", value: "1.0")],
+-            children: [rootElement]
+-        )
+-
+-        var bytes = Array((xmlDeclaration + "\n" + doctype + "\n").utf8)
+-        bytes.append(contentsOf: plistElement.serialize.bytes(pretty: pretty))
+-        return bytes
+-    }
+-
+-    public static func serializeString(_ plist: Plist, pretty: Bool = false) -> String {
+-        String(decoding: serialize(plist, pretty: pretty), as: UTF8.self)
+-    }
+-}
+-
+-extension Plist.XML {
+-    private static func serializeValue(_ value: Plist.Value) -> XML {
+-        switch value {
+-        case .string(let text):
+-            return XML.element("string", text: text)
+-
+-        case .integer(let number):
+-            return XML.element("integer", text: String(number))
+-
+-        case .real(let number):
+-
+-            let text: String
+-            if number.truncatingRemainder(dividingBy: 1) == 0 {
+-
+-                let intPart = Int(number)
+-                text = "\(intPart).0"
+-            } else {
+-                text = String(number)
+-            }
+-            return XML.element("real", text: text)
+-
+-        case .bool(let flag):
+-            return flag ? XML.element("true") : XML.element("false")
+-
+-        case .data(let bytes):
+-            let base64 = RFC_4648.Base64.encode(bytes.lazy.map(Byte.init(bitPattern:)), padding: true)
+-            let base64String = String(decoding: base64.lazy.map(\.underlying), as: UTF8.self)
+-            return XML.element("data", text: base64String)
+-
+-        case .date(let secondsSinceRef):
+-            let text = formatDate(secondsSinceRef)
+-            return XML.element("date", text: text)
+-
+-        case .array(let elements):
+-            let children = elements.map { serializeValue($0) }
+-            return XML.element("array", children: children)
+-
+-        case .dictionary(let members):
+-            var children: [XML] = []
+-            for member in members {
+-                children.append(XML.element("key", text: member.key))
+-                children.append(serializeValue(member.value))
+-            }
+-            return XML.element("dict", children: children)
+-
+-        case .null:
+-
+-            return XML.element("string", text: "")
+-        }
+-    }
+-}
+-
+-extension Plist.XML {
+-    private static func formatDate(_ secondsSinceRef: Double) -> String {
+-
+-        let wholeSeconds = secondsSinceRef.rounded(.down)
+-        let unixSeconds = Int(wholeSeconds) + appleReferenceEpochOffset
+-        let nanoseconds = Int((secondsSinceRef - wholeSeconds) * 1_000_000_000)
+-        let secondOfDay = (unixSeconds % 86_400 + 86_400) % 86_400
+-
+-        guard
+-            let date = try? ISO_8601.CalendarDate(daysSinceUnixEpoch: (unixSeconds - secondOfDay) / 86_400),
+-            let dateTime = try? ISO_8601.DateTime(
+-                date: date,
+-                hour: secondOfDay / 3_600,
+-                minute: secondOfDay % 3_600 / 60,
+-                second: secondOfDay % 60,
+-                nanoseconds: nanoseconds
+-            )
+-        else {
+-            return "2001-01-01T00:00:00Z"
+-        }
+-
+-        return ISO_8601.DateTime.Formatter.format(dateTime)
+-    }
+-}
+diff --git a/Sources/Plist XML/exports.swift b/Sources/Plist XML/exports.swift
+index 44cb94f..e5cfd23 100644
+--- a/Sources/Plist XML/exports.swift	
++++ b/Sources/Plist XML/exports.swift	
+@@ -1,2 +1,2 @@
+-@_exported public import Plist_Core
+-@_exported public import XML
++@_exported import Plist_Core
++@_exported import XML
+diff --git a/Sources/Plist/exports.swift b/Sources/Plist/exports.swift
+index 832e67d..4ab6b45 100644
+--- a/Sources/Plist/exports.swift
++++ b/Sources/Plist/exports.swift
+@@ -1,3 +1,3 @@
+-@_exported public import Plist_Binary
+-@_exported public import Plist_Core
+-@_exported public import Plist_XML
++@_exported import Plist_Binary
++@_exported import Plist_Core
++@_exported import Plist_XML
+-- 
+2.43.0
+

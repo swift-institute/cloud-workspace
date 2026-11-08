@@ -1,0 +1,367 @@
+From ef36fd23326d86adc0643ba3a5df3c897761b837 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 07:21:15 +0000
+Subject: [PATCH 9/9] Revert Sources to origin/main: reverts had dropped Email
+ Received files (coenttb/work#242)
+
+---
+ .../Email.Received+Addresses.swift            | 120 ++++++++++++++++++
+ .../Email.Received+Attachments.swift          |  63 +++++++++
+ .../Email Received/Email.Received+Body.swift  |  38 ++++++
+ .../Email.Received+Header.swift               |  16 +++
+ .../Email.Received+Parsing.swift              |  12 ++
+ .../Email.Received.Decoding+Text.swift        |  43 +++++++
+ Sources/Email/exports.swift                   |   6 +-
+ 7 files changed, 295 insertions(+), 3 deletions(-)
+ create mode 100644 Sources/Email Received/Email.Received+Addresses.swift
+ create mode 100644 Sources/Email Received/Email.Received+Attachments.swift
+ create mode 100644 Sources/Email Received/Email.Received+Body.swift
+ create mode 100644 Sources/Email Received/Email.Received+Header.swift
+ create mode 100644 Sources/Email Received/Email.Received+Parsing.swift
+ create mode 100644 Sources/Email Received/Email.Received.Decoding+Text.swift
+
+diff --git a/Sources/Email Received/Email.Received+Addresses.swift b/Sources/Email Received/Email.Received+Addresses.swift
+new file mode 100644
+index 0000000..3c13571
+--- /dev/null
++++ b/Sources/Email Received/Email.Received+Addresses.swift	
+@@ -0,0 +1,120 @@
++#if EmailReceived
++    import Byte
++    public import Email_Standard
++    import RFC_2046
++    import RFC_5322
++
++    extension Email.Received {
++        public func addresses(_ name: String) -> [String] {
++            guard entity.fields.filter({ $0.name.lowercased() == name.lowercased() }).count == 1,
++                let raw = entity[name], let fields = Self.mailboxes(String(decoding: raw.map(\.bitPattern), as: UTF8.self))
++            else { return [] }
++            var result: [String] = []
++            for field in fields {
++                guard let address = Self.address(field), !address.contains("<"), !address.contains(">") else { return [] }
++                do throws(RFC_5322.Mailbox.Error) {
++                    result.append(try RFC_5322.Mailbox(address).address.lowercased())
++                } catch {
++                    return []
++                }
++            }
++            return result
++        }
++
++        private static func mailboxes(_ raw: String) -> [String]? {
++            var fields: [String] = []
++            var field = ""
++            var quoted = false
++            var escaped = false
++            var comments = 0
++            var angle = false
++            for character in raw {
++                if escaped {
++                    if comments == 0 { field.append(character) }
++                    escaped = false
++                    continue
++                }
++                if character == "\\", quoted || comments > 0 {
++                    if comments == 0 { field.append(character) }
++                    escaped = true
++                    continue
++                }
++                if comments > 0 {
++                    if character == "(" { comments += 1 }
++                    if character == ")" { comments -= 1 }
++                    continue
++                }
++                if character == "\"" {
++                    quoted.toggle()
++                    field.append(character)
++                    continue
++                }
++                if !quoted {
++                    if character == "(" {
++                        comments = 1
++                        continue
++                    }
++                    if character == "<" {
++                        guard !angle else { return nil }
++                        angle = true
++                    }
++                    if character == ">" {
++                        guard angle else { return nil }
++                        angle = false
++                    }
++                    if character == ",", !angle {
++                        fields.append(field)
++                        field = ""
++                        continue
++                    }
++                    if character == ":" || character == ";" { return nil }
++                }
++                field.append(character)
++            }
++            guard !quoted, !escaped, comments == 0, !angle else { return nil }
++            fields.append(field)
++            return fields
++        }
++
++        private static func address(_ field: String) -> String? {
++            var quoted = false
++            var escaped = false
++            var opening: String.Index?
++            var closing: String.Index?
++            for index in field.indices {
++                let character = field[index]
++                if escaped {
++                    escaped = false
++                    continue
++                }
++                if character == "\\", quoted {
++                    escaped = true
++                    continue
++                }
++                if character == "\"" {
++                    quoted.toggle()
++                    continue
++                }
++                if !quoted {
++                    if character == "<" {
++                        guard opening == nil else { return nil }
++                        opening = index
++                    }
++                    if character == ">" {
++                        guard closing == nil else { return nil }
++                        closing = index
++                    }
++                }
++            }
++            let value: Substring
++            if let opening, let closing {
++                guard opening < closing, field[field.index(after: closing)...].allSatisfy(\.isWhitespace) else { return nil }
++                value = field[field.index(after: opening)..<closing]
++            } else {
++                guard opening == nil, closing == nil else { return nil }
++                value = field[...]
++            }
++            return String(value.drop(while: \.isWhitespace).reversed().drop(while: \.isWhitespace).reversed())
++        }
++    }
++#endif
+diff --git a/Sources/Email Received/Email.Received+Attachments.swift b/Sources/Email Received/Email.Received+Attachments.swift
+new file mode 100644
+index 0000000..7525f69
+--- /dev/null
++++ b/Sources/Email Received/Email.Received+Attachments.swift	
+@@ -0,0 +1,63 @@
++#if EmailReceived
++    import Byte
++    public import Email_Standard
++    import RFC_2045
++    import RFC_2046
++    import RFC_2183
++    import RFC_2231
++
++    extension Email.Received {
++
++        public var undecodableAttachmentCount: Int {
++            leaves.filter { Self.isAttachment($0) && $0.content == nil }.count
++        }
++
++        public var attachments: [Email.Received.Attachment] {
++            leaves.filter(Self.isAttachment).compactMap { leaf in
++                leaf.content.map { content in
++                    Email.Received.Attachment(filename: Self.filename(leaf), contentType: leaf.contentType, content: content)
++                }
++            }
++        }
++
++        static func disposition(_ leaf: RFC_2046.Entity) -> RFC_2183.ContentDisposition? {
++            leaf["Content-Disposition"].flatMap { value in
++                do throws(RFC_2183.ContentDisposition.Error) {
++                    return try RFC_2183.ContentDisposition(ascii: value)
++                } catch {
++                    return nil
++                }
++            }
++        }
++
++        static func isAttachment(_ leaf: RFC_2046.Entity) -> Bool {
++            let disposition = Self.disposition(leaf)
++            switch (disposition?.type.rawValue.lowercased(), leaf.contentType.type.lowercased()) {
++            case ("attachment", _): return true
++            case (_, "text"): return filename(leaf) != nil && disposition != nil
++            default: return true
++            }
++        }
++
++        static func filename(_ leaf: RFC_2046.Entity) -> String? {
++            let disposition = Self.disposition(leaf)
++            let fromDisposition: [(name: String, value: String)] =
++                (disposition?.filename.map { [(name: "filename", value: $0.rawValue)] } ?? [])
++                + (disposition?.parameters.extensionParameters.map { (name: $0.key.rawValue, value: $0.value.rawValue) } ?? [])
++            let fromType = leaf.contentType.parameters.map { (name: $0.key.rawValue, value: $0.value) }
++            return parameter("filename", fromDisposition) ?? parameter("name", fromType)
++        }
++
++        static func parameter(_ name: String, _ pairs: [(name: String, value: String)]) -> String? {
++            do throws(RFC_2231.Parameter.Error) {
++                return try RFC_2231.Parameters(pairs)[name].map { parameter in
++                    Email.Received.Decoding.header(
++                        [Byte](utf8: Email.Received.Decoding.text(parameter.value, charset: parameter.charset?.rawValue))
++                    )
++                }
++            } catch {
++                return nil
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Email Received/Email.Received+Body.swift b/Sources/Email Received/Email.Received+Body.swift
+new file mode 100644
+index 0000000..fad8d90
+--- /dev/null
++++ b/Sources/Email Received/Email.Received+Body.swift	
+@@ -0,0 +1,38 @@
++#if EmailReceived
++    public import Email_Standard
++    import RFC_2045
++    import RFC_2046
++
++    extension Email.Received {
++
++        public var text: String? {
++            body("plain")
++        }
++
++        public var html: String? {
++            body("html")
++        }
++
++        var leaves: [RFC_2046.Entity] {
++            Self.leaves(entity)
++        }
++
++        static func leaves(_ entity: RFC_2046.Entity) -> [RFC_2046.Entity] {
++            switch entity.body {
++            case .discrete: [entity]
++            case .multipart(let multipart): multipart.parts.flatMap(leaves)
++            case .message(let inner): leaves(inner)
++            }
++        }
++
++        func body(_ subtype: String) -> String? {
++            leaves.first { leaf in
++                leaf.contentType.type.lowercased() == "text"
++                    && leaf.contentType.subtype.lowercased() == subtype
++                    && !Self.isAttachment(leaf)
++            }.flatMap { leaf in
++                leaf.content.map { Email.Received.Decoding.text($0, charset: leaf.contentType.charset?.rawValue) }
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Email Received/Email.Received+Header.swift b/Sources/Email Received/Email.Received+Header.swift
+new file mode 100644
+index 0000000..a666d60
+--- /dev/null
++++ b/Sources/Email Received/Email.Received+Header.swift	
+@@ -0,0 +1,16 @@
++#if EmailReceived
++    public import Email_Standard
++    import RFC_2046
++
++    extension Email.Received {
++
++        public func header(_ name: String) -> String? {
++            entity[name].map(Email.Received.Decoding.header)
++        }
++
++        public var subject: String? {
++            header("Subject")
++        }
++
++    }
++#endif
+diff --git a/Sources/Email Received/Email.Received+Parsing.swift b/Sources/Email Received/Email.Received+Parsing.swift
+new file mode 100644
+index 0000000..ff3ffbc
+--- /dev/null
++++ b/Sources/Email Received/Email.Received+Parsing.swift	
+@@ -0,0 +1,12 @@
++#if EmailReceived
++    public import Byte
++    public import Email_Standard
++    import RFC_2046
++
++    extension Email.Received {
++
++        public init(_ bytes: some Swift::Collection<Byte>) {
++            self.init(entity: RFC_2046.Entity(binary: bytes))
++        }
++    }
++#endif
+diff --git a/Sources/Email Received/Email.Received.Decoding+Text.swift b/Sources/Email Received/Email.Received.Decoding+Text.swift
+new file mode 100644
+index 0000000..6bd6bf6
+--- /dev/null
++++ b/Sources/Email Received/Email.Received.Decoding+Text.swift	
+@@ -0,0 +1,43 @@
++#if EmailReceived
++    import ASCII
++    import Byte
++    import Email_Standard
++    import RFC_2045
++    import RFC_2047
++    import RFC_2231
++    import WHATWG_Encoding
++
++    extension Email.Received.Decoding {
++
++        static func text(_ octets: [Byte], charset: String?) -> String {
++            switch charset.flatMap(WHATWG_Encoding.Encoding.init(label:)) {
++            case let encoding?: encoding.decode(octets)
++            case nil: raw(octets)
++            }
++        }
++
++        static func raw(_ octets: [Byte]) -> String {
++            let utf8 = WHATWG_Encoding.Encoding.utf8.decode(octets)
++            return utf8.unicodeScalars.contains("\u{FFFD}") ? WHATWG_Encoding.Encoding.windows1252.decode(octets) : utf8
++        }
++
++        static func header(_ value: [Byte]) -> String {
++            RFC_2047.Text(value).segments.map { segment in
++                switch segment {
++                case .text(let octets):
++                    raw(octets)
++                case .word(let word):
++                    Self.word(word)
++                }
++            }.joined()
++        }
++
++        static func word(_ word: RFC_2047.EncodedWord) -> String {
++            do throws(RFC_2047.EncodedWord.Error) {
++                return text(try word.octets, charset: RFC_2231.Charset(word.charset).name.rawValue)
++            } catch {
++                return String(decoding: word.text.map(\.byte.bitPattern), as: UTF8.self)
++            }
++        }
++    }
++#endif
+diff --git a/Sources/Email/exports.swift b/Sources/Email/exports.swift
+index 3112925..95b5b3a 100644
+--- a/Sources/Email/exports.swift
++++ b/Sources/Email/exports.swift
+@@ -1,6 +1,6 @@
+-@_exported public import Dependencies
+-@_exported public import Email_Standard
+-@_exported public import HTML
++@_exported import Dependencies
++@_exported import Email_Standard
++@_exported import HTML
+ 
+ #if TRANSLATING
+     @_exported import Translating
+-- 
+2.43.0
+

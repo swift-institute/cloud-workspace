@@ -1,0 +1,406 @@
+From 51d300ce17d985192e56fb30b9f2c7222401a1a2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 07:06:22 +0000
+Subject: [PATCH 20/21] Revert Sources/SQL Macros Implementation to
+ origin/main: macro targets aren't type-checkable outside the build
+ (coenttb/work#242)
+
+---
+ .../SQL Macros Implementation/BindMacro.swift |   6 +-
+ .../ColumnCheckMacro.swift                    | 177 ++++++++----------
+ .../ColumnMacro.swift                         |   6 +-
+ .../EphemeralMacro.swift                      |   6 +-
+ .../Internal/ExprSyntax.swift                 |  12 +-
+ .../Internal/MemberwiseInitializer.swift      |  25 ++-
+ .../SQL Macros Implementation/Plugin.swift    |   2 +-
+ .../TableMacro.swift                          |  14 +-
+ 8 files changed, 115 insertions(+), 133 deletions(-)
+
+diff --git a/Sources/SQL Macros Implementation/BindMacro.swift b/Sources/SQL Macros Implementation/BindMacro.swift
+index e7f2c47..b699026 100644
+--- a/Sources/SQL Macros Implementation/BindMacro.swift	
++++ b/Sources/SQL Macros Implementation/BindMacro.swift	
+@@ -3,9 +3,6 @@ import SwiftSyntaxBuilder
+ public import SwiftSyntaxMacros
+ 
+ public enum BindMacro: ExpressionMacro {
+-}
+-
+-extension BindMacro {
+     public static func expansion<N: FreestandingMacroExpansionSyntax, C: MacroExpansionContext>(
+         of node: N,
+         in context: C
+@@ -13,4 +10,5 @@ extension BindMacro {
+         guard let argument = node.arguments.first?.expression else { fatalError() }
+         let `as` = node.arguments.dropFirst().first
+         return "\(moduleName)::BindQueryExpression(\(argument)\(raw: `as`.map { ", \($0)" } ?? ""))"
+-    }}
++    }
++}
+diff --git a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift
+index e3ee28f..dcf4902 100644
+--- a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
++++ b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
+@@ -4,19 +4,44 @@ import SwiftSyntaxBuilder
+ package import SwiftSyntaxMacros
+ 
+ package enum ColumnCheckPassMacro: PeerMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        []
++    }
+ }
+ 
+ package enum ColumnCheckFailMacro: PeerMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        diagnoseUnrepresentableColumn(of: node, on: declaration, suggesting: .none, in: context)
++        return []
++    }
+ }
+ 
+ package enum ColumnCheckFailRawRepresentableMacro: PeerMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        diagnoseUnrepresentableColumn(
++            of: node,
++            on: declaration,
++            suggesting: .rawRepresentation,
++            in: context
++        )
++        return []
++    }
+ }
+ 
+ #if CasePaths
+     package enum CaseCheckFailMacro: PeerMacro {
+-    }
+-
+-    extension CaseCheckFailMacro {
+         package static func expansion(
+             of node: AttributeSyntax,
+             providingPeersOf declaration: some DeclSyntaxProtocol,
+@@ -60,6 +85,61 @@ package enum ColumnCheckFailRawRepresentableMacro: PeerMacro {
+ #endif
+ 
+ package enum ColumnCheckGroupMacro: PeerMacro {
++    package static func expansion(
++        of node: AttributeSyntax,
++        providingPeersOf declaration: some DeclSyntaxProtocol,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        guard let property = declaration.as(VariableDeclSyntax.self) else { return [] }
++        for attribute in property.attributes {
++            guard
++                let attribute = attribute.as(AttributeSyntax.self),
++                let attributeName = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name
++                    .text,
++                attributeName == "Column",
++                case .argumentList(let arguments) = attribute.arguments
++            else { continue }
++
++            for argumentIndex in arguments.indices {
++                let argument = arguments[argumentIndex]
++                let message: String
++                switch argument.label?.text {
++                case nil:
++                    message = "Column name cannot be applied to a column group"
++                case "generated":
++                    message = "Argument 'generated' cannot be applied to a column group"
++                default:
++                    continue
++                }
++                var newAttribute = attribute
++                var newArguments = arguments
++                newArguments.remove(at: argumentIndex)
++                if newArguments.isEmpty {
++                    newAttribute.leftParen = nil
++                    newAttribute.arguments = nil
++                    newAttribute.rightParen = nil
++                } else {
++                    newArguments[newArguments.index(before: newArguments.endIndex)].trailingComma =
++                        nil
++                    newAttribute.arguments = .argumentList(newArguments)
++                }
++                context.diagnose(
++                    Diagnostic(
++                        node: argument,
++                        message: MacroExpansionErrorMessage(message),
++                        fixIt: .replace(
++                            message: MacroExpansionFixItMessage(
++                                "Remove '\(argument.trimmed.with(\.trailingComma, nil))'"
++                            ),
++                            oldNode: attribute,
++                            newNode: newAttribute
++                        )
++                    )
++                )
++            }
++        }
++        return []
++    }
+ }
+ 
+ private enum UnrepresentableSuggestion {
+@@ -188,94 +268,3 @@ extension DeclSyntaxProtocol {
+         return DeclSyntax(self)
+     }
+ }
+-
+-extension ColumnCheckPassMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        []
+-    }}
+-
+-extension ColumnCheckFailMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        diagnoseUnrepresentableColumn(of: node, on: declaration, suggesting: .none, in: context)
+-        return []
+-    }}
+-
+-extension ColumnCheckFailRawRepresentableMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        diagnoseUnrepresentableColumn(
+-            of: node,
+-            on: declaration,
+-            suggesting: .rawRepresentation,
+-            in: context
+-        )
+-        return []
+-    }}
+-
+-extension ColumnCheckGroupMacro {
+-    package static func expansion(
+-        of node: AttributeSyntax,
+-        providingPeersOf declaration: some DeclSyntaxProtocol,
+-        in context: some MacroExpansionContext
+-    ) throws -> [DeclSyntax] {
+-        guard let property = declaration.as(VariableDeclSyntax.self) else { return [] }
+-        for attribute in property.attributes {
+-            guard
+-                let attribute = attribute.as(AttributeSyntax.self),
+-                let attributeName = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name
+-                    .text,
+-                attributeName == "Column",
+-                case .argumentList(let arguments) = attribute.arguments
+-            else { continue }
+-
+-            for argumentIndex in arguments.indices {
+-                let argument = arguments[argumentIndex]
+-                let message: String
+-                switch argument.label?.text {
+-                case nil:
+-                    message = "Column name cannot be applied to a column group"
+-                case "generated":
+-                    message = "Argument 'generated' cannot be applied to a column group"
+-                default:
+-                    continue
+-                }
+-                var newAttribute = attribute
+-                var newArguments = arguments
+-                newArguments.remove(at: argumentIndex)
+-                if newArguments.isEmpty {
+-                    newAttribute.leftParen = nil
+-                    newAttribute.arguments = nil
+-                    newAttribute.rightParen = nil
+-                } else {
+-                    newArguments[newArguments.index(before: newArguments.endIndex)].trailingComma =
+-                        nil
+-                    newAttribute.arguments = .argumentList(newArguments)
+-                }
+-                context.diagnose(
+-                    Diagnostic(
+-                        node: argument,
+-                        message: MacroExpansionErrorMessage(message),
+-                        fixIt: .replace(
+-                            message: MacroExpansionFixItMessage(
+-                                "Remove '\(argument.trimmed.with(\.trailingComma, nil))'"
+-                            ),
+-                            oldNode: attribute,
+-                            newNode: newAttribute
+-                        )
+-                    )
+-                )
+-            }
+-        }
+-        return []
+-    }}
+diff --git a/Sources/SQL Macros Implementation/ColumnMacro.swift b/Sources/SQL Macros Implementation/ColumnMacro.swift
+index 69e18fb..5cdff49 100644
+--- a/Sources/SQL Macros Implementation/ColumnMacro.swift	
++++ b/Sources/SQL Macros Implementation/ColumnMacro.swift	
+@@ -2,13 +2,11 @@ public import SwiftSyntax
+ public import SwiftSyntaxMacros
+ 
+ public enum ColumnMacro: PeerMacro {
+-}
+-
+-extension ColumnMacro {
+     public static func expansion<D: DeclSyntaxProtocol, C: MacroExpansionContext>(
+         of node: AttributeSyntax,
+         providingPeersOf declaration: D,
+         in context: C
+     ) throws -> [DeclSyntax] {
+         []
+-    }}
++    }
++}
+diff --git a/Sources/SQL Macros Implementation/EphemeralMacro.swift b/Sources/SQL Macros Implementation/EphemeralMacro.swift
+index 998c944..4058b23 100644
+--- a/Sources/SQL Macros Implementation/EphemeralMacro.swift	
++++ b/Sources/SQL Macros Implementation/EphemeralMacro.swift	
+@@ -2,13 +2,11 @@ public import SwiftSyntax
+ public import SwiftSyntaxMacros
+ 
+ public enum EphemeralMacro: PeerMacro {
+-}
+-
+-extension EphemeralMacro {
+     public static func expansion<D: DeclSyntaxProtocol, C: MacroExpansionContext>(
+         of node: AttributeSyntax,
+         providingPeersOf declaration: D,
+         in context: C
+     ) throws -> [DeclSyntax] {
+         []
+-    }}
++    }
++}
+diff --git a/Sources/SQL Macros Implementation/Internal/ExprSyntax.swift b/Sources/SQL Macros Implementation/Internal/ExprSyntax.swift
+index 3db015d..850bfc3 100644
+--- a/Sources/SQL Macros Implementation/Internal/ExprSyntax.swift	
++++ b/Sources/SQL Macros Implementation/Internal/ExprSyntax.swift	
+@@ -4,16 +4,16 @@ import SwiftSyntaxBuilder
+ 
+ extension ExprSyntax {
+     var literalType: TypeSyntax? {
+-        return if self.is(BooleanLiteralExprSyntax.self) {
+-            "Swift.Bool"
++        if self.is(BooleanLiteralExprSyntax.self) {
++            return "Swift.Bool"
+         } else if self.is(FloatLiteralExprSyntax.self) {
+-            "Swift.Double"
++            return "Swift.Double"
+         } else if self.is(IntegerLiteralExprSyntax.self) {
+-            "Swift.Int"
++            return "Swift.Int"
+         } else if self.is(StringLiteralExprSyntax.self) {
+-            "Swift.String"
++            return "Swift.String"
+         } else {
+-            nil
++            return nil
+         }
+     }
+ 
+diff --git a/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift b/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift
+index 773f531..215179c 100644
+--- a/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift	
++++ b/Sources/SQL Macros Implementation/Internal/MemberwiseInitializer.swift	
+@@ -51,6 +51,18 @@ struct MemberwiseInitializer {
+             assignments.append("self.\(identifier.text) = \(identifier.text)")
+         }
+     }
++
++    var declaration: DeclSyntax {
++        guard !parameters.isEmpty
++        else { return "\(TokenSyntax.keyword(access)) init() {\n}" }
++        return """
++            \(TokenSyntax.keyword(access)) init(
++            \(raw: parameters.joined(separator: ",\n"))
++            ) {
++            \(raw: assignments.joined(separator: "\n"))
++            }
++            """
++    }
+ }
+ 
+ extension ExprSyntax {
+@@ -74,16 +86,3 @@ extension TypeSyntax {
+             || self.as(AttributedTypeSyntax.self)?.baseType.is(FunctionTypeSyntax.self) == true
+     }
+ }
+-
+-extension MemberwiseInitializer {
+-    var declaration: DeclSyntax {
+-        guard !parameters.isEmpty
+-        else { return "\(TokenSyntax.keyword(access)) init() {\n}" }
+-        return """
+-            \(TokenSyntax.keyword(access)) init(
+-            \(raw: parameters.joined(separator: ",\n"))
+-            ) {
+-            \(raw: assignments.joined(separator: "\n"))
+-            }
+-            """
+-    }}
+diff --git a/Sources/SQL Macros Implementation/Plugin.swift b/Sources/SQL Macros Implementation/Plugin.swift
+index e9909bf..aab2b83 100644
+--- a/Sources/SQL Macros Implementation/Plugin.swift	
++++ b/Sources/SQL Macros Implementation/Plugin.swift	
+@@ -2,7 +2,7 @@ import SwiftCompilerPlugin
+ import SwiftSyntaxMacros
+ 
+ @main
+-fileprivate struct SQLPlugin: CompilerPlugin {
++struct SQLPlugin: CompilerPlugin {
+     let providingMacros: [any Macro.Type] =
+         [
+             BindMacro.self,
+diff --git a/Sources/SQL Macros Implementation/TableMacro.swift b/Sources/SQL Macros Implementation/TableMacro.swift
+index ed132bc..fa5e4b4 100644
+--- a/Sources/SQL Macros Implementation/TableMacro.swift	
++++ b/Sources/SQL Macros Implementation/TableMacro.swift	
+@@ -616,10 +616,10 @@ extension TableMacro: ExtensionMacro {
+                     """
+                 )
+                 let caseArgumentLabel: String
+-                caseArgumentLabel = if let firstName = parameter.firstName, firstName.tokenKind != .wildcard {
+-                    "\(firstName.text.trimmingBackticks()): "
++                if let firstName = parameter.firstName, firstName.tokenKind != .wildcard {
++                    caseArgumentLabel = "\(firstName.text.trimmingBackticks()): "
+                 } else {
+-                    ""
++                    caseArgumentLabel = ""
+                 }
+                 decodingAssignments.append(
+                     """
+@@ -1574,12 +1574,12 @@ extension TableMacro: MemberAttributeMacro {
+         }
+ 
+         let checkAttribute: [AttributeSyntax]
+-        checkAttribute = if let columnType {
+-            ["@\(macrosModuleName)::ColumnCheck(\(columnType.trimmed).self)"]
++        if let columnType {
++            checkAttribute = ["@\(macrosModuleName)::ColumnCheck(\(columnType.trimmed).self)"]
+         } else if let initializer = binding.initializer {
+-            ["@\(macrosModuleName)::ColumnCheck(\(initializer.value.trimmed))"]
++            checkAttribute = ["@\(macrosModuleName)::ColumnCheck(\(initializer.value.trimmed))"]
+         } else {
+-            []
++            checkAttribute = []
+         }
+         return checkAttribute
+     }
+-- 
+2.43.0
+
