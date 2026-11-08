@@ -1,0 +1,173 @@
+From 823db58739b27f1ab6f5060e6372ad09a4c28085 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:13 +0000
+Subject: [PATCH 12/12] extension file naming: member-only extension files
+ merged into the extended type's own file (type-check follows; Linux x86_64,
+ Swift 6.4.2) (coenttb/work#242)
+
+---
+ ...nel.File.Flush+CrossPlatform.Windows.swift | 18 --------
+ Sources/Kernel File/Kernel.File.Flush.swift   | 19 ++++++++
+ Sources/Kernel File/Kernel.File.Open.swift    | 42 ------------------
+ Sources/Kernel File/Kernel.File.swift         | 43 +++++++++++++++++++
+ 4 files changed, 62 insertions(+), 60 deletions(-)
+ delete mode 100644 Sources/Kernel File/Kernel.File.Flush+CrossPlatform.Windows.swift
+ delete mode 100644 Sources/Kernel File/Kernel.File.Open.swift
+
+diff --git a/Sources/Kernel File/Kernel.File.Flush+CrossPlatform.Windows.swift b/Sources/Kernel File/Kernel.File.Flush+CrossPlatform.Windows.swift
+deleted file mode 100644
+index bcd39d4..0000000
+--- a/Sources/Kernel File/Kernel.File.Flush+CrossPlatform.Windows.swift	
++++ /dev/null
+@@ -1,18 +0,0 @@
+-#if os(Windows)
+-
+-    public import Path
+-
+-    extension Kernel.File.Flush {
+-
+-        @inlinable
+-        public static func data(_ descriptor: borrowing Kernel.Descriptor) throws(Error) {
+-            try Windows.`32`.Kernel.File.Flush.flush(descriptor)
+-        }
+-
+-        @inlinable
+-        public static func directory(path: borrowing Path.Borrowed) throws(Error) {
+-            _ = path
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Kernel File/Kernel.File.Flush.swift b/Sources/Kernel File/Kernel.File.Flush.swift
+index 27fa508..3f762b2 100644
+--- a/Sources/Kernel File/Kernel.File.Flush.swift	
++++ b/Sources/Kernel File/Kernel.File.Flush.swift	
+@@ -10,3 +10,22 @@
+     }
+ 
+ #endif
++
++#if os(Windows)
++
++    public import Path
++
++    extension Kernel.File.Flush {
++
++        @inlinable
++        public static func data(_ descriptor: borrowing Kernel.Descriptor) throws(Error) {
++            try Windows.`32`.Kernel.File.Flush.flush(descriptor)
++        }
++
++        @inlinable
++        public static func directory(path: borrowing Path.Borrowed) throws(Error) {
++            _ = path
++        }
++    }
++
++#endif
+diff --git a/Sources/Kernel File/Kernel.File.Open.swift b/Sources/Kernel File/Kernel.File.Open.swift
+deleted file mode 100644
+index e656cf0..0000000
+--- a/Sources/Kernel File/Kernel.File.Open.swift	
++++ /dev/null
+@@ -1,42 +0,0 @@
+-public import Path
+-
+-extension Kernel.File {
+-
+-    public static func open(
+-        _ path: borrowing Path.Borrowed,
+-        configuration: Open.Configuration = .init()
+-    ) throws(Open.Error) -> Handle {
+-
+-        let requirements = Direct.Requirements(path)
+-
+-        let resolved: Direct.Mode.Resolved
+-        do throws(Kernel.File.Direct.Error) {
+-            resolved = try configuration.cache.resolve(given: requirements)
+-        } catch {
+-
+-            resolved = .buffered
+-        }
+-
+-        var kernelOptions: Open.Options = []
+-        if configuration.create { kernelOptions.insert(.create) }
+-        if configuration.truncate { kernelOptions.insert(.truncate) }
+-        #if os(Linux)
+-            if resolved == .direct { kernelOptions.insert(.direct) }
+-        #elseif os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+-            if resolved == .direct { kernelOptions.insert(.noCache) }
+-        #endif
+-
+-        let descriptor = try Open.open(
+-            path: path,
+-            mode: configuration.mode,
+-            options: kernelOptions,
+-            permissions: .standard
+-        )
+-
+-        return Handle(
+-            descriptor: descriptor,
+-            mode: resolved,
+-            requirements: requirements
+-        )
+-    }
+-}
+diff --git a/Sources/Kernel File/Kernel.File.swift b/Sources/Kernel File/Kernel.File.swift
+index 732de6d..27121e1 100644
+--- a/Sources/Kernel File/Kernel.File.swift	
++++ b/Sources/Kernel File/Kernel.File.swift	
+@@ -1,3 +1,5 @@
++public import Path
++
+ #if os(Windows)
+ 
+     public import Windows_Kernel_File
+@@ -8,3 +10,44 @@
+     }
+ 
+ #endif
++
++extension Kernel.File {
++
++    public static func open(
++        _ path: borrowing Path.Borrowed,
++        configuration: Open.Configuration = .init()
++    ) throws(Open.Error) -> Handle {
++
++        let requirements = Direct.Requirements(path)
++
++        let resolved: Direct.Mode.Resolved
++        do throws(Kernel.File.Direct.Error) {
++            resolved = try configuration.cache.resolve(given: requirements)
++        } catch {
++
++            resolved = .buffered
++        }
++
++        var kernelOptions: Open.Options = []
++        if configuration.create { kernelOptions.insert(.create) }
++        if configuration.truncate { kernelOptions.insert(.truncate) }
++        #if os(Linux)
++            if resolved == .direct { kernelOptions.insert(.direct) }
++        #elseif os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
++            if resolved == .direct { kernelOptions.insert(.noCache) }
++        #endif
++
++        let descriptor = try Open.open(
++            path: path,
++            mode: configuration.mode,
++            options: kernelOptions,
++            permissions: .standard
++        )
++
++        return Handle(
++            descriptor: descriptor,
++            mode: resolved,
++            requirements: requirements
++        )
++    }
++}
+-- 
+2.43.0
+

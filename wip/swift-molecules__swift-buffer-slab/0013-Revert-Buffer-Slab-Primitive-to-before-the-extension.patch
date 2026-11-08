@@ -1,0 +1,205 @@
+From 286e37f50dee9545fbe217a958df83800b8c0504 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:49:05 +0000
+Subject: [PATCH 13/13] Revert Buffer Slab Primitive to before the
+ extension-file renames and merges: type-check (coenttb/work#242)
+
+---
+ .../Buffer.Slab+Store ~Copyable.swift         | 73 +++++++++++++++++++
+ .../Buffer.Slab+Subscript.swift               | 34 +++++++++
+ .../Buffer.Slab+clone.swift                   | 23 ++++++
+ ... Buffer.Slab+forEach Property.Inout.swift} |  0
+ .../Buffer Slab Primitive/Buffer.Slab.swift   | 21 ------
+ 5 files changed, 130 insertions(+), 21 deletions(-)
+ create mode 100644 Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift
+ create mode 100644 Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift
+ create mode 100644 Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift
+ rename Sources/Buffer Slab Primitive/{Property.Borrow.swift => Buffer.Slab+forEach Property.Inout.swift} (100%)
+
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift
+new file mode 100644
+index 0000000..1fff1e6
+--- /dev/null
++++ b/Sources/Buffer Slab Primitive/Buffer.Slab+Store ~Copyable.swift	
+@@ -0,0 +1,73 @@
++import Affine
++public import Bit_Vector_Bounded
++import Growth
++public import Index
++import Ordinal
++import Storage
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public static func insert(
++        _ element: consuming S.Element,
++        at slot: Index::Index<Bit::Bit>,
++        header: inout Header,
++        storage: inout S
++    ) {
++        storage.initialize(at: slot.retag(S.Element.self), to: consume element)
++        header.bitmap[slot] = true
++    }
++
++    @inlinable
++    public static func remove(
++        at slot: Index::Index<Bit::Bit>,
++        header: inout Header,
++        storage: inout S
++    ) -> S.Element {
++        let element = storage.move(at: slot.retag(S.Element.self))
++        header.bitmap[slot] = false
++        return element
++    }
++
++    @inlinable
++    public static func update(
++        at slot: Index::Index<Bit::Bit>,
++        with element: consuming S.Element,
++        storage: inout S
++    ) -> S.Element {
++        let storageIndex = slot.retag(S.Element.self)
++        let old = storage.move(at: storageIndex)
++        storage.initialize(at: storageIndex, to: consume element)
++        return old
++    }
++
++    @inlinable
++    public static func forEachOccupied(
++        header: borrowing Header,
++        storage: borrowing S,
++        _ body: (Index<S.Element>) -> Void
++    ) {
++        header.bitmap.ones.forEach { bitIndex in
++            body(bitIndex.retag(S.Element.self))
++        }
++    }
++
++    @inlinable
++    public static func firstVacant(
++        header: borrowing Header
++    ) -> Index::Index<Bit::Bit>? {
++        header.firstVacant(max: header.bitmap.capacity.maximum)
++    }
++
++    @inlinable
++    public static func deinitializeAll(
++        header: inout Header,
++        storage: inout S
++    ) {
++        header.bitmap.ones.forEach { bitIndex in
++
++            _ = storage.move(at: bitIndex.retag(S.Element.self))
++            header.bitmap[bitIndex] = false
++        }
++    }
++}
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift
+new file mode 100644
+index 0000000..b2863dc
+--- /dev/null
++++ b/Sources/Buffer Slab Primitive/Buffer.Slab+Subscript.swift	
+@@ -0,0 +1,34 @@
++import Affine
++public import Bit_Vector_Bounded
++import Growth
++public import Index
++import Ordinal
++import Storage
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public var capacity: Tagged<Bit, Cardinal> {
++        header.bitmap.capacity.maximum
++    }
++}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public subscript(slot: Index::Index<Bit::Bit>) -> S.Element {
++        _read {
++            yield storage[slot.retag(S.Element.self)]
++        }
++    }
++}
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public var forEach: Property<Sequence.ForEach, Self>.Borrow {
++        _read {
++            yield Property<Sequence.ForEach, Self>.Borrow(self)
++        }
++    }
++}
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift
+new file mode 100644
+index 0000000..f3aa703
+--- /dev/null
++++ b/Sources/Buffer Slab Primitive/Buffer.Slab+clone.swift	
+@@ -0,0 +1,23 @@
++import Affine
++public import Bit_Vector_Bounded
++import Index
++public import Memory_Allocator
++public import Memory_Allocator_Protocol
++import Ordinal
++public import Storage
++
++extension Buffer.Slab where S: ~Copyable {
++
++    @inlinable
++    public func clone<E, Resource: Memory.Growable & ~Copyable>() -> Self
++    where S == Storage<Memory.Allocator<Resource>>.Contiguous<E>, E: Copyable {
++        let capacity = storage.capacity
++        var fresh = S.create(minimumCapacity: capacity)
++        header.bitmap.ones.forEach { bitIndex in
++            let index = bitIndex.retag(E.self)
++            let element = storage[index]
++            fresh.initialize(at: index, to: element)
++        }
++        return Self(header: header, storage: fresh)
++    }
++}
+diff --git a/Sources/Buffer Slab Primitive/Property.Borrow.swift b/Sources/Buffer Slab Primitive/Buffer.Slab+forEach Property.Inout.swift
+similarity index 100%
+rename from Sources/Buffer Slab Primitive/Property.Borrow.swift
+rename to Sources/Buffer Slab Primitive/Buffer.Slab+forEach Property.Inout.swift
+diff --git a/Sources/Buffer Slab Primitive/Buffer.Slab.swift b/Sources/Buffer Slab Primitive/Buffer.Slab.swift
+index a4cd057..b25e467 100644
+--- a/Sources/Buffer Slab Primitive/Buffer.Slab.swift	
++++ b/Sources/Buffer Slab Primitive/Buffer.Slab.swift	
+@@ -19,27 +19,6 @@ extension Buffer where S: Store.`Protocol`, S: ~Copyable {
+ }
+ 
+ extension Buffer.Slab where S: ~Copyable {
+-
+-    @usableFromInline
+-    internal final class Box {
+-        @usableFromInline
+-        internal var header: Header
+-
+-        @usableFromInline
+-        internal var storage: S
+-
+-        @usableFromInline
+-        internal init(header: Header, storage: consuming S) {
+-            self.header = header
+-            self.storage = storage
+-        }
+-
+-        deinit {
+-            header.bitmap.ones.forEach { bitIndex in
+-                _ = storage.move(at: bitIndex.retag(S.Element.self))
+-            }
+-        }
+-    }
+ }
+ 
+ extension Buffer.Slab where S: ~Copyable {
+-- 
+2.43.0
+

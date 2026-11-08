@@ -1,0 +1,205 @@
+From 08fd2b7695c378c5be108defcc7e1d7b3937bc40 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:43:20 +0000
+Subject: [PATCH 29/32] Revert Sources/Type Algebra
+ Syntax/Type.Syntax.Mapping.swift: it broke the root build (coenttb/work#242)
+
+---
+ .../Type.Syntax.Mapping.swift                 | 171 +++++++++---------
+ 1 file changed, 84 insertions(+), 87 deletions(-)
+
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift b/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift
+index 78fc2aa..5d0bcbb 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift	
+@@ -3,103 +3,100 @@ public import Type_Algebra
+ 
+ extension Type.Syntax {
+     public enum Mapping {
+-    }
+-}
+-
+-extension Type.Syntax.Mapping {
+-    public static func apply(
+-        _ type: Expression,
+-        to value: String,
+-        forward: [String: String],
+-        backward: [String: String] = [:],
+-        depth: Int = 0
+-    ) throws -> String {
+-        let plan = try Type.Mapping.derive(
+-            type.algebra,
+-            forward: Set(forward.keys.map(Type.Variable.init)),
+-            backward: Set(backward.keys.map(Type.Variable.init))
+-        )
+-        return try emit(
+-            plan,
+-            shape: type,
+-            value: value,
+-            forward: forward,
+-            backward: backward,
+-            depth: depth
+-        )
+-    }
++        public static func apply(
++            _ type: Expression,
++            to value: String,
++            forward: [String: String],
++            backward: [String: String] = [:],
++            depth: Int = 0
++        ) throws -> String {
++            let plan = try Type.Mapping.derive(
++                type.algebra,
++                forward: Set(forward.keys.map(Type.Variable.init)),
++                backward: Set(backward.keys.map(Type.Variable.init))
++            )
++            return try emit(
++                plan,
++                shape: type,
++                value: value,
++                forward: forward,
++                backward: backward,
++                depth: depth
++            )
++        }
+ 
+-    private static func emit(
+-        _ plan: Type.Mapping,
+-        shape: Expression,
+-        value: String,
+-        forward: [String: String],
+-        backward: [String: String],
+-        depth: Int
+-    ) throws -> String {
+-        switch (plan, shape) {
+-        case (.identity, _): return value
+-        case (.transform(let variable, let direction), _):
+-            guard let transform = (direction == .forward ? forward : backward)[variable.name]
+-            else {
+-                throw Type.Failure("missing Swift representation of a mapping")
+-            }
+-            return "\(transform)(\(value))"
+-        case (.list(let child), .array(let element)):
+-            let variable = "element\(depth)"
+-            return
+-                "(\(value)).map { \(variable) in \(try emit(child, shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
+-        case (.sum(let children), .optional(let element)):
+-            guard children.count == 2 else {
+-                throw Type.Failure("optional mapping must have two alternatives")
+-            }
+-            let variable = "element\(depth)"
+-            return
+-                "(\(value)).map { \(variable) in \(try emit(children[1], shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
+-        case (.product(let children), .tuple(let coordinates)):
+-            guard children.count == coordinates.count else {
+-                throw Type.Failure("tuple mapping arity mismatch")
+-            }
+-            let fields = try coordinates.enumerated().map { index, coordinate in
+-                let label = coordinate.label.map { $0 == "_" ? "" : "\($0): " } ?? ""
+-                return label
+-                    + (try emit(
++        private static func emit(
++            _ plan: Type.Mapping,
++            shape: Expression,
++            value: String,
++            forward: [String: String],
++            backward: [String: String],
++            depth: Int
++        ) throws -> String {
++            switch (plan, shape) {
++            case (.identity, _): return value
++            case (.transform(let variable, let direction), _):
++                guard let transform = (direction == .forward ? forward : backward)[variable.name]
++                else {
++                    throw Type.Failure("missing Swift representation of a mapping")
++                }
++                return "\(transform)(\(value))"
++            case (.list(let child), .array(let element)):
++                let variable = "element\(depth)"
++                return
++                    "(\(value)).map { \(variable) in \(try emit(child, shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
++            case (.sum(let children), .optional(let element)):
++                guard children.count == 2 else {
++                    throw Type.Failure("optional mapping must have two alternatives")
++                }
++                let variable = "element\(depth)"
++                return
++                    "(\(value)).map { \(variable) in \(try emit(children[1], shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
++            case (.product(let children), .tuple(let coordinates)):
++                guard children.count == coordinates.count else {
++                    throw Type.Failure("tuple mapping arity mismatch")
++                }
++                let fields = try coordinates.enumerated().map { index, coordinate in
++                    let label = coordinate.label.map { $0 == "_" ? "" : "\($0): " } ?? ""
++                    return label
++                        + (try emit(
++                            children[index],
++                            shape: coordinate.type,
++                            value: "(\(value)).\(index)",
++                            forward: forward,
++                            backward: backward,
++                            depth: depth + 1
++                        ))
++                }
++                return "(\(fields.joined(separator: ", ")))"
++            case (.exponential(let domain, let codomain), .arrow(let inputs, let output)):
++                guard case .product(let children) = domain, children.count == inputs.count else {
++                    throw Type.Failure("function mapping arity mismatch")
++                }
++                let arguments = inputs.indices.map { "argument\(depth)_\($0)" }
++                let mapped = try inputs.enumerated().map { index, input in
++                    try emit(
+                         children[index],
+-                        shape: coordinate.type,
+-                        value: "(\(value)).\(index)",
++                        shape: input,
++                        value: arguments[index],
+                         forward: forward,
+                         backward: backward,
+                         depth: depth + 1
+-                    ))
+-            }
+-            return "(\(fields.joined(separator: ", ")))"
+-        case (.exponential(let domain, let codomain), .arrow(let inputs, let output)):
+-            guard case .product(let children) = domain, children.count == inputs.count else {
+-                throw Type.Failure("function mapping arity mismatch")
+-            }
+-            let arguments = inputs.indices.map { "argument\(depth)_\($0)" }
+-            let mapped = try inputs.enumerated().map { index, input in
+-                try emit(
+-                    children[index],
+-                    shape: input,
+-                    value: arguments[index],
++                    )
++                }
++                let call = "(\(value))(\(mapped.joined(separator: ", ")))"
++                let result = try emit(
++                    codomain,
++                    shape: output,
++                    value: call,
+                     forward: forward,
+                     backward: backward,
+                     depth: depth + 1
+                 )
++                return
++                    "{ \(arguments.isEmpty ? "" : arguments.joined(separator: ", ") + " in ")\(result) }"
++            default: throw Type.Failure("Swift representation does not match the derived mapping")
+             }
+-            let call = "(\(value))(\(mapped.joined(separator: ", ")))"
+-            let result = try emit(
+-                codomain,
+-                shape: output,
+-                value: call,
+-                forward: forward,
+-                backward: backward,
+-                depth: depth + 1
+-            )
+-            return
+-                "{ \(arguments.isEmpty ? "" : arguments.joined(separator: ", ") + " in ")\(result) }"
+-        default: throw Type.Failure("Swift representation does not match the derived mapping")
+         }
+     }
+ }
+-- 
+2.43.0
+

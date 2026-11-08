@@ -1,0 +1,452 @@
+From a362be2548c6769cb70738ebf895f29deb903973 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:10 +0000
+Subject: [PATCH 14/14] extension file naming: member-only extension files
+ merged into the extended type's own file (type-check follows; Linux x86_64,
+ Swift 6.4.2) (coenttb/work#242)
+
+---
+ Sources/Serializer/Either/Builder.swift       |  64 +++++++++
+ Sources/Serializer/Lazy/Builder+Lazy.swift    |  21 ---
+ Sources/Serializer/Map/Serializing.swift      | 129 ++++++++++++++++++
+ .../Serializer.Protocol+Optic.Adapter.swift   |  46 -------
+ ...erializer.Protocol+Optic.Isomorphism.swift |  22 ---
+ .../Serializer.Protocol+Optic.Prism.swift     |  58 --------
+ Sources/Serializer/Pair/Builder+Pair.swift    |  41 ------
+ 7 files changed, 193 insertions(+), 188 deletions(-)
+ delete mode 100644 Sources/Serializer/Lazy/Builder+Lazy.swift
+ delete mode 100644 Sources/Serializer/Optic/Serializer.Protocol+Optic.Adapter.swift
+ delete mode 100644 Sources/Serializer/Optic/Serializer.Protocol+Optic.Isomorphism.swift
+ delete mode 100644 Sources/Serializer/Optic/Serializer.Protocol+Optic.Prism.swift
+ delete mode 100644 Sources/Serializer/Pair/Builder+Pair.swift
+
+diff --git a/Sources/Serializer/Either/Builder.swift b/Sources/Serializer/Either/Builder.swift
+index baa3232..64ffc2f 100644
+--- a/Sources/Serializer/Either/Builder.swift
++++ b/Sources/Serializer/Either/Builder.swift
+@@ -59,3 +59,67 @@
+     }
+ 
+ #endif
++
++#if Lazy
++    public import Serializer_Core
++    public import Lazy
++    public import Either
++    extension Builder where Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildExpression<S: Serializing & ~Copyable, E: Swift::Error>(
++            _ lazy: Lazy<S, E>
++        ) -> Lazy<S, E>.Serializer<Either<E, S.Failure>>
++        where S.Output: ~Copyable & ~Escapable, S.Buffer: ~Copyable & ~Escapable, S.Buffer == Buffer {
++            lazy.serializer()
++        }
++        @inlinable
++        public static func buildExpression<S: Serializing & ~Copyable>(
++            _ lazy: Lazy<S, Never>
++        ) -> Lazy<S, Never>.Serializer<S.Failure>
++        where S.Output: ~Copyable & ~Escapable, S.Buffer: ~Copyable & ~Escapable, S.Buffer == Buffer {
++            lazy.serializer()
++        }
++    }
++#endif
++
++#if Pair
++    public import Serializer_Core
++    public import Pair
++    public import Either
++
++    extension Builder where Buffer: ~Copyable & ~Escapable {
++        @inlinable
++        @_disfavoredOverload
++        public static func buildPartialBlock<A: Serializing & ~Copyable, N: Serializing & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Serializer<Either<A.Failure, N.Failure>>
++        where
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer
++        {
++            Pair(accumulated, next).serializer()
++        }
++
++        @inlinable
++        public static func buildPartialBlock<A: Serializing & ~Copyable, N: Serializing & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair<A, N>.Serializer<A.Failure>
++        where
++            A.Buffer: ~Copyable & ~Escapable,
++            N.Buffer: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Buffer == Buffer,
++            N.Buffer == Buffer,
++            A.Failure == N.Failure
++        {
++            Pair(accumulated, next).serializer()
++        }
++    }
++#endif
+diff --git a/Sources/Serializer/Lazy/Builder+Lazy.swift b/Sources/Serializer/Lazy/Builder+Lazy.swift
+deleted file mode 100644
+index 8d97785..0000000
+--- a/Sources/Serializer/Lazy/Builder+Lazy.swift
++++ /dev/null
+@@ -1,21 +0,0 @@
+-#if Lazy
+-    public import Serializer_Core
+-    public import Lazy
+-    public import Either
+-    extension Builder where Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildExpression<S: Serializing & ~Copyable, E: Swift::Error>(
+-            _ lazy: Lazy<S, E>
+-        ) -> Lazy<S, E>.Serializer<Either<E, S.Failure>>
+-        where S.Output: ~Copyable & ~Escapable, S.Buffer: ~Copyable & ~Escapable, S.Buffer == Buffer {
+-            lazy.serializer()
+-        }
+-        @inlinable
+-        public static func buildExpression<S: Serializing & ~Copyable>(
+-            _ lazy: Lazy<S, Never>
+-        ) -> Lazy<S, Never>.Serializer<S.Failure>
+-        where S.Output: ~Copyable & ~Escapable, S.Buffer: ~Copyable & ~Escapable, S.Buffer == Buffer {
+-            lazy.serializer()
+-        }
+-    }
+-#endif
+diff --git a/Sources/Serializer/Map/Serializing.swift b/Sources/Serializer/Map/Serializing.swift
+index 30167b7..3b8f310 100644
+--- a/Sources/Serializer/Map/Serializing.swift
++++ b/Sources/Serializer/Map/Serializing.swift
+@@ -12,3 +12,132 @@
+         }
+     }
+ #endif
++
++#if Optic
++    public import Serializer_Core
++    public import Either
++    public import Map
++    public import Optic
++
++    extension Serializing where Self: ~Copyable, Buffer: ~Copyable & ~Escapable {
++
++        @inlinable
++        public consuming func map<Source, Target, Focus, Replacement, ForwardFailure: Swift::Error>(
++            backward adapter: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Adapter<ForwardFailure, Never>
++        ) -> Map<Replacement, Output, Failure>.Serializer<Self>
++        where Output == Target {
++            contramap { replacement in adapter.backward(copy replacement) }
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public consuming func map<
++            Source,
++            Target,
++            Focus,
++            Replacement,
++            ForwardFailure: Swift::Error,
++            BackwardFailure: Swift::Error
++        >(
++            backward adapter: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Adapter<ForwardFailure, BackwardFailure>
++        ) -> Map<Replacement, Output, Either<Failure, BackwardFailure>>.Serializer<Self>
++        where Output == Target {
++            contramap { replacement throws(BackwardFailure) in
++                try adapter.backward(copy replacement)
++            }
++        }
++    }
++
++#endif
++
++#if Optic
++    public import Serializer_Core
++    public import Map
++    public import Optic
++
++    extension Serializing where Self: ~Copyable, Buffer: ~Copyable & ~Escapable {
++
++        @inlinable
++        public consuming func map<Source, Target, Focus, Replacement>(
++            backward isomorphism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Isomorphism
++        ) -> Map<Replacement, Output, Failure>.Serializer<Self>
++        where Output == Target {
++            contramap { replacement in isomorphism.backward(copy replacement) }
++        }
++    }
++
++#endif
++
++#if Optic
++    public import Serializer_Core
++    public import Either
++    public import Map
++    public import Optic
++
++    extension Serializing where Self: ~Copyable, Buffer: ~Copyable & ~Escapable {
++
++        @inlinable
++        public consuming func map<Source, Target, Focus, Replacement>(
++            embedding prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism
++        ) -> Map<Replacement, Output, Failure>.Serializer<Self>
++        where Output == Target {
++            contramap { replacement in prism.embed(copy replacement) }
++        }
++
++        @inlinable
++        public consuming func map<Source, Target, Focus, Replacement>(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism
++        ) -> Map<Source, Output, Failure>.Serializer<Self>
++        where Output == Either<Target, Focus> {
++            contramap { source in prism.match(copy source) }
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public consuming func map<Source, Target, Focus, Replacement, MatchFailure: Swift::Error>(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism,
++            failure transform: @escaping (consuming Target) -> MatchFailure
++        ) -> Map<Source, Output, Either<Failure, MatchFailure>>.Serializer<Self>
++        where Output == Focus {
++            contramap { source throws(MatchFailure) in
++                switch prism.match(copy source) {
++                case .left(let target):
++                    throw transform(target)
++                case .right(let focus):
++                    return focus
++                }
++            }
++        }
++    }
++
++#endif
+diff --git a/Sources/Serializer/Optic/Serializer.Protocol+Optic.Adapter.swift b/Sources/Serializer/Optic/Serializer.Protocol+Optic.Adapter.swift
+deleted file mode 100644
+index ada8835..0000000
+--- a/Sources/Serializer/Optic/Serializer.Protocol+Optic.Adapter.swift
++++ /dev/null
+@@ -1,46 +0,0 @@
+-#if Optic
+-    public import Serializer_Core
+-    public import Either
+-    public import Map
+-    public import Optic
+-
+-    extension Serializing where Self: ~Copyable, Buffer: ~Copyable & ~Escapable {
+-
+-        @inlinable
+-        public consuming func map<Source, Target, Focus, Replacement, ForwardFailure: Swift::Error>(
+-            backward adapter: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Adapter<ForwardFailure, Never>
+-        ) -> Map<Replacement, Output, Failure>.Serializer<Self>
+-        where Output == Target {
+-            contramap { replacement in adapter.backward(copy replacement) }
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public consuming func map<
+-            Source,
+-            Target,
+-            Focus,
+-            Replacement,
+-            ForwardFailure: Swift::Error,
+-            BackwardFailure: Swift::Error
+-        >(
+-            backward adapter: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Adapter<ForwardFailure, BackwardFailure>
+-        ) -> Map<Replacement, Output, Either<Failure, BackwardFailure>>.Serializer<Self>
+-        where Output == Target {
+-            contramap { replacement throws(BackwardFailure) in
+-                try adapter.backward(copy replacement)
+-            }
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Serializer/Optic/Serializer.Protocol+Optic.Isomorphism.swift b/Sources/Serializer/Optic/Serializer.Protocol+Optic.Isomorphism.swift
+deleted file mode 100644
+index 76e2be3..0000000
+--- a/Sources/Serializer/Optic/Serializer.Protocol+Optic.Isomorphism.swift
++++ /dev/null
+@@ -1,22 +0,0 @@
+-#if Optic
+-    public import Serializer_Core
+-    public import Map
+-    public import Optic
+-
+-    extension Serializing where Self: ~Copyable, Buffer: ~Copyable & ~Escapable {
+-
+-        @inlinable
+-        public consuming func map<Source, Target, Focus, Replacement>(
+-            backward isomorphism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Isomorphism
+-        ) -> Map<Replacement, Output, Failure>.Serializer<Self>
+-        where Output == Target {
+-            contramap { replacement in isomorphism.backward(copy replacement) }
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Serializer/Optic/Serializer.Protocol+Optic.Prism.swift b/Sources/Serializer/Optic/Serializer.Protocol+Optic.Prism.swift
+deleted file mode 100644
+index 7a9d160..0000000
+--- a/Sources/Serializer/Optic/Serializer.Protocol+Optic.Prism.swift
++++ /dev/null
+@@ -1,58 +0,0 @@
+-#if Optic
+-    public import Serializer_Core
+-    public import Either
+-    public import Map
+-    public import Optic
+-
+-    extension Serializing where Self: ~Copyable, Buffer: ~Copyable & ~Escapable {
+-
+-        @inlinable
+-        public consuming func map<Source, Target, Focus, Replacement>(
+-            embedding prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism
+-        ) -> Map<Replacement, Output, Failure>.Serializer<Self>
+-        where Output == Target {
+-            contramap { replacement in prism.embed(copy replacement) }
+-        }
+-
+-        @inlinable
+-        public consuming func map<Source, Target, Focus, Replacement>(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism
+-        ) -> Map<Source, Output, Failure>.Serializer<Self>
+-        where Output == Either<Target, Focus> {
+-            contramap { source in prism.match(copy source) }
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public consuming func map<Source, Target, Focus, Replacement, MatchFailure: Swift::Error>(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism,
+-            failure transform: @escaping (consuming Target) -> MatchFailure
+-        ) -> Map<Source, Output, Either<Failure, MatchFailure>>.Serializer<Self>
+-        where Output == Focus {
+-            contramap { source throws(MatchFailure) in
+-                switch prism.match(copy source) {
+-                case .left(let target):
+-                    throw transform(target)
+-                case .right(let focus):
+-                    return focus
+-                }
+-            }
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Serializer/Pair/Builder+Pair.swift b/Sources/Serializer/Pair/Builder+Pair.swift
+deleted file mode 100644
+index 45ad9af..0000000
+--- a/Sources/Serializer/Pair/Builder+Pair.swift
++++ /dev/null
+@@ -1,41 +0,0 @@
+-#if Pair
+-    public import Serializer_Core
+-    public import Pair
+-    public import Either
+-
+-    extension Builder where Buffer: ~Copyable & ~Escapable {
+-        @inlinable
+-        @_disfavoredOverload
+-        public static func buildPartialBlock<A: Serializing & ~Copyable, N: Serializing & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Serializer<Either<A.Failure, N.Failure>>
+-        where
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer
+-        {
+-            Pair(accumulated, next).serializer()
+-        }
+-
+-        @inlinable
+-        public static func buildPartialBlock<A: Serializing & ~Copyable, N: Serializing & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair<A, N>.Serializer<A.Failure>
+-        where
+-            A.Buffer: ~Copyable & ~Escapable,
+-            N.Buffer: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Buffer == Buffer,
+-            N.Buffer == Buffer,
+-            A.Failure == N.Failure
+-        {
+-            Pair(accumulated, next).serializer()
+-        }
+-    }
+-#endif
+-- 
+2.43.0
+

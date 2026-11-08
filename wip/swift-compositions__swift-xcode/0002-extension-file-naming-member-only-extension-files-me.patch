@@ -1,0 +1,451 @@
+From 96cf6212b2aa5a016a4d6e983c7726e3828bebf0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:14 +0000
+Subject: [PATCH 2/2] extension file naming: member-only extension files merged
+ into the extended type's own file (type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ Sources/Xcode Scheme/Xcode.Scheme+XML.swift   | 115 ------------------
+ Sources/Xcode Scheme/Xcode.Scheme.swift       | 114 +++++++++++++++++
+ .../Xcode.Workspace+Read.swift                |  24 ----
+ .../Xcode.Workspace+Write.swift               |  19 ---
+ .../Xcode Workspace/Xcode.Workspace+XML.swift |  33 -----
+ Sources/Xcode Workspace/Xcode.Workspace.swift |  71 +++++++++++
+ 6 files changed, 185 insertions(+), 191 deletions(-)
+ delete mode 100644 Sources/Xcode Scheme/Xcode.Scheme+XML.swift
+ delete mode 100644 Sources/Xcode Workspace/Xcode.Workspace+Read.swift
+ delete mode 100644 Sources/Xcode Workspace/Xcode.Workspace+Write.swift
+ delete mode 100644 Sources/Xcode Workspace/Xcode.Workspace+XML.swift
+
+diff --git a/Sources/Xcode Scheme/Xcode.Scheme+XML.swift b/Sources/Xcode Scheme/Xcode.Scheme+XML.swift
+deleted file mode 100644
+index 9874104..0000000
+--- a/Sources/Xcode Scheme/Xcode.Scheme+XML.swift	
++++ /dev/null
+@@ -1,115 +0,0 @@
+-private import XML
+-public import Xcode_Scheme_Standard
+-
+-extension Xcode.Scheme {
+-
+-    public var xml: Swift.String {
+-        let root = XML.element(
+-            "Scheme",
+-            attributes: [
+-                .init(name: "LastUpgradeVersion", value: "2650"),
+-                .init(name: "version", value: version),
+-            ],
+-            children: [
+-                buildAction,
+-                testAction,
+-
+-                XML.element(
+-                    "ProfileAction",
+-                    attributes: [.init(name: "buildConfiguration", value: "Release")]
+-                ),
+-                XML.element(
+-                    "AnalyzeAction",
+-                    attributes: [.init(name: "buildConfiguration", value: "Debug")]
+-                ),
+-                XML.element(
+-                    "ArchiveAction",
+-                    attributes: [
+-                        .init(name: "buildConfiguration", value: "Release"),
+-                        .init(name: "revealArchiveInOrganizer", value: "YES"),
+-                    ]
+-                ),
+-            ]
+-        )
+-        return XML.Document(version: .v1_0, encoding: "UTF-8", root: root).serialize(pretty: true)
+-    }
+-
+-    private var buildAction: XML {
+-        XML.element(
+-            "BuildAction",
+-            attributes: [
+-                .init(name: "parallelizeBuildables", value: "YES"),
+-                .init(name: "buildImplicitDependencies", value: "YES"),
+-            ],
+-            children: [
+-                XML.element("BuildActionEntries", children: build.map { entry($0.reference) })
+-            ]
+-        )
+-    }
+-
+-    private var testAction: XML {
+-        XML.element(
+-            "TestAction",
+-            attributes: action(configuration: "Debug"),
+-            children: [
+-                XML.element(
+-                    "Testables",
+-                    children: test.map { item in
+-                        XML.element(
+-                            "TestableReference",
+-                            attributes: [
+-                                .init(name: "skipped", value: item.skipped ? "YES" : "NO"),
+-                                .init(
+-                                    name: "parallelizable",
+-                                    value: item.parallelizable ? "YES" : "NO"
+-                                ),
+-                            ],
+-                            children: [node(item.reference)]
+-                        )
+-                    }
+-                )
+-            ]
+-        )
+-    }
+-
+-    private func entry(_ value: Reference) -> XML {
+-        XML.element(
+-            "BuildActionEntry",
+-            attributes: [
+-                "buildForTesting", "buildForRunning", "buildForProfiling", "buildForArchiving",
+-                "buildForAnalyzing",
+-            ].map {
+-                .init(name: $0, value: "YES")
+-            },
+-            children: [node(value)]
+-        )
+-    }
+-
+-    private func node(_ value: Reference) -> XML {
+-        XML.element(
+-            "BuildableReference",
+-            attributes: [
+-                .init(name: "BuildableIdentifier", value: value.identifier),
+-                .init(name: "BlueprintIdentifier", value: value.blueprint),
+-                .init(name: "BuildableName", value: value.name),
+-                .init(name: "BlueprintName", value: value.name),
+-                .init(name: "ReferencedContainer", value: value.container),
+-            ]
+-        )
+-    }
+-
+-    private func action(configuration: Swift.String) -> [XML.Attribute] {
+-        [
+-            .init(name: "buildConfiguration", value: configuration),
+-            .init(
+-                name: "selectedDebuggerIdentifier",
+-                value: "Xcode.DebuggerFoundation.Debugger.LLDB"
+-            ),
+-            .init(
+-                name: "selectedLauncherIdentifier",
+-                value: "Xcode.DebuggerFoundation.Launcher.LLDB"
+-            ),
+-            .init(name: "shouldUseLaunchSchemeArgsEnv", value: "YES"),
+-        ]
+-    }
+-}
+diff --git a/Sources/Xcode Scheme/Xcode.Scheme.swift b/Sources/Xcode Scheme/Xcode.Scheme.swift
+index b08085c..4a2170e 100644
+--- a/Sources/Xcode Scheme/Xcode.Scheme.swift	
++++ b/Sources/Xcode Scheme/Xcode.Scheme.swift	
+@@ -1,5 +1,6 @@
+ private import File_System
+ public import Xcode_Scheme_Standard
++private import XML
+ 
+ extension Xcode.Scheme {
+ 
+@@ -28,3 +29,116 @@ extension Xcode.Scheme {
+         }
+     }
+ }
++
++extension Xcode.Scheme {
++
++    public var xml: Swift.String {
++        let root = XML.element(
++            "Scheme",
++            attributes: [
++                .init(name: "LastUpgradeVersion", value: "2650"),
++                .init(name: "version", value: version),
++            ],
++            children: [
++                buildAction,
++                testAction,
++
++                XML.element(
++                    "ProfileAction",
++                    attributes: [.init(name: "buildConfiguration", value: "Release")]
++                ),
++                XML.element(
++                    "AnalyzeAction",
++                    attributes: [.init(name: "buildConfiguration", value: "Debug")]
++                ),
++                XML.element(
++                    "ArchiveAction",
++                    attributes: [
++                        .init(name: "buildConfiguration", value: "Release"),
++                        .init(name: "revealArchiveInOrganizer", value: "YES"),
++                    ]
++                ),
++            ]
++        )
++        return XML.Document(version: .v1_0, encoding: "UTF-8", root: root).serialize(pretty: true)
++    }
++
++    private var buildAction: XML {
++        XML.element(
++            "BuildAction",
++            attributes: [
++                .init(name: "parallelizeBuildables", value: "YES"),
++                .init(name: "buildImplicitDependencies", value: "YES"),
++            ],
++            children: [
++                XML.element("BuildActionEntries", children: build.map { entry($0.reference) })
++            ]
++        )
++    }
++
++    private var testAction: XML {
++        XML.element(
++            "TestAction",
++            attributes: action(configuration: "Debug"),
++            children: [
++                XML.element(
++                    "Testables",
++                    children: test.map { item in
++                        XML.element(
++                            "TestableReference",
++                            attributes: [
++                                .init(name: "skipped", value: item.skipped ? "YES" : "NO"),
++                                .init(
++                                    name: "parallelizable",
++                                    value: item.parallelizable ? "YES" : "NO"
++                                ),
++                            ],
++                            children: [node(item.reference)]
++                        )
++                    }
++                )
++            ]
++        )
++    }
++
++    private func entry(_ value: Reference) -> XML {
++        XML.element(
++            "BuildActionEntry",
++            attributes: [
++                "buildForTesting", "buildForRunning", "buildForProfiling", "buildForArchiving",
++                "buildForAnalyzing",
++            ].map {
++                .init(name: $0, value: "YES")
++            },
++            children: [node(value)]
++        )
++    }
++
++    private func node(_ value: Reference) -> XML {
++        XML.element(
++            "BuildableReference",
++            attributes: [
++                .init(name: "BuildableIdentifier", value: value.identifier),
++                .init(name: "BlueprintIdentifier", value: value.blueprint),
++                .init(name: "BuildableName", value: value.name),
++                .init(name: "BlueprintName", value: value.name),
++                .init(name: "ReferencedContainer", value: value.container),
++            ]
++        )
++    }
++
++    private func action(configuration: Swift.String) -> [XML.Attribute] {
++        [
++            .init(name: "buildConfiguration", value: configuration),
++            .init(
++                name: "selectedDebuggerIdentifier",
++                value: "Xcode.DebuggerFoundation.Debugger.LLDB"
++            ),
++            .init(
++                name: "selectedLauncherIdentifier",
++                value: "Xcode.DebuggerFoundation.Launcher.LLDB"
++            ),
++            .init(name: "shouldUseLaunchSchemeArgsEnv", value: "YES"),
++        ]
++    }
++}
+diff --git a/Sources/Xcode Workspace/Xcode.Workspace+Read.swift b/Sources/Xcode Workspace/Xcode.Workspace+Read.swift
+deleted file mode 100644
+index ad732d3..0000000
+--- a/Sources/Xcode Workspace/Xcode.Workspace+Read.swift	
++++ /dev/null
+@@ -1,24 +0,0 @@
+-public import File_System
+-public import Xcode_Workspace_Standard
+-
+-extension Xcode.Workspace {
+-    public static func read(from directory: File.Directory) throws(Error) -> Self {
+-        let file = directory[file: "contents.xcworkspacedata"]
+-        guard file.stat.isFile else { throw .invalidBundle }
+-
+-        let source: Swift.String
+-        do throws(Either<File.System.Read.Full.Error, Never>) {
+-            source = try file.read.full { bytes in
+-                var storage = [Byte]()
+-                storage.reserveCapacity(bytes.count)
+-                for index in bytes.indices {
+-                    storage.append(bytes[index])
+-                }
+-                return Swift.String(decoding: storage, as: Swift.UTF8.self)
+-            }
+-        } catch {
+-            throw .read
+-        }
+-        return try parse(source)
+-    }
+-}
+diff --git a/Sources/Xcode Workspace/Xcode.Workspace+Write.swift b/Sources/Xcode Workspace/Xcode.Workspace+Write.swift
+deleted file mode 100644
+index 81851bc..0000000
+--- a/Sources/Xcode Workspace/Xcode.Workspace+Write.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-public import File_System
+-public import Xcode_Workspace_Standard
+-
+-extension Xcode.Workspace {
+-
+-    public func write(to directory: File.Directory) throws(Error) {
+-        let bundle = directory.path
+-        do throws(File.System.Create.Directory.Error) {
+-            try File.System.Create.Directory.create(at: bundle, createIntermediates: true)
+-        } catch {
+-            throw .create
+-        }
+-        do throws(File.System.Write.Atomic.Error) {
+-            try File(bundle / "contents.xcworkspacedata").write.atomic(xml)
+-        } catch {
+-            throw .write
+-        }
+-    }
+-}
+diff --git a/Sources/Xcode Workspace/Xcode.Workspace+XML.swift b/Sources/Xcode Workspace/Xcode.Workspace+XML.swift
+deleted file mode 100644
+index 84122a6..0000000
+--- a/Sources/Xcode Workspace/Xcode.Workspace+XML.swift	
++++ /dev/null
+@@ -1,33 +0,0 @@
+-private import XML
+-public import Xcode_Workspace_Standard
+-
+-extension Xcode.Workspace {
+-
+-    public var xml: Swift.String {
+-        let root = XML.element(
+-            "Workspace",
+-            attributes: [.init(name: "version", value: version)],
+-            children: references.map(Self.xml)
+-        )
+-        return XML.Document(version: .v1_0, encoding: "UTF-8", root: root).serialize(pretty: true)
+-    }
+-
+-    private static func xml(_ reference: Reference) -> XML {
+-        switch reference {
+-        case .file(let location):
+-            XML.element(
+-                "FileRef",
+-                attributes: [.init(name: "location", value: location.rawValue)]
+-            )
+-        case .group(let group):
+-            XML.element(
+-                "Group",
+-                attributes: [
+-                    .init(name: "location", value: group.location.rawValue),
+-                    .init(name: "name", value: group.name),
+-                ],
+-                children: group.references.map(Self.xml)
+-            )
+-        }
+-    }
+-}
+diff --git a/Sources/Xcode Workspace/Xcode.Workspace.swift b/Sources/Xcode Workspace/Xcode.Workspace.swift
+index 5843296..de561bb 100644
+--- a/Sources/Xcode Workspace/Xcode.Workspace.swift	
++++ b/Sources/Xcode Workspace/Xcode.Workspace.swift	
+@@ -1,5 +1,6 @@
+ private import XML
+ public import Xcode_Workspace_Standard
++public import File_System
+ 
+ extension Xcode.Workspace {
+     public static func parse(_ source: Swift.String) throws(Error) -> Self {
+@@ -66,3 +67,73 @@ extension Xcode.Workspace {
+         }
+     }
+ }
++
++extension Xcode.Workspace {
++    public static func read(from directory: File.Directory) throws(Error) -> Self {
++        let file = directory[file: "contents.xcworkspacedata"]
++        guard file.stat.isFile else { throw .invalidBundle }
++
++        let source: Swift.String
++        do throws(Either<File.System.Read.Full.Error, Never>) {
++            source = try file.read.full { bytes in
++                var storage = [Byte]()
++                storage.reserveCapacity(bytes.count)
++                for index in bytes.indices {
++                    storage.append(bytes[index])
++                }
++                return Swift.String(decoding: storage, as: Swift.UTF8.self)
++            }
++        } catch {
++            throw .read
++        }
++        return try parse(source)
++    }
++}
++
++extension Xcode.Workspace {
++
++    public func write(to directory: File.Directory) throws(Error) {
++        let bundle = directory.path
++        do throws(File.System.Create.Directory.Error) {
++            try File.System.Create.Directory.create(at: bundle, createIntermediates: true)
++        } catch {
++            throw .create
++        }
++        do throws(File.System.Write.Atomic.Error) {
++            try File(bundle / "contents.xcworkspacedata").write.atomic(xml)
++        } catch {
++            throw .write
++        }
++    }
++}
++
++extension Xcode.Workspace {
++
++    public var xml: Swift.String {
++        let root = XML.element(
++            "Workspace",
++            attributes: [.init(name: "version", value: version)],
++            children: references.map(Self.xml)
++        )
++        return XML.Document(version: .v1_0, encoding: "UTF-8", root: root).serialize(pretty: true)
++    }
++
++    private static func xml(_ reference: Reference) -> XML {
++        switch reference {
++        case .file(let location):
++            XML.element(
++                "FileRef",
++                attributes: [.init(name: "location", value: location.rawValue)]
++            )
++        case .group(let group):
++            XML.element(
++                "Group",
++                attributes: [
++                    .init(name: "location", value: group.location.rawValue),
++                    .init(name: "name", value: group.name),
++                ],
++                children: group.references.map(Self.xml)
++            )
++        }
++    }
++}
+-- 
+2.43.0
+

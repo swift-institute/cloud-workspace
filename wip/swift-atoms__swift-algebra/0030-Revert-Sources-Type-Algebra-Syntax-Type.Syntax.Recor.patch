@@ -1,0 +1,175 @@
+From 55dae5b68612792b14a46914b0bfdf6ab3fe5580 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:43:20 +0000
+Subject: [PATCH 30/32] Revert Sources/Type Algebra
+ Syntax/Type.Syntax.Record.swift: it broke the root build (coenttb/work#242)
+
+---
+ .../Type.Syntax.Record.swift                  | 139 ++++++++----------
+ 1 file changed, 65 insertions(+), 74 deletions(-)
+
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Record.swift b/Sources/Type Algebra Syntax/Type.Syntax.Record.swift
+index e8ef1f4..de6afb0 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Record.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Record.swift	
+@@ -2,6 +2,35 @@ public import Type_Algebra
+ 
+ extension Type.Syntax {
+     public struct Record {
++        public struct Field {
++            public let name: String
++            public let type: String
++            public let label: String
++            public let binding: String
++            public let argument: String
++            public let initial: String?
++            public let mutable: Bool
++            public let access: String?
++            public init(
++                _ name: String,
++                type: String,
++                label: String? = nil,
++                binding: String? = nil,
++                argument: String? = nil,
++                initial: String? = nil,
++                mutable: Bool = true,
++                access: String? = nil
++            ) {
++                self.name = name
++                self.type = type
++                self.label = label ?? name
++                self.binding = binding ?? name
++                self.argument = argument ?? type
++                self.initial = initial
++                self.mutable = mutable
++                self.access = access
++            }
++        }
+         public let fields: [Field]
+         public let algebra: Type.Record
+         public init(_ fields: [Field]) throws {
+@@ -17,85 +46,47 @@ extension Type.Syntax {
+             self.algebra = algebra
+             self.fields = try algebra.fields.map(representation)
+         }
++        public func selecting(_ labels: [String]) throws -> Self {
++            let selection = try algebra.selecting(labels)
++            return Self(algebra: selection.record, fields: selection.indices.map { fields[$0] })
++        }
+         private init(algebra: Type.Record, fields: [Field]) {
+             self.algebra = algebra
+             self.fields = fields
+         }
+-    }
+-}
+-
+-extension Type.Syntax.Record {
+-    public struct Field {
+-        public let name: String
+-        public let type: String
+-        public let label: String
+-        public let binding: String
+-        public let argument: String
+-        public let initial: String?
+-        public let mutable: Bool
+-        public let access: String?
+-        public init(
+-            _ name: String,
+-            type: String,
+-            label: String? = nil,
+-            binding: String? = nil,
+-            argument: String? = nil,
+-            initial: String? = nil,
+-            mutable: Bool = true,
+-            access: String? = nil
+-        ) {
+-            self.name = name
+-            self.type = type
+-            self.label = label ?? name
+-            self.binding = binding ?? name
+-            self.argument = argument ?? type
+-            self.initial = initial
+-            self.mutable = mutable
+-            self.access = access
++        public var tupleType: String {
++            fields.isEmpty
++                ? "Void"
++                : fields.count == 1
++                    ? fields[0].type : "(" + fields.map(\.type).joined(separator: ", ") + ")"
+         }
+-    }
+-
+-    public func selecting(_ labels: [String]) throws -> Self {
+-        let selection = try algebra.selecting(labels)
+-        return Self(algebra: selection.record, fields: selection.indices.map { fields[$0] })
+-    }
+-
+-    public var tupleType: String {
+-        fields.isEmpty
+-            ? "Void"
+-            : fields.count == 1
+-                ? fields[0].type : "(" + fields.map(\.type).joined(separator: ", ") + ")"
+-    }
+-
+-    public func unpacking(_ value: String) -> Interpretation.Product {
+-        .product(fields.indices.map { .value(fields.count == 1 ? value : "\(value).\($0)") })
+-    }
+-
+-    public func declarations(access: String) -> [String] {
+-        fields.map {
+-            "\($0.access ?? access)\($0.mutable ? "var" : "let") \($0.name): \($0.type)"
+-                + ($0.initial.map { " = \($0)" } ?? "")
++        public func unpacking(_ value: String) -> Interpretation.Product {
++            .product(fields.indices.map { .value(fields.count == 1 ? value : "\(value).\($0)") })
++        }
++        public func declarations(access: String) -> [String] {
++            fields.map {
++                "\($0.access ?? access)\($0.mutable ? "var" : "let") \($0.name): \($0.type)"
++                    + ($0.initial.map { " = \($0)" } ?? "")
++            }
++        }
++        public var parameters: String {
++            fields.map { field in
++                let name =
++                    field.label == field.binding ? field.binding : "\(field.label) \(field.binding)"
++                return "\(name): \(field.argument)" + (field.initial.map { " = \($0)" } ?? "")
++            }.joined(separator: ", ")
++        }
++        public func initializer(
++            access: String,
++            parameters selected: [String]? = nil,
++            prelude: String = ""
++        ) throws -> String {
++            let record = try selected.map(selecting) ?? self
++            let assignments = record.fields.map { "self.\($0.name) = \($0.binding)" }.joined(
++                separator: "\n"
++            )
++            return
++                "\(access)init(\(record.parameters)) {\n\(prelude.isEmpty ? "" : prelude + "\n")\(assignments)\n}"
+         }
+-    }
+-
+-    public var parameters: String {
+-        fields.map { field in
+-            let name =
+-                field.label == field.binding ? field.binding : "\(field.label) \(field.binding)"
+-            return "\(name): \(field.argument)" + (field.initial.map { " = \($0)" } ?? "")
+-        }.joined(separator: ", ")
+-    }
+-
+-    public func initializer(
+-        access: String,
+-        parameters selected: [String]? = nil,
+-        prelude: String = ""
+-    ) throws -> String {
+-        let record = try selected.map(selecting) ?? self
+-        let assignments = record.fields.map { "self.\($0.name) = \($0.binding)" }.joined(
+-            separator: "\n"
+-        )
+-        return
+-            "\(access)init(\(record.parameters)) {\n\(prelude.isEmpty ? "" : prelude + "\n")\(assignments)\n}"
+     }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,1356 @@
+From ab79ce050687d91d0b8ca101dbb6e48bb123c818 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:10 +0000
+Subject: [PATCH 22/23] extension file naming: member-only extension files
+ merged into the extended type's own file (type-check follows; Linux x86_64,
+ Swift 6.4.2) (coenttb/work#242)
+
+---
+ Sources/Parser/Always/Builder.swift           | 238 ++++++++++++++
+ .../Parser/Append/Parser.Builder+Append.swift |  54 ----
+ .../Parser/Either/Parser.Builder+Either.swift |  61 ----
+ Sources/Parser/FlatMap/Parsing.swift          | 305 ++++++++++++++++++
+ Sources/Parser/Lazy/Parser.Builder+Lazy.swift |  31 --
+ Sources/Parser/Map/Parsing+mapFailure.swift   |  20 --
+ .../Parser/Optic/Optic.Adapter+Parsing.swift  |  93 ------
+ .../Optic/Optic.Isomorphism+Parsing.swift     |  31 --
+ .../Parser/Optic/Optic.Prism+Parsing.swift    | 157 ---------
+ Sources/Parser/Pair/Parser.Builder+Pair.swift |  45 ---
+ ...rdinal.Range+CustomCollection.Parser.swift |  17 -
+ .../Cardinal.Range+Iteration.Parser.swift     |  19 --
+ .../Repetition/Cardinal.Range+Parser.swift    |  34 --
+ .../Parser/Repetition/Cardinal.Range.swift    |  73 +++++
+ Sources/Parser/Skip/Parser.Builder+Skip.swift |  42 ---
+ 15 files changed, 616 insertions(+), 604 deletions(-)
+ delete mode 100644 Sources/Parser/Append/Parser.Builder+Append.swift
+ delete mode 100644 Sources/Parser/Either/Parser.Builder+Either.swift
+ delete mode 100644 Sources/Parser/Lazy/Parser.Builder+Lazy.swift
+ delete mode 100644 Sources/Parser/Map/Parsing+mapFailure.swift
+ delete mode 100644 Sources/Parser/Optic/Optic.Adapter+Parsing.swift
+ delete mode 100644 Sources/Parser/Optic/Optic.Isomorphism+Parsing.swift
+ delete mode 100644 Sources/Parser/Optic/Optic.Prism+Parsing.swift
+ delete mode 100644 Sources/Parser/Pair/Parser.Builder+Pair.swift
+ delete mode 100644 Sources/Parser/Repetition/Cardinal.Range+CustomCollection.Parser.swift
+ delete mode 100644 Sources/Parser/Repetition/Cardinal.Range+Iteration.Parser.swift
+ delete mode 100644 Sources/Parser/Repetition/Cardinal.Range+Parser.swift
+ delete mode 100644 Sources/Parser/Skip/Parser.Builder+Skip.swift
+
+diff --git a/Sources/Parser/Always/Builder.swift b/Sources/Parser/Always/Builder.swift
+index 23c2250..c99901e 100644
+--- a/Sources/Parser/Always/Builder.swift
++++ b/Sources/Parser/Always/Builder.swift
+@@ -11,3 +11,241 @@
+     }
+ 
+ #endif
++
++#if Append
++    public import Parser_Core
++    public import Append
++    public import Either
++
++    extension Parser::Builder where Input: ~Copyable & ~Escapable {
++
++        @inlinable
++        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Append::Append<A.Output, N.Output, (repeat each O, N.Output), Never>.Parser<A, N, Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output == (repeat each O)
++        {
++            .init(
++                .init(),
++                accumulated,
++                next,
++                accumulatedFailure: { .left($0) },
++                nextFailure: { .right($0) },
++                appendFailure: { $0 }
++            )
++        }
++
++        @inlinable
++        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Append::Append<A.Output, N.Output, (repeat each O, N.Output), Never>.Parser<A, N, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output == (repeat each O),
++            A.Failure == N.Failure
++        {
++            .init(
++                .init(),
++                accumulated,
++                next,
++                accumulatedFailure: { $0 },
++                nextFailure: { $0 },
++                appendFailure: { $0 }
++            )
++        }
++    }
++
++#endif
++
++#if Either
++    public import Parser_Core
++    public import Either
++
++    extension Parser::Builder where Input: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildExpression<L: Parser::Parsing & ~Copyable, R: Parser::Parsing & ~Copyable>(
++            _ either: consuming Either<L, R>
++        ) -> Either<L, R>.Parser
++        where
++            L.Input == Input,
++            R.Input == Input,
++            L.Output == R.Output,
++            L.Input: ~Copyable & ~Escapable,
++            R.Input: ~Copyable & ~Escapable,
++            L.Output: ~Copyable & ~Escapable,
++            R.Output: ~Copyable & ~Escapable
++        {
++            .init(either)
++        }
++
++        @inlinable
++        public static func buildEither<
++            First: Parser::Parsing & ~Copyable,
++            Second: Parser::Parsing & ~Copyable
++        >(
++            first: consuming First
++        ) -> Either<First, Second>.Parser
++        where
++            First.Input == Input,
++            Second.Input == Input,
++            First.Input: ~Copyable & ~Escapable,
++            Second.Input: ~Copyable & ~Escapable,
++            First.Output == Second.Output,
++            First.Output: ~Copyable & ~Escapable,
++            Second.Output: ~Copyable & ~Escapable
++        {
++            .init(.left(first))
++        }
++
++        @inlinable
++        public static func buildEither<
++            First: Parser::Parsing & ~Copyable,
++            Second: Parser::Parsing & ~Copyable
++        >(
++            second: consuming Second
++        ) -> Either<First, Second>.Parser
++        where
++            First.Input == Input,
++            Second.Input == Input,
++            First.Input: ~Copyable & ~Escapable,
++            Second.Input: ~Copyable & ~Escapable,
++            First.Output == Second.Output,
++            First.Output: ~Copyable & ~Escapable,
++            Second.Output: ~Copyable & ~Escapable
++        {
++            .init(.right(second))
++        }
++    }
++
++#endif
++
++#if Lazy
++    public import Parser_Core
++    public import Lazy
++    public import Either
++
++    extension Parser::Builder where Input: ~Copyable & ~Escapable {
++        @inlinable
++        public static func buildExpression<P: Parser::Parsing & ~Copyable>(
++            _ lazy: Lazy::Lazy<P, Never>
++        ) -> Lazy::Lazy<P, Never>.Parser<P.Failure>
++        where
++            P.Input == Input,
++            P.Input: ~Copyable & ~Escapable,
++            P.Output: ~Copyable & Escapable
++        {
++            .init(lazy)
++        }
++
++        @inlinable
++        public static func buildExpression<P: Parser::Parsing & ~Copyable, F: Swift::Error>(
++            _ lazy: Lazy::Lazy<P, F>
++        ) -> Lazy::Lazy<P, F>.Parser<Either<F, P.Failure>>
++        where
++            P.Input == Input,
++            P.Input: ~Copyable & ~Escapable,
++            P.Output: ~Copyable & Escapable
++        {
++            .init(lazy)
++        }
++    }
++#endif
++
++#if Pair
++    public import Parser_Core
++
++    public import Either
++    public import Pair
++
++    extension Parser::Builder where Input: ~Copyable & ~Escapable {
++
++        @_disfavoredOverload
++        @inlinable
++        public static func buildPartialBlock<A: Parser::Parsing & ~Copyable, N: Parser::Parsing & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair::Pair<A, N>.Parser<Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable
++        {
++            .init(accumulated, next, { .left($0) }, { .right($0) })
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public static func buildPartialBlock<A: Parser::Parsing & ~Copyable, N: Parser::Parsing & ~Copyable>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Pair::Pair<A, N>.Parser<A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output: ~Copyable & Escapable,
++            N.Output: ~Copyable & Escapable,
++            A.Failure == N.Failure
++        {
++            .init(accumulated, next, { $0 }, { $0 })
++        }
++    }
++
++#endif
++
++#if Skip
++    public import Parser_Core
++    public import Skip
++    public import Either
++
++    extension Parser::Builder where Input: ~Copyable & ~Escapable {
++
++        @inlinable
++        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip::Skip<A.Output, N.Output>.Parser<A, N, Either<A.Failure, N.Failure>>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output == (repeat each O),
++            N.Output == Void
++        {
++            Skip::Skip.Parser(accumulated, next, { .left($0) }, { .right($0) })
++        }
++
++        @inlinable
++        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
++            accumulated: consuming A,
++            next: consuming N
++        ) -> Skip::Skip<A.Output, N.Output>.Parser<A, N, A.Failure>
++        where
++            A.Input == Input,
++            N.Input == Input,
++            A.Input: ~Copyable & ~Escapable,
++            N.Input: ~Copyable & ~Escapable,
++            A.Output == (repeat each O),
++            N.Output == Void,
++            A.Failure == N.Failure
++        {
++            Skip::Skip.Parser(accumulated, next, { $0 }, { $0 })
++        }
++    }
++
++#endif
+diff --git a/Sources/Parser/Append/Parser.Builder+Append.swift b/Sources/Parser/Append/Parser.Builder+Append.swift
+deleted file mode 100644
+index 054527d..0000000
+--- a/Sources/Parser/Append/Parser.Builder+Append.swift
++++ /dev/null
+@@ -1,54 +0,0 @@
+-#if Append
+-    public import Parser_Core
+-    public import Append
+-    public import Either
+-
+-    extension Parser::Builder where Input: ~Copyable & ~Escapable {
+-
+-        @inlinable
+-        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Append::Append<A.Output, N.Output, (repeat each O, N.Output), Never>.Parser<A, N, Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output == (repeat each O)
+-        {
+-            .init(
+-                .init(),
+-                accumulated,
+-                next,
+-                accumulatedFailure: { .left($0) },
+-                nextFailure: { .right($0) },
+-                appendFailure: { $0 }
+-            )
+-        }
+-
+-        @inlinable
+-        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Append::Append<A.Output, N.Output, (repeat each O, N.Output), Never>.Parser<A, N, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output == (repeat each O),
+-            A.Failure == N.Failure
+-        {
+-            .init(
+-                .init(),
+-                accumulated,
+-                next,
+-                accumulatedFailure: { $0 },
+-                nextFailure: { $0 },
+-                appendFailure: { $0 }
+-            )
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/Either/Parser.Builder+Either.swift b/Sources/Parser/Either/Parser.Builder+Either.swift
+deleted file mode 100644
+index c903239..0000000
+--- a/Sources/Parser/Either/Parser.Builder+Either.swift
++++ /dev/null
+@@ -1,61 +0,0 @@
+-#if Either
+-    public import Parser_Core
+-    public import Either
+-
+-    extension Parser::Builder where Input: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildExpression<L: Parser::Parsing & ~Copyable, R: Parser::Parsing & ~Copyable>(
+-            _ either: consuming Either<L, R>
+-        ) -> Either<L, R>.Parser
+-        where
+-            L.Input == Input,
+-            R.Input == Input,
+-            L.Output == R.Output,
+-            L.Input: ~Copyable & ~Escapable,
+-            R.Input: ~Copyable & ~Escapable,
+-            L.Output: ~Copyable & ~Escapable,
+-            R.Output: ~Copyable & ~Escapable
+-        {
+-            .init(either)
+-        }
+-
+-        @inlinable
+-        public static func buildEither<
+-            First: Parser::Parsing & ~Copyable,
+-            Second: Parser::Parsing & ~Copyable
+-        >(
+-            first: consuming First
+-        ) -> Either<First, Second>.Parser
+-        where
+-            First.Input == Input,
+-            Second.Input == Input,
+-            First.Input: ~Copyable & ~Escapable,
+-            Second.Input: ~Copyable & ~Escapable,
+-            First.Output == Second.Output,
+-            First.Output: ~Copyable & ~Escapable,
+-            Second.Output: ~Copyable & ~Escapable
+-        {
+-            .init(.left(first))
+-        }
+-
+-        @inlinable
+-        public static func buildEither<
+-            First: Parser::Parsing & ~Copyable,
+-            Second: Parser::Parsing & ~Copyable
+-        >(
+-            second: consuming Second
+-        ) -> Either<First, Second>.Parser
+-        where
+-            First.Input == Input,
+-            Second.Input == Input,
+-            First.Input: ~Copyable & ~Escapable,
+-            Second.Input: ~Copyable & ~Escapable,
+-            First.Output == Second.Output,
+-            First.Output: ~Copyable & ~Escapable,
+-            Second.Output: ~Copyable & ~Escapable
+-        {
+-            .init(.right(second))
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/FlatMap/Parsing.swift b/Sources/Parser/FlatMap/Parsing.swift
+index 77b34dd..879070b 100644
+--- a/Sources/Parser/FlatMap/Parsing.swift
++++ b/Sources/Parser/FlatMap/Parsing.swift
+@@ -23,3 +23,308 @@
+     }
+ 
+ #endif
++
++#if Map
++    public import Parser_Core
++    public import Map
++
++    extension Parsing
++    where
++        Self: ~Copyable,
++        Input: ~Copyable & ~Escapable,
++        Output: ~Copyable & ~Escapable
++    {
++
++        @inlinable
++        public consuming func mapFailure<NewFailure: Swift::Error>(
++            _ transform: @escaping (Failure) -> NewFailure
++        ) -> Map::Map<Failure, NewFailure, Never>.Error.Parser<Self> {
++            Map::Map<Failure, NewFailure, Never>(transform).errorParser(self)
++        }
++    }
++
++#endif
++
++#if Optic
++    public import Parser_Core
++    public import Either
++    public import Optic
++
++    extension Parser::Parsing
++    where
++        Self: ~Copyable,
++        Input: ~Copyable & ~Escapable,
++        Output: ~Copyable & ~Escapable
++    {
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable,
++            BackwardFailure: Swift::Error
++        >(
++            forward adapter: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Adapter<Never, BackwardFailure>
++        ) -> Map::Map<Self.Output, Focus, Never>.Parser<Self>
++        where Output == Source, Failure == Never {
++            map { source in adapter.forward(source) }
++        }
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable,
++            BackwardFailure: Swift::Error
++        >(
++            forward adapter: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Adapter<Never, BackwardFailure>
++        ) -> Map::Map<Self.Output, Focus, Failure>.Parser<Self>
++        where Output == Source {
++            map { source in adapter.forward(source) }
++        }
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable,
++            ForwardFailure: Swift::Error,
++            BackwardFailure: Swift::Error
++        >(
++            forward adapter: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Adapter<ForwardFailure, BackwardFailure>
++        ) -> Map::Map<Self.Output, Focus, ForwardFailure>.Parser<Self>
++        where Output == Source, Failure == Never {
++            map(adapter.forward)
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable,
++            ForwardFailure: Swift::Error,
++            BackwardFailure: Swift::Error
++        >(
++            forward adapter: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Adapter<ForwardFailure, BackwardFailure>
++        ) -> Map::Map<Self.Output, Focus, Either<Failure, ForwardFailure>>.Parser<Self>
++        where Output == Source {
++            map(adapter.forward)
++        }
++    }
++
++#endif
++
++#if Optic
++    public import Parser_Core
++    public import Optic
++
++    extension Parser::Parsing
++    where
++        Self: ~Copyable,
++        Input: ~Copyable & ~Escapable,
++        Output: ~Copyable & ~Escapable
++    {
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            forward isomorphism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Isomorphism
++        ) -> Map::Map<Self.Output, Focus, Failure>.Parser<Self>
++        where Output == Source {
++            map(isomorphism.forward)
++        }
++    }
++
++#endif
++
++#if Optic
++    public import Parser_Core
++    public import Either
++    public import Optic
++
++    extension Parser::Parsing
++    where
++        Self: ~Copyable,
++        Input: ~Copyable & ~Escapable,
++        Output: ~Copyable & ~Escapable
++    {
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism
++        ) -> Map::Map<Self.Output, Either<Target, Focus>, Failure>.Parser<Self>
++        where Output == Source {
++            map(prism.match)
++        }
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism,
++            failure transform: @escaping (consuming Target) -> Never
++        ) -> Map::Map<Self.Output, Focus, Never>.Parser<Self>
++        where Output == Source, Failure == Never {
++            map { source in
++                switch prism.match(source) {
++                case .left(let target):
++                    transform(target)
++                case .right(let focus):
++                    focus
++                }
++            }
++        }
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism,
++            failure transform: @escaping (consuming Target) -> Never
++        ) -> Map::Map<Self.Output, Focus, Failure>.Parser<Self>
++        where Output == Source {
++            map { source in
++                switch prism.match(source) {
++                case .left(let target):
++                    transform(target)
++                case .right(let focus):
++                    focus
++                }
++            }
++        }
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable,
++            MatchFailure: Swift::Error
++        >(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism,
++            failure transform: @escaping (consuming Target) -> MatchFailure
++        ) -> Map::Map<Self.Output, Focus, MatchFailure>.Parser<Self>
++        where Output == Source, Failure == Never {
++            map { source throws(MatchFailure) in
++                switch prism.match(source) {
++                case .left(let target):
++                    throw transform(target)
++                case .right(let focus):
++                    return focus
++                }
++            }
++        }
++
++        @_disfavoredOverload
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable,
++            MatchFailure: Swift::Error
++        >(
++            matching prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism,
++            failure transform: @escaping (consuming Target) -> MatchFailure
++        ) -> Map::Map<Self.Output, Focus, Either<Failure, MatchFailure>>.Parser<Self>
++        where Output == Source {
++            map { source throws(MatchFailure) in
++                switch prism.match(source) {
++                case .left(let target):
++                    throw transform(target)
++                case .right(let focus):
++                    return focus
++                }
++            }
++        }
++
++        @inlinable
++        public consuming func map<
++            Source: ~Copyable & ~Escapable,
++            Target: ~Copyable & Escapable,
++            Focus: ~Copyable & Escapable,
++            Replacement: ~Copyable & ~Escapable
++        >(
++            embedding prism: Optic::Optic<
++                Source,
++                Target,
++                Focus,
++                Replacement
++            >.Prism
++        ) -> Map::Map<Self.Output, Target, Failure>.Parser<Self>
++        where Output == Replacement {
++            map(prism.embed)
++        }
++    }
++
++#endif
+diff --git a/Sources/Parser/Lazy/Parser.Builder+Lazy.swift b/Sources/Parser/Lazy/Parser.Builder+Lazy.swift
+deleted file mode 100644
+index 490bbe4..0000000
+--- a/Sources/Parser/Lazy/Parser.Builder+Lazy.swift
++++ /dev/null
+@@ -1,31 +0,0 @@
+-#if Lazy
+-    public import Parser_Core
+-    public import Lazy
+-    public import Either
+-
+-    extension Parser::Builder where Input: ~Copyable & ~Escapable {
+-        @inlinable
+-        public static func buildExpression<P: Parser::Parsing & ~Copyable>(
+-            _ lazy: Lazy::Lazy<P, Never>
+-        ) -> Lazy::Lazy<P, Never>.Parser<P.Failure>
+-        where
+-            P.Input == Input,
+-            P.Input: ~Copyable & ~Escapable,
+-            P.Output: ~Copyable & Escapable
+-        {
+-            .init(lazy)
+-        }
+-
+-        @inlinable
+-        public static func buildExpression<P: Parser::Parsing & ~Copyable, F: Swift::Error>(
+-            _ lazy: Lazy::Lazy<P, F>
+-        ) -> Lazy::Lazy<P, F>.Parser<Either<F, P.Failure>>
+-        where
+-            P.Input == Input,
+-            P.Input: ~Copyable & ~Escapable,
+-            P.Output: ~Copyable & Escapable
+-        {
+-            .init(lazy)
+-        }
+-    }
+-#endif
+diff --git a/Sources/Parser/Map/Parsing+mapFailure.swift b/Sources/Parser/Map/Parsing+mapFailure.swift
+deleted file mode 100644
+index 18d7396..0000000
+--- a/Sources/Parser/Map/Parsing+mapFailure.swift
++++ /dev/null
+@@ -1,20 +0,0 @@
+-#if Map
+-    public import Parser_Core
+-    public import Map
+-
+-    extension Parsing
+-    where
+-        Self: ~Copyable,
+-        Input: ~Copyable & ~Escapable,
+-        Output: ~Copyable & ~Escapable
+-    {
+-
+-        @inlinable
+-        public consuming func mapFailure<NewFailure: Swift::Error>(
+-            _ transform: @escaping (Failure) -> NewFailure
+-        ) -> Map::Map<Failure, NewFailure, Never>.Error.Parser<Self> {
+-            Map::Map<Failure, NewFailure, Never>(transform).errorParser(self)
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/Optic/Optic.Adapter+Parsing.swift b/Sources/Parser/Optic/Optic.Adapter+Parsing.swift
+deleted file mode 100644
+index 68eb388..0000000
+--- a/Sources/Parser/Optic/Optic.Adapter+Parsing.swift
++++ /dev/null
+@@ -1,93 +0,0 @@
+-#if Optic
+-    public import Parser_Core
+-    public import Either
+-    public import Optic
+-
+-    extension Parser::Parsing
+-    where
+-        Self: ~Copyable,
+-        Input: ~Copyable & ~Escapable,
+-        Output: ~Copyable & ~Escapable
+-    {
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable,
+-            BackwardFailure: Swift::Error
+-        >(
+-            forward adapter: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Adapter<Never, BackwardFailure>
+-        ) -> Map::Map<Self.Output, Focus, Never>.Parser<Self>
+-        where Output == Source, Failure == Never {
+-            map { source in adapter.forward(source) }
+-        }
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable,
+-            BackwardFailure: Swift::Error
+-        >(
+-            forward adapter: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Adapter<Never, BackwardFailure>
+-        ) -> Map::Map<Self.Output, Focus, Failure>.Parser<Self>
+-        where Output == Source {
+-            map { source in adapter.forward(source) }
+-        }
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable,
+-            ForwardFailure: Swift::Error,
+-            BackwardFailure: Swift::Error
+-        >(
+-            forward adapter: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Adapter<ForwardFailure, BackwardFailure>
+-        ) -> Map::Map<Self.Output, Focus, ForwardFailure>.Parser<Self>
+-        where Output == Source, Failure == Never {
+-            map(adapter.forward)
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable,
+-            ForwardFailure: Swift::Error,
+-            BackwardFailure: Swift::Error
+-        >(
+-            forward adapter: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Adapter<ForwardFailure, BackwardFailure>
+-        ) -> Map::Map<Self.Output, Focus, Either<Failure, ForwardFailure>>.Parser<Self>
+-        where Output == Source {
+-            map(adapter.forward)
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/Optic/Optic.Isomorphism+Parsing.swift b/Sources/Parser/Optic/Optic.Isomorphism+Parsing.swift
+deleted file mode 100644
+index fbb1bb5..0000000
+--- a/Sources/Parser/Optic/Optic.Isomorphism+Parsing.swift
++++ /dev/null
+@@ -1,31 +0,0 @@
+-#if Optic
+-    public import Parser_Core
+-    public import Optic
+-
+-    extension Parser::Parsing
+-    where
+-        Self: ~Copyable,
+-        Input: ~Copyable & ~Escapable,
+-        Output: ~Copyable & ~Escapable
+-    {
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            forward isomorphism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Isomorphism
+-        ) -> Map::Map<Self.Output, Focus, Failure>.Parser<Self>
+-        where Output == Source {
+-            map(isomorphism.forward)
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/Optic/Optic.Prism+Parsing.swift b/Sources/Parser/Optic/Optic.Prism+Parsing.swift
+deleted file mode 100644
+index 53afa18..0000000
+--- a/Sources/Parser/Optic/Optic.Prism+Parsing.swift
++++ /dev/null
+@@ -1,157 +0,0 @@
+-#if Optic
+-    public import Parser_Core
+-    public import Either
+-    public import Optic
+-
+-    extension Parser::Parsing
+-    where
+-        Self: ~Copyable,
+-        Input: ~Copyable & ~Escapable,
+-        Output: ~Copyable & ~Escapable
+-    {
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism
+-        ) -> Map::Map<Self.Output, Either<Target, Focus>, Failure>.Parser<Self>
+-        where Output == Source {
+-            map(prism.match)
+-        }
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism,
+-            failure transform: @escaping (consuming Target) -> Never
+-        ) -> Map::Map<Self.Output, Focus, Never>.Parser<Self>
+-        where Output == Source, Failure == Never {
+-            map { source in
+-                switch prism.match(source) {
+-                case .left(let target):
+-                    transform(target)
+-                case .right(let focus):
+-                    focus
+-                }
+-            }
+-        }
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism,
+-            failure transform: @escaping (consuming Target) -> Never
+-        ) -> Map::Map<Self.Output, Focus, Failure>.Parser<Self>
+-        where Output == Source {
+-            map { source in
+-                switch prism.match(source) {
+-                case .left(let target):
+-                    transform(target)
+-                case .right(let focus):
+-                    focus
+-                }
+-            }
+-        }
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable,
+-            MatchFailure: Swift::Error
+-        >(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism,
+-            failure transform: @escaping (consuming Target) -> MatchFailure
+-        ) -> Map::Map<Self.Output, Focus, MatchFailure>.Parser<Self>
+-        where Output == Source, Failure == Never {
+-            map { source throws(MatchFailure) in
+-                switch prism.match(source) {
+-                case .left(let target):
+-                    throw transform(target)
+-                case .right(let focus):
+-                    return focus
+-                }
+-            }
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable,
+-            MatchFailure: Swift::Error
+-        >(
+-            matching prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism,
+-            failure transform: @escaping (consuming Target) -> MatchFailure
+-        ) -> Map::Map<Self.Output, Focus, Either<Failure, MatchFailure>>.Parser<Self>
+-        where Output == Source {
+-            map { source throws(MatchFailure) in
+-                switch prism.match(source) {
+-                case .left(let target):
+-                    throw transform(target)
+-                case .right(let focus):
+-                    return focus
+-                }
+-            }
+-        }
+-
+-        @inlinable
+-        public consuming func map<
+-            Source: ~Copyable & ~Escapable,
+-            Target: ~Copyable & Escapable,
+-            Focus: ~Copyable & Escapable,
+-            Replacement: ~Copyable & ~Escapable
+-        >(
+-            embedding prism: Optic::Optic<
+-                Source,
+-                Target,
+-                Focus,
+-                Replacement
+-            >.Prism
+-        ) -> Map::Map<Self.Output, Target, Failure>.Parser<Self>
+-        where Output == Replacement {
+-            map(prism.embed)
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/Pair/Parser.Builder+Pair.swift b/Sources/Parser/Pair/Parser.Builder+Pair.swift
+deleted file mode 100644
+index acb5126..0000000
+--- a/Sources/Parser/Pair/Parser.Builder+Pair.swift
++++ /dev/null
+@@ -1,45 +0,0 @@
+-#if Pair
+-    public import Parser_Core
+-
+-    public import Either
+-    public import Pair
+-
+-    extension Parser::Builder where Input: ~Copyable & ~Escapable {
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public static func buildPartialBlock<A: Parser::Parsing & ~Copyable, N: Parser::Parsing & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair::Pair<A, N>.Parser<Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable
+-        {
+-            .init(accumulated, next, { .left($0) }, { .right($0) })
+-        }
+-
+-        @_disfavoredOverload
+-        @inlinable
+-        public static func buildPartialBlock<A: Parser::Parsing & ~Copyable, N: Parser::Parsing & ~Copyable>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Pair::Pair<A, N>.Parser<A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output: ~Copyable & Escapable,
+-            N.Output: ~Copyable & Escapable,
+-            A.Failure == N.Failure
+-        {
+-            .init(accumulated, next, { $0 }, { $0 })
+-        }
+-    }
+-
+-#endif
+diff --git a/Sources/Parser/Repetition/Cardinal.Range+CustomCollection.Parser.swift b/Sources/Parser/Repetition/Cardinal.Range+CustomCollection.Parser.swift
+deleted file mode 100644
+index 1e27c64..0000000
+--- a/Sources/Parser/Repetition/Cardinal.Range+CustomCollection.Parser.swift
++++ /dev/null
+@@ -1,17 +0,0 @@
+-#if Repetition && Collection
+-    public import Cardinal
+-    public import Repetition
+-    public import Collection
+-
+-    extension Cardinal.Range {
+-        public func parser<Input: Collection.Slice.`Protocol`>(forCollection input: Input.Type) -> Parser::Parser<Input, Input, Repetition<Self, Void>.Error>
+-        where Input.Element: ~Copyable {
+-            Parser::Parser { input throws(Repetition<Self, Void>.Error) in
+-                let end = try self.end(inCollection: input)
+-                let output = input[input.startIndex..<end]
+-                input = input[end..<input.endIndex]
+-                return output
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Parser/Repetition/Cardinal.Range+Iteration.Parser.swift b/Sources/Parser/Repetition/Cardinal.Range+Iteration.Parser.swift
+deleted file mode 100644
+index a972d83..0000000
+--- a/Sources/Parser/Repetition/Cardinal.Range+Iteration.Parser.swift
++++ /dev/null
+@@ -1,19 +0,0 @@
+-#if Repetition && Iterator
+-    public import Cardinal
+-    public import Repetition
+-    public import Iterator
+-    public import Either
+-
+-    extension Cardinal.Range {
+-        public func parser<I: Iterating & ~Copyable & ~Escapable>(
+-            for input: Iterator::Iterator.Buffered<I, I.Failure>.Type
+-        ) -> Parser::Parser<Iterator::Iterator.Buffered<I, I.Failure>, [I.Element], Either<Repetition<Self, Void>.Error, I.Failure>>
+-        where I.Element: Copyable & Escapable {
+-            Parser::Parser { input throws(Either<Repetition<Self, Void>.Error, I.Failure>) in
+-                var output: [I.Element] = []
+-                try self.forEach(in: &input) { output.append($0) }
+-                return output
+-            }
+-        }
+-    }
+-#endif
+diff --git a/Sources/Parser/Repetition/Cardinal.Range+Parser.swift b/Sources/Parser/Repetition/Cardinal.Range+Parser.swift
+deleted file mode 100644
+index ae208df..0000000
+--- a/Sources/Parser/Repetition/Cardinal.Range+Parser.swift
++++ /dev/null
+@@ -1,34 +0,0 @@
+-#if Repetition
+-    public import Parser_Core
+-    public import Cardinal
+-    public import Repetition
+-    public import Either
+-    public import Checkpoint
+-
+-    extension Cardinal.Range {
+-        public func parser<P: Parsing & ~Copyable, Rejection: Swift::Error, Fatal: Swift::Error>(
+-            _ build: () -> P
+-        ) -> Repetition<Self, P>.Parser<Rejection, Fatal>
+-        where
+-            P.Input: Restorable & ~Copyable & ~Escapable,
+-            P.Input.Checkpoint: Equatable,
+-            P.Output: Copyable & Escapable,
+-            P.Failure == Either<Rejection, Fatal>
+-        {
+-            .init(.init(self, operation: build()))
+-        }
+-        public func parser<Input: Restorable & ~Copyable & ~Escapable, P: Parsing & ~Copyable, Rejection: Swift::Error, Fatal: Swift::Error>(
+-            for input: Input.Type,
+-            @Builder<Input> _ build: () -> P
+-        ) -> Repetition<Self, P>.Parser<Rejection, Fatal>
+-        where
+-            Input.Checkpoint: Equatable,
+-            P.Input == Input,
+-            P.Input: ~Copyable & ~Escapable,
+-            P.Output: Copyable & Escapable,
+-            P.Failure == Either<Rejection, Fatal>
+-        {
+-            .init(.init(self, operation: build()))
+-        }
+-    }
+-#endif
+diff --git a/Sources/Parser/Repetition/Cardinal.Range.swift b/Sources/Parser/Repetition/Cardinal.Range.swift
+index 54010a1..ef16b1b 100644
+--- a/Sources/Parser/Repetition/Cardinal.Range.swift
++++ b/Sources/Parser/Repetition/Cardinal.Range.swift
+@@ -23,3 +23,76 @@
+         }
+     }
+ #endif
++
++#if Repetition && Collection
++    public import Cardinal
++    public import Repetition
++    public import Collection
++
++    extension Cardinal.Range {
++        public func parser<Input: Collection.Slice.`Protocol`>(forCollection input: Input.Type) -> Parser::Parser<Input, Input, Repetition<Self, Void>.Error>
++        where Input.Element: ~Copyable {
++            Parser::Parser { input throws(Repetition<Self, Void>.Error) in
++                let end = try self.end(inCollection: input)
++                let output = input[input.startIndex..<end]
++                input = input[end..<input.endIndex]
++                return output
++            }
++        }
++    }
++#endif
++
++#if Repetition && Iterator
++    public import Cardinal
++    public import Repetition
++    public import Iterator
++    public import Either
++
++    extension Cardinal.Range {
++        public func parser<I: Iterating & ~Copyable & ~Escapable>(
++            for input: Iterator::Iterator.Buffered<I, I.Failure>.Type
++        ) -> Parser::Parser<Iterator::Iterator.Buffered<I, I.Failure>, [I.Element], Either<Repetition<Self, Void>.Error, I.Failure>>
++        where I.Element: Copyable & Escapable {
++            Parser::Parser { input throws(Either<Repetition<Self, Void>.Error, I.Failure>) in
++                var output: [I.Element] = []
++                try self.forEach(in: &input) { output.append($0) }
++                return output
++            }
++        }
++    }
++#endif
++
++#if Repetition
++    public import Parser_Core
++    public import Cardinal
++    public import Repetition
++    public import Either
++    public import Checkpoint
++
++    extension Cardinal.Range {
++        public func parser<P: Parsing & ~Copyable, Rejection: Swift::Error, Fatal: Swift::Error>(
++            _ build: () -> P
++        ) -> Repetition<Self, P>.Parser<Rejection, Fatal>
++        where
++            P.Input: Restorable & ~Copyable & ~Escapable,
++            P.Input.Checkpoint: Equatable,
++            P.Output: Copyable & Escapable,
++            P.Failure == Either<Rejection, Fatal>
++        {
++            .init(.init(self, operation: build()))
++        }
++        public func parser<Input: Restorable & ~Copyable & ~Escapable, P: Parsing & ~Copyable, Rejection: Swift::Error, Fatal: Swift::Error>(
++            for input: Input.Type,
++            @Builder<Input> _ build: () -> P
++        ) -> Repetition<Self, P>.Parser<Rejection, Fatal>
++        where
++            Input.Checkpoint: Equatable,
++            P.Input == Input,
++            P.Input: ~Copyable & ~Escapable,
++            P.Output: Copyable & Escapable,
++            P.Failure == Either<Rejection, Fatal>
++        {
++            .init(.init(self, operation: build()))
++        }
++    }
++#endif
+diff --git a/Sources/Parser/Skip/Parser.Builder+Skip.swift b/Sources/Parser/Skip/Parser.Builder+Skip.swift
+deleted file mode 100644
+index c0fa40c..0000000
+--- a/Sources/Parser/Skip/Parser.Builder+Skip.swift
++++ /dev/null
+@@ -1,42 +0,0 @@
+-#if Skip
+-    public import Parser_Core
+-    public import Skip
+-    public import Either
+-
+-    extension Parser::Builder where Input: ~Copyable & ~Escapable {
+-
+-        @inlinable
+-        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip::Skip<A.Output, N.Output>.Parser<A, N, Either<A.Failure, N.Failure>>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output == (repeat each O),
+-            N.Output == Void
+-        {
+-            Skip::Skip.Parser(accumulated, next, { .left($0) }, { .right($0) })
+-        }
+-
+-        @inlinable
+-        public static func buildPartialBlock<A: Parsing & ~Copyable, N: Parsing & ~Copyable, each O>(
+-            accumulated: consuming A,
+-            next: consuming N
+-        ) -> Skip::Skip<A.Output, N.Output>.Parser<A, N, A.Failure>
+-        where
+-            A.Input == Input,
+-            N.Input == Input,
+-            A.Input: ~Copyable & ~Escapable,
+-            N.Input: ~Copyable & ~Escapable,
+-            A.Output == (repeat each O),
+-            N.Output == Void,
+-            A.Failure == N.Failure
+-        {
+-            Skip::Skip.Parser(accumulated, next, { $0 }, { $0 })
+-        }
+-    }
+-
+-#endif
+-- 
+2.43.0
+

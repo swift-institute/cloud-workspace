@@ -1,0 +1,2658 @@
+From f8e8176c0a9bf3392bd1b0aef5ecd415784e55dc Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:14 +0000
+Subject: [PATCH 30/30] extension file naming: member-only extension files
+ merged into the extended type's own file (type-check follows; Linux x86_64,
+ Swift 6.4.2) (coenttb/work#242)
+
+---
+ .../Lint.Rule+TargetImportEdge.swift          | 197 -----
+ .../Lint.Rule.Manifest.ApacheLicense.swift    | 388 ----------
+ ....Rule.Manifest.CanonicalSettingsTail.swift | 134 ----
+ .../Lint.Rule.swift                           | 713 ++++++++++++++++++
+ ...ule+Structure.ForbiddenLicenseHeader.swift |  95 ---
+ ...Lint.Rule+Suppression.ReasonRequired.swift | 141 ----
+ .../Lint.Rule.swift                           | 232 ++++++
+ ...Institute.Source.Application+measure.swift | 328 --------
+ .../Institute.Source.Application.swift        | 322 ++++++++
+ 9 files changed, 1267 insertions(+), 1283 deletions(-)
+ delete mode 100644 Sources/Institute Linter Rule Manifest/Lint.Rule+TargetImportEdge.swift
+ delete mode 100644 Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.ApacheLicense.swift
+ delete mode 100644 Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.CanonicalSettingsTail.swift
+ delete mode 100644 Sources/Institute Linter Rule Structure/Lint.Rule+Structure.ForbiddenLicenseHeader.swift
+ delete mode 100644 Sources/Institute Linter Rule Structure/Lint.Rule+Suppression.ReasonRequired.swift
+ delete mode 100644 Sources/Institute Source/Institute.Source.Application+measure.swift
+
+diff --git a/Sources/Institute Linter Rule Manifest/Lint.Rule+TargetImportEdge.swift b/Sources/Institute Linter Rule Manifest/Lint.Rule+TargetImportEdge.swift
+deleted file mode 100644
+index 8523ca6..0000000
+--- a/Sources/Institute Linter Rule Manifest/Lint.Rule+TargetImportEdge.swift	
++++ /dev/null
+@@ -1,197 +0,0 @@
+-internal import File_System
+-public import Lint
+-internal import Linter_Rule_Scope
+-internal import SwiftParser
+-internal import SwiftSyntax
+-
+-extension Lint.Rule {
+-
+-    public static let `target import edge` = Lint.Rule(
+-        id: "target import edge",
+-
+-        default: .warning,
+-        controls: [
+-            .init(
+-                id: "target import edge absent materialized sources",
+-                source: """
+-                    import PackageDescription
+-
+-                    let package = Package(
+-                        name: "Fixture",
+-                        targets: [.target(name: "Fixture")]
+-                    )
+-                    """,
+-                path: "/Controls/TargetImportEdge/Package.swift",
+-                expectation: .clean
+-            )
+-        ],
+-        observe: Lint.Rule.measured { source, severity in
+-            packageTargetImportEdgeFindings(source: source, severity: severity)
+-        }
+-    )
+-}
+-
+-let packageTargetImportEdgeToolchainModules: Swift::Set<Swift::String> = [
+-    "Swift", "Testing", "XCTest", "Foundation", "FoundationEssentials",
+-    "Dispatch", "os", "Darwin", "Glibc", "Musl", "WinSDK", "Android",
+-    "Observation", "Synchronization", "Builtin", "CRT", "ucrt",
+-    "SwiftShims", "DistributedActors", "Distributed", "RegexBuilder",
+-    "StringProcessing", "CoreFoundation", "ObjectiveC", "simd", "Accelerate",
+-    "FoundationNetworking", "FoundationXML", "FoundationInternationalization",
+-    "SwiftUI", "AppKit", "UIKit", "WebKit", "Network", "Security", "CryptoKit",
+-    "CoreGraphics", "ImageIO", "UniformTypeIdentifiers", "AVFoundation", "Combine",
+-    "CoreText", "QuartzCore", "CoreServices", "OSLog", "SystemConfiguration",
+-]
+-
+-func packageTargetImportEdgeNormalize(_ name: Swift::String) -> Swift::String {
+-    var out = ""
+-    out.reserveCapacity(name.count)
+-    for character in name {
+-        out.append(character == " " || character == "-" ? "_" : character)
+-    }
+-    return out
+-}
+-
+-func packageTargetImportEdgeFindings(
+-    source: borrowing Lint.Source.Parsed,
+-    severity: Diagnostic.Severity
+-) -> [Diagnostic.Record] {
+-
+-    let runPath = Swift::String(describing: source.path)
+-    guard runPath == "Package.swift" || runPath.hasSuffix("/Package.swift") else { return [] }
+-
+-    let filePath = source.file.filePath
+-    guard filePath.hasSuffix("/Package.swift") else { return [] }
+-    let root = Swift::String(filePath.dropLast("/Package.swift".count))
+-    guard Lint.Scope.File.isDirectory(root) else { return [] }
+-
+-    let visitor = PackageTargetImportEdgeManifestVisitor()
+-    visitor.walk(source.tree)
+-    let manifest = visitor.manifest
+-
+-    var dependencyManifestPaths: [Swift::String] = []
+-    var resolvedCount = 0
+-    for relative in manifest.pathDependencies {
+-        let candidate = root + "/" + relative + "/Package.swift"
+-        if Lint.Scope.File.isFile(candidate) {
+-            dependencyManifestPaths.append(candidate)
+-            resolvedCount += 1
+-        }
+-    }
+-    for url in manifest.urlDependencies {
+-        var trimmed = url
+-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
+-        let parts = trimmed.split(separator: "/").map(Swift::String.init)
+-        let tail = parts.suffix(2)
+-        guard tail.count == 2, let organization = tail.first, var name = tail.last else { continue }
+-        if name.hasSuffix(".git") { name = Swift::String(name.dropLast(4)) }
+-        let candidate = root + "/../../" + organization + "/" + name + "/Package.swift"
+-        if Lint.Scope.File.isFile(candidate) {
+-            dependencyManifestPaths.append(candidate)
+-            resolvedCount += 1
+-        }
+-    }
+-    let declaredCount = manifest.pathDependencies.count + manifest.urlDependencies.count
+-
+-    let unresolvableDependencies = declaredCount > resolvedCount
+-
+-    var dependencyProducts: [Swift::String: Swift::Set<Swift::String>] = [:]
+-    for manifestPath in dependencyManifestPaths {
+-        guard let text = Lint.Scope.File.text(at: manifestPath) else { continue }
+-        let tree = Parser.parse(source: text)
+-        let dependencyVisitor = PackageTargetImportEdgeManifestVisitor()
+-        dependencyVisitor.walk(tree)
+-        for (product, members) in dependencyVisitor.manifest.products {
+-            dependencyProducts[product, default: []].formUnion(members)
+-        }
+-    }
+-
+-    let samePackageTargets = Swift::Set(manifest.targets.map(\.name))
+-    var records: [Diagnostic.Record] = []
+-
+-    for target in manifest.targets {
+-        let sourceDirectory: Swift::String
+-        if let explicit = target.explicitPath {
+-            sourceDirectory = root + "/" + explicit
+-        } else {
+-            let base = target.kind == .testTarget ? "Tests" : "Sources"
+-            sourceDirectory = root + "/" + base + "/" + target.name
+-        }
+-        guard Lint.Scope.File.isDirectory(sourceDirectory) else { continue }
+-
+-        var allowed: Swift::Set<Swift::String> = [packageTargetImportEdgeNormalize(target.name)]
+-        for dependency in target.dependencies {
+-            switch dependency {
+-            case .target(let name):
+-                allowed.insert(packageTargetImportEdgeNormalize(name))
+-
+-            case .product(let name):
+-                if let members = dependencyProducts[name] {
+-                    allowed.formUnion(members)
+-                } else {
+-
+-                    allowed.insert(packageTargetImportEdgeNormalize(name))
+-                }
+-
+-            case .byName(let name):
+-                if samePackageTargets.contains(name) {
+-                    allowed.insert(packageTargetImportEdgeNormalize(name))
+-                } else {
+-                    if let members = dependencyProducts[name] {
+-                        allowed.formUnion(members)
+-                    }
+-                    allowed.insert(packageTargetImportEdgeNormalize(name))
+-                }
+-            }
+-        }
+-
+-        var sightings: [Swift::String: (Swift::String, Swift::Int)] = [:]
+-        let sources: File.Directory
+-        do throws(File.Path.Error) {
+-            sources = try File.Directory(validating: sourceDirectory)
+-        } catch {
+-            continue
+-        }
+-        for swiftFile in Lint.Scope.File.swiftFiles(under: sources) {
+-            guard let text = Lint.Scope.File.text(at: swiftFile) else { continue }
+-            let tree = Parser.parse(source: text)
+-            let converter = SourceLocationConverter(fileName: swiftFile, tree: tree)
+-            let importVisitor = PackageTargetImportEdgeImportVisitor(converter: converter)
+-            importVisitor.walk(tree)
+-            var relative = swiftFile
+-            if relative.hasPrefix(root + "/") {
+-                relative = Swift::String(relative.dropFirst(root.count + 1))
+-            }
+-            for (module, line) in importVisitor.imports where sightings[module] == nil {
+-                sightings[module] = (relative, line)
+-            }
+-        }
+-
+-        for module in sightings.keys.sorted() {
+-            guard let (relative, line) = sightings[module] else { continue }
+-            if packageTargetImportEdgeToolchainModules.contains(module) { continue }
+-            if module.hasPrefix("_") { continue }
+-            if allowed.contains(module) { continue }
+-            if unresolvableDependencies { continue }
+-            let location = source.converter.location(for: target.namePosition)
+-            records.append(
+-                Diagnostic.Record(
+-                    location: Source.Location(
+-                        fileID: source.file.fileID,
+-                        filePath: source.file.filePath,
+-                        line: location.line,
+-                        column: location.column
+-                    ),
+-                    severity: severity,
+-                    identifier: "target import edge",
+-                    message: "[target import edge]: \(relative):\(line): target "
+-                        + "'\(target.name)' imports '\(module)' without a declared "
+-                        + "dependency edge ([TARGET-IMPORT-EDGE]: transitive-build "
+-                        + "riding is a scheduling race; declare the target/product "
+-                        + "dependency)"
+-                )
+-            )
+-        }
+-    }
+-    return records
+-}
+diff --git a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.ApacheLicense.swift b/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.ApacheLicense.swift
+deleted file mode 100644
+index 31c1acc..0000000
+--- a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.ApacheLicense.swift	
++++ /dev/null
+@@ -1,388 +0,0 @@
+-public import Lint
+-internal import SwiftSyntax
+-
+-extension Lint.Rule {
+-    public static let `apache license` = Lint.Rule(
+-        id: "apache license",
+-        default: .warning,
+-        controls: [
+-            .init(
+-                id: "apache license canonical text",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .clean,
+-                license: .text("Copyright 2025 Coen ten Thije Boonkkamp\n\n" + manifestApacheLicenseTerms)
+-            ),
+-            .init(
+-                id: "apache license unfilled holder",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .findings(1),
+-                license: .text(manifestApacheLicenseTerms + "\n\n    Copyright [yyyy] [name of copyright owner]")
+-            ),
+-            .init(
+-                id: "apache license reflowed markdown text",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .clean,
+-                license: .text("# Apache License\n\nCopyright 2025 Coen ten Thije Boonkkamp\n\n**" + manifestApacheLicenseTerms.split(separator: "\n").joined(separator: " ") + "**")
+-            ),
+-            .init(
+-                id: "apache license missing file",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .findings(1),
+-                license: .absent
+-            ),
+-            .init(
+-                id: "apache license other license",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .findings(1),
+-                license: .text("MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy")
+-            ),
+-            .init(
+-                id: "apache license truncated terms",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .findings(1),
+-                license: .text(Swift::String(manifestApacheLicenseTerms.dropLast(200)))
+-            ),
+-            .init(
+-                id: "apache license upstream holder",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .clean,
+-                license: .text("MIT License\n\nCopyright (c) 2025 Point-Free, Inc.\n\nPermission is hereby granted")
+-            ),
+-            .init(
+-                id: "apache license upstream holder without (c)",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .clean,
+-                license: .text(manifestApacheLicenseTerms + "\n\nCopyright 2022 The SwiftASN1 Project")
+-            ),
+-            .init(
+-                id: "apache license own holder",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .findings(1),
+-                license: .text("MIT License\n\nCopyright (c) 2026 Swift Institute\n\nPermission is hereby granted")
+-            ),
+-            .init(
+-                id: "apache license license author",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .findings(1),
+-                license: .text("GNU Affero General Public License\n\n_Copyright © 2007 Free Software Foundation, Inc._")
+-            ),
+-            .init(
+-                id: "apache license unread",
+-                source: "let package = Package(name: \"Fixture\")",
+-                path: "Package.swift",
+-                expectation: .clean,
+-                applicability: .inapplicable
+-            ),
+-            .init(
+-                id: "apache license nested manifest",
+-                source: "let package = Package(name: \"Runner\")",
+-                path: "Runner/Package.swift",
+-                expectation: .clean,
+-                applicability: .inapplicable,
+-                license: .absent
+-            ),
+-        ],
+-        observe: { source, severity in
+-            guard manifestIsRootPackageManifest(source.path.underlying), source.index.license != .unread
+-            else {
+-                return Lint.Rule.Observation(findings: [], coverage: .measured, applicability: .inapplicable)
+-            }
+-            let findings: [Diagnostic.Record]
+-            switch source.index.license {
+-            case .text(let text)
+-            where manifestApacheLicenseNormalized(text).contains(manifestApacheLicenseCanonical)
+-                && manifestLicenseNamesOwnHolder(text):
+-                findings = []
+-
+-            case .text(let text) where manifestLicenseNamesUpstreamHolder(text):
+-                findings = []
+-
+-            case .unread, .absent, .text:
+-                findings = [
+-                    Diagnostic.Record(
+-                        location: Source.Location(
+-                            fileID: source.file.fileID,
+-                            filePath: source.file.filePath,
+-                            line: 1,
+-                            column: 1
+-                        ),
+-                        severity: severity,
+-                        identifier: "apache license",
+-                        message: manifestApacheLicenseMessage(source.index.license)
+-                    )
+-                ]
+-            }
+-            return Lint.Rule.Observation(findings: findings, coverage: .measured)
+-        }
+-    )
+-}
+-
+-internal func manifestIsRootPackageManifest(_ path: Swift::String) -> Swift::Bool {
+-    path.split(separator: "/").filter { $0 != "." } == ["Package.swift"]
+-}
+-
+-let manifestLicenseOwnHolders: [Swift::String] = [
+-    "coen ten thije boonkkamp",
+-    "swift institute",
+-    "the swift institute",
+-    "free software foundation",
+-]
+-
+-func manifestLicenseNamesUpstreamHolder(_ text: Swift::String) -> Swift::Bool {
+-    text.split(separator: "\n").contains { line in
+-        var rest = Swift::Substring(manifestApacheLicenseNormalized(Swift::String(line)))
+-        guard rest.hasPrefix("copyright ") else { return false }
+-        rest = rest.dropFirst("copyright ".count)
+-        if rest.hasPrefix("(c) ") {
+-            rest = rest.dropFirst(4)
+-        } else if rest.hasPrefix("© ") {
+-            rest = rest.dropFirst(2)
+-        } else if rest.first?.isNumber != true {
+-            return false
+-        }
+-        let holder = rest.drop { $0.isNumber || $0 == "-" || $0 == "," || $0 == " " }
+-        guard holder.first?.isLetter == true else { return false }
+-        return !manifestLicenseOwnHolders.contains { holder.hasPrefix($0) }
+-    }
+-}
+-
+-/// Whether a line of `text` is the Institute's copyright, `Copyright <year> <holder>` (with or without `(c)`),
+-/// naming one of its own holders: the Apache terms alone, with the appendix's `[name of copyright owner]`
+-/// unfilled, say nothing about who licenses the package.
+-func manifestLicenseNamesOwnHolder(_ text: Swift::String) -> Swift::Bool {
+-    text.split(separator: "\n").contains { line in
+-        var rest = Swift::Substring(manifestApacheLicenseNormalized(Swift::String(line)))
+-        guard rest.hasPrefix("copyright ") else { return false }
+-        rest = rest.dropFirst("copyright ".count)
+-        if rest.hasPrefix("(c) ") { rest = rest.dropFirst(4) } else if rest.hasPrefix("© ") { rest = rest.dropFirst(2) }
+-        guard rest.first?.isNumber == true else { return false }
+-        let holder = rest.drop { $0.isNumber || $0 == "-" || $0 == "," || $0 == " " }
+-        return manifestLicenseOwnHolders.contains { holder.hasPrefix($0) }
+-    }
+-}
+-
+-internal func manifestApacheLicenseMessage(_ license: Lint.Source.Index.License) -> Swift::String {
+-    let found: Swift::String
+-    switch license {
+-    case .absent, .unread:
+-        found = "the package has no LICENSE.md or LICENSE file at its root"
+-
+-    case .text:
+-        found =
+-            "the root LICENSE does not carry the complete Apache License 2.0 terms with the Institute's "
+-            + "copyright line (`Copyright <year> Coen ten Thije Boonkkamp`)"
+-    }
+-    return "[apache license]: every Swift Institute package is licensed under the Apache License 2.0; "
+-        + found + ". Use the full Apache License 2.0 text (sections 1 to 9); a package that keeps an "
+-        + "upstream holder's licence names that holder in a `Copyright (c) <year> <holder>` line."
+-}
+-
+-func manifestApacheLicenseNormalized(_ text: Swift::String) -> Swift::String {
+-    var result = ""
+-    var pendingSpace = false
+-    for character in text.lowercased() {
+-        if character.isWhitespace || character == "*" || character == "_" || character == "#" {
+-            pendingSpace = !result.isEmpty
+-        } else {
+-            if pendingSpace { result.append(" ") }
+-            pendingSpace = false
+-            result.append(character)
+-        }
+-    }
+-    return result
+-}
+-
+-let manifestApacheLicenseCanonical: Swift::String = manifestApacheLicenseNormalized(
+-    manifestApacheLicenseTerms
+-)
+-
+-package let manifestApacheLicenseTerms: Swift::String = """
+-       TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+-
+-       1. Definitions.
+-
+-          "License" shall mean the terms and conditions for use, reproduction,
+-          and distribution as defined by Sections 1 through 9 of this document.
+-
+-          "Licensor" shall mean the copyright owner or entity authorized by
+-          the copyright owner that is granting the License.
+-
+-          "Legal Entity" shall mean the union of the acting entity and all
+-          other entities that control, are controlled by, or are under common
+-          control with that entity. For the purposes of this definition,
+-          "control" means (i) the power, direct or indirect, to cause the
+-          direction or management of such entity, whether by contract or
+-          otherwise, or (ii) ownership of fifty percent (50%) or more of the
+-          outstanding shares, or (iii) beneficial ownership of such entity.
+-
+-          "You" (or "Your") shall mean an individual or Legal Entity
+-          exercising permissions granted by this License.
+-
+-          "Source" form shall mean the preferred form for making modifications,
+-          including but not limited to software source code, documentation
+-          source, and configuration files.
+-
+-          "Object" form shall mean any form resulting from mechanical
+-          transformation or translation of a Source form, including but
+-          not limited to compiled object code, generated documentation,
+-          and conversions to other media types.
+-
+-          "Work" shall mean the work of authorship, whether in Source or
+-          Object form, made available under the License, as indicated by a
+-          copyright notice that is included in or attached to the work
+-          (an example is provided in the Appendix below).
+-
+-          "Derivative Works" shall mean any work, whether in Source or Object
+-          form, that is based on (or derived from) the Work and for which the
+-          editorial revisions, annotations, elaborations, or other modifications
+-          represent, as a whole, an original work of authorship. For the purposes
+-          of this License, Derivative Works shall not include works that remain
+-          separable from, or merely link (or bind by name) to the interfaces of,
+-          the Work and Derivative Works thereof.
+-
+-          "Contribution" shall mean any work of authorship, including
+-          the original version of the Work and any modifications or additions
+-          to that Work or Derivative Works thereof, that is intentionally
+-          submitted to Licensor for inclusion in the Work by the copyright owner
+-          or by an individual or Legal Entity authorized to submit on behalf of
+-          the copyright owner. For the purposes of this definition, "submitted"
+-          means any form of electronic, verbal, or written communication sent
+-          to the Licensor or its representatives, including but not limited to
+-          communication on electronic mailing lists, source code control systems,
+-          and issue tracking systems that are managed by, or on behalf of, the
+-          Licensor for the purpose of discussing and improving the Work, but
+-          excluding communication that is conspicuously marked or otherwise
+-          designated in writing by the copyright owner as "Not a Contribution."
+-
+-          "Contributor" shall mean Licensor and any individual or Legal Entity
+-          on behalf of whom a Contribution has been received by Licensor and
+-          subsequently incorporated within the Work.
+-
+-       2. Grant of Copyright License. Subject to the terms and conditions of
+-          this License, each Contributor hereby grants to You a perpetual,
+-          worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+-          copyright license to reproduce, prepare Derivative Works of,
+-          publicly display, publicly perform, sublicense, and distribute the
+-          Work and such Derivative Works in Source or Object form.
+-
+-       3. Grant of Patent License. Subject to the terms and conditions of
+-          this License, each Contributor hereby grants to You a perpetual,
+-          worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+-          (except as stated in this section) patent license to make, have made,
+-          use, offer to sell, sell, import, and otherwise transfer the Work,
+-          where such license applies only to those patent claims licensable
+-          by such Contributor that are necessarily infringed by their
+-          Contribution(s) alone or by combination of their Contribution(s)
+-          with the Work to which such Contribution(s) was submitted. If You
+-          institute patent litigation against any entity (including a
+-          cross-claim or counterclaim in a lawsuit) alleging that the Work
+-          or a Contribution incorporated within the Work constitutes direct
+-          or contributory patent infringement, then any patent licenses
+-          granted to You under this License for that Work shall terminate
+-          as of the date such litigation is filed.
+-
+-       4. Redistribution. You may reproduce and distribute copies of the
+-          Work or Derivative Works thereof in any medium, with or without
+-          modifications, and in Source or Object form, provided that You
+-          meet the following conditions:
+-
+-          (a) You must give any other recipients of the Work or
+-              Derivative Works a copy of this License; and
+-
+-          (b) You must cause any modified files to carry prominent notices
+-              stating that You changed the files; and
+-
+-          (c) You must retain, in the Source form of any Derivative Works
+-              that You distribute, all copyright, patent, trademark, and
+-              attribution notices from the Source form of the Work,
+-              excluding those notices that do not pertain to any part of
+-              the Derivative Works; and
+-
+-          (d) If the Work includes a "NOTICE" text file as part of its
+-              distribution, then any Derivative Works that You distribute must
+-              include a readable copy of the attribution notices contained
+-              within such NOTICE file, excluding those notices that do not
+-              pertain to any part of the Derivative Works, in at least one
+-              of the following places: within a NOTICE text file distributed
+-              as part of the Derivative Works; within the Source form or
+-              documentation, if provided along with the Derivative Works; or,
+-              within a display generated by the Derivative Works, if and
+-              wherever such third-party notices normally appear. The contents
+-              of the NOTICE file are for informational purposes only and
+-              do not modify the License. You may add Your own attribution
+-              notices within Derivative Works that You distribute, alongside
+-              or as an addendum to the NOTICE text from the Work, provided
+-              that such additional attribution notices cannot be construed
+-              as modifying the License.
+-
+-          You may add Your own copyright statement to Your modifications and
+-          may provide additional or different license terms and conditions
+-          for use, reproduction, or distribution of Your modifications, or
+-          for any such Derivative Works as a whole, provided Your use,
+-          reproduction, and distribution of the Work otherwise complies with
+-          the conditions stated in this License.
+-
+-       5. Submission of Contributions. Unless You explicitly state otherwise,
+-          any Contribution intentionally submitted for inclusion in the Work
+-          by You to the Licensor shall be under the terms and conditions of
+-          this License, without any additional terms or conditions.
+-          Notwithstanding the above, nothing herein shall supersede or modify
+-          the terms of any separate license agreement you may have executed
+-          with Licensor regarding such Contributions.
+-
+-       6. Trademarks. This License does not grant permission to use the trade
+-          names, trademarks, service marks, or product names of the Licensor,
+-          except as required for reasonable and customary use in describing the
+-          origin of the Work and reproducing the content of the NOTICE file.
+-
+-       7. Disclaimer of Warranty. Unless required by applicable law or
+-          agreed to in writing, Licensor provides the Work (and each
+-          Contributor provides its Contributions) on an "AS IS" BASIS,
+-          WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+-          implied, including, without limitation, any warranties or conditions
+-          of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+-          PARTICULAR PURPOSE. You are solely responsible for determining the
+-          appropriateness of using or redistributing the Work and assume any
+-          risks associated with Your exercise of permissions under this License.
+-
+-       8. Limitation of Liability. In no event and under no legal theory,
+-          whether in tort (including negligence), contract, or otherwise,
+-          unless required by applicable law (such as deliberate and grossly
+-          negligent acts) or agreed to in writing, shall any Contributor be
+-          liable to You for damages, including any direct, indirect, special,
+-          incidental, or consequential damages of any character arising as a
+-          result of this License or out of the use or inability to use the
+-          Work (including but not limited to damages for loss of goodwill,
+-          work stoppage, computer failure or malfunction, or any and all
+-          other commercial damages or losses), even if such Contributor
+-          has been advised of the possibility of such damages.
+-
+-       9. Accepting Warranty or Additional Liability. While redistributing
+-          the Work or Derivative Works thereof, You may choose to offer,
+-          and charge a fee for, acceptance of support, warranty, indemnity,
+-          or other liability obligations and/or rights consistent with this
+-          License. However, in accepting such obligations, You may act only
+-          on Your own behalf and on Your sole responsibility, not on behalf
+-          of any other Contributor, and only if You agree to indemnify,
+-          defend, and hold each Contributor harmless for any liability
+-          incurred by, or claims asserted against, such Contributor by reason
+-          of your accepting any such warranty or additional liability.
+-
+-       END OF TERMS AND CONDITIONS
+-    """
+-
+-package func manifestLicenseIsUpstream(_ license: Lint.Source.Index.License) -> Swift::Bool {
+-    guard case .text(let text) = license else { return false }
+-    return !manifestApacheLicenseNormalized(text).contains(manifestApacheLicenseCanonical)
+-        && manifestLicenseNamesUpstreamHolder(text)
+-}
+diff --git a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.CanonicalSettingsTail.swift b/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.CanonicalSettingsTail.swift
+deleted file mode 100644
+index 5afabf9..0000000
+--- a/Sources/Institute Linter Rule Manifest/Lint.Rule.Manifest.CanonicalSettingsTail.swift	
++++ /dev/null
+@@ -1,134 +0,0 @@
+-public import Lint
+-internal import SwiftSyntax
+-
+-extension Lint.Rule {
+-    public static let `canonical settings tail` = Lint.Rule(
+-        id: "canonical settings tail",
+-        default: .warning,
+-        controls: [
+-            .init(
+-                id: "canonical settings tail canonical",
+-                source: "let package = Package(name: \"Fixture\")\n\n" + manifestCanonicalSettingsTail,
+-                path: "Package.swift",
+-                expectation: .clean
+-            ),
+-            .init(
+-                id: "canonical settings tail missing",
+-                source: "let package = Package(name: \"Fixture\")\n",
+-                path: "Package.swift",
+-                expectation: .findings(1)
+-            ),
+-            .init(
+-                id: "canonical settings tail drifted",
+-                source: "let package = Package(name: \"Fixture\")\n\n"
+-                    + "for target in package.targets {\n"
+-                    + "    target.swiftSettings = [.strictMemorySafety()]\n"
+-                    + "}\n",
+-                path: "Package.swift",
+-                expectation: .findings(1)
+-            ),
+-        ],
+-        observe: { source, severity in
+-            guard manifestIsPackageManifest(source.file.filePath, path: source.path.underlying, text: source.tree.description) else {
+-                return Lint.Rule.Observation(
+-                    findings: [],
+-                    coverage: .measured,
+-                    applicability: .inapplicable
+-                )
+-            }
+-            let text = source.tree.description
+-            let tail = text.range(of: manifestCanonicalSettingsTailHead).map { Swift::String(text[$0.lowerBound...]) }
+-            guard manifestCanonicalSettingsTailNormalized(tail) != manifestCanonicalSettingsTailNormalized(manifestCanonicalSettingsTail)
+-            else {
+-                return Lint.Rule.Observation(findings: [], coverage: .measured)
+-            }
+-            let line =
+-                text.range(of: manifestCanonicalSettingsTailHead)
+-                .map { text[..<$0.lowerBound].count(where: { $0 == "\n" }) + 1 } ?? 1
+-            let reason =
+-                tail == nil
+-                ? "the manifest must end with the canonical settings tail"
+-                : "the settings tail differs from the canonical shape"
+-            return Lint.Rule.Observation(
+-                findings: [
+-                    Diagnostic.Record(
+-                        location: Source.Location(
+-                            fileID: source.file.fileID,
+-                            filePath: source.file.filePath,
+-                            line: line,
+-                            column: 1
+-                        ),
+-                        severity: severity,
+-                        identifier: "canonical settings tail",
+-                        message: "[canonical settings tail] [PACKAGE-SETTINGS-TAIL]: \(reason); "
+-                            + "this rule's repair rewrites it to the canonical shape."
+-                    )
+-                ],
+-                coverage: .measured
+-            )
+-        },
+-        repair: { source in
+-            guard manifestIsPackageManifest(source.file.filePath, path: source.path.underlying, text: source.tree.description) else { return .unchanged }
+-            let text = source.tree.description
+-            let tail = text.range(of: manifestCanonicalSettingsTailHead).map { Swift::String(text[$0.lowerBound...]) }
+-            return
+-                if manifestCanonicalSettingsTailNormalized(tail)
+-                == manifestCanonicalSettingsTailNormalized(manifestCanonicalSettingsTail)
+-            {
+-                .unchanged
+-            } else if let contents = manifestCanonicalSettingsTailRewrite(text) {
+-                .edits([.rewrite(path: source.path, contents: contents)])
+-            } else {
+-                .refused(.ambiguousRepair("code follows the settings loop, or the loop is unbalanced"))
+-            }
+-        }
+-    )
+-}
+-
+-@usableFromInline
+-internal let manifestCanonicalSettingsTailHead: Swift::String = "for target in package.targets"
+-
+-@usableFromInline
+-internal let manifestCanonicalSettingsTail: Swift::String = """
+-    for target in package.targets where ![.system, .binary, .plugin, .macro].contains(target.type) {
+-        target.swiftSettings = (target.swiftSettings ?? []) + [
+-            .strictMemorySafety(),
+-            .enableUpcomingFeature("ExistentialAny"),
+-            .enableUpcomingFeature("InternalImportsByDefault"),
+-            .enableUpcomingFeature("MemberImportVisibility"),
+-            .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
+-            .enableUpcomingFeature("InferIsolatedConformances"),
+-            .enableExperimentalFeature("Lifetimes"),
+-            .treatAllWarnings(as: .error),
+-        ]
+-    }
+-
+-    """
+-
+-internal func manifestCanonicalSettingsTailNormalized(_ text: Swift::String?) -> Swift::String? {
+-    text.map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+-}
+-
+-internal func manifestCanonicalSettingsTailRewrite(_ text: Swift::String) -> Swift::String? {
+-    guard let head = text.range(of: manifestCanonicalSettingsTailHead) else {
+-        return Swift::String(text.reversed().drop(while: \.isWhitespace).reversed())
+-            + "\n\n" + manifestCanonicalSettingsTail
+-    }
+-    var depth = 0
+-    for index in text[head.lowerBound...].indices {
+-        switch text[index] {
+-        case "{":
+-            depth += 1
+-        case "}":
+-            depth -= 1
+-            if depth == 0 {
+-                return text[text.index(after: index)...].allSatisfy(\.isWhitespace)
+-                    ? Swift::String(text[..<head.lowerBound]) + manifestCanonicalSettingsTail
+-                    : nil
+-            }
+-        default:
+-            break
+-        }
+-    }
+-    return nil
+-}
+diff --git a/Sources/Institute Linter Rule Manifest/Lint.Rule.swift b/Sources/Institute Linter Rule Manifest/Lint.Rule.swift
+index 37b8653..19e459f 100644
+--- a/Sources/Institute Linter Rule Manifest/Lint.Rule.swift	
++++ b/Sources/Institute Linter Rule Manifest/Lint.Rule.swift	
+@@ -1,5 +1,8 @@
+ public import Lint
+ internal import SwiftSyntax
++internal import File_System
++internal import Linter_Rule_Scope
++internal import SwiftParser
+ 
+ extension Lint.Rule {
+ 
+@@ -133,3 +136,713 @@ extension Lint.Rule {
+         }
+     )
+ }
++
++extension Lint.Rule {
++
++    public static let `target import edge` = Lint.Rule(
++        id: "target import edge",
++
++        default: .warning,
++        controls: [
++            .init(
++                id: "target import edge absent materialized sources",
++                source: """
++                    import PackageDescription
++
++                    let package = Package(
++                        name: "Fixture",
++                        targets: [.target(name: "Fixture")]
++                    )
++                    """,
++                path: "/Controls/TargetImportEdge/Package.swift",
++                expectation: .clean
++            )
++        ],
++        observe: Lint.Rule.measured { source, severity in
++            packageTargetImportEdgeFindings(source: source, severity: severity)
++        }
++    )
++}
++
++let packageTargetImportEdgeToolchainModules: Swift::Set<Swift::String> = [
++    "Swift", "Testing", "XCTest", "Foundation", "FoundationEssentials",
++    "Dispatch", "os", "Darwin", "Glibc", "Musl", "WinSDK", "Android",
++    "Observation", "Synchronization", "Builtin", "CRT", "ucrt",
++    "SwiftShims", "DistributedActors", "Distributed", "RegexBuilder",
++    "StringProcessing", "CoreFoundation", "ObjectiveC", "simd", "Accelerate",
++    "FoundationNetworking", "FoundationXML", "FoundationInternationalization",
++    "SwiftUI", "AppKit", "UIKit", "WebKit", "Network", "Security", "CryptoKit",
++    "CoreGraphics", "ImageIO", "UniformTypeIdentifiers", "AVFoundation", "Combine",
++    "CoreText", "QuartzCore", "CoreServices", "OSLog", "SystemConfiguration",
++]
++
++func packageTargetImportEdgeNormalize(_ name: Swift::String) -> Swift::String {
++    var out = ""
++    out.reserveCapacity(name.count)
++    for character in name {
++        out.append(character == " " || character == "-" ? "_" : character)
++    }
++    return out
++}
++
++func packageTargetImportEdgeFindings(
++    source: borrowing Lint.Source.Parsed,
++    severity: Diagnostic.Severity
++) -> [Diagnostic.Record] {
++
++    let runPath = Swift::String(describing: source.path)
++    guard runPath == "Package.swift" || runPath.hasSuffix("/Package.swift") else { return [] }
++
++    let filePath = source.file.filePath
++    guard filePath.hasSuffix("/Package.swift") else { return [] }
++    let root = Swift::String(filePath.dropLast("/Package.swift".count))
++    guard Lint.Scope.File.isDirectory(root) else { return [] }
++
++    let visitor = PackageTargetImportEdgeManifestVisitor()
++    visitor.walk(source.tree)
++    let manifest = visitor.manifest
++
++    var dependencyManifestPaths: [Swift::String] = []
++    var resolvedCount = 0
++    for relative in manifest.pathDependencies {
++        let candidate = root + "/" + relative + "/Package.swift"
++        if Lint.Scope.File.isFile(candidate) {
++            dependencyManifestPaths.append(candidate)
++            resolvedCount += 1
++        }
++    }
++    for url in manifest.urlDependencies {
++        var trimmed = url
++        while trimmed.hasSuffix("/") { trimmed.removeLast() }
++        let parts = trimmed.split(separator: "/").map(Swift::String.init)
++        let tail = parts.suffix(2)
++        guard tail.count == 2, let organization = tail.first, var name = tail.last else { continue }
++        if name.hasSuffix(".git") { name = Swift::String(name.dropLast(4)) }
++        let candidate = root + "/../../" + organization + "/" + name + "/Package.swift"
++        if Lint.Scope.File.isFile(candidate) {
++            dependencyManifestPaths.append(candidate)
++            resolvedCount += 1
++        }
++    }
++    let declaredCount = manifest.pathDependencies.count + manifest.urlDependencies.count
++
++    let unresolvableDependencies = declaredCount > resolvedCount
++
++    var dependencyProducts: [Swift::String: Swift::Set<Swift::String>] = [:]
++    for manifestPath in dependencyManifestPaths {
++        guard let text = Lint.Scope.File.text(at: manifestPath) else { continue }
++        let tree = Parser.parse(source: text)
++        let dependencyVisitor = PackageTargetImportEdgeManifestVisitor()
++        dependencyVisitor.walk(tree)
++        for (product, members) in dependencyVisitor.manifest.products {
++            dependencyProducts[product, default: []].formUnion(members)
++        }
++    }
++
++    let samePackageTargets = Swift::Set(manifest.targets.map(\.name))
++    var records: [Diagnostic.Record] = []
++
++    for target in manifest.targets {
++        let sourceDirectory: Swift::String
++        if let explicit = target.explicitPath {
++            sourceDirectory = root + "/" + explicit
++        } else {
++            let base = target.kind == .testTarget ? "Tests" : "Sources"
++            sourceDirectory = root + "/" + base + "/" + target.name
++        }
++        guard Lint.Scope.File.isDirectory(sourceDirectory) else { continue }
++
++        var allowed: Swift::Set<Swift::String> = [packageTargetImportEdgeNormalize(target.name)]
++        for dependency in target.dependencies {
++            switch dependency {
++            case .target(let name):
++                allowed.insert(packageTargetImportEdgeNormalize(name))
++
++            case .product(let name):
++                if let members = dependencyProducts[name] {
++                    allowed.formUnion(members)
++                } else {
++
++                    allowed.insert(packageTargetImportEdgeNormalize(name))
++                }
++
++            case .byName(let name):
++                if samePackageTargets.contains(name) {
++                    allowed.insert(packageTargetImportEdgeNormalize(name))
++                } else {
++                    if let members = dependencyProducts[name] {
++                        allowed.formUnion(members)
++                    }
++                    allowed.insert(packageTargetImportEdgeNormalize(name))
++                }
++            }
++        }
++
++        var sightings: [Swift::String: (Swift::String, Swift::Int)] = [:]
++        let sources: File.Directory
++        do throws(File.Path.Error) {
++            sources = try File.Directory(validating: sourceDirectory)
++        } catch {
++            continue
++        }
++        for swiftFile in Lint.Scope.File.swiftFiles(under: sources) {
++            guard let text = Lint.Scope.File.text(at: swiftFile) else { continue }
++            let tree = Parser.parse(source: text)
++            let converter = SourceLocationConverter(fileName: swiftFile, tree: tree)
++            let importVisitor = PackageTargetImportEdgeImportVisitor(converter: converter)
++            importVisitor.walk(tree)
++            var relative = swiftFile
++            if relative.hasPrefix(root + "/") {
++                relative = Swift::String(relative.dropFirst(root.count + 1))
++            }
++            for (module, line) in importVisitor.imports where sightings[module] == nil {
++                sightings[module] = (relative, line)
++            }
++        }
++
++        for module in sightings.keys.sorted() {
++            guard let (relative, line) = sightings[module] else { continue }
++            if packageTargetImportEdgeToolchainModules.contains(module) { continue }
++            if module.hasPrefix("_") { continue }
++            if allowed.contains(module) { continue }
++            if unresolvableDependencies { continue }
++            let location = source.converter.location(for: target.namePosition)
++            records.append(
++                Diagnostic.Record(
++                    location: Source.Location(
++                        fileID: source.file.fileID,
++                        filePath: source.file.filePath,
++                        line: location.line,
++                        column: location.column
++                    ),
++                    severity: severity,
++                    identifier: "target import edge",
++                    message: "[target import edge]: \(relative):\(line): target "
++                        + "'\(target.name)' imports '\(module)' without a declared "
++                        + "dependency edge ([TARGET-IMPORT-EDGE]: transitive-build "
++                        + "riding is a scheduling race; declare the target/product "
++                        + "dependency)"
++                )
++            )
++        }
++    }
++    return records
++}
++
++extension Lint.Rule {
++    public static let `apache license` = Lint.Rule(
++        id: "apache license",
++        default: .warning,
++        controls: [
++            .init(
++                id: "apache license canonical text",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .clean,
++                license: .text("Copyright 2025 Coen ten Thije Boonkkamp\n\n" + manifestApacheLicenseTerms)
++            ),
++            .init(
++                id: "apache license unfilled holder",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .findings(1),
++                license: .text(manifestApacheLicenseTerms + "\n\n    Copyright [yyyy] [name of copyright owner]")
++            ),
++            .init(
++                id: "apache license reflowed markdown text",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .clean,
++                license: .text("# Apache License\n\nCopyright 2025 Coen ten Thije Boonkkamp\n\n**" + manifestApacheLicenseTerms.split(separator: "\n").joined(separator: " ") + "**")
++            ),
++            .init(
++                id: "apache license missing file",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .findings(1),
++                license: .absent
++            ),
++            .init(
++                id: "apache license other license",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .findings(1),
++                license: .text("MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy")
++            ),
++            .init(
++                id: "apache license truncated terms",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .findings(1),
++                license: .text(Swift::String(manifestApacheLicenseTerms.dropLast(200)))
++            ),
++            .init(
++                id: "apache license upstream holder",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .clean,
++                license: .text("MIT License\n\nCopyright (c) 2025 Point-Free, Inc.\n\nPermission is hereby granted")
++            ),
++            .init(
++                id: "apache license upstream holder without (c)",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .clean,
++                license: .text(manifestApacheLicenseTerms + "\n\nCopyright 2022 The SwiftASN1 Project")
++            ),
++            .init(
++                id: "apache license own holder",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .findings(1),
++                license: .text("MIT License\n\nCopyright (c) 2026 Swift Institute\n\nPermission is hereby granted")
++            ),
++            .init(
++                id: "apache license license author",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .findings(1),
++                license: .text("GNU Affero General Public License\n\n_Copyright © 2007 Free Software Foundation, Inc._")
++            ),
++            .init(
++                id: "apache license unread",
++                source: "let package = Package(name: \"Fixture\")",
++                path: "Package.swift",
++                expectation: .clean,
++                applicability: .inapplicable
++            ),
++            .init(
++                id: "apache license nested manifest",
++                source: "let package = Package(name: \"Runner\")",
++                path: "Runner/Package.swift",
++                expectation: .clean,
++                applicability: .inapplicable,
++                license: .absent
++            ),
++        ],
++        observe: { source, severity in
++            guard manifestIsRootPackageManifest(source.path.underlying), source.index.license != .unread
++            else {
++                return Lint.Rule.Observation(findings: [], coverage: .measured, applicability: .inapplicable)
++            }
++            let findings: [Diagnostic.Record]
++            switch source.index.license {
++            case .text(let text)
++            where manifestApacheLicenseNormalized(text).contains(manifestApacheLicenseCanonical)
++                && manifestLicenseNamesOwnHolder(text):
++                findings = []
++
++            case .text(let text) where manifestLicenseNamesUpstreamHolder(text):
++                findings = []
++
++            case .unread, .absent, .text:
++                findings = [
++                    Diagnostic.Record(
++                        location: Source.Location(
++                            fileID: source.file.fileID,
++                            filePath: source.file.filePath,
++                            line: 1,
++                            column: 1
++                        ),
++                        severity: severity,
++                        identifier: "apache license",
++                        message: manifestApacheLicenseMessage(source.index.license)
++                    )
++                ]
++            }
++            return Lint.Rule.Observation(findings: findings, coverage: .measured)
++        }
++    )
++}
++
++internal func manifestIsRootPackageManifest(_ path: Swift::String) -> Swift::Bool {
++    path.split(separator: "/").filter { $0 != "." } == ["Package.swift"]
++}
++
++let manifestLicenseOwnHolders: [Swift::String] = [
++    "coen ten thije boonkkamp",
++    "swift institute",
++    "the swift institute",
++    "free software foundation",
++]
++
++func manifestLicenseNamesUpstreamHolder(_ text: Swift::String) -> Swift::Bool {
++    text.split(separator: "\n").contains { line in
++        var rest = Swift::Substring(manifestApacheLicenseNormalized(Swift::String(line)))
++        guard rest.hasPrefix("copyright ") else { return false }
++        rest = rest.dropFirst("copyright ".count)
++        if rest.hasPrefix("(c) ") {
++            rest = rest.dropFirst(4)
++        } else if rest.hasPrefix("© ") {
++            rest = rest.dropFirst(2)
++        } else if rest.first?.isNumber != true {
++            return false
++        }
++        let holder = rest.drop { $0.isNumber || $0 == "-" || $0 == "," || $0 == " " }
++        guard holder.first?.isLetter == true else { return false }
++        return !manifestLicenseOwnHolders.contains { holder.hasPrefix($0) }
++    }
++}
++
++/// Whether a line of `text` is the Institute's copyright, `Copyright <year> <holder>` (with or without `(c)`),
++/// naming one of its own holders: the Apache terms alone, with the appendix's `[name of copyright owner]`
++/// unfilled, say nothing about who licenses the package.
++func manifestLicenseNamesOwnHolder(_ text: Swift::String) -> Swift::Bool {
++    text.split(separator: "\n").contains { line in
++        var rest = Swift::Substring(manifestApacheLicenseNormalized(Swift::String(line)))
++        guard rest.hasPrefix("copyright ") else { return false }
++        rest = rest.dropFirst("copyright ".count)
++        if rest.hasPrefix("(c) ") { rest = rest.dropFirst(4) } else if rest.hasPrefix("© ") { rest = rest.dropFirst(2) }
++        guard rest.first?.isNumber == true else { return false }
++        let holder = rest.drop { $0.isNumber || $0 == "-" || $0 == "," || $0 == " " }
++        return manifestLicenseOwnHolders.contains { holder.hasPrefix($0) }
++    }
++}
++
++internal func manifestApacheLicenseMessage(_ license: Lint.Source.Index.License) -> Swift::String {
++    let found: Swift::String
++    switch license {
++    case .absent, .unread:
++        found = "the package has no LICENSE.md or LICENSE file at its root"
++
++    case .text:
++        found =
++            "the root LICENSE does not carry the complete Apache License 2.0 terms with the Institute's "
++            + "copyright line (`Copyright <year> Coen ten Thije Boonkkamp`)"
++    }
++    return "[apache license]: every Swift Institute package is licensed under the Apache License 2.0; "
++        + found + ". Use the full Apache License 2.0 text (sections 1 to 9); a package that keeps an "
++        + "upstream holder's licence names that holder in a `Copyright (c) <year> <holder>` line."
++}
++
++func manifestApacheLicenseNormalized(_ text: Swift::String) -> Swift::String {
++    var result = ""
++    var pendingSpace = false
++    for character in text.lowercased() {
++        if character.isWhitespace || character == "*" || character == "_" || character == "#" {
++            pendingSpace = !result.isEmpty
++        } else {
++            if pendingSpace { result.append(" ") }
++            pendingSpace = false
++            result.append(character)
++        }
++    }
++    return result
++}
++
++let manifestApacheLicenseCanonical: Swift::String = manifestApacheLicenseNormalized(
++    manifestApacheLicenseTerms
++)
++
++package let manifestApacheLicenseTerms: Swift::String = """
++       TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++       1. Definitions.
++
++          "License" shall mean the terms and conditions for use, reproduction,
++          and distribution as defined by Sections 1 through 9 of this document.
++
++          "Licensor" shall mean the copyright owner or entity authorized by
++          the copyright owner that is granting the License.
++
++          "Legal Entity" shall mean the union of the acting entity and all
++          other entities that control, are controlled by, or are under common
++          control with that entity. For the purposes of this definition,
++          "control" means (i) the power, direct or indirect, to cause the
++          direction or management of such entity, whether by contract or
++          otherwise, or (ii) ownership of fifty percent (50%) or more of the
++          outstanding shares, or (iii) beneficial ownership of such entity.
++
++          "You" (or "Your") shall mean an individual or Legal Entity
++          exercising permissions granted by this License.
++
++          "Source" form shall mean the preferred form for making modifications,
++          including but not limited to software source code, documentation
++          source, and configuration files.
++
++          "Object" form shall mean any form resulting from mechanical
++          transformation or translation of a Source form, including but
++          not limited to compiled object code, generated documentation,
++          and conversions to other media types.
++
++          "Work" shall mean the work of authorship, whether in Source or
++          Object form, made available under the License, as indicated by a
++          copyright notice that is included in or attached to the work
++          (an example is provided in the Appendix below).
++
++          "Derivative Works" shall mean any work, whether in Source or Object
++          form, that is based on (or derived from) the Work and for which the
++          editorial revisions, annotations, elaborations, or other modifications
++          represent, as a whole, an original work of authorship. For the purposes
++          of this License, Derivative Works shall not include works that remain
++          separable from, or merely link (or bind by name) to the interfaces of,
++          the Work and Derivative Works thereof.
++
++          "Contribution" shall mean any work of authorship, including
++          the original version of the Work and any modifications or additions
++          to that Work or Derivative Works thereof, that is intentionally
++          submitted to Licensor for inclusion in the Work by the copyright owner
++          or by an individual or Legal Entity authorized to submit on behalf of
++          the copyright owner. For the purposes of this definition, "submitted"
++          means any form of electronic, verbal, or written communication sent
++          to the Licensor or its representatives, including but not limited to
++          communication on electronic mailing lists, source code control systems,
++          and issue tracking systems that are managed by, or on behalf of, the
++          Licensor for the purpose of discussing and improving the Work, but
++          excluding communication that is conspicuously marked or otherwise
++          designated in writing by the copyright owner as "Not a Contribution."
++
++          "Contributor" shall mean Licensor and any individual or Legal Entity
++          on behalf of whom a Contribution has been received by Licensor and
++          subsequently incorporated within the Work.
++
++       2. Grant of Copyright License. Subject to the terms and conditions of
++          this License, each Contributor hereby grants to You a perpetual,
++          worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++          copyright license to reproduce, prepare Derivative Works of,
++          publicly display, publicly perform, sublicense, and distribute the
++          Work and such Derivative Works in Source or Object form.
++
++       3. Grant of Patent License. Subject to the terms and conditions of
++          this License, each Contributor hereby grants to You a perpetual,
++          worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++          (except as stated in this section) patent license to make, have made,
++          use, offer to sell, sell, import, and otherwise transfer the Work,
++          where such license applies only to those patent claims licensable
++          by such Contributor that are necessarily infringed by their
++          Contribution(s) alone or by combination of their Contribution(s)
++          with the Work to which such Contribution(s) was submitted. If You
++          institute patent litigation against any entity (including a
++          cross-claim or counterclaim in a lawsuit) alleging that the Work
++          or a Contribution incorporated within the Work constitutes direct
++          or contributory patent infringement, then any patent licenses
++          granted to You under this License for that Work shall terminate
++          as of the date such litigation is filed.
++
++       4. Redistribution. You may reproduce and distribute copies of the
++          Work or Derivative Works thereof in any medium, with or without
++          modifications, and in Source or Object form, provided that You
++          meet the following conditions:
++
++          (a) You must give any other recipients of the Work or
++              Derivative Works a copy of this License; and
++
++          (b) You must cause any modified files to carry prominent notices
++              stating that You changed the files; and
++
++          (c) You must retain, in the Source form of any Derivative Works
++              that You distribute, all copyright, patent, trademark, and
++              attribution notices from the Source form of the Work,
++              excluding those notices that do not pertain to any part of
++              the Derivative Works; and
++
++          (d) If the Work includes a "NOTICE" text file as part of its
++              distribution, then any Derivative Works that You distribute must
++              include a readable copy of the attribution notices contained
++              within such NOTICE file, excluding those notices that do not
++              pertain to any part of the Derivative Works, in at least one
++              of the following places: within a NOTICE text file distributed
++              as part of the Derivative Works; within the Source form or
++              documentation, if provided along with the Derivative Works; or,
++              within a display generated by the Derivative Works, if and
++              wherever such third-party notices normally appear. The contents
++              of the NOTICE file are for informational purposes only and
++              do not modify the License. You may add Your own attribution
++              notices within Derivative Works that You distribute, alongside
++              or as an addendum to the NOTICE text from the Work, provided
++              that such additional attribution notices cannot be construed
++              as modifying the License.
++
++          You may add Your own copyright statement to Your modifications and
++          may provide additional or different license terms and conditions
++          for use, reproduction, or distribution of Your modifications, or
++          for any such Derivative Works as a whole, provided Your use,
++          reproduction, and distribution of the Work otherwise complies with
++          the conditions stated in this License.
++
++       5. Submission of Contributions. Unless You explicitly state otherwise,
++          any Contribution intentionally submitted for inclusion in the Work
++          by You to the Licensor shall be under the terms and conditions of
++          this License, without any additional terms or conditions.
++          Notwithstanding the above, nothing herein shall supersede or modify
++          the terms of any separate license agreement you may have executed
++          with Licensor regarding such Contributions.
++
++       6. Trademarks. This License does not grant permission to use the trade
++          names, trademarks, service marks, or product names of the Licensor,
++          except as required for reasonable and customary use in describing the
++          origin of the Work and reproducing the content of the NOTICE file.
++
++       7. Disclaimer of Warranty. Unless required by applicable law or
++          agreed to in writing, Licensor provides the Work (and each
++          Contributor provides its Contributions) on an "AS IS" BASIS,
++          WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++          implied, including, without limitation, any warranties or conditions
++          of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++          PARTICULAR PURPOSE. You are solely responsible for determining the
++          appropriateness of using or redistributing the Work and assume any
++          risks associated with Your exercise of permissions under this License.
++
++       8. Limitation of Liability. In no event and under no legal theory,
++          whether in tort (including negligence), contract, or otherwise,
++          unless required by applicable law (such as deliberate and grossly
++          negligent acts) or agreed to in writing, shall any Contributor be
++          liable to You for damages, including any direct, indirect, special,
++          incidental, or consequential damages of any character arising as a
++          result of this License or out of the use or inability to use the
++          Work (including but not limited to damages for loss of goodwill,
++          work stoppage, computer failure or malfunction, or any and all
++          other commercial damages or losses), even if such Contributor
++          has been advised of the possibility of such damages.
++
++       9. Accepting Warranty or Additional Liability. While redistributing
++          the Work or Derivative Works thereof, You may choose to offer,
++          and charge a fee for, acceptance of support, warranty, indemnity,
++          or other liability obligations and/or rights consistent with this
++          License. However, in accepting such obligations, You may act only
++          on Your own behalf and on Your sole responsibility, not on behalf
++          of any other Contributor, and only if You agree to indemnify,
++          defend, and hold each Contributor harmless for any liability
++          incurred by, or claims asserted against, such Contributor by reason
++          of your accepting any such warranty or additional liability.
++
++       END OF TERMS AND CONDITIONS
++    """
++
++package func manifestLicenseIsUpstream(_ license: Lint.Source.Index.License) -> Swift::Bool {
++    guard case .text(let text) = license else { return false }
++    return !manifestApacheLicenseNormalized(text).contains(manifestApacheLicenseCanonical)
++        && manifestLicenseNamesUpstreamHolder(text)
++}
++
++extension Lint.Rule {
++    public static let `canonical settings tail` = Lint.Rule(
++        id: "canonical settings tail",
++        default: .warning,
++        controls: [
++            .init(
++                id: "canonical settings tail canonical",
++                source: "let package = Package(name: \"Fixture\")\n\n" + manifestCanonicalSettingsTail,
++                path: "Package.swift",
++                expectation: .clean
++            ),
++            .init(
++                id: "canonical settings tail missing",
++                source: "let package = Package(name: \"Fixture\")\n",
++                path: "Package.swift",
++                expectation: .findings(1)
++            ),
++            .init(
++                id: "canonical settings tail drifted",
++                source: "let package = Package(name: \"Fixture\")\n\n"
++                    + "for target in package.targets {\n"
++                    + "    target.swiftSettings = [.strictMemorySafety()]\n"
++                    + "}\n",
++                path: "Package.swift",
++                expectation: .findings(1)
++            ),
++        ],
++        observe: { source, severity in
++            guard manifestIsPackageManifest(source.file.filePath, path: source.path.underlying, text: source.tree.description) else {
++                return Lint.Rule.Observation(
++                    findings: [],
++                    coverage: .measured,
++                    applicability: .inapplicable
++                )
++            }
++            let text = source.tree.description
++            let tail = text.range(of: manifestCanonicalSettingsTailHead).map { Swift::String(text[$0.lowerBound...]) }
++            guard manifestCanonicalSettingsTailNormalized(tail) != manifestCanonicalSettingsTailNormalized(manifestCanonicalSettingsTail)
++            else {
++                return Lint.Rule.Observation(findings: [], coverage: .measured)
++            }
++            let line =
++                text.range(of: manifestCanonicalSettingsTailHead)
++                .map { text[..<$0.lowerBound].count(where: { $0 == "\n" }) + 1 } ?? 1
++            let reason =
++                tail == nil
++                ? "the manifest must end with the canonical settings tail"
++                : "the settings tail differs from the canonical shape"
++            return Lint.Rule.Observation(
++                findings: [
++                    Diagnostic.Record(
++                        location: Source.Location(
++                            fileID: source.file.fileID,
++                            filePath: source.file.filePath,
++                            line: line,
++                            column: 1
++                        ),
++                        severity: severity,
++                        identifier: "canonical settings tail",
++                        message: "[canonical settings tail] [PACKAGE-SETTINGS-TAIL]: \(reason); "
++                            + "this rule's repair rewrites it to the canonical shape."
++                    )
++                ],
++                coverage: .measured
++            )
++        },
++        repair: { source in
++            guard manifestIsPackageManifest(source.file.filePath, path: source.path.underlying, text: source.tree.description) else { return .unchanged }
++            let text = source.tree.description
++            let tail = text.range(of: manifestCanonicalSettingsTailHead).map { Swift::String(text[$0.lowerBound...]) }
++            return
++                if manifestCanonicalSettingsTailNormalized(tail)
++                == manifestCanonicalSettingsTailNormalized(manifestCanonicalSettingsTail)
++            {
++                .unchanged
++            } else if let contents = manifestCanonicalSettingsTailRewrite(text) {
++                .edits([.rewrite(path: source.path, contents: contents)])
++            } else {
++                .refused(.ambiguousRepair("code follows the settings loop, or the loop is unbalanced"))
++            }
++        }
++    )
++}
++
++@usableFromInline
++internal let manifestCanonicalSettingsTailHead: Swift::String = "for target in package.targets"
++
++@usableFromInline
++internal let manifestCanonicalSettingsTail: Swift::String = """
++    for target in package.targets where ![.system, .binary, .plugin, .macro].contains(target.type) {
++        target.swiftSettings = (target.swiftSettings ?? []) + [
++            .strictMemorySafety(),
++            .enableUpcomingFeature("ExistentialAny"),
++            .enableUpcomingFeature("InternalImportsByDefault"),
++            .enableUpcomingFeature("MemberImportVisibility"),
++            .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
++            .enableUpcomingFeature("InferIsolatedConformances"),
++            .enableExperimentalFeature("Lifetimes"),
++            .treatAllWarnings(as: .error),
++        ]
++    }
++
++    """
++
++internal func manifestCanonicalSettingsTailNormalized(_ text: Swift::String?) -> Swift::String? {
++    text.map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
++}
++
++internal func manifestCanonicalSettingsTailRewrite(_ text: Swift::String) -> Swift::String? {
++    guard let head = text.range(of: manifestCanonicalSettingsTailHead) else {
++        return Swift::String(text.reversed().drop(while: \.isWhitespace).reversed())
++            + "\n\n" + manifestCanonicalSettingsTail
++    }
++    var depth = 0
++    for index in text[head.lowerBound...].indices {
++        switch text[index] {
++        case "{":
++            depth += 1
++        case "}":
++            depth -= 1
++            if depth == 0 {
++                return text[text.index(after: index)...].allSatisfy(\.isWhitespace)
++                    ? Swift::String(text[..<head.lowerBound]) + manifestCanonicalSettingsTail
++                    : nil
++            }
++        default:
++            break
++        }
++    }
++    return nil
++}
+diff --git a/Sources/Institute Linter Rule Structure/Lint.Rule+Structure.ForbiddenLicenseHeader.swift b/Sources/Institute Linter Rule Structure/Lint.Rule+Structure.ForbiddenLicenseHeader.swift
+deleted file mode 100644
+index f1a948c..0000000
+--- a/Sources/Institute Linter Rule Structure/Lint.Rule+Structure.ForbiddenLicenseHeader.swift	
++++ /dev/null
+@@ -1,95 +0,0 @@
+-internal import Cardinal
+-public import Lint
+-internal import Linter_Rule_Structure
+-internal import SwiftSyntax
+-
+-extension Lint.Rule {
+-
+-    public static let `forbidden license header` = Lint.Rule(
+-        id: "forbidden license header",
+-        default: .error,
+-        controls: [
+-            .init(
+-                id: "forbidden license header complete",
+-                source: "// Copyright (c) 2026 Example\n"
+-                    + "// Licensed under Apache License v2.0\n\nstruct Value {}",
+-                path: "Sources/Structure Core/Value.swift",
+-                expectation: .findings(1)
+-            ),
+-            .init(
+-                id: "forbidden license header ordinary comment",
+-                source: "// Implementation note\nstruct Value {}",
+-                path: "Sources/Structure Core/Value.swift",
+-                expectation: .clean
+-            ),
+-            .init(
+-                id: "forbidden license header partial",
+-                source: "// Licensed under Apache License v2.0\nstruct Value {}",
+-                path: "Sources/Structure Core/Value.swift",
+-                expectation: .findings(1)
+-            ),
+-        ],
+-        observe: { source, severity in
+-            let recognition = Lint.License.Header.recognize(in: source.tree.description)
+-            switch recognition {
+-            case .absent:
+-                return Lint.Rule.Observation(findings: [], coverage: .measured)
+-            case .complete(let header):
+-                return Lint.Rule.Observation(
+-                    findings: [
+-                        forbiddenLicenseHeaderFinding(
+-                            source: source,
+-                            severity: severity,
+-                            line: Swift::Int(clamping: header.start) + 1
+-                        )
+-                    ],
+-                    coverage: .measured
+-                )
+-            case .refused(let refusal):
+-                return Lint.Rule.Observation(
+-                    findings: [
+-                        forbiddenLicenseHeaderFinding(
+-                            source: source,
+-                            severity: severity,
+-                            detail: "ambiguous leading license block: \(refusal)"
+-                        )
+-                    ],
+-                    coverage: .measured
+-                )
+-            }
+-        },
+-        repair: { source in
+-            switch Lint.License.Header.recognize(in: source.tree.description) {
+-            case .absent:
+-                .unchanged
+-            case .complete(let header):
+-                if let contents = header.removing(from: source.tree.description) {
+-                    .edits([.rewrite(path: source.path, contents: contents)])
+-                } else {
+-                    .refused(.ambiguousRepair("recognized header could not be removed"))
+-                }
+-            case .refused(let refusal):
+-                .refused(.ambiguousRepair("ambiguous leading license block: \(refusal)"))
+-            }
+-        }
+-    )
+-}
+-
+-private func forbiddenLicenseHeaderFinding(
+-    source: borrowing Lint.Source.Parsed,
+-    severity: Diagnostic.Severity,
+-    line: Swift::Int = 1,
+-    detail: Swift::String = "remove the complete leading license block"
+-) -> Diagnostic.Record {
+-    Diagnostic.Record(
+-        location: Source.Location(
+-            fileID: source.file.fileID,
+-            filePath: source.file.filePath,
+-            line: line,
+-            column: 1
+-        ),
+-        severity: severity,
+-        identifier: "forbidden license header",
+-        message: "[forbidden license header]: Institute Swift source headers are forbidden; \(detail)"
+-    )
+-}
+diff --git a/Sources/Institute Linter Rule Structure/Lint.Rule+Suppression.ReasonRequired.swift b/Sources/Institute Linter Rule Structure/Lint.Rule+Suppression.ReasonRequired.swift
+deleted file mode 100644
+index 1cd6924..0000000
+--- a/Sources/Institute Linter Rule Structure/Lint.Rule+Suppression.ReasonRequired.swift	
++++ /dev/null
+@@ -1,141 +0,0 @@
+-public import Lint
+-internal import SwiftSyntax
+-
+-extension Lint.Rule {
+-
+-    public static let `suppression reason required` = Lint.Rule(
+-        id: "suppression reason required",
+-        default: .error,
+-        controls: [
+-            .init(
+-                id: "suppression reason required missing reason",
+-                source: """
+-                    // swift-linter:disable:next malformed suppression directive
+-                    let value = compute()
+-                    """,
+-                path: "Controls/SuppressionReasonRequired.swift",
+-                expectation: .findings(1)
+-            )
+-        ],
+-        observe: Lint.Rule.measured { source, severity in
+-            reasonless(
+-                tree: source.tree,
+-                file: source.file,
+-                converter: source.converter,
+-                severity: severity
+-            )
+-        }
+-    )
+-}
+-
+-@usableFromInline
+-internal let `suppression reason required message`: Swift::String =
+-    "[suppression reason required] [LINT-SUPPRESS-002]: every "
+-    + "`swift-linter:disable:next` or `swift-linter:disable:line` directive "
+-    + "must have an immediately associated `// REASON:` continuation with "
+-    + "non-whitespace prose."
+-
+-private let suppressionReasonRequiredPrefixes = [
+-    "// swift-linter:disable:next ",
+-    "// swift-linter:disable:line ",
+-]
+-
+-internal func reasonless(
+-    tree: SourceFileSyntax,
+-    file: Source.File,
+-    converter: SourceLocationConverter,
+-    severity: Diagnostic.Severity
+-) -> [Diagnostic.Record] {
+-    var comments: [(text: Swift::String, position: AbsolutePosition, line: Swift::Int)] = []
+-
+-    for token in tree.tokens(viewMode: .sourceAccurate) {
+-        suppressionReasonRequiredCollect(
+-            token.leadingTrivia,
+-            tokenStartPosition: token.position,
+-            converter: converter,
+-            into: &comments
+-        )
+-        suppressionReasonRequiredCollect(
+-            token.trailingTrivia,
+-            tokenStartPosition: token.endPositionBeforeTrailingTrivia,
+-            converter: converter,
+-            into: &comments
+-        )
+-    }
+-
+-    var findings: [Diagnostic.Record] = []
+-    let lines = tree.description.split(separator: "\n", omittingEmptySubsequences: false)
+-
+-    for comment in comments
+-    where suppressionReasonRequiredPrefixes.contains(where: comment.text.hasPrefix) {
+-        guard let prefix = suppressionReasonRequiredPrefixes.first(where: comment.text.hasPrefix),
+-            comment.text.dropFirst(prefix.count).contains(where: { !$0.isWhitespace })
+-        else { continue }
+-
+-        guard comment.line < lines.count else {
+-            findings.append(
+-                suppressionReasonRequiredFinding(
+-                    for: comment,
+-                    file: file,
+-                    converter: converter,
+-                    severity: severity
+-                )
+-            )
+-            continue
+-        }
+-
+-        let continuation = lines[comment.line].drop(while: { $0 == " " || $0 == "\t" })
+-        let reasonPrefix = "// REASON:"
+-        guard continuation.hasPrefix(reasonPrefix),
+-            continuation.dropFirst(reasonPrefix.count).contains(where: { !$0.isWhitespace })
+-        else {
+-            findings.append(
+-                suppressionReasonRequiredFinding(
+-                    for: comment,
+-                    file: file,
+-                    converter: converter,
+-                    severity: severity
+-                )
+-            )
+-            continue
+-        }
+-    }
+-    return findings
+-}
+-
+-private func suppressionReasonRequiredCollect(
+-    _ trivia: Trivia,
+-    tokenStartPosition: AbsolutePosition,
+-    converter: SourceLocationConverter,
+-    into comments: inout [(text: Swift::String, position: AbsolutePosition, line: Swift::Int)]
+-) {
+-    var cursor = tokenStartPosition
+-    for piece in trivia {
+-        let position = cursor
+-        defer { cursor = cursor.advanced(by: piece.sourceLength.utf8Length) }
+-        guard case .lineComment(let text) = piece else { continue }
+-        comments.append(
+-            (text, position, converter.location(for: position).line)
+-        )
+-    }
+-}
+-
+-private func suppressionReasonRequiredFinding(
+-    for comment: (text: Swift::String, position: AbsolutePosition, line: Swift::Int),
+-    file: Source.File,
+-    converter: SourceLocationConverter,
+-    severity: Diagnostic.Severity
+-) -> Diagnostic.Record {
+-    let location = converter.location(for: comment.position)
+-    return Diagnostic.Record(
+-        location: Source.Location(
+-            fileID: file.fileID,
+-            filePath: file.filePath,
+-            line: location.line,
+-            column: location.column
+-        ),
+-        severity: severity,
+-        identifier: "suppression reason required",
+-        message: `suppression reason required message`
+-    )
+-}
+diff --git a/Sources/Institute Linter Rule Structure/Lint.Rule.swift b/Sources/Institute Linter Rule Structure/Lint.Rule.swift
+index 06134f9..26cfaf7 100644
+--- a/Sources/Institute Linter Rule Structure/Lint.Rule.swift	
++++ b/Sources/Institute Linter Rule Structure/Lint.Rule.swift	
+@@ -1,6 +1,8 @@
+ internal import Institute_Linter_Rule_Manifest
+ public import Lint
+ internal import SwiftSyntax
++internal import Cardinal
++internal import Linter_Rule_Structure
+ 
+ extension Lint.Rule {
+     public static let `file name nested path` = Lint.Rule(
+@@ -242,3 +244,233 @@ internal func position(of node: DeclSyntax) -> AbsolutePosition {
+     if let d = node.as(ProtocolDeclSyntax.self) { return d.name.positionAfterSkippingLeadingTrivia }
+     return node.positionAfterSkippingLeadingTrivia
+ }
++
++extension Lint.Rule {
++
++    public static let `forbidden license header` = Lint.Rule(
++        id: "forbidden license header",
++        default: .error,
++        controls: [
++            .init(
++                id: "forbidden license header complete",
++                source: "// Copyright (c) 2026 Example\n"
++                    + "// Licensed under Apache License v2.0\n\nstruct Value {}",
++                path: "Sources/Structure Core/Value.swift",
++                expectation: .findings(1)
++            ),
++            .init(
++                id: "forbidden license header ordinary comment",
++                source: "// Implementation note\nstruct Value {}",
++                path: "Sources/Structure Core/Value.swift",
++                expectation: .clean
++            ),
++            .init(
++                id: "forbidden license header partial",
++                source: "// Licensed under Apache License v2.0\nstruct Value {}",
++                path: "Sources/Structure Core/Value.swift",
++                expectation: .findings(1)
++            ),
++        ],
++        observe: { source, severity in
++            let recognition = Lint.License.Header.recognize(in: source.tree.description)
++            switch recognition {
++            case .absent:
++                return Lint.Rule.Observation(findings: [], coverage: .measured)
++            case .complete(let header):
++                return Lint.Rule.Observation(
++                    findings: [
++                        forbiddenLicenseHeaderFinding(
++                            source: source,
++                            severity: severity,
++                            line: Swift::Int(clamping: header.start) + 1
++                        )
++                    ],
++                    coverage: .measured
++                )
++            case .refused(let refusal):
++                return Lint.Rule.Observation(
++                    findings: [
++                        forbiddenLicenseHeaderFinding(
++                            source: source,
++                            severity: severity,
++                            detail: "ambiguous leading license block: \(refusal)"
++                        )
++                    ],
++                    coverage: .measured
++                )
++            }
++        },
++        repair: { source in
++            switch Lint.License.Header.recognize(in: source.tree.description) {
++            case .absent:
++                .unchanged
++            case .complete(let header):
++                if let contents = header.removing(from: source.tree.description) {
++                    .edits([.rewrite(path: source.path, contents: contents)])
++                } else {
++                    .refused(.ambiguousRepair("recognized header could not be removed"))
++                }
++            case .refused(let refusal):
++                .refused(.ambiguousRepair("ambiguous leading license block: \(refusal)"))
++            }
++        }
++    )
++}
++
++private func forbiddenLicenseHeaderFinding(
++    source: borrowing Lint.Source.Parsed,
++    severity: Diagnostic.Severity,
++    line: Swift::Int = 1,
++    detail: Swift::String = "remove the complete leading license block"
++) -> Diagnostic.Record {
++    Diagnostic.Record(
++        location: Source.Location(
++            fileID: source.file.fileID,
++            filePath: source.file.filePath,
++            line: line,
++            column: 1
++        ),
++        severity: severity,
++        identifier: "forbidden license header",
++        message: "[forbidden license header]: Institute Swift source headers are forbidden; \(detail)"
++    )
++}
++
++extension Lint.Rule {
++
++    public static let `suppression reason required` = Lint.Rule(
++        id: "suppression reason required",
++        default: .error,
++        controls: [
++            .init(
++                id: "suppression reason required missing reason",
++                source: """
++                    // swift-linter:disable:next malformed suppression directive
++                    let value = compute()
++                    """,
++                path: "Controls/SuppressionReasonRequired.swift",
++                expectation: .findings(1)
++            )
++        ],
++        observe: Lint.Rule.measured { source, severity in
++            reasonless(
++                tree: source.tree,
++                file: source.file,
++                converter: source.converter,
++                severity: severity
++            )
++        }
++    )
++}
++
++@usableFromInline
++internal let `suppression reason required message`: Swift::String =
++    "[suppression reason required] [LINT-SUPPRESS-002]: every "
++    + "`swift-linter:disable:next` or `swift-linter:disable:line` directive "
++    + "must have an immediately associated `// REASON:` continuation with "
++    + "non-whitespace prose."
++
++private let suppressionReasonRequiredPrefixes = [
++    "// swift-linter:disable:next ",
++    "// swift-linter:disable:line ",
++]
++
++internal func reasonless(
++    tree: SourceFileSyntax,
++    file: Source.File,
++    converter: SourceLocationConverter,
++    severity: Diagnostic.Severity
++) -> [Diagnostic.Record] {
++    var comments: [(text: Swift::String, position: AbsolutePosition, line: Swift::Int)] = []
++
++    for token in tree.tokens(viewMode: .sourceAccurate) {
++        suppressionReasonRequiredCollect(
++            token.leadingTrivia,
++            tokenStartPosition: token.position,
++            converter: converter,
++            into: &comments
++        )
++        suppressionReasonRequiredCollect(
++            token.trailingTrivia,
++            tokenStartPosition: token.endPositionBeforeTrailingTrivia,
++            converter: converter,
++            into: &comments
++        )
++    }
++
++    var findings: [Diagnostic.Record] = []
++    let lines = tree.description.split(separator: "\n", omittingEmptySubsequences: false)
++
++    for comment in comments
++    where suppressionReasonRequiredPrefixes.contains(where: comment.text.hasPrefix) {
++        guard let prefix = suppressionReasonRequiredPrefixes.first(where: comment.text.hasPrefix),
++            comment.text.dropFirst(prefix.count).contains(where: { !$0.isWhitespace })
++        else { continue }
++
++        guard comment.line < lines.count else {
++            findings.append(
++                suppressionReasonRequiredFinding(
++                    for: comment,
++                    file: file,
++                    converter: converter,
++                    severity: severity
++                )
++            )
++            continue
++        }
++
++        let continuation = lines[comment.line].drop(while: { $0 == " " || $0 == "\t" })
++        let reasonPrefix = "// REASON:"
++        guard continuation.hasPrefix(reasonPrefix),
++            continuation.dropFirst(reasonPrefix.count).contains(where: { !$0.isWhitespace })
++        else {
++            findings.append(
++                suppressionReasonRequiredFinding(
++                    for: comment,
++                    file: file,
++                    converter: converter,
++                    severity: severity
++                )
++            )
++            continue
++        }
++    }
++    return findings
++}
++
++private func suppressionReasonRequiredCollect(
++    _ trivia: Trivia,
++    tokenStartPosition: AbsolutePosition,
++    converter: SourceLocationConverter,
++    into comments: inout [(text: Swift::String, position: AbsolutePosition, line: Swift::Int)]
++) {
++    var cursor = tokenStartPosition
++    for piece in trivia {
++        let position = cursor
++        defer { cursor = cursor.advanced(by: piece.sourceLength.utf8Length) }
++        guard case .lineComment(let text) = piece else { continue }
++        comments.append(
++            (text, position, converter.location(for: position).line)
++        )
++    }
++}
++
++private func suppressionReasonRequiredFinding(
++    for comment: (text: Swift::String, position: AbsolutePosition, line: Swift::Int),
++    file: Source.File,
++    converter: SourceLocationConverter,
++    severity: Diagnostic.Severity
++) -> Diagnostic.Record {
++    let location = converter.location(for: comment.position)
++    return Diagnostic.Record(
++        location: Source.Location(
++            fileID: file.fileID,
++            filePath: file.filePath,
++            line: location.line,
++            column: location.column
++        ),
++        severity: severity,
++        identifier: "suppression reason required",
++        message: `suppression reason required message`
++    )
++}
+diff --git a/Sources/Institute Source/Institute.Source.Application+measure.swift b/Sources/Institute Source/Institute.Source.Application+measure.swift
+deleted file mode 100644
+index 6201423..0000000
+--- a/Sources/Institute Source/Institute.Source.Application+measure.swift	
++++ /dev/null
+@@ -1,328 +0,0 @@
+-import Async_Fanout
+-import FIPS_180_4
+-import File_System
+-public import Institute_Model
+-public import Institute_Source_Policy
+-internal import Institute_Source_Profile
+-import Institute_Source_Workspace
+-public import Source_Execution
+-import Source_Linter
+-public import Source_Measurement
+-internal import Source_Profile
+-import Source_Repair
+-public import Source_Report
+-import Source_Swift_Format
+-
+-extension Institute.Source.Application {
+-    public static func bundle(
+-        _ token: Swift.String
+-    ) throws(Institute.Error)
+-        -> Institute.Source.Bundle
+-    {
+-        guard let bundle = Institute.Source.Bundle(rawValue: token) else {
+-            throw .configuration("invalid source bundle \(token)")
+-        }
+-        return bundle
+-    }
+-
+-    public func measure(
+-        subject: Source_Measurement::Source.Subject,
+-        bundle: Institute.Source.Bundle,
+-        engines: Set<Source_Measurement::Source.Engine.ID>? = nil,
+-        jobs: Swift.Int? = nil,
+-        preparation: Institute.Source.Preparation
+-    ) async throws(Institute.Error) -> Source_Report::Source.Report {
+-        let scope: Source_Report::Source.Report.Scope = engines == nil ? .workspace : .partial
+-        guard preparation.binding == .package(subject.binding) else {
+-            return Self.unmeasuredReport(
+-                scope: scope,
+-                reason: .init(code: "stale-subject", detail: subject.identity)
+-            )
+-        }
+-        return try await measure(
+-            entries: [(bundle: bundle, subject: subject)],
+-            scope: scope,
+-            engines: engines,
+-            jobs: jobs,
+-            references: [],
+-            preparation: preparation
+-        )
+-    }
+-
+-    private func measure(
+-        entries: [(bundle: Institute.Source.Bundle, subject: Source_Measurement::Source.Subject)],
+-        scope: Source_Report::Source.Report.Scope,
+-        engines: Set<Source_Measurement::Source.Engine.ID>?,
+-        jobs: Swift.Int?,
+-        references: [Source_Measurement::Source.Reason],
+-        preparation: Institute.Source.Preparation
+-    ) async throws(Institute.Error) -> Source_Report::Source.Report {
+-        let policy = Institute.Source.Policy.current
+-        if let reason = Self.staleness(of: preparation) {
+-            return Self.unmeasuredReport(scope: scope, reason: reason)
+-        }
+-
+-        let execution: Source_Execution::Source.Execution
+-        do throws(Source_Execution::Source.Execution.Error) {
+-            execution = try .init(process: process)
+-        } catch {
+-            throw .configuration("cannot register source engines: \(error)")
+-        }
+-        var subjects = entries.map(\.subject)
+-        let configuration = try Self.configuration(policy: policy, preparation: preparation)
+-        subjects.append(configuration.subject)
+-        let owner = Institute.Source.Profile(policy: policy)
+-        var requirements: [Source_Report::Source.Report.Commitment.Requirement] = []
+-        for entry in entries {
+-            let bundle = entry.bundle
+-            let artifacts = entry.subject.governed.paths(of: .swift)
+-            for engine in policy.requiredEngines where engines?.contains(engine) ?? true {
+-                let rules: [Source_Measurement::Source.Rule.ID]
+-                switch engine.token {
+-                case "swift-format":
+-                    rules = [.init(engine: engine, token: "format")]
+-                case "swiftlint":
+-                    rules = policy.swiftLintRules
+-                case "swift-linter":
+-                    rules = owner.rules(for: bundle)
+-                default:
+-                    rules = []
+-                }
+-                requirements.append(
+-                    .init(
+-                        subject: entry.subject.identity,
+-                        engine: engine,
+-                        artifacts: artifacts,
+-                        rules: rules
+-                    )
+-                )
+-            }
+-        }
+-        let measuredBySubject: [[Source_Measurement::Source.Measurement]] = await Async.Fanout(
+-            jobs: jobs ?? 1
+-        ).mapAsync(entries) { entry in
+-            let subject = entry.subject
+-            let bundle = entry.bundle
+-            let rules = Institute.Source.Profile(policy: policy).rules(for: bundle)
+-            let linterConfiguration =
+-                "\(preparation.directory)/\(bundle.rawValue)-source-linter-profile.json"
+-            let linterArtifact = policy.linter(bundle: bundle, rules: rules)
+-            guard preparation.verifiedProfiles.contains(bundle.rawValue) else {
+-                return policy.requiredEngines.map {
+-                    .init(
+-                        engine: $0,
+-                        subject: subject,
+-                        activeRules: [],
+-                        applicableRules: [],
+-                        files: subject.governed.paths(of: .swift),
+-                        verdict: .unmeasured([
+-                            .init(code: "unverified-profile", detail: bundle.rawValue)
+-                        ])
+-                    )
+-                }
+-            }
+-            guard Self.matches(file: linterConfiguration, digest: linterArtifact.digest) else {
+-                return policy.requiredEngines.map {
+-                    .init(
+-                        engine: $0,
+-                        subject: subject,
+-                        activeRules: [],
+-                        applicableRules: [],
+-                        files: subject.governed.paths(of: .swift),
+-                        verdict: .unmeasured([
+-                            .init(code: "stale-configuration", detail: linterConfiguration)
+-                        ])
+-                    )
+-                }
+-            }
+-            let profile = policy.profile(
+-                swiftFormat: (executable: preparation.swiftFormatExecutable, tool: preparation.swiftFormatTool, configurationPath: "\(preparation.directory)/.swift-format"),
+-                swiftLint: (executable: preparation.swiftLintExecutable, tool: preparation.swiftLintTool, configurationPath: "\(preparation.directory)/.swiftlint.yml"),
+-                linter: (executable: preparation.linterExecutable, tool: preparation.linterTool, configurationPath: linterConfiguration),
+-                bundle: bundle,
+-                linterRules: rules,
+-                repository: subject.repository.flatMap { Institute.Repository.Coordinate($0) }
+-            )
+-            guard preparation.profiles[bundle.rawValue] == profile.digest else {
+-                return profile.engines.map {
+-                    .init(
+-                        engine: $0.id,
+-                        subject: subject,
+-                        activeRules: $0.rules,
+-                        applicableRules: [],
+-                        files: subject.governed.paths(of: .swift),
+-                        verdict: .unmeasured([.init(code: "stale-profile", detail: bundle.rawValue)]
+-                        )
+-                    )
+-                }
+-            }
+-            let measured = await execution.measure(subject, profile: profile, engines: engines)
+-                .map { measurement in
+-                    measurement.demotingFindings { finding in
+-                        policy.reportsAsWarning(
+-                            identifier: finding.diagnostic.identifier,
+-                            path: finding.diagnostic.location.filePath ?? finding.diagnostic.location.fileID,
+-                            root: subject.root
+-                        )
+-                    }
+-                }
+-            let current: Source_Measurement::Source.Subject
+-            do throws(Institute.Error) {
+-                current = try Institute.Source.Workspace.subject(
+-                    identity: subject.identity,
+-                    root: subject.root
+-                )
+-            } catch {
+-                return profile.engines.map {
+-                    .init(
+-                        engine: $0.id,
+-                        subject: subject,
+-                        activeRules: $0.rules,
+-                        applicableRules: [],
+-                        files: subject.governed.paths(of: .swift),
+-                        verdict: .unmeasured([
+-                            .init(code: "source-changed", detail: "\(error)")
+-                        ])
+-                    )
+-                }
+-            }
+-            guard current == subject else {
+-                return profile.engines.map {
+-                    .init(
+-                        engine: $0.id,
+-                        subject: subject,
+-                        activeRules: $0.rules,
+-                        applicableRules: [],
+-                        files: subject.governed.paths(of: .swift),
+-                        verdict: .unmeasured([
+-                            .init(code: "source-changed", detail: subject.identity)
+-                        ])
+-                    )
+-                }
+-            }
+-            return measured
+-        }
+-        let measurements = measuredBySubject.flatMap { $0 }
+-        var controlIdentities: Swift.Set<Swift.String> = []
+-        let controlEvidence = measurements.flatMap(\.controls).filter {
+-            controlIdentities.insert($0.identity).inserted
+-        }
+-        let profileBytes = preparation.profiles.keys.sorted()
+-            .compactMap { preparation.profiles[$0]?.hex }
+-            .joined(separator: ":").utf8.map(Byte.init(_:))
+-        let digest = Source_Profile::Source.Profile.Digest(FIPS_180_4.SHA256.digest(profileBytes).hex)
+-        return .init(
+-            scope: scope,
+-            profile: digest,
+-            commitment: .init(
+-                subjects: subjects,
+-                engines: policy.requiredEngines.map {
+-                    let controlPolicy: Source_Report::Source.Report.Commitment.Engine.ControlPolicy =
+-                        switch $0.token {
+-                        case "swift-format", "swiftlint":
+-                            .transitionalExternal
+-                        default:
+-                            .required
+-                        }
+-                    return .init(
+-                        id: $0,
+-                        artifactKinds: [.swift],
+-                        controlPolicy: controlPolicy
+-                    )
+-                } + [
+-                    .init(id: policy.configuration.engine, artifactKinds: [.configuration])
+-                ],
+-                rules: Swift.Set(
+-                    requirements.flatMap(\.rules) + [policy.configuration.predicate]
+-                ).map { rule in
+-                    .init(
+-                        id: rule,
+-                        controls: controlEvidence.filter { $0.rule == rule }.map(\.identity)
+-                    )
+-                },
+-                requirements: requirements,
+-                predicates: [
+-                    .init(
+-                        id: policy.configuration.predicate,
+-                        artifactKinds: [.configuration]
+-                    )
+-                ],
+-                predicateRequirements: [
+-                    .init(
+-                        subject: configuration.subject.identity,
+-                        artifacts: configuration.subject.artifacts.map { $0.path.string },
+-                        predicates: [policy.configuration.predicate]
+-                    )
+-                ]
+-            ),
+-            subjects: subjects,
+-            references: references,
+-            measurements: measurements,
+-            artifactEvidence: configuration.evidence,
+-            controlEvidence: controlEvidence
+-        )
+-    }
+-
+-    /// Why `preparation` can no longer back a measurement under the current
+-    /// policy, or `nil` when it still can.
+-    ///
+-    /// The one place a preparation is judged current: measurement refuses on
+-    /// it before running any engine.
+-    public static func staleness(
+-        of preparation: Institute.Source.Preparation
+-    ) -> Source_Measurement::Source.Reason? {
+-        let policy = Institute.Source.Policy.current
+-        guard preparation.policyRevision == policy.revision else {
+-            return .init(code: "stale-profile", detail: preparation.policyRevision)
+-        }
+-        guard
+-            Self.matches(
+-                file: preparation.swiftFormatExecutable,
+-                digest: preparation.swiftFormatTool
+-            ),
+-            Self.matches(
+-                file: preparation.swiftLintExecutable,
+-                digest: preparation.swiftLintTool
+-            ),
+-            Self.matches(file: preparation.linterExecutable, digest: preparation.linterTool)
+-        else {
+-            return .init(code: "stale-tool", detail: preparation.directory.description)
+-        }
+-        guard
+-            Self.matches(
+-                file: "\(preparation.directory)/.swift-format",
+-                digest: policy.swiftFormat.digest
+-            ),
+-            Self.matches(
+-                file: "\(preparation.directory)/.swiftlint.yml",
+-                digest: policy.swiftLint.digest
+-            )
+-        else {
+-            return .init(code: "stale-configuration", detail: ".swift-format")
+-        }
+-        return nil
+-    }
+-
+-    private static func unmeasuredReport(
+-        scope: Source_Report::Source.Report.Scope,
+-        reason: Source_Measurement::Source.Reason
+-    ) -> Source_Report::Source.Report {
+-        .init(
+-            scope: scope,
+-            profile: .init("stale"),
+-            commitment: .init(
+-                subjects: [],
+-                engines: [],
+-                rules: [],
+-                requirements: [],
+-                predicates: [],
+-                predicateRequirements: []
+-            ),
+-            subjects: [],
+-            references: [reason],
+-            measurements: [],
+-            artifactEvidence: [],
+-            controlEvidence: []
+-        )
+-    }
+-}
+diff --git a/Sources/Institute Source/Institute.Source.Application.swift b/Sources/Institute Source/Institute.Source.Application.swift
+index 126ac42..88600a3 100644
+--- a/Sources/Institute Source/Institute.Source.Application.swift	
++++ b/Sources/Institute Source/Institute.Source.Application.swift	
+@@ -6,6 +6,14 @@ internal import Institute_Source_Profile
+ internal import JSON
+ import Source_Measurement
+ internal import Source_Profile
++import Async_Fanout
++import FIPS_180_4
++import Institute_Source_Workspace
++public import Source_Execution
++import Source_Linter
++import Source_Repair
++public import Source_Report
++import Source_Swift_Format
+ 
+ extension Institute.Source.Application {
+     static let configurationSubject = "control:source-profile"
+@@ -155,3 +163,317 @@ extension Institute.Source.Application {
+         return (prefix + version.description, nil)
+     }
+ }
++
++extension Institute.Source.Application {
++    public static func bundle(
++        _ token: Swift.String
++    ) throws(Institute.Error)
++        -> Institute.Source.Bundle
++    {
++        guard let bundle = Institute.Source.Bundle(rawValue: token) else {
++            throw .configuration("invalid source bundle \(token)")
++        }
++        return bundle
++    }
++
++    public func measure(
++        subject: Source_Measurement::Source.Subject,
++        bundle: Institute.Source.Bundle,
++        engines: Set<Source_Measurement::Source.Engine.ID>? = nil,
++        jobs: Swift.Int? = nil,
++        preparation: Institute.Source.Preparation
++    ) async throws(Institute.Error) -> Source_Report::Source.Report {
++        let scope: Source_Report::Source.Report.Scope = engines == nil ? .workspace : .partial
++        guard preparation.binding == .package(subject.binding) else {
++            return Self.unmeasuredReport(
++                scope: scope,
++                reason: .init(code: "stale-subject", detail: subject.identity)
++            )
++        }
++        return try await measure(
++            entries: [(bundle: bundle, subject: subject)],
++            scope: scope,
++            engines: engines,
++            jobs: jobs,
++            references: [],
++            preparation: preparation
++        )
++    }
++
++    private func measure(
++        entries: [(bundle: Institute.Source.Bundle, subject: Source_Measurement::Source.Subject)],
++        scope: Source_Report::Source.Report.Scope,
++        engines: Set<Source_Measurement::Source.Engine.ID>?,
++        jobs: Swift.Int?,
++        references: [Source_Measurement::Source.Reason],
++        preparation: Institute.Source.Preparation
++    ) async throws(Institute.Error) -> Source_Report::Source.Report {
++        let policy = Institute.Source.Policy.current
++        if let reason = Self.staleness(of: preparation) {
++            return Self.unmeasuredReport(scope: scope, reason: reason)
++        }
++
++        let execution: Source_Execution::Source.Execution
++        do throws(Source_Execution::Source.Execution.Error) {
++            execution = try .init(process: process)
++        } catch {
++            throw .configuration("cannot register source engines: \(error)")
++        }
++        var subjects = entries.map(\.subject)
++        let configuration = try Self.configuration(policy: policy, preparation: preparation)
++        subjects.append(configuration.subject)
++        let owner = Institute.Source.Profile(policy: policy)
++        var requirements: [Source_Report::Source.Report.Commitment.Requirement] = []
++        for entry in entries {
++            let bundle = entry.bundle
++            let artifacts = entry.subject.governed.paths(of: .swift)
++            for engine in policy.requiredEngines where engines?.contains(engine) ?? true {
++                let rules: [Source_Measurement::Source.Rule.ID]
++                switch engine.token {
++                case "swift-format":
++                    rules = [.init(engine: engine, token: "format")]
++                case "swiftlint":
++                    rules = policy.swiftLintRules
++                case "swift-linter":
++                    rules = owner.rules(for: bundle)
++                default:
++                    rules = []
++                }
++                requirements.append(
++                    .init(
++                        subject: entry.subject.identity,
++                        engine: engine,
++                        artifacts: artifacts,
++                        rules: rules
++                    )
++                )
++            }
++        }
++        let measuredBySubject: [[Source_Measurement::Source.Measurement]] = await Async.Fanout(
++            jobs: jobs ?? 1
++        ).mapAsync(entries) { entry in
++            let subject = entry.subject
++            let bundle = entry.bundle
++            let rules = Institute.Source.Profile(policy: policy).rules(for: bundle)
++            let linterConfiguration =
++                "\(preparation.directory)/\(bundle.rawValue)-source-linter-profile.json"
++            let linterArtifact = policy.linter(bundle: bundle, rules: rules)
++            guard preparation.verifiedProfiles.contains(bundle.rawValue) else {
++                return policy.requiredEngines.map {
++                    .init(
++                        engine: $0,
++                        subject: subject,
++                        activeRules: [],
++                        applicableRules: [],
++                        files: subject.governed.paths(of: .swift),
++                        verdict: .unmeasured([
++                            .init(code: "unverified-profile", detail: bundle.rawValue)
++                        ])
++                    )
++                }
++            }
++            guard Self.matches(file: linterConfiguration, digest: linterArtifact.digest) else {
++                return policy.requiredEngines.map {
++                    .init(
++                        engine: $0,
++                        subject: subject,
++                        activeRules: [],
++                        applicableRules: [],
++                        files: subject.governed.paths(of: .swift),
++                        verdict: .unmeasured([
++                            .init(code: "stale-configuration", detail: linterConfiguration)
++                        ])
++                    )
++                }
++            }
++            let profile = policy.profile(
++                swiftFormat: (executable: preparation.swiftFormatExecutable, tool: preparation.swiftFormatTool, configurationPath: "\(preparation.directory)/.swift-format"),
++                swiftLint: (executable: preparation.swiftLintExecutable, tool: preparation.swiftLintTool, configurationPath: "\(preparation.directory)/.swiftlint.yml"),
++                linter: (executable: preparation.linterExecutable, tool: preparation.linterTool, configurationPath: linterConfiguration),
++                bundle: bundle,
++                linterRules: rules,
++                repository: subject.repository.flatMap { Institute.Repository.Coordinate($0) }
++            )
++            guard preparation.profiles[bundle.rawValue] == profile.digest else {
++                return profile.engines.map {
++                    .init(
++                        engine: $0.id,
++                        subject: subject,
++                        activeRules: $0.rules,
++                        applicableRules: [],
++                        files: subject.governed.paths(of: .swift),
++                        verdict: .unmeasured([.init(code: "stale-profile", detail: bundle.rawValue)]
++                        )
++                    )
++                }
++            }
++            let measured = await execution.measure(subject, profile: profile, engines: engines)
++                .map { measurement in
++                    measurement.demotingFindings { finding in
++                        policy.reportsAsWarning(
++                            identifier: finding.diagnostic.identifier,
++                            path: finding.diagnostic.location.filePath ?? finding.diagnostic.location.fileID,
++                            root: subject.root
++                        )
++                    }
++                }
++            let current: Source_Measurement::Source.Subject
++            do throws(Institute.Error) {
++                current = try Institute.Source.Workspace.subject(
++                    identity: subject.identity,
++                    root: subject.root
++                )
++            } catch {
++                return profile.engines.map {
++                    .init(
++                        engine: $0.id,
++                        subject: subject,
++                        activeRules: $0.rules,
++                        applicableRules: [],
++                        files: subject.governed.paths(of: .swift),
++                        verdict: .unmeasured([
++                            .init(code: "source-changed", detail: "\(error)")
++                        ])
++                    )
++                }
++            }
++            guard current == subject else {
++                return profile.engines.map {
++                    .init(
++                        engine: $0.id,
++                        subject: subject,
++                        activeRules: $0.rules,
++                        applicableRules: [],
++                        files: subject.governed.paths(of: .swift),
++                        verdict: .unmeasured([
++                            .init(code: "source-changed", detail: subject.identity)
++                        ])
++                    )
++                }
++            }
++            return measured
++        }
++        let measurements = measuredBySubject.flatMap { $0 }
++        var controlIdentities: Swift.Set<Swift.String> = []
++        let controlEvidence = measurements.flatMap(\.controls).filter {
++            controlIdentities.insert($0.identity).inserted
++        }
++        let profileBytes = preparation.profiles.keys.sorted()
++            .compactMap { preparation.profiles[$0]?.hex }
++            .joined(separator: ":").utf8.map(Byte.init(_:))
++        let digest = Source_Profile::Source.Profile.Digest(FIPS_180_4.SHA256.digest(profileBytes).hex)
++        return .init(
++            scope: scope,
++            profile: digest,
++            commitment: .init(
++                subjects: subjects,
++                engines: policy.requiredEngines.map {
++                    let controlPolicy: Source_Report::Source.Report.Commitment.Engine.ControlPolicy =
++                        switch $0.token {
++                        case "swift-format", "swiftlint":
++                            .transitionalExternal
++                        default:
++                            .required
++                        }
++                    return .init(
++                        id: $0,
++                        artifactKinds: [.swift],
++                        controlPolicy: controlPolicy
++                    )
++                } + [
++                    .init(id: policy.configuration.engine, artifactKinds: [.configuration])
++                ],
++                rules: Swift.Set(
++                    requirements.flatMap(\.rules) + [policy.configuration.predicate]
++                ).map { rule in
++                    .init(
++                        id: rule,
++                        controls: controlEvidence.filter { $0.rule == rule }.map(\.identity)
++                    )
++                },
++                requirements: requirements,
++                predicates: [
++                    .init(
++                        id: policy.configuration.predicate,
++                        artifactKinds: [.configuration]
++                    )
++                ],
++                predicateRequirements: [
++                    .init(
++                        subject: configuration.subject.identity,
++                        artifacts: configuration.subject.artifacts.map { $0.path.string },
++                        predicates: [policy.configuration.predicate]
++                    )
++                ]
++            ),
++            subjects: subjects,
++            references: references,
++            measurements: measurements,
++            artifactEvidence: configuration.evidence,
++            controlEvidence: controlEvidence
++        )
++    }
++
++    /// Why `preparation` can no longer back a measurement under the current
++    /// policy, or `nil` when it still can.
++    ///
++    /// The one place a preparation is judged current: measurement refuses on
++    /// it before running any engine.
++    public static func staleness(
++        of preparation: Institute.Source.Preparation
++    ) -> Source_Measurement::Source.Reason? {
++        let policy = Institute.Source.Policy.current
++        guard preparation.policyRevision == policy.revision else {
++            return .init(code: "stale-profile", detail: preparation.policyRevision)
++        }
++        guard
++            Self.matches(
++                file: preparation.swiftFormatExecutable,
++                digest: preparation.swiftFormatTool
++            ),
++            Self.matches(
++                file: preparation.swiftLintExecutable,
++                digest: preparation.swiftLintTool
++            ),
++            Self.matches(file: preparation.linterExecutable, digest: preparation.linterTool)
++        else {
++            return .init(code: "stale-tool", detail: preparation.directory.description)
++        }
++        guard
++            Self.matches(
++                file: "\(preparation.directory)/.swift-format",
++                digest: policy.swiftFormat.digest
++            ),
++            Self.matches(
++                file: "\(preparation.directory)/.swiftlint.yml",
++                digest: policy.swiftLint.digest
++            )
++        else {
++            return .init(code: "stale-configuration", detail: ".swift-format")
++        }
++        return nil
++    }
++
++    private static func unmeasuredReport(
++        scope: Source_Report::Source.Report.Scope,
++        reason: Source_Measurement::Source.Reason
++    ) -> Source_Report::Source.Report {
++        .init(
++            scope: scope,
++            profile: .init("stale"),
++            commitment: .init(
++                subjects: [],
++                engines: [],
++                rules: [],
++                requirements: [],
++                predicates: [],
++                predicateRequirements: []
++            ),
++            subjects: [],
++            references: [reason],
++            measurements: [],
++            artifactEvidence: [],
++            controlEvidence: []
++        )
++    }
++}
+-- 
+2.43.0
+

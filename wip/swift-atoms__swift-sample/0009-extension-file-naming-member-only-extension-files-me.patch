@@ -1,0 +1,183 @@
+From eb45a4867d2e4725edf8d8fa958968d5c169b033 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:10 +0000
+Subject: [PATCH 9/9] extension file naming: member-only extension files merged
+ into the extended type's own file (type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ Sources/Sample/Sample.Batch ~Copyable.swift | 74 --------------------
+ Sources/Sample/Sample.Batch.swift           | 75 +++++++++++++++++++++
+ 2 files changed, 75 insertions(+), 74 deletions(-)
+ delete mode 100644 Sources/Sample/Sample.Batch ~Copyable.swift
+
+diff --git a/Sources/Sample/Sample.Batch ~Copyable.swift b/Sources/Sample/Sample.Batch ~Copyable.swift
+deleted file mode 100644
+index 4c0da15..0000000
+--- a/Sources/Sample/Sample.Batch ~Copyable.swift	
++++ /dev/null
+@@ -1,74 +0,0 @@
+-public import Order
+-
+-extension Sample.Batch where Element: ~Copyable {
+-
+-    @inlinable
+-    public init(
+-        count: Int,
+-        sortedBy comparator: Order.Comparator<Element>,
+-        initializingWith body: (Int) -> Element
+-    ) {
+-        let pointer = UnsafeMutablePointer<Element>.allocate(capacity: Swift::max(count, 1))
+-        (0..<count).forEach { i in
+-            unsafe (pointer + i).initialize(to: body(i))
+-        }
+-        unsafe Self._insertionSort(pointer, count: count, comparator: comparator)
+-        self._storage = unsafe _SampleBatchStorage(base: pointer, count: count)
+-    }
+-
+-    @inlinable
+-    public borrowing func withPercentile<R: ~Copyable>(
+-        _ p: Double,
+-        _ body: (borrowing Element) -> R
+-    ) -> R? {
+-        guard count > 0, (0.0...1.0).contains(p) else { return nil }
+-        let index = Int(Double(count) * p)
+-
+-        let clamped = Swift::min(index, count - 1)
+-        return unsafe body((self._storage.base + clamped).pointee)
+-    }
+-
+-    @inlinable
+-    public borrowing func withMin<R: ~Copyable>(_ body: (borrowing Element) -> R) -> R? {
+-        guard count > 0 else { return nil }
+-        return unsafe body(self._storage.base.pointee)
+-    }
+-
+-    @inlinable
+-    public borrowing func withMax<R: ~Copyable>(_ body: (borrowing Element) -> R) -> R? {
+-        guard count > 0 else { return nil }
+-
+-        return unsafe body((self._storage.base + count - 1).pointee)
+-    }
+-
+-    @inlinable
+-    public borrowing func withMedian<R: ~Copyable>(_ body: (borrowing Element) -> R) -> R? {
+-        withPercentile(0.5, body)
+-    }
+-}
+-
+-extension Sample.Batch where Element: ~Copyable {
+-
+-    @usableFromInline
+-    static func _insertionSort(
+-        _ base: UnsafeMutablePointer<Element>,
+-        count: Int,
+-        comparator: Order.Comparator<Element>
+-    ) {
+-        guard count > 1 else { return }
+-        for i in 1..<count {
+-            var j = i
+-            while j > 0 {
+-                let shouldSwap = unsafe comparator(
+-                    (base + j - 1).pointee,
+-                    (base + j).pointee
+-                ).isGreater
+-                guard shouldSwap else { break }
+-                let temp = unsafe (base + j).move()
+-                unsafe (base + j).initialize(to: (base + j - 1).move())
+-                unsafe (base + j - 1).initialize(to: temp)
+-                j -= 1
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/Sample/Sample.Batch.swift b/Sources/Sample/Sample.Batch.swift
+index e1e157d..6fd69d2 100644
+--- a/Sources/Sample/Sample.Batch.swift
++++ b/Sources/Sample/Sample.Batch.swift
+@@ -1,3 +1,5 @@
++public import Order
++
+ extension Sample {
+ 
+     public struct Batch<Element: ~Copyable>: ~Copyable {
+@@ -16,3 +18,76 @@ extension Sample.Batch where Element: ~Copyable {
+ }
+ 
+ extension Sample.Batch: Swift::Copyable where Element: Swift::Copyable {}
++
++extension Sample.Batch where Element: ~Copyable {
++
++    @inlinable
++    public init(
++        count: Int,
++        sortedBy comparator: Order.Comparator<Element>,
++        initializingWith body: (Int) -> Element
++    ) {
++        let pointer = UnsafeMutablePointer<Element>.allocate(capacity: Swift::max(count, 1))
++        (0..<count).forEach { i in
++            unsafe (pointer + i).initialize(to: body(i))
++        }
++        unsafe Self._insertionSort(pointer, count: count, comparator: comparator)
++        self._storage = unsafe _SampleBatchStorage(base: pointer, count: count)
++    }
++
++    @inlinable
++    public borrowing func withPercentile<R: ~Copyable>(
++        _ p: Double,
++        _ body: (borrowing Element) -> R
++    ) -> R? {
++        guard count > 0, (0.0...1.0).contains(p) else { return nil }
++        let index = Int(Double(count) * p)
++
++        let clamped = Swift::min(index, count - 1)
++        return unsafe body((self._storage.base + clamped).pointee)
++    }
++
++    @inlinable
++    public borrowing func withMin<R: ~Copyable>(_ body: (borrowing Element) -> R) -> R? {
++        guard count > 0 else { return nil }
++        return unsafe body(self._storage.base.pointee)
++    }
++
++    @inlinable
++    public borrowing func withMax<R: ~Copyable>(_ body: (borrowing Element) -> R) -> R? {
++        guard count > 0 else { return nil }
++
++        return unsafe body((self._storage.base + count - 1).pointee)
++    }
++
++    @inlinable
++    public borrowing func withMedian<R: ~Copyable>(_ body: (borrowing Element) -> R) -> R? {
++        withPercentile(0.5, body)
++    }
++}
++
++extension Sample.Batch where Element: ~Copyable {
++
++    @usableFromInline
++    static func _insertionSort(
++        _ base: UnsafeMutablePointer<Element>,
++        count: Int,
++        comparator: Order.Comparator<Element>
++    ) {
++        guard count > 1 else { return }
++        for i in 1..<count {
++            var j = i
++            while j > 0 {
++                let shouldSwap = unsafe comparator(
++                    (base + j - 1).pointee,
++                    (base + j).pointee
++                ).isGreater
++                guard shouldSwap else { break }
++                let temp = unsafe (base + j).move()
++                unsafe (base + j).initialize(to: (base + j - 1).move())
++                unsafe (base + j - 1).initialize(to: temp)
++                j -= 1
++            }
++        }
++    }
++}
+-- 
+2.43.0
+

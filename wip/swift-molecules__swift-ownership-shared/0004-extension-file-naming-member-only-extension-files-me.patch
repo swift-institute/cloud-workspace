@@ -1,0 +1,196 @@
+From bee3709d23299e5750832449f5ba32f1dba3177f Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:46:12 +0000
+Subject: [PATCH 4/4] extension file naming: member-only extension files merged
+ into the extended type's own file (type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ .../Ownership.Shared.swift                    | 57 +++++++++++++++++++
+ .../Shared+Equatable.swift                    | 25 --------
+ .../Shared+Hashable.swift                     | 24 --------
+ .../Shared+withUnique.swift                   | 37 ------------
+ 4 files changed, 57 insertions(+), 86 deletions(-)
+ delete mode 100644 Sources/Ownership Shared Primitive/Shared+Equatable.swift
+ delete mode 100644 Sources/Ownership Shared Primitive/Shared+Hashable.swift
+ delete mode 100644 Sources/Ownership Shared Primitive/Shared+withUnique.swift
+
+diff --git a/Sources/Ownership Shared Primitive/Ownership.Shared.swift b/Sources/Ownership Shared Primitive/Ownership.Shared.swift
+index 2dda02f..498a1ec 100644
+--- a/Sources/Ownership Shared Primitive/Ownership.Shared.swift	
++++ b/Sources/Ownership Shared Primitive/Ownership.Shared.swift	
+@@ -12,6 +12,7 @@ import Property
+ public import Storage
+ import Store
+ import Tagged
++import Affine
+ 
+ extension Ownership.Shared where Element: ~Copyable, B: ~Copyable {
+ 
+@@ -62,3 +63,59 @@ extension Ownership.Shared where Element: ~Copyable, B: ~Copyable {
+         return try body(&span)
+     }
+ }
++
++extension Ownership.Shared: Equatable where Element: Equatable, B: ~Copyable {
++
++    @inlinable
++    public static func == (lhs: Self, rhs: Self) -> Bool {
++        guard lhs.count == rhs.count else { return false }
++        var slot: Index<Element> = .zero
++        let end = lhs.count.map(Ordinal.init)
++        while slot < end {
++            guard lhs[slot] == rhs[slot] else { return false }
++            slot += .one
++        }
++        return true
++    }
++}
++
++extension Ownership.Shared: Hashable where Element: Hashable, B: ~Copyable {
++
++    @inlinable
++    public func hash(into hasher: inout Hasher) {
++        hasher.combine(Int(bitPattern: count.underlying))
++        var slot: Index<Element> = .zero
++        let end = count.map(Ordinal.init)
++        while slot < end {
++            hasher.combine(self[slot])
++            slot += .one
++        }
++    }
++}
++
++extension Ownership.Shared where Element: ~Copyable, B: ~Copyable {
++
++    @inlinable
++    public mutating func withUnique<R: ~Copyable, Failure: Swift::Error>(
++        _ body: (inout B) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        ensureUnique()
++        return try unsafe body(&box.unguarded)
++    }
++
++    @inlinable
++    public mutating func withUnique<T: ~Copyable, R: ~Copyable, Failure: Swift::Error>(
++        consuming payload: consuming T,
++        _ body: (inout B, consuming T) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        ensureUnique()
++        return try unsafe body(&box.unguarded, payload)
++    }
++
++    @inlinable
++    public func withColumn<R: ~Copyable, Failure: Swift::Error>(
++        _ body: (borrowing B) throws(Failure) -> R
++    ) throws(Failure) -> R {
++        try unsafe body(box.unguarded)
++    }
++}
+diff --git a/Sources/Ownership Shared Primitive/Shared+Equatable.swift b/Sources/Ownership Shared Primitive/Shared+Equatable.swift
+deleted file mode 100644
+index fed2059..0000000
+--- a/Sources/Ownership Shared Primitive/Shared+Equatable.swift	
++++ /dev/null
+@@ -1,25 +0,0 @@
+-import Affine
+-import Buffer
+-public import Cardinal
+-import Carrier
+-public import Index
+-import Memory_Allocator_Protocol
+-public import Ordinal
+-import Property
+-import Store
+-public import Tagged
+-
+-extension Ownership.Shared: Equatable where Element: Equatable, B: ~Copyable {
+-
+-    @inlinable
+-    public static func == (lhs: Self, rhs: Self) -> Bool {
+-        guard lhs.count == rhs.count else { return false }
+-        var slot: Index<Element> = .zero
+-        let end = lhs.count.map(Ordinal.init)
+-        while slot < end {
+-            guard lhs[slot] == rhs[slot] else { return false }
+-            slot += .one
+-        }
+-        return true
+-    }
+-}
+diff --git a/Sources/Ownership Shared Primitive/Shared+Hashable.swift b/Sources/Ownership Shared Primitive/Shared+Hashable.swift
+deleted file mode 100644
+index 1466efc..0000000
+--- a/Sources/Ownership Shared Primitive/Shared+Hashable.swift	
++++ /dev/null
+@@ -1,24 +0,0 @@
+-import Affine
+-import Buffer
+-public import Cardinal
+-import Carrier
+-public import Index
+-import Memory_Allocator_Protocol
+-public import Ordinal
+-import Property
+-import Store
+-public import Tagged
+-
+-extension Ownership.Shared: Hashable where Element: Hashable, B: ~Copyable {
+-
+-    @inlinable
+-    public func hash(into hasher: inout Hasher) {
+-        hasher.combine(Int(bitPattern: count.underlying))
+-        var slot: Index<Element> = .zero
+-        let end = count.map(Ordinal.init)
+-        while slot < end {
+-            hasher.combine(self[slot])
+-            slot += .one
+-        }
+-    }
+-}
+diff --git a/Sources/Ownership Shared Primitive/Shared+withUnique.swift b/Sources/Ownership Shared Primitive/Shared+withUnique.swift
+deleted file mode 100644
+index 8329c7b..0000000
+--- a/Sources/Ownership Shared Primitive/Shared+withUnique.swift	
++++ /dev/null
+@@ -1,37 +0,0 @@
+-import Buffer
+-import Cardinal
+-import Carrier
+-import Index
+-import Memory_Allocator_Protocol
+-import Ordinal
+-public import Ownership
+-import Property
+-import Store
+-import Tagged
+-
+-extension Ownership.Shared where Element: ~Copyable, B: ~Copyable {
+-
+-    @inlinable
+-    public mutating func withUnique<R: ~Copyable, Failure: Swift::Error>(
+-        _ body: (inout B) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        ensureUnique()
+-        return try unsafe body(&box.unguarded)
+-    }
+-
+-    @inlinable
+-    public mutating func withUnique<T: ~Copyable, R: ~Copyable, Failure: Swift::Error>(
+-        consuming payload: consuming T,
+-        _ body: (inout B, consuming T) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        ensureUnique()
+-        return try unsafe body(&box.unguarded, payload)
+-    }
+-
+-    @inlinable
+-    public func withColumn<R: ~Copyable, Failure: Swift::Error>(
+-        _ body: (borrowing B) throws(Failure) -> R
+-    ) throws(Failure) -> R {
+-        try unsafe body(box.unguarded)
+-    }
+-}
+-- 
+2.43.0
+
