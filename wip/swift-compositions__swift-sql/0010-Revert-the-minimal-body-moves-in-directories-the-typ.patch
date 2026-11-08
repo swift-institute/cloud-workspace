@@ -1,0 +1,97 @@
+From 99582c70a11b968bca2e8b7ba15911348042566c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:43:40 +0000
+Subject: [PATCH 10/10] Revert the minimal-body moves in directories the
+ type-check can't verify (macros, C shims) (coenttb/work#242)
+
+---
+ .../ColumnCheckMacro.swift                    |  3 --
+ Sources/SQL Test Support/TestDatabase.swift   | 40 ++++++++-----------
+ 2 files changed, 16 insertions(+), 27 deletions(-)
+
+diff --git a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift
+index e3ee28f..9e38e7f 100644
+--- a/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
++++ b/Sources/SQL Macros Implementation/ColumnCheckMacro.swift	
+@@ -14,9 +14,6 @@ package enum ColumnCheckFailRawRepresentableMacro: PeerMacro {
+ 
+ #if CasePaths
+     package enum CaseCheckFailMacro: PeerMacro {
+-    }
+-
+-    extension CaseCheckFailMacro {
+         package static func expansion(
+             of node: AttributeSyntax,
+             providingPeersOf declaration: some DeclSyntaxProtocol,
+diff --git a/Sources/SQL Test Support/TestDatabase.swift b/Sources/SQL Test Support/TestDatabase.swift
+index b74c661..254e56f 100644
+--- a/Sources/SQL Test Support/TestDatabase.swift	
++++ b/Sources/SQL Test Support/TestDatabase.swift	
+@@ -25,6 +25,7 @@ extension TestDatabase {
+     }
+ 
+     public struct Dialect: ISO_9075.Dialect {
++        public func placeholder(_ offset: Int) -> String { "$\(offset)" }
+     }
+ 
+     public struct Row: ISO_9075.Row, Sendable {
+@@ -35,6 +36,11 @@ extension TestDatabase {
+             self.columns = pairs.map(\.key)
+             self.values = pairs.map(\.value)
+         }
++
++        public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
++            guard values.indices.contains(index) else { throw .decoding("no column at \(index)") }
++            return values[index]
++        }
+     }
+ 
+     public func script(_ rows: [Row]) {
+@@ -75,34 +81,20 @@ extension TestDatabase {
+     }
+ }
+ 
+-extension TestDatabase.Dialect {
+-    public func placeholder(_ offset: Int) -> String { "$\(offset)" }
+-}
+-
+-extension TestDatabase.Row {
+-    public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
+-        guard values.indices.contains(index) else { throw .decoding("no column at \(index)") }
+-        return values[index]
+-    }
+-}
+-
+ extension TestDatabase {
+     public struct Connection: ISO_9075.Connection {
+         let database: TestDatabase
+-    }
+-}
+-
+-extension TestDatabase.Connection {
+-    public var dialect: Dialect { Dialect() }
++        public var dialect: Dialect { Dialect() }
+ 
+-    public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
+-        database.record(statement).count
+-    }
++        public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
++            database.record(statement).count
++        }
+ 
+-    public func fetchAll<Value>(
+-        _ statement: ISO_9075.Rendering,
+-        decode: (Row) throws(ISO_9075.Error) -> Value
+-    ) throws(ISO_9075.Error) -> [Value] {
+-        try database.record(statement).map { row throws(ISO_9075.Error) in try decode(row) }
++        public func fetchAll<Value>(
++            _ statement: ISO_9075.Rendering,
++            decode: (Row) throws(ISO_9075.Error) -> Value
++        ) throws(ISO_9075.Error) -> [Value] {
++            try database.record(statement).map { row throws(ISO_9075.Error) in try decode(row) }
++        }
+     }
+ }
+-- 
+2.43.0
+

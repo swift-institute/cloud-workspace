@@ -1,0 +1,101 @@
+From 36f189c8f862d6d5f1109ede88e3e1cfab3e022a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:43:40 +0000
+Subject: [PATCH 5/5] Revert the minimal-body moves in directories the
+ type-check can't verify (macros, C shims) (coenttb/work#242)
+
+---
+ Sources/Motion Cache/Hosting.Cache.swift   |  5 +----
+ Sources/Motion Window/Hosting.Window.swift | 23 +++++++---------------
+ Sources/Motion/Render.Ordered.swift        | 18 ++++++++---------
+ 3 files changed, 16 insertions(+), 30 deletions(-)
+
+diff --git a/Sources/Motion Cache/Hosting.Cache.swift b/Sources/Motion Cache/Hosting.Cache.swift
+index 8fb140d..9da34df 100644
+--- a/Sources/Motion Cache/Hosting.Cache.swift	
++++ b/Sources/Motion Cache/Hosting.Cache.swift	
+@@ -9,13 +9,10 @@ extension Hosting {
+     /// It needs no permission, so it serves machines without Screen Recording access. Its blur
+     /// and shadows are CoreGraphics' software versions, a little different from the screen's.
+     @MainActor public enum Cache {
++        static var window: NSWindow?
+     }
+ }
+ 
+-extension Hosting.Cache {
+-    static var window: NSWindow?
+-}
+-
+ extension Hosting.Cache {
+     /// Closes the window, so the next frame starts from a new one.
+     public static func forget() {
+diff --git a/Sources/Motion Window/Hosting.Window.swift b/Sources/Motion Window/Hosting.Window.swift
+index b92866e..0598359 100644
+--- a/Sources/Motion Window/Hosting.Window.swift	
++++ b/Sources/Motion Window/Hosting.Window.swift	
+@@ -22,25 +22,16 @@ extension Hosting {
+     /// It needs Screen Recording permission, and one process at a time: with several processes
+     /// capturing at once, ScreenCaptureKit's calls stop returning.
+     @MainActor public enum Window {
++        static var window: NSWindow?
++        static var filter: SCContentFilter?
++        static var count = 0
++        static var drawing = false
++        static var waiting: [CheckedContinuation<Void, Never>] = []
++        static var forgetting = false
++        static var opened = 0
+     }
+ }
+ 
+-extension Hosting.Window {
+-    static var window: NSWindow?
+-
+-    static var filter: SCContentFilter?
+-
+-    static var count = 0
+-
+-    static var drawing = false
+-
+-    static var waiting: [CheckedContinuation<Void, Never>] = []
+-
+-    static var forgetting = false
+-
+-    static var opened = 0
+-}
+-
+ extension Hosting.Window {
+     /// Closes the window, so the next frame starts from a new one; during a capture, once it is done.
+     public static func forget() {
+diff --git a/Sources/Motion/Render.Ordered.swift b/Sources/Motion/Render.Ordered.swift
+index bf57ae4..0f2cde1 100644
+--- a/Sources/Motion/Render.Ordered.swift
++++ b/Sources/Motion/Render.Ordered.swift
+@@ -6,17 +6,15 @@ extension Render {
+         var waiting: [Int: Value] = [:]
+ 
+         public init() {}
+-    }
+-}
+ 
+-extension Render.Ordered {
+-    public mutating func arrive(_ index: Int, _ value: Value) -> [Value] {
+-        waiting[index] = value
+-        var ready: [Value] = []
+-        while let value = waiting.removeValue(forKey: next) {
+-            ready.append(value)
+-            next += 1
++        public mutating func arrive(_ index: Int, _ value: Value) -> [Value] {
++            waiting[index] = value
++            var ready: [Value] = []
++            while let value = waiting.removeValue(forKey: next) {
++                ready.append(value)
++                next += 1
++            }
++            return ready
+         }
+-        return ready
+     }
+ }
+-- 
+2.43.0
+

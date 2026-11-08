@@ -1,0 +1,863 @@
+From f453fc49871e54db35b2bf12f978f7beb55e2137 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:43:39 +0000
+Subject: [PATCH 8/8] Revert the minimal-body moves in directories the
+ type-check can't verify (macros, C shims) (coenttb/work#242)
+
+---
+ .../Type.Syntax.Interpretation.swift          | 318 +++++++++---------
+ .../Type.Syntax.Mapping.swift                 | 171 +++++-----
+ .../Type.Syntax.Traversal.swift               | 119 ++++---
+ Sources/Type Algebra/Type.Interface.swift     |  35 +-
+ Sources/Type Algebra/Type.Isomorphism.swift   |  62 ++--
+ Sources/Type Algebra/Type.Lens.swift          |  40 ++-
+ 6 files changed, 363 insertions(+), 382 deletions(-)
+
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Interpretation.swift b/Sources/Type Algebra Syntax/Type.Syntax.Interpretation.swift
+index 42f8045..8dc62da 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Interpretation.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Interpretation.swift	
+@@ -20,181 +20,179 @@ extension Type.Syntax {
+             self.representations = representations
+             self.generators = generators
+         }
+-    }
+-}
+ 
+-extension Type.Syntax.Interpretation {
+-    public func type(_ expression: Type.Expression) throws -> TypeSyntax {
+-        if let supplied = representations[expression] {
+-            switch expression {
+-            case .sum, .effect, .opaque: return supplied
+-            default:
+-                throw Type.Failure(
+-                    "structural representations are fixed by this interpreter; bind atoms or nominal sums instead"
+-                )
+-            }
+-        }
+-        let result: String
+-        switch expression {
+-        case .zero: result = "Swift.Never"
+-        case .unit: result = "Swift.Void"
+-        case .atom(let atom):
+-            guard let value = atoms[atom] else {
+-                throw Type.Failure("no Swift representation for atom `\(atom.name)`")
++        public func type(_ expression: Type.Expression) throws -> TypeSyntax {
++            if let supplied = representations[expression] {
++                switch expression {
++                case .sum, .effect, .opaque: return supplied
++                default:
++                    throw Type.Failure(
++                        "structural representations are fixed by this interpreter; bind atoms or nominal sums instead"
++                    )
++                }
+             }
+-            return value
+-        case .variable(let variable):
+-            guard let value = variables[variable] else {
+-                throw Type.Failure("no Swift representation for variable `\(variable.name)`")
++            let result: String
++            switch expression {
++            case .zero: result = "Swift.Never"
++            case .unit: result = "Swift.Void"
++            case .atom(let atom):
++                guard let value = atoms[atom] else {
++                    throw Type.Failure("no Swift representation for atom `\(atom.name)`")
++                }
++                return value
++            case .variable(let variable):
++                guard let value = variables[variable] else {
++                    throw Type.Failure("no Swift representation for variable `\(variable.name)`")
++                }
++                return value
++            case .product(let factors):
++                let elements = try factors.map { try type($0).trimmedDescription }
++                result =
++                    elements.count == 1 ? elements[0] : "(" + elements.joined(separator: ", ") + ")"
++            case .exponential(let domain, let codomain):
++                result = "(\(try type(domain))) -> \(try type(codomain))"
++            case .list(let element): result = "[\(try type(element))]"
++            case .sum:
++                throw Type.Failure("a Swift coproduct requires an explicit nominal representation")
++            case .effect, .opaque:
++                throw Type.Failure("this constructor requires an explicit Swift representation")
+             }
+-            return value
+-        case .product(let factors):
+-            let elements = try factors.map { try type($0).trimmedDescription }
+-            result =
+-                elements.count == 1 ? elements[0] : "(" + elements.joined(separator: ", ") + ")"
+-        case .exponential(let domain, let codomain):
+-            result = "(\(try type(domain))) -> \(try type(codomain))"
+-        case .list(let element): result = "[\(try type(element))]"
+-        case .sum:
+-            throw Type.Failure("a Swift coproduct requires an explicit nominal representation")
+-        case .effect, .opaque:
+-            throw Type.Failure("this constructor requires an explicit Swift representation")
++            return TypeSyntax(stringLiteral: result)
+         }
+-        return TypeSyntax(stringLiteral: result)
+-    }
+ 
+-    public func record(
+-        _ record: Type.Record,
+-        named name: TokenSyntax,
+-        access: String = "",
+-        escaping: Set<String> = []
+-    ) throws -> DeclSyntax {
+-        guard escaping.isSubset(of: Set(record.fields.map(\.name))) else {
+-            throw Type.Failure("escaping policy names an unknown field")
+-        }
+-        let representation = try Record(
+-            record.fields.map { field in
+-                let syntax = try type(field.type)
+-                let function =
+-                    syntax.is(FunctionTypeSyntax.self)
+-                    || syntax.as(AttributedTypeSyntax.self)?.baseType.is(
+-                        FunctionTypeSyntax.self
+-                    ) == true
+-                return .init(
+-                    field.name,
+-                    type: syntax.trimmedDescription,
+-                    argument: (function || escaping.contains(field.name) ? "@escaping " : "")
+-                        + syntax.trimmedDescription
+-                )
++        public func record(
++            _ record: Type.Record,
++            named name: TokenSyntax,
++            access: String = "",
++            escaping: Set<String> = []
++        ) throws -> DeclSyntax {
++            guard escaping.isSubset(of: Set(record.fields.map(\.name))) else {
++                throw Type.Failure("escaping policy names an unknown field")
+             }
+-        )
+-        return DeclSyntax(
+-            stringLiteral: """
+-                \(access)struct \(name.trimmedDescription) {
+-                \(representation.declarations(access: access).joined(separator: "\n"))
+-                \(try representation.initializer(access: access))
++            let representation = try Record(
++                record.fields.map { field in
++                    let syntax = try type(field.type)
++                    let function =
++                        syntax.is(FunctionTypeSyntax.self)
++                        || syntax.as(AttributedTypeSyntax.self)?.baseType.is(
++                            FunctionTypeSyntax.self
++                        ) == true
++                    return .init(
++                        field.name,
++                        type: syntax.trimmedDescription,
++                        argument: (function || escaping.contains(field.name) ? "@escaping " : "")
++                            + syntax.trimmedDescription
++                    )
+                 }
+-                """
+-        )
+-    }
+-
+-    public func coproduct(
+-        _ alternatives: [Type.Expression],
+-        named name: TokenSyntax,
+-        access: String = ""
+-    ) throws -> DeclSyntax {
+-        let cases = try alternatives.enumerated().map {
+-            "case branch\($0.offset)(\(try type($0.element)))"
++            )
++            return DeclSyntax(
++                stringLiteral: """
++                    \(access)struct \(name.trimmedDescription) {
++                    \(representation.declarations(access: access).joined(separator: "\n"))
++                    \(try representation.initializer(access: access))
++                    }
++                    """
++            )
+         }
+-        return DeclSyntax(
+-            stringLiteral:
+-                "\(access)enum \(name.trimmedDescription) {\n\(cases.joined(separator: "\n"))\n}"
+-        )
+-    }
+ 
+-    public func expression(
+-        _ map: Type.Morphism,
+-        appliedTo value: ExprSyntax,
+-        fresh: (String) -> TokenSyntax
+-    ) throws -> ExprSyntax {
+-        let argument = fresh("value").text
+-        let body = try body(map, value: argument, fresh: fresh)
+-        return ExprSyntax(
+-            stringLiteral:
+-                "({ (\(argument): \(try type(map.domain))) -> \(try type(map.codomain)) in \(body) })(\(value))"
+-        )
+-    }
++        public func coproduct(
++            _ alternatives: [Type.Expression],
++            named name: TokenSyntax,
++            access: String = ""
++        ) throws -> DeclSyntax {
++            let cases = try alternatives.enumerated().map {
++                "case branch\($0.offset)(\(try type($0.element)))"
++            }
++            return DeclSyntax(
++                stringLiteral:
++                    "\(access)enum \(name.trimmedDescription) {\n\(cases.joined(separator: "\n"))\n}"
++            )
++        }
+ 
+-    private func call(
+-        _ map: Type.Morphism,
+-        _ value: String,
+-        fresh: (String) -> TokenSyntax
+-    ) throws -> String {
+-        try expression(map, appliedTo: ExprSyntax(stringLiteral: value), fresh: fresh)
+-            .trimmedDescription
+-    }
++        public func expression(
++            _ map: Type.Morphism,
++            appliedTo value: ExprSyntax,
++            fresh: (String) -> TokenSyntax
++        ) throws -> ExprSyntax {
++            let argument = fresh("value").text
++            let body = try body(map, value: argument, fresh: fresh)
++            return ExprSyntax(
++                stringLiteral:
++                    "({ (\(argument): \(try type(map.domain))) -> \(try type(map.codomain)) in \(body) })(\(value))"
++            )
++        }
+ 
+-    private func body(
+-        _ map: Type.Morphism,
+-        value: String,
+-        fresh: (String) -> TokenSyntax
+-    ) throws -> String {
+-        func tuple(_ values: [String]) -> String {
+-            values.count == 1 ? values[0] : "(" + values.joined(separator: ", ") + ")"
++        private func call(
++            _ map: Type.Morphism,
++            _ value: String,
++            fresh: (String) -> TokenSyntax
++        ) throws -> String {
++            try expression(map, appliedTo: ExprSyntax(stringLiteral: value), fresh: fresh)
++                .trimmedDescription
+         }
+-        switch map.term {
+-        case .identity: return "return \(value)"
+-        case .composition(let first, let second):
+-            return "return \(try call(second, call(first, value, fresh: fresh), fresh: fresh))"
+-        case .projection(let index):
+-            guard case .product(let factors) = map.domain else {
+-                throw Type.Failure("invalid product representation")
+-            }
+-            return "return \(factors.count == 1 ? value : "\(value).\(index)")"
+-        case .pairing(let maps):
+-            return "return \(tuple(try maps.map { try call($0, value, fresh: fresh) }))"
+-        case .injection(let index): return "return .branch\(index)(\(value))"
+-        case .elimination(let maps):
+-            let branches = try maps.enumerated().map { index, branch in
+-                let payload = fresh("payload").text
+-                return
+-                    "case .branch\(index)(let \(payload)): return \(try call(branch, payload, fresh: fresh))"
+-            }
+-            return "switch \(value) { \(branches.joined(separator: "\n")) }"
+-        case .terminal: return "return ()"
+-        case .initial: return "switch \(value) {}"
+-        case .evaluation: return "return \(value).0(\(value).1)"
+-        case .curry(let uncurried):
+-            let argument = fresh("argument").text
+-            return
+-                "return { \(argument) in \(try call(uncurried, "(\(value), \(argument))", fresh: fresh)) }"
+-        case .uncurry(let curried):
+-            return "return (\(try call(curried, "\(value).0", fresh: fresh)))(\(value).1)"
+-        case .generator(let atom):
+-            guard let function = generators[atom] else {
+-                throw Type.Failure("no Swift interpretation for generator `\(atom.name)`")
+-            }
+-            return "return (\(function))(\(value))"
+-        case .distribution:
+-            guard case .sum(let alternatives) = map.codomain else {
+-                throw Type.Failure("invalid distribution")
+-            }
+-            let branches = alternatives.indices.map { index in
+-                let payload = fresh("payload").text
+-                return
+-                    "case .branch\(index)(let \(payload)): return .branch\(index)((\(value).0, \(payload)))"
+-            }
+-            return "switch \(value).1 { \(branches.joined(separator: "\n")) }"
+-        case .factorization:
+-            guard case .sum(let alternatives) = map.domain else {
+-                throw Type.Failure("invalid factorization")
++
++        private func body(
++            _ map: Type.Morphism,
++            value: String,
++            fresh: (String) -> TokenSyntax
++        ) throws -> String {
++            func tuple(_ values: [String]) -> String {
++                values.count == 1 ? values[0] : "(" + values.joined(separator: ", ") + ")"
+             }
+-            let branches = alternatives.indices.map { index in
+-                let payload = fresh("payload").text
++            switch map.term {
++            case .identity: return "return \(value)"
++            case .composition(let first, let second):
++                return "return \(try call(second, call(first, value, fresh: fresh), fresh: fresh))"
++            case .projection(let index):
++                guard case .product(let factors) = map.domain else {
++                    throw Type.Failure("invalid product representation")
++                }
++                return "return \(factors.count == 1 ? value : "\(value).\(index)")"
++            case .pairing(let maps):
++                return "return \(tuple(try maps.map { try call($0, value, fresh: fresh) }))"
++            case .injection(let index): return "return .branch\(index)(\(value))"
++            case .elimination(let maps):
++                let branches = try maps.enumerated().map { index, branch in
++                    let payload = fresh("payload").text
++                    return
++                        "case .branch\(index)(let \(payload)): return \(try call(branch, payload, fresh: fresh))"
++                }
++                return "switch \(value) { \(branches.joined(separator: "\n")) }"
++            case .terminal: return "return ()"
++            case .initial: return "switch \(value) {}"
++            case .evaluation: return "return \(value).0(\(value).1)"
++            case .curry(let uncurried):
++                let argument = fresh("argument").text
+                 return
+-                    "case .branch\(index)(let \(payload)): return (\(payload).0, .branch\(index)(\(payload).1))"
++                    "return { \(argument) in \(try call(uncurried, "(\(value), \(argument))", fresh: fresh)) }"
++            case .uncurry(let curried):
++                return "return (\(try call(curried, "\(value).0", fresh: fresh)))(\(value).1)"
++            case .generator(let atom):
++                guard let function = generators[atom] else {
++                    throw Type.Failure("no Swift interpretation for generator `\(atom.name)`")
++                }
++                return "return (\(function))(\(value))"
++            case .distribution:
++                guard case .sum(let alternatives) = map.codomain else {
++                    throw Type.Failure("invalid distribution")
++                }
++                let branches = alternatives.indices.map { index in
++                    let payload = fresh("payload").text
++                    return
++                        "case .branch\(index)(let \(payload)): return .branch\(index)((\(value).0, \(payload)))"
++                }
++                return "switch \(value).1 { \(branches.joined(separator: "\n")) }"
++            case .factorization:
++                guard case .sum(let alternatives) = map.domain else {
++                    throw Type.Failure("invalid factorization")
++                }
++                let branches = alternatives.indices.map { index in
++                    let payload = fresh("payload").text
++                    return
++                        "case .branch\(index)(let \(payload)): return (\(payload).0, .branch\(index)(\(payload).1))"
++                }
++                return "switch \(value) { \(branches.joined(separator: "\n")) }"
+             }
+-            return "switch \(value) { \(branches.joined(separator: "\n")) }"
+         }
+     }
+ }
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift b/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift
+index 78fc2aa..5d0bcbb 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Mapping.swift	
+@@ -3,103 +3,100 @@ public import Type_Algebra
+ 
+ extension Type.Syntax {
+     public enum Mapping {
+-    }
+-}
+-
+-extension Type.Syntax.Mapping {
+-    public static func apply(
+-        _ type: Expression,
+-        to value: String,
+-        forward: [String: String],
+-        backward: [String: String] = [:],
+-        depth: Int = 0
+-    ) throws -> String {
+-        let plan = try Type.Mapping.derive(
+-            type.algebra,
+-            forward: Set(forward.keys.map(Type.Variable.init)),
+-            backward: Set(backward.keys.map(Type.Variable.init))
+-        )
+-        return try emit(
+-            plan,
+-            shape: type,
+-            value: value,
+-            forward: forward,
+-            backward: backward,
+-            depth: depth
+-        )
+-    }
++        public static func apply(
++            _ type: Expression,
++            to value: String,
++            forward: [String: String],
++            backward: [String: String] = [:],
++            depth: Int = 0
++        ) throws -> String {
++            let plan = try Type.Mapping.derive(
++                type.algebra,
++                forward: Set(forward.keys.map(Type.Variable.init)),
++                backward: Set(backward.keys.map(Type.Variable.init))
++            )
++            return try emit(
++                plan,
++                shape: type,
++                value: value,
++                forward: forward,
++                backward: backward,
++                depth: depth
++            )
++        }
+ 
+-    private static func emit(
+-        _ plan: Type.Mapping,
+-        shape: Expression,
+-        value: String,
+-        forward: [String: String],
+-        backward: [String: String],
+-        depth: Int
+-    ) throws -> String {
+-        switch (plan, shape) {
+-        case (.identity, _): return value
+-        case (.transform(let variable, let direction), _):
+-            guard let transform = (direction == .forward ? forward : backward)[variable.name]
+-            else {
+-                throw Type.Failure("missing Swift representation of a mapping")
+-            }
+-            return "\(transform)(\(value))"
+-        case (.list(let child), .array(let element)):
+-            let variable = "element\(depth)"
+-            return
+-                "(\(value)).map { \(variable) in \(try emit(child, shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
+-        case (.sum(let children), .optional(let element)):
+-            guard children.count == 2 else {
+-                throw Type.Failure("optional mapping must have two alternatives")
+-            }
+-            let variable = "element\(depth)"
+-            return
+-                "(\(value)).map { \(variable) in \(try emit(children[1], shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
+-        case (.product(let children), .tuple(let coordinates)):
+-            guard children.count == coordinates.count else {
+-                throw Type.Failure("tuple mapping arity mismatch")
+-            }
+-            let fields = try coordinates.enumerated().map { index, coordinate in
+-                let label = coordinate.label.map { $0 == "_" ? "" : "\($0): " } ?? ""
+-                return label
+-                    + (try emit(
++        private static func emit(
++            _ plan: Type.Mapping,
++            shape: Expression,
++            value: String,
++            forward: [String: String],
++            backward: [String: String],
++            depth: Int
++        ) throws -> String {
++            switch (plan, shape) {
++            case (.identity, _): return value
++            case (.transform(let variable, let direction), _):
++                guard let transform = (direction == .forward ? forward : backward)[variable.name]
++                else {
++                    throw Type.Failure("missing Swift representation of a mapping")
++                }
++                return "\(transform)(\(value))"
++            case (.list(let child), .array(let element)):
++                let variable = "element\(depth)"
++                return
++                    "(\(value)).map { \(variable) in \(try emit(child, shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
++            case (.sum(let children), .optional(let element)):
++                guard children.count == 2 else {
++                    throw Type.Failure("optional mapping must have two alternatives")
++                }
++                let variable = "element\(depth)"
++                return
++                    "(\(value)).map { \(variable) in \(try emit(children[1], shape: element, value: variable, forward: forward, backward: backward, depth: depth + 1)) }"
++            case (.product(let children), .tuple(let coordinates)):
++                guard children.count == coordinates.count else {
++                    throw Type.Failure("tuple mapping arity mismatch")
++                }
++                let fields = try coordinates.enumerated().map { index, coordinate in
++                    let label = coordinate.label.map { $0 == "_" ? "" : "\($0): " } ?? ""
++                    return label
++                        + (try emit(
++                            children[index],
++                            shape: coordinate.type,
++                            value: "(\(value)).\(index)",
++                            forward: forward,
++                            backward: backward,
++                            depth: depth + 1
++                        ))
++                }
++                return "(\(fields.joined(separator: ", ")))"
++            case (.exponential(let domain, let codomain), .arrow(let inputs, let output)):
++                guard case .product(let children) = domain, children.count == inputs.count else {
++                    throw Type.Failure("function mapping arity mismatch")
++                }
++                let arguments = inputs.indices.map { "argument\(depth)_\($0)" }
++                let mapped = try inputs.enumerated().map { index, input in
++                    try emit(
+                         children[index],
+-                        shape: coordinate.type,
+-                        value: "(\(value)).\(index)",
++                        shape: input,
++                        value: arguments[index],
+                         forward: forward,
+                         backward: backward,
+                         depth: depth + 1
+-                    ))
+-            }
+-            return "(\(fields.joined(separator: ", ")))"
+-        case (.exponential(let domain, let codomain), .arrow(let inputs, let output)):
+-            guard case .product(let children) = domain, children.count == inputs.count else {
+-                throw Type.Failure("function mapping arity mismatch")
+-            }
+-            let arguments = inputs.indices.map { "argument\(depth)_\($0)" }
+-            let mapped = try inputs.enumerated().map { index, input in
+-                try emit(
+-                    children[index],
+-                    shape: input,
+-                    value: arguments[index],
++                    )
++                }
++                let call = "(\(value))(\(mapped.joined(separator: ", ")))"
++                let result = try emit(
++                    codomain,
++                    shape: output,
++                    value: call,
+                     forward: forward,
+                     backward: backward,
+                     depth: depth + 1
+                 )
++                return
++                    "{ \(arguments.isEmpty ? "" : arguments.joined(separator: ", ") + " in ")\(result) }"
++            default: throw Type.Failure("Swift representation does not match the derived mapping")
+             }
+-            let call = "(\(value))(\(mapped.joined(separator: ", ")))"
+-            let result = try emit(
+-                codomain,
+-                shape: output,
+-                value: call,
+-                forward: forward,
+-                backward: backward,
+-                depth: depth + 1
+-            )
+-            return
+-                "{ \(arguments.isEmpty ? "" : arguments.joined(separator: ", ") + " in ")\(result) }"
+-        default: throw Type.Failure("Swift representation does not match the derived mapping")
+         }
+     }
+ }
+diff --git a/Sources/Type Algebra Syntax/Type.Syntax.Traversal.swift b/Sources/Type Algebra Syntax/Type.Syntax.Traversal.swift
+index 87130a7..845f08f 100644
+--- a/Sources/Type Algebra Syntax/Type.Syntax.Traversal.swift	
++++ b/Sources/Type Algebra Syntax/Type.Syntax.Traversal.swift	
+@@ -2,72 +2,69 @@ import Type_Algebra
+ 
+ extension Type.Syntax {
+     public enum Traversal {
+-    }
+-}
+-
+-extension Type.Syntax.Traversal {
+-    public static func interpret<Output>(
+-        _ type: Expression,
+-        value: String,
+-        parameter: String,
+-        constant: (Expression, String) throws -> Output,
+-        transform: (String) throws -> Output,
+-        collection: (Bool, String, String, Output) throws -> Output,
+-        product: (Expression, [(String?, Output)], Int) throws -> Output
+-    ) throws -> Output {
+-        guard type.algebra.isTraversable else {
+-            throw Type.Failure(
+-                "structural traversal requires known, finite traversable positions"
+-            )
+-        }
+-        let plan = try Type.Mapping.derive(type.algebra, forward: [.init(parameter)])
+-        func emit(
+-            _ plan: Type.Mapping,
+-            _ shape: Expression,
+-            _ value: String,
+-            _ depth: Int
++        public static func interpret<Output>(
++            _ type: Expression,
++            value: String,
++            parameter: String,
++            constant: (Expression, String) throws -> Output,
++            transform: (String) throws -> Output,
++            collection: (Bool, String, String, Output) throws -> Output,
++            product: (Expression, [(String?, Output)], Int) throws -> Output
+         ) throws -> Output {
+-            switch (plan, shape) {
+-            case (.identity, _): return try constant(shape, value)
+-            case (.transform, _): return try transform(value)
+-            case (.list(let child), .array(let element)):
+-                let binding = "element\(depth)"
+-                return try collection(
+-                    false,
+-                    value,
+-                    binding,
+-                    emit(child, element, binding, depth + 1)
+-                )
+-            case (.sum(let children), .optional(let element)):
+-                guard children.count == 2 else {
+-                    throw Type.Failure("invalid optional traversal")
+-                }
+-                let binding = "element\(depth)"
+-                return try collection(
+-                    true,
+-                    value,
+-                    binding,
+-                    emit(children[1], element, binding, depth + 1)
++            guard type.algebra.isTraversable else {
++                throw Type.Failure(
++                    "structural traversal requires known, finite traversable positions"
+                 )
+-            case (.product(let children), .tuple(let coordinates)):
+-                guard children.count == coordinates.count else {
+-                    throw Type.Failure("invalid product traversal")
+-                }
+-                let parts = try coordinates.enumerated().map { index, coordinate in
+-                    (
+-                        coordinate.label,
+-                        try emit(
+-                            children[index],
+-                            coordinate.type,
+-                            "(\(value)).\(index)",
+-                            depth + 1
+-                        )
++            }
++            let plan = try Type.Mapping.derive(type.algebra, forward: [.init(parameter)])
++            func emit(
++                _ plan: Type.Mapping,
++                _ shape: Expression,
++                _ value: String,
++                _ depth: Int
++            ) throws -> Output {
++                switch (plan, shape) {
++                case (.identity, _): return try constant(shape, value)
++                case (.transform, _): return try transform(value)
++                case (.list(let child), .array(let element)):
++                    let binding = "element\(depth)"
++                    return try collection(
++                        false,
++                        value,
++                        binding,
++                        emit(child, element, binding, depth + 1)
+                     )
++                case (.sum(let children), .optional(let element)):
++                    guard children.count == 2 else {
++                        throw Type.Failure("invalid optional traversal")
++                    }
++                    let binding = "element\(depth)"
++                    return try collection(
++                        true,
++                        value,
++                        binding,
++                        emit(children[1], element, binding, depth + 1)
++                    )
++                case (.product(let children), .tuple(let coordinates)):
++                    guard children.count == coordinates.count else {
++                        throw Type.Failure("invalid product traversal")
++                    }
++                    let parts = try coordinates.enumerated().map { index, coordinate in
++                        (
++                            coordinate.label,
++                            try emit(
++                                children[index],
++                                coordinate.type,
++                                "(\(value)).\(index)",
++                                depth + 1
++                            )
++                        )
++                    }
++                    return try product(shape, parts, depth)
++                default: throw Type.Failure("Swift representation does not match traversal plan")
+                 }
+-                return try product(shape, parts, depth)
+-            default: throw Type.Failure("Swift representation does not match traversal plan")
+             }
++            return try emit(plan, type, value, 0)
+         }
+-        return try emit(plan, type, value, 0)
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Interface.swift b/Sources/Type Algebra/Type.Interface.swift
+index 90fb773..12c2ae8 100644
+--- a/Sources/Type Algebra/Type.Interface.swift	
++++ b/Sources/Type Algebra/Type.Interface.swift	
+@@ -11,28 +11,25 @@ extension Type {
+             self.signature = signature
+             self.children = children
+         }
+-    }
+-}
+-
+-extension Type.Interface {
+-    public var implementation: Record {
+-        get throws {
+-            try Record(
+-                signature.operations.map { .init($0.name, $0.implementation) } + children.fields
++        public var implementation: Record {
++            get throws {
++                try Record(
++                    signature.operations.map { .init($0.name, $0.implementation) } + children.fields
++                )
++            }
++        }
++        public func requests(children requests: Record) throws -> Expression {
++            try requestRecord(children: requests).alternatives
++        }
++        public func requestRecord(children requests: Record) throws -> Record {
++            guard requests.fields.map(\.name) == children.fields.map(\.name) else {
++                throw Failure("child requests must match the child coordinates in order")
++            }
++            return try Record(
++                signature.operations.map { .init($0.name, $0.input) } + requests.fields
+             )
+         }
+     }
+ 
+-    public func requests(children requests: Record) throws -> Expression {
+-        try requestRecord(children: requests).alternatives
+-    }
+ 
+-    public func requestRecord(children requests: Record) throws -> Record {
+-        guard requests.fields.map(\.name) == children.fields.map(\.name) else {
+-            throw Failure("child requests must match the child coordinates in order")
+-        }
+-        return try Record(
+-            signature.operations.map { .init($0.name, $0.input) } + requests.fields
+-        )
+-    }
+ }
+diff --git a/Sources/Type Algebra/Type.Isomorphism.swift b/Sources/Type Algebra/Type.Isomorphism.swift
+index 25126cd..7434303 100644
+--- a/Sources/Type Algebra/Type.Isomorphism.swift	
++++ b/Sources/Type Algebra/Type.Isomorphism.swift	
+@@ -2,40 +2,34 @@ extension Type {
+     public struct Isomorphism: Equatable, Sendable {
+         public let forward: Morphism
+         public let backward: Morphism
+-    }
+-}
+-
+-extension Type.Isomorphism {
+-    public static func distribution(
+-        _ factor: Expression,
+-        over alternatives: [Expression]
+-    ) -> Self {
+-        Self(
+-            forward: .distribution(factor, over: alternatives),
+-            backward: .factorization(factor, from: alternatives)
+-        )
+-    }
+-
+-    public static func productUnit(_ value: Expression) throws -> Self {
+-        Self(
+-            forward: try .projection([.unit, value], at: 1),
+-            backward: try .pairing(from: value, [.terminal(from: value), .identity(value)])
+-        )
+-    }
+-
+-    public static func sumZero(_ value: Expression) throws -> Self {
+-        Self(
+-            forward: try .elimination(to: value, [.initial(to: value), .identity(value)]),
+-            backward: try .injection([.zero, value], at: 1)
+-        )
+-    }
+-
+-    public static func permutation(of record: Record, order: [String]) throws -> Self {
+-        guard order.count == record.fields.count else {
+-            throw Failure("a permutation must include every coordinate")
++        public static func distribution(
++            _ factor: Expression,
++            over alternatives: [Expression]
++        ) -> Self {
++            Self(
++                forward: .distribution(factor, over: alternatives),
++                backward: .factorization(factor, from: alternatives)
++            )
++        }
++        public static func productUnit(_ value: Expression) throws -> Self {
++            Self(
++                forward: try .projection([.unit, value], at: 1),
++                backward: try .pairing(from: value, [.terminal(from: value), .identity(value)])
++            )
++        }
++        public static func sumZero(_ value: Expression) throws -> Self {
++            Self(
++                forward: try .elimination(to: value, [.initial(to: value), .identity(value)]),
++                backward: try .injection([.zero, value], at: 1)
++            )
++        }
++        public static func permutation(of record: Record, order: [String]) throws -> Self {
++            guard order.count == record.fields.count else {
++                throw Failure("a permutation must include every coordinate")
++            }
++            let selected = try record.selecting(order)
++            let inverse = try selected.record.selecting(record.fields.map(\.name))
++            return Self(forward: selected.projection, backward: inverse.projection)
+         }
+-        let selected = try record.selecting(order)
+-        let inverse = try selected.record.selecting(record.fields.map(\.name))
+-        return Self(forward: selected.projection, backward: inverse.projection)
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Lens.swift b/Sources/Type Algebra/Type.Lens.swift
+index 3472ec7..8a6ae8c 100644
+--- a/Sources/Type Algebra/Type.Lens.swift	
++++ b/Sources/Type Algebra/Type.Lens.swift	
+@@ -2,28 +2,26 @@ extension Type {
+     public struct Lens: Equatable, Sendable {
+         public let get: Morphism
+         public let put: Morphism
+-    }
+-}
+ 
+-extension Type.Lens {
+-    public static func coordinate(
+-        _ label: String,
+-        in record: Record,
+-        replacingWith replacementType: Expression? = nil
+-    ) throws -> Self {
+-        guard let index = record.fields.firstIndex(where: { $0.name == label }) else {
+-            throw Failure("unknown lens coordinate")
+-        }
+-        let types = record.fields.map(\.type)
+-        let domain = [record.expression, replacementType ?? types[index]]
+-        let old = try Morphism.projection(domain, at: 0)
+-        let replacement = try Morphism.projection(domain, at: 1)
+-        let fields = try types.indices.map { field in
+-            field == index ? replacement : try old.followed(by: .projection(types, at: field))
++        public static func coordinate(
++            _ label: String,
++            in record: Record,
++            replacingWith replacementType: Expression? = nil
++        ) throws -> Self {
++            guard let index = record.fields.firstIndex(where: { $0.name == label }) else {
++                throw Failure("unknown lens coordinate")
++            }
++            let types = record.fields.map(\.type)
++            let domain = [record.expression, replacementType ?? types[index]]
++            let old = try Morphism.projection(domain, at: 0)
++            let replacement = try Morphism.projection(domain, at: 1)
++            let fields = try types.indices.map { field in
++                field == index ? replacement : try old.followed(by: .projection(types, at: field))
++            }
++            return Self(
++                get: try .projection(types, at: index),
++                put: try .pairing(from: .product(domain), fields)
++            )
+         }
+-        return Self(
+-            get: try .projection(types, at: index),
+-            put: try .pairing(from: .product(domain), fields)
+-        )
+     }
+ }
+-- 
+2.43.0
+

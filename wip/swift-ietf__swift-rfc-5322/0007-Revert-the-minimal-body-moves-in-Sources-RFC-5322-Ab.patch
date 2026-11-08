@@ -1,0 +1,579 @@
+From 6728b61d2ab306d9d92a92ecb0a0c26c94613308 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 01:01:14 +0000
+Subject: [PATCH 7/7] Revert the minimal-body moves in Sources/RFC
+ 5322/Absorbed swift-rfc-5322-coder: they broke the root build
+ (coenttb/work#242)
+
+---
+ .../RFC_5322.Header.Coder.swift               |  66 ++++++------
+ .../RFC_5322.Header.Name.Coder.swift          |  42 ++++----
+ .../RFC_5322.Header.Value.Coder.swift         |  70 ++++++------
+ .../RFC_5322.Mailbox.Coder.swift              | 102 +++++++++---------
+ .../RFC_5322.Mailbox.LocalPart.Coder.swift    |  82 +++++++-------
+ .../RFC_5322.Whitespace.Coder.swift           |  43 ++++----
+ .../Absorbed swift-rfc-5322-coder/Scan.swift  |   2 -
+ 7 files changed, 203 insertions(+), 204 deletions(-)
+
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Coder.swift
+index 763042b..65bcbc1 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Coder.swift	
+@@ -6,47 +6,47 @@
+     import Serializer
+ 
+     extension RFC_5322.Header {
+-        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
+-
+-extension RFC_5322.Header.Coder {
+-        public typealias Output = RFC_5322.Header
++        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+ 
+-        public typealias Failure = RFC_5322.Header.Error
++            public typealias Output = RFC_5322.Header
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
++            public typealias Failure = RFC_5322.Header.Error
+ 
+-            let name: RFC_5322.Header.Name
+-            do throws(RFC_5322.Header.Name.Error) {
+-                name = try RFC_5322.Header.Name.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .invalidName(error)
+-            }
++            public init() {}
+ 
+-            guard let colon = input.next(), colon.bitPattern == 0x3A else {
+-                input.seek(to: start)
+-                throw .invalidFormat(name.rawValue, reason: "Missing colon separator")
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++
++                let name: RFC_5322.Header.Name
++                do throws(RFC_5322.Header.Name.Error) {
++                    name = try RFC_5322.Header.Name.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .invalidName(error)
++                }
++
++                guard let colon = input.next(), colon.bitPattern == 0x3A else {
++                    input.seek(to: start)
++                    throw .invalidFormat(name.rawValue, reason: "Missing colon separator")
++                }
++
++                let value: RFC_5322.Header.Value
++                do throws(RFC_5322.Header.Value.Error) {
++                    value = try RFC_5322.Header.Value.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .invalidValue(error)
++                }
++
++                return RFC_5322.Header(name: name, value: value)
+             }
+ 
+-            let value: RFC_5322.Header.Value
+-            do throws(RFC_5322.Header.Value.Error) {
+-                value = try RFC_5322.Header.Value.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .invalidValue(error)
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                Scan.append(output.description, into: &buffer)
+             }
+-
+-            return RFC_5322.Header(name: name, value: value)
+         }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            Scan.append(output.description, into: &buffer)
+-        }
+-}
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ #endif
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Name.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Name.Coder.swift
+index 5da235d..284642d 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Name.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Name.Coder.swift	
+@@ -6,34 +6,34 @@
+     import Serializer
+ 
+     extension RFC_5322.Header.Name {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++            public typealias Output = RFC_5322.Header.Name
+ 
+-extension RFC_5322.Header.Name.Coder {
+-        public typealias Output = RFC_5322.Header.Name
++            public typealias Failure = RFC_5322.Header.Name.Error
+ 
+-        public typealias Failure = RFC_5322.Header.Name.Error
++            public init() {}
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            let bytes = Scan.run(&input) { byte in
+-                let code = byte.bitPattern
+-                return code != 0x3A && code != 0x0D && code != 0x0A
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                let bytes = Scan.run(&input) { byte in
++                    let code = byte.bitPattern
++                    return code != 0x3A && code != 0x0D && code != 0x0A
++                }
++                do throws(Failure) {
++                    return try RFC_5322.Header.Name(ascii: bytes)
++                } catch {
++                    input.seek(to: start)
++                    throw error
++                }
+             }
+-            do throws(Failure) {
+-                return try RFC_5322.Header.Name(ascii: bytes)
+-            } catch {
+-                input.seek(to: start)
+-                throw error
++
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                Scan.append(output.rawValue, into: &buffer)
+             }
+         }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            Scan.append(output.rawValue, into: &buffer)
+-        }
+-}
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ #endif
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Value.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Value.Coder.swift
+index 4eba3c7..3b536cd 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Value.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Header.Value.Coder.swift	
+@@ -6,57 +6,57 @@
+     import Serializer
+ 
+     extension RFC_5322.Header.Value {
+-        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+ 
+-extension RFC_5322.Header.Value.Coder {
+-        public typealias Output = RFC_5322.Header.Value
++            public typealias Output = RFC_5322.Header.Value
+ 
+-        public typealias Failure = RFC_5322.Header.Value.Error
++            public typealias Failure = RFC_5322.Header.Value.Error
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            var bytes: [Byte] = []
++            public init() {}
+ 
+-            while true {
+-                let mark = input.checkpoint
+-                guard let byte = input.next() else { break }
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                var bytes: [Byte] = []
+ 
+-                if byte.bitPattern == 0x0A {
+-                    input.seek(to: mark)
+-                    break
+-                }
++                while true {
++                    let mark = input.checkpoint
++                    guard let byte = input.next() else { break }
+ 
+-                if byte.bitPattern == 0x0D {
+-                    guard let lf = input.next(), lf.bitPattern == 0x0A,
+-                        let wsp = input.next(), Scan.isWhitespace(wsp)
+-                    else {
++                    if byte.bitPattern == 0x0A {
+                         input.seek(to: mark)
+                         break
+                     }
++
++                    if byte.bitPattern == 0x0D {
++                        guard let lf = input.next(), lf.bitPattern == 0x0A,
++                            let wsp = input.next(), Scan.isWhitespace(wsp)
++                        else {
++                            input.seek(to: mark)
++                            break
++                        }
++                        bytes.append(byte)
++                        bytes.append(lf)
++                        bytes.append(wsp)
++                        continue
++                    }
++
+                     bytes.append(byte)
+-                    bytes.append(lf)
+-                    bytes.append(wsp)
+-                    continue
+                 }
+ 
+-                bytes.append(byte)
++                do throws(Failure) {
++                    return try RFC_5322.Header.Value(ascii: bytes)
++                } catch {
++                    input.seek(to: start)
++                    throw error
++                }
+             }
+ 
+-            do throws(Failure) {
+-                return try RFC_5322.Header.Value(ascii: bytes)
+-            } catch {
+-                input.seek(to: start)
+-                throw error
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                Scan.append(output.rawValue, into: &buffer)
+             }
+         }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            Scan.append(output.rawValue, into: &buffer)
+-        }
+-}
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ #endif
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.Coder.swift
+index a30c35d..46ec1de 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.Coder.swift	
+@@ -6,73 +6,73 @@
+     import Serializer
+ 
+     extension RFC_5322.Mailbox {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++            public typealias Output = RFC_5322.Mailbox
+ 
+-extension RFC_5322.Mailbox.Coder {
+-        public typealias Output = RFC_5322.Mailbox
++            public typealias Failure = RFC_5322.Mailbox.Error
+ 
+-        public typealias Failure = RFC_5322.Mailbox.Error
++            public init() {}
++
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                var bytes: [Byte] = []
++                var quoted = false
++                var escaped = false
++                var angled = false
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            var bytes: [Byte] = []
+-            var quoted = false
+-            var escaped = false
+-            var angled = false
++                while true {
++                    let mark = input.checkpoint
++                    guard let byte = input.next() else { break }
++                    let code = byte.bitPattern
+ 
+-            while true {
+-                let mark = input.checkpoint
+-                guard let byte = input.next() else { break }
+-                let code = byte.bitPattern
++                    if quoted {
++                        if escaped {
++                            escaped = false
++                        } else if code == 0x5C {
++                            escaped = true
++                        } else if code == 0x22 {
++                            quoted = false
++                        }
++                        bytes.append(byte)
++                        continue
++                    }
+ 
+-                if quoted {
+-                    if escaped {
+-                        escaped = false
+-                    } else if code == 0x5C {
+-                        escaped = true
+-                    } else if code == 0x22 {
+-                        quoted = false
++                    if code == 0x0D || code == 0x0A || (!angled && (code == 0x2C || code == 0x3B)) {
++                        input.seek(to: mark)
++                        break
+                     }
++
++                    if code == 0x22 {
++                        quoted = true
++                    } else if code == 0x3C {
++                        angled = true
++                    } else if code == 0x3E {
++                        angled = false
++                    }
++
+                     bytes.append(byte)
+-                    continue
+                 }
+ 
+-                if code == 0x0D || code == 0x0A || (!angled && (code == 0x2C || code == 0x3B)) {
+-                    input.seek(to: mark)
+-                    break
+-                }
++                var lower = bytes.startIndex
++                var upper = bytes.endIndex
++                while lower < upper, Scan.isWhitespace(bytes[lower]) { lower += 1 }
++                while upper > lower, Scan.isWhitespace(bytes[upper - 1]) { upper -= 1 }
+ 
+-                if code == 0x22 {
+-                    quoted = true
+-                } else if code == 0x3C {
+-                    angled = true
+-                } else if code == 0x3E {
+-                    angled = false
++                do throws(Failure) {
++                    return try RFC_5322.Mailbox(ascii: bytes[lower..<upper])
++                } catch {
++                    input.seek(to: start)
++                    throw error
+                 }
+-
+-                bytes.append(byte)
+             }
+ 
+-            var lower = bytes.startIndex
+-            var upper = bytes.endIndex
+-            while lower < upper, Scan.isWhitespace(bytes[lower]) { lower += 1 }
+-            while upper > lower, Scan.isWhitespace(bytes[upper - 1]) { upper -= 1 }
+-
+-            do throws(Failure) {
+-                return try RFC_5322.Mailbox(ascii: bytes[lower..<upper])
+-            } catch {
+-                input.seek(to: start)
+-                throw error
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                Scan.append(output.description, into: &buffer)
+             }
+         }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            Scan.append(output.description, into: &buffer)
+-        }
+-}
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ #endif
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.LocalPart.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.LocalPart.Coder.swift
+index 35aca69..62e5217 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.LocalPart.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Mailbox.LocalPart.Coder.swift	
+@@ -7,60 +7,60 @@
+     import Serializer
+ 
+     extension RFC_5322.Mailbox.LocalPart {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++            public typealias Output = RFC_5322.Mailbox.LocalPart
+ 
+-extension RFC_5322.Mailbox.LocalPart.Coder {
+-        public typealias Output = RFC_5322.Mailbox.LocalPart
++            public typealias Failure = RFC_5322.Mailbox.LocalPart.Error
+ 
+-        public typealias Failure = RFC_5322.Mailbox.LocalPart.Error
++            public init() {}
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            var bytes: [Byte] = []
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                var bytes: [Byte] = []
+ 
+-            let mark = input.checkpoint
+-            if let first = input.next(), first.bitPattern == 0x22 {
+-                bytes.append(first)
+-                var escaped = false
+-                var terminated = false
+-                while let byte = input.next() {
+-                    bytes.append(byte)
+-                    if escaped {
+-                        escaped = false
+-                    } else if byte.bitPattern == 0x5C {
+-                        escaped = true
+-                    } else if byte.bitPattern == 0x22 {
+-                        terminated = true
+-                        break
++                let mark = input.checkpoint
++                if let first = input.next(), first.bitPattern == 0x22 {
++                    bytes.append(first)
++                    var escaped = false
++                    var terminated = false
++                    while let byte = input.next() {
++                        bytes.append(byte)
++                        if escaped {
++                            escaped = false
++                        } else if byte.bitPattern == 0x5C {
++                            escaped = true
++                        } else if byte.bitPattern == 0x22 {
++                            terminated = true
++                            break
++                        }
++                    }
++                    guard terminated else {
++                        input.seek(to: start)
++                        throw .invalidQuotedString
++                    }
++                } else {
++                    input.seek(to: mark)
++                    bytes = Scan.run(&input) { byte in
++                        byte.bitPattern == 0x2E
++                            || (byte.bitPattern < 0x80 && RFC_5322.isAtext(ASCII.Code(unchecked: byte)))
+                     }
+                 }
+-                guard terminated else {
++
++                do throws(Failure) {
++                    return try RFC_5322.Mailbox.LocalPart(ascii: bytes)
++                } catch {
+                     input.seek(to: start)
+-                    throw .invalidQuotedString
+-                }
+-            } else {
+-                input.seek(to: mark)
+-                bytes = Scan.run(&input) { byte in
+-                    byte.bitPattern == 0x2E
+-                        || (byte.bitPattern < 0x80 && RFC_5322.isAtext(ASCII.Code(unchecked: byte)))
++                    throw error
+                 }
+             }
+ 
+-            do throws(Failure) {
+-                return try RFC_5322.Mailbox.LocalPart(ascii: bytes)
+-            } catch {
+-                input.seek(to: start)
+-                throw error
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                Scan.append(output.description, into: &buffer)
+             }
+         }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            Scan.append(output.description, into: &buffer)
+-        }
+-}
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ #endif
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Whitespace.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Whitespace.Coder.swift
+index 8d7b126..af95704 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Whitespace.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Whitespace.Coder.swift	
+@@ -6,41 +6,42 @@
+     import Serializer
+ 
+     extension RFC_5322 {
++
+         public enum Whitespace {}
+     }
+ 
+     extension RFC_5322.Whitespace {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Output = Void
++
++            public typealias Failure = Never
++
+             public let canonical: [Byte]
+ 
+             public init(canonical: [Byte] = []) {
+                 self.canonical = canonical
+             }
+-        }
+-    }
+ 
+-extension RFC_5322.Whitespace.Coder {
+-        public typealias Output = Void
+-
+-        public typealias Failure = Never
+-
+-        public borrowing func parse(_ input: inout Input) {
+-            while true {
+-                let mark = input.checkpoint
+-                guard let byte = input.next(), Self.isWhitespace(byte) else {
+-                    input.seek(to: mark)
+-                    return
++            public borrowing func parse(_ input: inout Input) {
++                while true {
++                    let mark = input.checkpoint
++                    guard let byte = input.next(), Self.isWhitespace(byte) else {
++                        input.seek(to: mark)
++                        return
++                    }
+                 }
+             }
+-        }
+ 
+-        public borrowing func serialize(_ output: Void, into buffer: inout Buffer) {
+-            buffer.append(contentsOf: canonical)
+-        }
++            public borrowing func serialize(_ output: Void, into buffer: inout Buffer) {
++                buffer.append(contentsOf: canonical)
++            }
+ 
+-        public static func isWhitespace(_ byte: Byte) -> Bool {
+-            let code = byte.bitPattern
+-            return code == 0x20 || code == 0x09 || code == 0x0D || code == 0x0A
++            public static func isWhitespace(_ byte: Byte) -> Bool {
++                let code = byte.bitPattern
++                return code == 0x20 || code == 0x09 || code == 0x0D || code == 0x0A
++            }
+         }
+-}
++    }
+ #endif
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/Scan.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/Scan.swift
+index f9702e3..1af221c 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/Scan.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/Scan.swift	
+@@ -4,9 +4,7 @@
+     import Cursor
+ 
+     enum Scan {
+-    }
+ 
+-    extension Scan {
+         static func run<Input: Cursor.`Protocol`<Byte, Never>>(
+             _ input: inout Input,
+             while predicate: (Byte) -> Bool
+-- 
+2.43.0
+

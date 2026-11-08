@@ -1,0 +1,172 @@
+From 2ed4c0e97245801b23225341a1df152875e7c49f Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:43:40 +0000
+Subject: [PATCH 6/6] Revert the minimal-body moves in directories the
+ type-check can't verify (macros, C shims) (coenttb/work#242)
+
+---
+ Sources/Parsers/Parsers.Chain.swift | 50 ++++++++++++++++++-----------
+ 1 file changed, 32 insertions(+), 18 deletions(-)
+
+diff --git a/Sources/Parsers/Parsers.Chain.swift b/Sources/Parsers/Parsers.Chain.swift
+index 541cf5f..89fe87c 100644
+--- a/Sources/Parsers/Parsers.Chain.swift
++++ b/Sources/Parsers/Parsers.Chain.swift
+@@ -1,16 +1,19 @@
+ public import Checkpoint
+ 
+ extension Parsers {
++
+     public enum Chain: Sendable {}
+ }
+ 
+ extension Parsers.Chain {
++
+     public struct Left<Operand: Parsing, Operator: Parsing>
+     where
+         Operand.Input == Operator.Input,
+         Operand.Input: Copyable & Restorable,
+         Operand.Input.Checkpoint: Equatable
+     {
++
+         @usableFromInline
+         let operand: Operand
+ 
+@@ -34,12 +37,14 @@ extension Parsers.Chain {
+ }
+ 
+ extension Parsers.Chain.Left: Parsing {
++
+     public typealias Input = Operand.Input
+     public typealias Output = Operand.Output
+     public typealias Failure = Operand.Failure
+ 
+     @inlinable
+     public func parse(_ input: inout Input) throws(Failure) -> Output {
++
+         var result = try operand.parse(&input)
+ 
+         while true {
+@@ -49,6 +54,7 @@ extension Parsers.Chain.Left: Parsing {
+             do throws(Operator.Failure) {
+                 op = try `operator`.parse(&input)
+             } catch {
++
+                 input = saved
+                 break
+             }
+@@ -57,6 +63,7 @@ extension Parsers.Chain.Left: Parsing {
+             do throws(Operand.Failure) {
+                 rhs = try operand.parse(&input)
+             } catch {
++
+                 input = saved
+                 break
+             }
+@@ -74,12 +81,14 @@ extension Parsers.Chain.Left: Parsing {
+ }
+ 
+ extension Parsers.Chain {
++
+     public struct Right<Operand: Parsing, Operator: Parsing>
+     where
+         Operand.Input == Operator.Input,
+         Operand.Input: Copyable & Restorable,
+         Operand.Input.Checkpoint: Equatable
+     {
++
+         @usableFromInline
+         let operand: Operand
+ 
+@@ -103,12 +112,14 @@ extension Parsers.Chain {
+ }
+ 
+ extension Parsers.Chain.Right: Parsing {
++
+     public typealias Input = Operand.Input
+     public typealias Output = Operand.Output
+     public typealias Failure = Operand.Failure
+ 
+     @inlinable
+     public func parse(_ input: inout Input) throws(Failure) -> Output {
++
+         let entry = input.checkpoint
+ 
+         let lhs = try operand.parse(&input)
+@@ -119,6 +130,7 @@ extension Parsers.Chain.Right: Parsing {
+         do throws(Operator.Failure) {
+             op = try `operator`.parse(&input)
+         } catch {
++
+             input = saved
+             return lhs
+         }
+@@ -132,6 +144,7 @@ extension Parsers.Chain.Right: Parsing {
+         do throws(Operand.Failure) {
+             rhs = try parse(&input)
+         } catch {
++
+             input = saved
+             return lhs
+         }
+@@ -141,7 +154,9 @@ extension Parsers.Chain.Right: Parsing {
+ }
+ 
+ extension Parsers.Chain {
++
+     public struct Access<Operand: Parsing> {
++
+         @usableFromInline
+         let operand: Operand
+ 
+@@ -149,30 +164,29 @@ extension Parsers.Chain {
+         init(operand: Operand) {
+             self.operand = operand
+         }
+-    }
+-}
+ 
+-extension Parsers.Chain.Access {
+-    @inlinable
+-    public func left<Op: Parsing>(
+-        _ op: Op,
+-        combine: @escaping (Operand.Output, Op.Output, Operand.Output) -> Operand.Output
+-    ) -> Parsers.Chain.Left<Operand, Op>
+-    where Op.Input == Operand.Input, Operand.Input: Copyable & Restorable, Operand.Input.Checkpoint: Equatable {
+-        Parsers.Chain.Left(operand: operand, operator: op, combine: combine)
+-    }
++        @inlinable
++        public func left<Op: Parsing>(
++            _ op: Op,
++            combine: @escaping (Operand.Output, Op.Output, Operand.Output) -> Operand.Output
++        ) -> Parsers.Chain.Left<Operand, Op>
++        where Op.Input == Operand.Input, Operand.Input: Copyable & Restorable, Operand.Input.Checkpoint: Equatable {
++            Parsers.Chain.Left(operand: operand, operator: op, combine: combine)
++        }
+ 
+-    @inlinable
+-    public func right<Op: Parsing>(
+-        _ op: Op,
+-        combine: @escaping (Operand.Output, Op.Output, Operand.Output) -> Operand.Output
+-    ) -> Parsers.Chain.Right<Operand, Op>
+-    where Op.Input == Operand.Input, Operand.Input: Copyable & Restorable, Operand.Input.Checkpoint: Equatable {
+-        Parsers.Chain.Right(operand: operand, operator: op, combine: combine)
++        @inlinable
++        public func right<Op: Parsing>(
++            _ op: Op,
++            combine: @escaping (Operand.Output, Op.Output, Operand.Output) -> Operand.Output
++        ) -> Parsers.Chain.Right<Operand, Op>
++        where Op.Input == Operand.Input, Operand.Input: Copyable & Restorable, Operand.Input.Checkpoint: Equatable {
++            Parsers.Chain.Right(operand: operand, operator: op, combine: combine)
++        }
+     }
+ }
+ 
+ extension Parsing {
++
+     @inlinable
+     public var chain: Parsers.Chain.Access<Self> {
+         Parsers.Chain.Access(operand: self)
+-- 
+2.43.0
+

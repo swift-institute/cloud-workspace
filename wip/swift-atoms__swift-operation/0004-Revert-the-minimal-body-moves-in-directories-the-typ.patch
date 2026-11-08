@@ -1,0 +1,296 @@
+From d1dd2e0a509274ba1a61ef585759fed0845a81eb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sat, 7 Nov 2026 23:43:39 +0000
+Subject: [PATCH 4/4] Revert the minimal-body moves in directories the
+ type-check can't verify (macros, C shims) (coenttb/work#242)
+
+---
+ .../Operation.Derivation.swift                | 253 +++++++++---------
+ 1 file changed, 125 insertions(+), 128 deletions(-)
+
+diff --git a/Sources/Operation Macro Core/Operation.Derivation.swift b/Sources/Operation Macro Core/Operation.Derivation.swift
+index a9a909c..3a20b78 100644
+--- a/Sources/Operation Macro Core/Operation.Derivation.swift	
++++ b/Sources/Operation Macro Core/Operation.Derivation.swift	
+@@ -4,153 +4,150 @@ import Type_Algebra_Syntax
+ 
+ extension Operation {
+     public enum Derivation {
+-    }
+-}
+-
+-extension Operation.Derivation {
+-    public static func peers(
+-        of analysis: Analysis,
+-        inputAttributes: [AttributeSyntax] = [],
+-        inputConformances: [String] = [],
+-        conformances: [String] = [],
+-        members: (Analysis.Symbol) -> [DeclSyntax] = { _ in [] }
+-    ) -> [DeclSyntax] {
+-        do { return try derive(analysis, inputAttributes: inputAttributes, inputConformances: inputConformances, conformances: conformances, members: members) } catch {
+-            return [DeclSyntax(stringLiteral: "#error(\(String(reflecting: String(describing: error))))")]
++        public static func peers(
++            of analysis: Analysis,
++            inputAttributes: [AttributeSyntax] = [],
++            inputConformances: [String] = [],
++            conformances: [String] = [],
++            members: (Analysis.Symbol) -> [DeclSyntax] = { _ in [] }
++        ) -> [DeclSyntax] {
++            do { return try derive(analysis, inputAttributes: inputAttributes, inputConformances: inputConformances, conformances: conformances, members: members) } catch {
++                return [DeclSyntax(stringLiteral: "#error(\(String(reflecting: String(describing: error))))")]
++            }
+         }
+-    }
+ 
+-    private static func derive(
+-        _ analysis: Analysis,
+-        inputAttributes: [AttributeSyntax],
+-        inputConformances: [String],
+-        conformances: [String],
+-        members: (Analysis.Symbol) -> [DeclSyntax]
+-    ) throws -> [DeclSyntax] {
+-        let access = access(of: analysis.declaration)
+-        let owner = analysis.owner.trimmedDescription
+-        return try analysis.algebra.operations.map { operation in
+-            guard let symbol = analysis.symbols.first(where: { $0.caseName == operation.name }) else {
+-                throw Type.Failure("missing Swift representation for operation")
+-            }
+-            let labels = Self.labels(of: symbol)
+-            let conformance = (["Operation::Operation.Symbol"] + (labels == nil ? [] : ["Operation::Operation.Labelled"]) + conformances).joined(separator: ", ")
+-            return DeclSyntax(
+-                stringLiteral: """
+-                    \(access)enum \(symbol.name): \(conformance) {
+-                        \(access)typealias Owner = \(owner)
+-                    \(inputAttributes.map(\.trimmedDescription).joined(separator: "\n"))
+-                    \(try input(of: symbol, domain: operation.input, access: access, conformances: inputConformances))
++        private static func derive(
++            _ analysis: Analysis,
++            inputAttributes: [AttributeSyntax],
++            inputConformances: [String],
++            conformances: [String],
++            members: (Analysis.Symbol) -> [DeclSyntax]
++        ) throws -> [DeclSyntax] {
++            let access = access(of: analysis.declaration)
++            let owner = analysis.owner.trimmedDescription
++            return try analysis.algebra.operations.map { operation in
++                guard let symbol = analysis.symbols.first(where: { $0.caseName == operation.name }) else {
++                    throw Type.Failure("missing Swift representation for operation")
++                }
++                let labels = Self.labels(of: symbol)
++                let conformance = (["Operation::Operation.Symbol"] + (labels == nil ? [] : ["Operation::Operation.Labelled"]) + conformances).joined(separator: ", ")
++                return DeclSyntax(
++                    stringLiteral: """
++                        \(access)enum \(symbol.name): \(conformance) {
++                            \(access)typealias Owner = \(owner)
++                        \(inputAttributes.map(\.trimmedDescription).joined(separator: "\n"))
++                        \(try input(of: symbol, domain: operation.input, access: access, conformances: inputConformances))
+ 
+-                        \(access)typealias Output = \(symbol.output.trimmedDescription)
+-                        \(access)typealias Failure = \(symbol.failure.trimmedDescription)
+-                        \(access)typealias Application = Operation::Operation.Application<Self>
++                            \(access)typealias Output = \(symbol.output.trimmedDescription)
++                            \(access)typealias Failure = \(symbol.failure.trimmedDescription)
++                            \(access)typealias Application = Operation::Operation.Application<Self>
+ 
+-                    \(labels.map { Self.labelled($0, access: access) } ?? "")
+-                    \(members(symbol).map(\.trimmedDescription).joined(separator: "\n"))
+-                    }
+-                    """
+-            )
++                        \(labels.map { Self.labelled($0, access: access) } ?? "")
++                        \(members(symbol).map(\.trimmedDescription).joined(separator: "\n"))
++                        }
++                        """
++                )
++            }
+         }
+-    }
+ 
+-    private static func labels(of symbol: Analysis.Symbol) -> (labels: [String], value: String)? {
+-        guard let tuple = symbol.output.as(TupleTypeSyntax.self), let value = tuple.elements.first?.type.trimmedDescription else { return nil }
+-        let labels = tuple.elements.compactMap { $0.firstName?.text }
+-        guard labels.count == tuple.elements.count, tuple.elements.allSatisfy({ $0.type.trimmedDescription == value }) else { return nil }
+-        return (labels, value)
+-    }
++        private static func labels(of symbol: Analysis.Symbol) -> (labels: [String], value: String)? {
++            guard let tuple = symbol.output.as(TupleTypeSyntax.self), let value = tuple.elements.first?.type.trimmedDescription else { return nil }
++            let labels = tuple.elements.compactMap { $0.firstName?.text }
++            guard labels.count == tuple.elements.count, tuple.elements.allSatisfy({ $0.type.trimmedDescription == value }) else { return nil }
++            return (labels, value)
++        }
+ 
+-    private static func labelled(_ labels: (labels: [String], value: String), access: String) -> String {
+-        """
+-            \(access)enum Label: Swift.CaseIterable, Swift.Hashable {
+-                case \(labels.labels.joined(separator: ", "))
+-            }
+-            \(access)typealias Value = \(labels.value)
+-            \(access)static func value(of output: Output, at label: Label) -> Value {
+-                switch label {
+-                \(labels.labels.map { "case .\($0): output.\($0)" }.joined(separator: "\n"))
++        private static func labelled(_ labels: (labels: [String], value: String), access: String) -> String {
++            """
++                \(access)enum Label: Swift.CaseIterable, Swift.Hashable {
++                    case \(labels.labels.joined(separator: ", "))
+                 }
+-            }
+-        """
+-    }
++                \(access)typealias Value = \(labels.value)
++                \(access)static func value(of output: Output, at label: Label) -> Value {
++                    switch label {
++                    \(labels.labels.map { "case .\($0): output.\($0)" }.joined(separator: "\n"))
++                    }
++                }
++            """
++        }
+ 
+-    private static func input(of symbol: Analysis.Symbol, domain: Type.Expression, access: String, conformances: [String]) throws -> String {
+-        let forwarding =
+-            symbol.inputs.count == 1 && !symbol.transfers
+-            ? """
++        private static func input(of symbol: Analysis.Symbol, domain: Type.Expression, access: String, conformances: [String]) throws -> String {
++            let forwarding =
++                symbol.inputs.count == 1 && !symbol.transfers
++                ? """
+ 
+-                \(symbol.inputs[0].parameter.localName.text == "fieldValue" ? "" : "\(access)var fieldValue: \(symbol.inputs[0].type.trimmedDescription) { \(symbol.inputs[0].parameter.localName.text) }")
++                    \(symbol.inputs[0].parameter.localName.text == "fieldValue" ? "" : "\(access)var fieldValue: \(symbol.inputs[0].type.trimmedDescription) { \(symbol.inputs[0].parameter.localName.text) }")
+ 
+-                \(access)subscript<Member>(dynamicMember keyPath: Swift.KeyPath<\(symbol.inputs[0].type.trimmedDescription), Member>) -> Member {
+-                    \(symbol.inputs[0].parameter.localName.text)[keyPath: keyPath]
+-                }
++                    \(access)subscript<Member>(dynamicMember keyPath: Swift.KeyPath<\(symbol.inputs[0].type.trimmedDescription), Member>) -> Member {
++                        \(symbol.inputs[0].parameter.localName.text)[keyPath: keyPath]
++                    }
+ 
+-                \(access)subscript<Member>(dynamicMember keyPath: Swift.WritableKeyPath<\(symbol.inputs[0].type.trimmedDescription), Member>) -> Member {
+-                    get { \(symbol.inputs[0].parameter.localName.text)[keyPath: keyPath] }
+-                    set { \(symbol.inputs[0].parameter.localName.text)[keyPath: keyPath] = newValue }
++                    \(access)subscript<Member>(dynamicMember keyPath: Swift.WritableKeyPath<\(symbol.inputs[0].type.trimmedDescription), Member>) -> Member {
++                        get { \(symbol.inputs[0].parameter.localName.text)[keyPath: keyPath] }
++                        set { \(symbol.inputs[0].parameter.localName.text)[keyPath: keyPath] = newValue }
++                    }
++                """
++                : ""
++            let inherited = (symbol.transfers ? ["~Copyable"] : symbol.inputs.count == 1 ? ["Operation::Operation.Unary"] : []) + conformances
++            let header =
++                (!symbol.transfers && symbol.inputs.count == 1 ? "@dynamicMemberLookup\n" : "")
++                + "\(access)struct Input" + (inherited.isEmpty ? "" : ": " + inherited.joined(separator: ", ")) + " {"
++            guard case .product(let factors) = domain, factors.count == symbol.inputs.count else {
++                throw Type.Failure("operation input representation must match its product domain")
++            }
++            let inputRecord = try Type.Record(zip(symbol.inputs, factors).map { .init($0.parameter.localName.text, $1) })
++            let record = try Type.Syntax.Record(inputRecord) { coordinate in
++                guard let input = symbol.inputs.first(where: { $0.parameter.localName.text == coordinate.name }) else {
++                    throw Type.Failure("missing Swift representation for input")
+                 }
+-            """
+-            : ""
+-        let inherited = (symbol.transfers ? ["~Copyable"] : symbol.inputs.count == 1 ? ["Operation::Operation.Unary"] : []) + conformances
+-        let header =
+-            (!symbol.transfers && symbol.inputs.count == 1 ? "@dynamicMemberLookup\n" : "")
+-            + "\(access)struct Input" + (inherited.isEmpty ? "" : ": " + inherited.joined(separator: ", ")) + " {"
+-        guard case .product(let factors) = domain, factors.count == symbol.inputs.count else {
+-            throw Type.Failure("operation input representation must match its product domain")
+-        }
+-        let inputRecord = try Type.Record(zip(symbol.inputs, factors).map { .init($0.parameter.localName.text, $1) })
+-        let record = try Type.Syntax.Record(inputRecord) { coordinate in
+-            guard let input = symbol.inputs.first(where: { $0.parameter.localName.text == coordinate.name }) else {
+-                throw Type.Failure("missing Swift representation for input")
++                let declaration = input.parameter.declaration
++                let label = declaration.firstName.tokenKind == .wildcard ? "_" : declaration.firstName.text
++                let type = input.type.trimmedDescription
++                return .init(
++                    input.parameter.localName.text,
++                    type: type,
++                    label: label,
++                    argument: input.parameter.transfersOwnership ? "consuming \(type)" : type
++                )
+             }
+-            let declaration = input.parameter.declaration
+-            let label = declaration.firstName.tokenKind == .wildcard ? "_" : declaration.firstName.text
+-            let type = input.type.trimmedDescription
+-            return .init(
+-                input.parameter.localName.text,
+-                type: type,
+-                label: label,
+-                argument: input.parameter.transfersOwnership ? "consuming \(type)" : type
+-            )
+-        }
+-        let fields = record.declarations(access: access).joined(separator: "\n")
+-        let initializer = try record.initializer(access: access)
+-        let unary: String
+-        if symbol.inputs.count == 1, !symbol.transfers,
+-            symbol.inputs[0].parameter.declaration.firstName.tokenKind != .wildcard
+-        {
+-            let local = symbol.inputs[0].parameter.localName.text
+-            unary = """
++            let fields = record.declarations(access: access).joined(separator: "\n")
++            let initializer = try record.initializer(access: access)
++            let unary: String
++            if symbol.inputs.count == 1, !symbol.transfers,
++                symbol.inputs[0].parameter.declaration.firstName.tokenKind != .wildcard
++            {
++                let local = symbol.inputs[0].parameter.localName.text
++                unary = """
+ 
+-                    \(access)init(_ field: \(symbol.inputs[0].type.trimmedDescription)) {
+-                        self.\(local) = field
+-                    }
++                        \(access)init(_ field: \(symbol.inputs[0].type.trimmedDescription)) {
++                            self.\(local) = field
++                        }
++                    """
++            } else {
++                unary = ""
++            }
++            return """
++                \(header)
++                \(fields)
++
++                    \(initializer)
++                \(unary)\(forwarding)
++                }
+                 """
+-        } else {
+-            unary = ""
+         }
+-        return """
+-            \(header)
+-            \(fields)
+ 
+-                \(initializer)
+-            \(unary)\(forwarding)
+-            }
+-            """
+-    }
+-
+-    public static func access(of declaration: ProtocolDeclSyntax) -> String {
+-        for modifier in declaration.modifiers {
+-            switch modifier.name.tokenKind {
+-            case .keyword(.public), .keyword(.package), .keyword(.fileprivate):
+-                return "\(modifier.name.text) "
+-            case .keyword(.private):
+-                return "fileprivate "
+-            default:
+-                continue
++        public static func access(of declaration: ProtocolDeclSyntax) -> String {
++            for modifier in declaration.modifiers {
++                switch modifier.name.tokenKind {
++                case .keyword(.public), .keyword(.package), .keyword(.fileprivate):
++                    return "\(modifier.name.text) "
++                case .keyword(.private):
++                    return "fileprivate "
++                default:
++                    continue
++                }
+             }
++            return ""
+         }
+-        return ""
+     }
+ }
+-- 
+2.43.0
+
