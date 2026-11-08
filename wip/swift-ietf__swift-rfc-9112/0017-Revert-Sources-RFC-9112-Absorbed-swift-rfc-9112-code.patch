@@ -1,0 +1,94 @@
+From 6c74417323b14e65fcb6395a449835345f6fe722 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:18:32 +0000
+Subject: [PATCH 17/17] Revert Sources/RFC 9112/Absorbed
+ swift-rfc-9112-coder/HTTP.Connection.Coder.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../HTTP.Connection.Coder.swift               | 59 ++++++++++---------
+ 1 file changed, 30 insertions(+), 29 deletions(-)
+
+diff --git a/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Connection.Coder.swift b/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Connection.Coder.swift
+index 1b5a994..14911ef 100644
+--- a/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Connection.Coder.swift	
++++ b/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Connection.Coder.swift	
+@@ -8,45 +8,46 @@
+     import Serializer
+ 
+     extension RFC_9112.Connection {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Output = RFC_9112.Connection
++
++            public typealias Failure = RFC_9112.Connection.Error
++
+             public init() {}
++
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let tokens: [RFC_9110.Token]
++                do {
++                    tokens = try RFC_9110.Field.Value.List(RFC_9110.Token.Coder<Input, Buffer>())
++                        .parse(&input)
++                } catch {
++                    throw .malformed
++                }
++
++                guard !tokens.isEmpty else { throw .empty }
++                return Output(options: Set(tokens.map { $0.rawValue.lowercased() }))
++            }
++
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                let tokens = output.options.sorted().map { RFC_9110.Token(unchecked: $0) }
++                do {
++                    try RFC_9110.Field.Value.List(RFC_9110.Token.Coder<Input, Buffer>())
++                        .serialize(tokens, into: &buffer)
++                } catch {
++                    throw .malformed
++                }
++            }
+         }
+ 
+         public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+ 
+         public enum Error: Swift::Error, Equatable {
++
+             case empty
+ 
+             case malformed
+         }
+     }
+-
+-extension RFC_9112.Connection.Coder {
+-        public typealias Output = RFC_9112.Connection
+-
+-        public typealias Failure = RFC_9112.Connection.Error
+-
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let tokens: [RFC_9110.Token]
+-            do {
+-                tokens = try RFC_9110.Field.Value.List(RFC_9110.Token.Coder<Input, Buffer>())
+-                    .parse(&input)
+-            } catch {
+-                throw .malformed
+-            }
+-
+-            guard !tokens.isEmpty else { throw .empty }
+-            return Output(options: Set(tokens.map { $0.rawValue.lowercased() }))
+-        }
+-
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            let tokens = output.options.sorted().map { RFC_9110.Token(unchecked: $0) }
+-            do {
+-                try RFC_9110.Field.Value.List(RFC_9110.Token.Coder<Input, Buffer>())
+-                    .serialize(tokens, into: &buffer)
+-            } catch {
+-                throw .malformed
+-            }
+-        }
+-}
+ #endif
+-- 
+2.43.0
+

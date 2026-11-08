@@ -1,0 +1,155 @@
+From 1c7fed005f355fda61d44c1250ba3531d3381939 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:19:23 +0000
+Subject: [PATCH 16/17] Revert Sources/RFC 5322/Absorbed
+ swift-rfc-5322-coder/RFC_5322.Message.ID.Coder.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../RFC_5322.Message.ID.Coder.swift           | 105 +++++++++---------
+ 1 file changed, 53 insertions(+), 52 deletions(-)
+
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Message.ID.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Message.ID.Coder.swift
+index 8788790..3b86522 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Message.ID.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.Message.ID.Coder.swift	
+@@ -9,46 +9,48 @@
+     import Serializer
+ 
+     extension RFC_5322.Message.ID {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
++            public typealias Output = RFC_5322.Message.ID
+ 
+-extension RFC_5322.Message.ID.Coder {
+-        public typealias Output = RFC_5322.Message.ID
++            public typealias Failure = RFC_5322.Message.ID.Error
+ 
+-        public typealias Failure = RFC_5322.Message.ID.Error
++            public init() {}
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            let parts: ([Byte], [Byte])
+-            do throws(Parts.Error) {
+-                parts = try Parts.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .missingAtSign("\(error)")
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                let parts: ([Byte], [Byte])
++                do throws(Parts.Error) {
++                    parts = try Parts.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .missingAtSign("\(error)")
++                }
++                do throws(Failure) {
++                    let bytes = [Byte](utf8: "<") + parts.0 + [Byte](utf8: "@") + parts.1 + [Byte](utf8: ">")
++                    return try RFC_5322.Message.ID(String(decoding: bytes, as: UTF8.self))
++                } catch {
++                    input.seek(to: start)
++                    throw error
++                }
+             }
+-            do throws(Failure) {
+-                let bytes = [Byte](utf8: "<") + parts.0 + [Byte](utf8: "@") + parts.1 + [Byte](utf8: ">")
+-                return try RFC_5322.Message.ID(String(decoding: bytes, as: UTF8.self))
+-            } catch {
+-                input.seek(to: start)
+-                throw error
++
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                RFC_5322.Message.ID.serialize(output, into: &buffer)
+             }
+         }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            RFC_5322.Message.ID.serialize(output, into: &buffer)
+-        }
+-}
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+     extension RFC_5322.Message.ID {
++
+         public enum Parts {}
+     }
+ 
+     extension RFC_5322.Message.ID.Parts {
++
+         public enum Error: Swift::Error, Equatable {
+             case expectedOpenAngle
+             case expectedAtSign
+@@ -56,36 +58,35 @@ extension RFC_5322.Message.ID.Coder {
+         }
+ 
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Failure = RFC_5322.Message.ID.Parts.Error
++
+             public init() {}
+-        }
+-    }
+ 
+-extension RFC_5322.Message.ID.Parts.Coder {
+-        public typealias Failure = RFC_5322.Message.ID.Parts.Error
+-
+-        @Coder::Builder<Input, Buffer>
+-        public var body:
+-            some Coding
+-                & Parsing<Input, ([Byte], [Byte]), Failure>
+-                & Serializing<([Byte], [Byte]), Buffer, Failure>
+-        {
+-            Coder::Coder(Input.self, Buffer.self) {
+-                Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "<"))
+-                Parser::Many(1..., Coder::First.Where { $0.bitPattern != 0x40 && $0.bitPattern != 0x3E }, rejected: { _ in true })
+-                Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "@"))
+-                Parser::Many(1..., Coder::First.Where { $0.bitPattern != 0x3E }, rejected: { _ in true })
+-                Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ">"))
+-            }
+-            .map(to: { ($0.first, $0.second) }, from: { .init($0.0, $0.1) })
+-            .mapFailure { (failure) -> Failure in
+-                switch failure {
+-                case .left(.left(.left(.left))): .expectedOpenAngle
+-                case .left(.left(.left(.right))): .expectedAtSign
+-                case .left(.left(.right)): .expectedAtSign
+-                case .left(.right): .expectedCloseAngle
+-                case .right: .expectedCloseAngle
++            @Coder::Builder<Input, Buffer>
++            public var body:
++                some Coding
++                    & Parsing<Input, ([Byte], [Byte]), Failure>
++                    & Serializing<([Byte], [Byte]), Buffer, Failure>
++            {
++                Coder::Coder(Input.self, Buffer.self) {
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "<"))
++                    Parser::Many(1..., Coder::First.Where { $0.bitPattern != 0x40 && $0.bitPattern != 0x3E }, rejected: { _ in true })
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: "@"))
++                    Parser::Many(1..., Coder::First.Where { $0.bitPattern != 0x3E }, rejected: { _ in true })
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ">"))
++                }
++                .map(to: { ($0.first, $0.second) }, from: { .init($0.0, $0.1) })
++                .mapFailure { (failure) -> Failure in
++                    switch failure {
++                    case .left(.left(.left(.left))): .expectedOpenAngle
++                    case .left(.left(.left(.right))): .expectedAtSign
++                    case .left(.left(.right)): .expectedAtSign
++                    case .left(.right): .expectedCloseAngle
++                    case .right: .expectedCloseAngle
++                    }
+                 }
+             }
+         }
+-}
++    }
+ #endif
+-- 
+2.43.0
+

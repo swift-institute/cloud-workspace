@@ -1,0 +1,3070 @@
+From f0797f46911b67102933ac1a4727b92e4ba55952 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:18:33 +0000
+Subject: [PATCH 17/17] Revert Sources/W3C
+ XML/W3C_XML.Parse.CDATASection.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../W3C XML/W3C_XML.Declaration.Version.swift |   9 -
+ Sources/W3C XML/W3C_XML.Declaration.swift     |   7 +
+ Sources/W3C XML/W3C_XML.Encode.swift          |  37 ++
+ Sources/W3C XML/W3C_XML.Encoder.swift         |  16 -
+ Sources/W3C XML/W3C_XML.Lexer.State.swift     |  15 -
+ Sources/W3C XML/W3C_XML.Lexer.swift           |  10 +
+ Sources/W3C XML/W3C_XML.Options.swift         |  25 -
+ .../W3C XML/W3C_XML.Parse.CDATASection.swift  |  51 --
+ Sources/W3C XML/W3C_XML.Parse.Comment.swift   |  49 --
+ Sources/W3C XML/W3C_XML.Parse.Content.swift   | 230 +++++++--
+ Sources/W3C XML/W3C_XML.Parse.Depth.swift     |  19 -
+ Sources/W3C XML/W3C_XML.Parse.Doctype.swift   | 121 -----
+ Sources/W3C XML/W3C_XML.Parse.Document.swift  | 442 +++++++++++-------
+ Sources/W3C XML/W3C_XML.Parse.Element.swift   | 398 ++++++++--------
+ Sources/W3C XML/W3C_XML.Parse.EndTagAny.swift |  44 --
+ Sources/W3C XML/W3C_XML.Parse.Error.swift     |  29 --
+ .../W3C_XML.Parse.MachineElement.swift        | 173 ++++++-
+ Sources/W3C XML/W3C_XML.Parse.Name.swift      | 113 -----
+ .../W3C_XML.Parse.NonEmptyElementParts.swift  |  21 -
+ .../W3C_XML.Parse.NonEmptyTextContent.swift   |  55 ---
+ .../W3C XML/W3C_XML.Parse.Primitives.swift    | 245 +++++++++-
+ .../W3C_XML.Parse.ProcessingInstruction.swift |  60 ---
+ Sources/W3C XML/W3C_XML.Parse.Reference.swift | 104 -----
+ .../W3C_XML.Parse.RequiredWhitespace.swift    |  34 --
+ Sources/W3C XML/W3C_XML.Parse.StartTag.swift  |  85 ----
+ .../W3C XML/W3C_XML.Parse.TextContent.swift   |  37 --
+ Sources/W3C XML/W3C_XML.Parse.swift           |  36 ++
+ Sources/W3C XML/W3C_XML.Token.swift           |  17 +
+ Sources/W3C XML/W3C_XML.TokenKind.swift       |  19 -
+ 29 files changed, 1211 insertions(+), 1290 deletions(-)
+ delete mode 100644 Sources/W3C XML/W3C_XML.Declaration.Version.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Encoder.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Lexer.State.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Options.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.CDATASection.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.Comment.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.Depth.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.Doctype.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.EndTagAny.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.Error.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.Name.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.NonEmptyElementParts.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.NonEmptyTextContent.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.ProcessingInstruction.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.Reference.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.RequiredWhitespace.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.StartTag.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.Parse.TextContent.swift
+ delete mode 100644 Sources/W3C XML/W3C_XML.TokenKind.swift
+
+diff --git a/Sources/W3C XML/W3C_XML.Declaration.Version.swift b/Sources/W3C XML/W3C_XML.Declaration.Version.swift
+deleted file mode 100644
+index d1343fd..0000000
+--- a/Sources/W3C XML/W3C_XML.Declaration.Version.swift	
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-extension W3C_XML.Declaration {
+-    public enum Version: String, Sendable, Hashable {
+-
+-        case v1_0 = "1.0"
+-
+-        case v1_1 = "1.1"
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Declaration.swift b/Sources/W3C XML/W3C_XML.Declaration.swift
+index 1c1b7df..4196240 100644
+--- a/Sources/W3C XML/W3C_XML.Declaration.swift	
++++ b/Sources/W3C XML/W3C_XML.Declaration.swift	
+@@ -22,6 +22,13 @@ extension W3C_XML {
+ }
+ 
+ extension W3C_XML.Declaration {
++
++    public enum Version: String, Sendable, Hashable {
++
++        case v1_0 = "1.0"
++
++        case v1_1 = "1.1"
++    }
+ }
+ 
+ extension W3C_XML.Declaration: CustomStringConvertible {
+diff --git a/Sources/W3C XML/W3C_XML.Encode.swift b/Sources/W3C XML/W3C_XML.Encode.swift
+index 0eaa70a..a7e09b5 100644
+--- a/Sources/W3C XML/W3C_XML.Encode.swift	
++++ b/Sources/W3C XML/W3C_XML.Encode.swift	
+@@ -31,9 +31,46 @@ extension W3C_XML.Encode {
+ }
+ 
+ extension W3C_XML {
++
++    public struct Options: Sendable {
++
++        public var prettyPrint: Bool
++
++        public var indent: String
++
++        public var includeDeclaration: Bool
++
++        public var escapeApostrophe: Bool
++
++        public init(
++            prettyPrint: Bool = false,
++            indent: String = "  ",
++            includeDeclaration: Bool = true,
++            escapeApostrophe: Bool = false
++        ) {
++            self.prettyPrint = prettyPrint
++            self.indent = indent
++            self.includeDeclaration = includeDeclaration
++            self.escapeApostrophe = escapeApostrophe
++        }
++    }
+ }
+ 
+ extension W3C_XML {
++
++    @usableFromInline
++    internal struct Encoder {
++        @usableFromInline
++        let options: Options
++
++        @usableFromInline
++        var depth: Int = 0
++
++        @usableFromInline
++        init(options: Options) {
++            self.options = options
++        }
++    }
+ }
+ 
+ extension W3C_XML.Encoder {
+diff --git a/Sources/W3C XML/W3C_XML.Encoder.swift b/Sources/W3C XML/W3C_XML.Encoder.swift
+deleted file mode 100644
+index e2025b2..0000000
+--- a/Sources/W3C XML/W3C_XML.Encoder.swift	
++++ /dev/null
+@@ -1,16 +0,0 @@
+-
+-extension W3C_XML {
+-    @usableFromInline
+-    internal struct Encoder {
+-        @usableFromInline
+-        let options: Options
+-
+-        @usableFromInline
+-        var depth: Int = 0
+-
+-        @usableFromInline
+-        init(options: Options) {
+-            self.options = options
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Lexer.State.swift b/Sources/W3C XML/W3C_XML.Lexer.State.swift
+deleted file mode 100644
+index 574e976..0000000
+--- a/Sources/W3C XML/W3C_XML.Lexer.State.swift	
++++ /dev/null
+@@ -1,15 +0,0 @@
+-import Cursor
+-import Parser
+-
+-
+-extension W3C_XML.Lexer {
+-    @usableFromInline
+-    internal enum State {
+-
+-        case content
+-
+-        case inStartTag
+-
+-        case inEndTag
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Lexer.swift b/Sources/W3C XML/W3C_XML.Lexer.swift
+index 95b1173..dced64a 100644
+--- a/Sources/W3C XML/W3C_XML.Lexer.swift	
++++ b/Sources/W3C XML/W3C_XML.Lexer.swift	
+@@ -29,6 +29,16 @@ extension W3C_XML {
+ }
+ 
+ extension W3C_XML.Lexer {
++
++    @usableFromInline
++    internal enum State {
++
++        case content
++
++        case inStartTag
++
++        case inEndTag
++    }
+ }
+ 
+ extension W3C_XML.Lexer {
+diff --git a/Sources/W3C XML/W3C_XML.Options.swift b/Sources/W3C XML/W3C_XML.Options.swift
+deleted file mode 100644
+index 879839d..0000000
+--- a/Sources/W3C XML/W3C_XML.Options.swift	
++++ /dev/null
+@@ -1,25 +0,0 @@
+-
+-extension W3C_XML {
+-    public struct Options: Sendable {
+-
+-        public var prettyPrint: Bool
+-
+-        public var indent: String
+-
+-        public var includeDeclaration: Bool
+-
+-        public var escapeApostrophe: Bool
+-
+-        public init(
+-            prettyPrint: Bool = false,
+-            indent: String = "  ",
+-            includeDeclaration: Bool = true,
+-            escapeApostrophe: Bool = false
+-        ) {
+-            self.prettyPrint = prettyPrint
+-            self.indent = indent
+-            self.includeDeclaration = includeDeclaration
+-            self.escapeApostrophe = escapeApostrophe
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.CDATASection.swift b/Sources/W3C XML/W3C_XML.Parse.CDATASection.swift
+deleted file mode 100644
+index a93afb1..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.CDATASection.swift	
++++ /dev/null
+@@ -1,51 +0,0 @@
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct CDATASection<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.CDATASection {
+-    public typealias Output = String
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        try expectLiteral(&input, "<![CDATA[")
+-
+-        var bytes: [Byte] = []
+-
+-        while true {
+-            guard let byte = input.xmlPeek() else {
+-                throw .unexpectedEndOfInput(expected: "]]>")
+-            }
+-
+-            if byte == ASCII.Code.rightBracket.byte {
+-                _ = input.next()
+-                guard let next = input.xmlPeek() else {
+-                    throw .unexpectedEndOfInput(expected: "]]>")
+-                }
+-                if next == ASCII.Code.rightBracket.byte {
+-                    _ = input.next()
+-                    if input.xmlPeek() == ASCII.Code.greaterThanSign.byte {
+-                        _ = input.next()
+-                        return String(decoding: bytes, as: UTF8.self)
+-                    }
+-
+-                    bytes.append(ASCII.Code.rightBracket.byte)
+-                    bytes.append(ASCII.Code.rightBracket.byte)
+-                    continue
+-                }
+-
+-                bytes.append(ASCII.Code.rightBracket.byte)
+-                continue
+-            }
+-            bytes.append(try input.xmlTake(expected: "character"))
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Comment.swift b/Sources/W3C XML/W3C_XML.Parse.Comment.swift
+deleted file mode 100644
+index c6eb03b..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.Comment.swift	
++++ /dev/null
+@@ -1,49 +0,0 @@
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct Comment<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.Comment {
+-    public typealias Output = String
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        try expectLiteral(&input, "<!--")
+-
+-        var bytes: [Byte] = []
+-
+-        while true {
+-            guard let byte = input.xmlPeek() else {
+-                throw .unexpectedEndOfInput(expected: "-->")
+-            }
+-
+-            if byte == ASCII.Code.hyphen.byte {
+-                _ = input.next()
+-                guard let next = input.xmlPeek() else {
+-                    throw .unexpectedEndOfInput(expected: "-->")
+-                }
+-                if next == ASCII.Code.hyphen.byte {
+-                    _ = input.next()
+-
+-                    guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
+-                        throw .expected("> after --")
+-                    }
+-                    _ = input.next()
+-                    return String(decoding: bytes, as: UTF8.self)
+-                }
+-
+-                bytes.append(ASCII.Code.hyphen.byte)
+-                continue
+-            }
+-            bytes.append(try input.xmlTake(expected: "character"))
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Content.swift b/Sources/W3C XML/W3C_XML.Parse.Content.swift
+index a21b154..ff930c1 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.Content.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.Content.swift	
+@@ -2,63 +2,241 @@ public import Cursor
+ import Parser
+ 
+ extension W3C_XML.Parse {
++
+     public struct CharData<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = String
++        public typealias Failure = Never
++
+         @inlinable
+         public init() {}
+-    }
+-}
+ 
+-extension W3C_XML.Parse.CharData {
+-    public typealias Output = String
++        @inlinable
++        public func parse(_ input: inout Input) -> Output {
++            var bytes: [Byte] = []
+ 
+-    public typealias Failure = Never
++            while let byte = input.xmlPeek() {
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) -> Output {
+-        var bytes: [Byte] = []
++                if byte == ASCII.Code.lessThanSign.byte || byte == ASCII.Code.ampersand.byte {
++                    break
++                }
+ 
+-        while let byte = input.xmlPeek() {
+-            if byte == ASCII.Code.lessThanSign.byte || byte == ASCII.Code.ampersand.byte {
+-                break
+-            }
++                if byte == ASCII.Code.rightBracket.byte {
+ 
+-            if byte == ASCII.Code.rightBracket.byte {
+-                let saved = input.checkpoint
+-                _ = input.next()
+-                if input.xmlPeek() == ASCII.Code.rightBracket.byte {
++                    let saved = input.checkpoint
+                     _ = input.next()
+-                    if input.xmlPeek() == ASCII.Code.greaterThanSign.byte {
+-                        input.seek(to: saved)
+-                        break
++                    if input.xmlPeek() == ASCII.Code.rightBracket.byte {
++                        _ = input.next()
++                        if input.xmlPeek() == ASCII.Code.greaterThanSign.byte {
++
++                            input.seek(to: saved)
++                            break
++                        }
++
++                        bytes.append(ASCII.Code.rightBracket.byte)
++                        bytes.append(ASCII.Code.rightBracket.byte)
++                        continue
+                     }
+ 
+-                    bytes.append(ASCII.Code.rightBracket.byte)
+                     bytes.append(ASCII.Code.rightBracket.byte)
+                     continue
+                 }
+-
+-                bytes.append(ASCII.Code.rightBracket.byte)
+-                continue
++                bytes.append(byte)
++                _ = input.next()
+             }
+-            bytes.append(byte)
+-            _ = input.next()
++
++            return String(decoding: bytes, as: UTF8.self)
+         }
++    }
++
++    public struct TextContent<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = String
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++            var result = ""
++
++            while let byte = input.xmlPeek() {
++                if byte == ASCII.Code.lessThanSign.byte {
++                    break
++                } else if byte == ASCII.Code.ampersand.byte {
+ 
+-        return String(decoding: bytes, as: UTF8.self)
++                    let resolved = try Reference<Input>().parse(&input)
++                    result += resolved
++                } else {
++
++                    result.append(Character(UnicodeScalar(try input.xmlTake(expected: "character").bitPattern)))
++                }
++            }
++
++            return result
++        }
+     }
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public struct Comment<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = String
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            try expectLiteral(&input, "<!--")
++
++            var bytes: [Byte] = []
++
++            while true {
++                guard let byte = input.xmlPeek() else {
++                    throw .unexpectedEndOfInput(expected: "-->")
++                }
++
++                if byte == ASCII.Code.hyphen.byte {
++                    _ = input.next()
++                    guard let next = input.xmlPeek() else {
++                        throw .unexpectedEndOfInput(expected: "-->")
++                    }
++                    if next == ASCII.Code.hyphen.byte {
++                        _ = input.next()
++
++                        guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
++                            throw .expected("> after --")
++                        }
++                        _ = input.next()
++                        return String(decoding: bytes, as: UTF8.self)
++                    }
++
++                    bytes.append(ASCII.Code.hyphen.byte)
++                    continue
++                }
++                bytes.append(try input.xmlTake(expected: "character"))
++            }
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public struct CDATASection<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = String
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            try expectLiteral(&input, "<![CDATA[")
++
++            var bytes: [Byte] = []
++
++            while true {
++                guard let byte = input.xmlPeek() else {
++                    throw .unexpectedEndOfInput(expected: "]]>")
++                }
++
++                if byte == ASCII.Code.rightBracket.byte {
++                    _ = input.next()
++                    guard let next = input.xmlPeek() else {
++                        throw .unexpectedEndOfInput(expected: "]]>")
++                    }
++                    if next == ASCII.Code.rightBracket.byte {
++                        _ = input.next()
++                        if input.xmlPeek() == ASCII.Code.greaterThanSign.byte {
++                            _ = input.next()
++                            return String(decoding: bytes, as: UTF8.self)
++                        }
++
++                        bytes.append(ASCII.Code.rightBracket.byte)
++                        bytes.append(ASCII.Code.rightBracket.byte)
++                        continue
++                    }
++
++                    bytes.append(ASCII.Code.rightBracket.byte)
++                    continue
++                }
++                bytes.append(try input.xmlTake(expected: "character"))
++            }
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public struct ProcessingInstruction<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Instruction
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            try expectLiteral(&input, "<?")
++
++            let target = try Name<Input>().parse(&input)
++
++            if target.qualified.lowercased() == "xml" {
++                throw .expected("processing instruction target (not 'xml')")
++            }
++
++            var data: String? = nil
++
++            if let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) {
++                Whitespace<Input>().parse(&input)
++
++                var bytes: [Byte] = []
++
++                while true {
++                    guard let byte = input.xmlPeek() else {
++                        throw .unexpectedEndOfInput(expected: "?>")
++                    }
++
++                    if byte == ASCII.Code.questionMark.byte {
++                        _ = input.next()
++                        if input.xmlPeek() == ASCII.Code.greaterThanSign.byte {
++                            _ = input.next()
++                            if !bytes.isEmpty {
++                                data = String(decoding: bytes, as: UTF8.self)
++                            }
++                            return W3C_XML.Instruction(target: target.qualified, data: data)
++                        }
++
++                        bytes.append(ASCII.Code.questionMark.byte)
++                        continue
++                    }
++                    bytes.append(try input.xmlTake(expected: "character"))
++                }
++            }
++
++            try expectLiteral(&input, "?>")
++
++            return W3C_XML.Instruction(target: target.qualified, data: nil)
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse {
++
+     @inlinable
+     package static func expectLiteral<Input: Cursor.`Protocol`>(
+         _ input: inout Input,
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Depth.swift b/Sources/W3C XML/W3C_XML.Parse.Depth.swift
+deleted file mode 100644
+index 88c265a..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.Depth.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-import Byte
+-import Cursor
+-import Parser
+-
+-
+-extension W3C_XML.Parse {
+-    public struct Depth: Sendable, Hashable {
+-
+-        public let value: Int
+-
+-        public let limit: Int
+-
+-        @inlinable
+-        public init(value: Int = 0, limit: Int = 512) {
+-            self.value = value
+-            self.limit = limit
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Doctype.swift b/Sources/W3C XML/W3C_XML.Parse.Doctype.swift
+deleted file mode 100644
+index f66c294..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.Doctype.swift	
++++ /dev/null
+@@ -1,121 +0,0 @@
+-import ASCII
+-import Byte
+-public import Cursor
+-import Machine
+-import Parser
+-import Parser_Machine
+-
+-extension W3C_XML.Parse {
+-    public struct Doctype<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.Doctype {
+-    public typealias Output = W3C_XML.Doctype
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        try expectLiteral(&input, "<!DOCTYPE")
+-
+-        try RequiredWhitespace<Input>().parse(&input)
+-
+-        let name = try Name<Input>().parse(&input)
+-
+-        var publicID: String? = nil
+-        var systemID: String? = nil
+-        var internalSubset: String? = nil
+-
+-        Whitespace<Input>().parse(&input)
+-
+-        if matchLiteral(&input, "PUBLIC") {
+-            try RequiredWhitespace<Input>().parse(&input)
+-            publicID = try parseQuotedValue(&input)
+-            try RequiredWhitespace<Input>().parse(&input)
+-            systemID = try parseQuotedValue(&input)
+-        } else if matchLiteral(&input, "SYSTEM") {
+-            try RequiredWhitespace<Input>().parse(&input)
+-            systemID = try parseQuotedValue(&input)
+-        }
+-
+-        Whitespace<Input>().parse(&input)
+-
+-        if input.xmlPeek() == ASCII.Code.leftBracket.byte {
+-            _ = input.next()
+-            var bytes: [Byte] = []
+-            var depth = 1
+-
+-            while depth > 0 {
+-                guard let byte = input.xmlPeek() else {
+-                    throw .unexpectedEndOfInput(expected: "]")
+-                }
+-                if byte == ASCII.Code.leftBracket.byte {
+-                    depth += 1
+-                } else if byte == ASCII.Code.rightBracket.byte {
+-                    depth -= 1
+-                    if depth == 0 {
+-                        _ = input.next()
+-                        break
+-                    }
+-                }
+-                bytes.append(try input.xmlTake(expected: "character"))
+-            }
+-            internalSubset = String(decoding: bytes, as: UTF8.self)
+-        }
+-
+-        Whitespace<Input>().parse(&input)
+-
+-        guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
+-            throw .expected(">")
+-        }
+-        _ = input.next()
+-
+-        return W3C_XML.Doctype(
+-            name: name.qualified,
+-            publicID: publicID,
+-            systemID: systemID,
+-            internalSubset: internalSubset
+-        )
+-    }
+-
+-    @inlinable
+-    package func parseQuotedValue(_ input: inout Input) throws(Failure) -> String {
+-        guard let quote = input.xmlPeek(),
+-            quote == ASCII.Code.quotationMark.byte || quote == ASCII.Code.apostrophe.byte
+-        else {
+-            throw .expected("\" or '")
+-        }
+-        _ = input.next()
+-
+-        var bytes: [Byte] = []
+-        while let byte = input.xmlPeek(), byte != quote {
+-            bytes.append(try input.xmlTake(expected: "character"))
+-        }
+-
+-        guard input.xmlPeek() == quote else {
+-            throw .unexpectedEndOfInput(expected: String(UnicodeScalar(quote.bitPattern)))
+-        }
+-        _ = input.next()
+-
+-        return String(decoding: bytes, as: UTF8.self)
+-    }
+-
+-    @inlinable
+-    package func matchLiteral(_ input: inout Input, _ string: StaticString) -> Bool {
+-        let bytes = string.withUTF8Buffer { unsafe Swift::Array($0) }
+-
+-        let saved = input.checkpoint
+-        for expected in bytes {
+-            guard let actual = input.xmlPeek(), actual.underlying == expected else {
+-                input.seek(to: saved)
+-                return false
+-            }
+-            _ = input.next()
+-        }
+-        return true
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Document.swift b/Sources/W3C XML/W3C_XML.Parse.Document.swift
+index b2a1dba..9e47e16 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.Document.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.Document.swift	
+@@ -6,117 +6,234 @@ import Parser
+ import Parser_Machine
+ 
+ extension W3C_XML.Parse {
++
+     public struct XMLDeclaration<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Declaration
++        public typealias Failure = W3C_XML.Parse.Error
++
+         @inlinable
+         public init() {}
+-    }
+-}
+ 
+-extension W3C_XML.Parse.XMLDeclaration {
+-    public typealias Output = W3C_XML.Declaration
+-
+-    public typealias Failure = W3C_XML.Parse.Error
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        try expectLiteral(&input, "<?xml")
++            try expectLiteral(&input, "<?xml")
+ 
+-        guard let ws = input.xmlPeek(), W3C_XML.isWhitespace(ws) else {
+-            throw .expected("whitespace after <?xml")
+-        }
+-        Whitespace<Input>().parse(&input)
+-
+-        try expectLiteral(&input, "version")
+-        Whitespace<Input>().parse(&input)
+-        try expectLiteral(&input, "=")
+-        Whitespace<Input>().parse(&input)
+-
+-        let versionString = try parseQuotedValue(&input)
+-        let version: W3C_XML.Declaration.Version
+-        switch versionString {
+-        case "1.0": version = .v1_0
+-        case "1.1": version = .v1_1
+-        default: throw .expected("valid XML version (1.0 or 1.1)")
+-        }
++            guard let ws = input.xmlPeek(), W3C_XML.isWhitespace(ws) else {
++                throw .expected("whitespace after <?xml")
++            }
++            Whitespace<Input>().parse(&input)
+ 
+-        var encoding: String? = nil
+-        Whitespace<Input>().parse(&input)
+-        if matchLiteral(&input, "encoding") {
++            try expectLiteral(&input, "version")
+             Whitespace<Input>().parse(&input)
+             try expectLiteral(&input, "=")
+             Whitespace<Input>().parse(&input)
+-            encoding = try parseQuotedValue(&input)
+-        }
+ 
+-        var standalone: Bool? = nil
+-        Whitespace<Input>().parse(&input)
+-        if matchLiteral(&input, "standalone") {
++            let versionString = try parseQuotedValue(&input)
++            let version: W3C_XML.Declaration.Version
++            switch versionString {
++            case "1.0": version = .v1_0
++            case "1.1": version = .v1_1
++            default: throw .expected("valid XML version (1.0 or 1.1)")
++            }
++
++            var encoding: String? = nil
+             Whitespace<Input>().parse(&input)
+-            try expectLiteral(&input, "=")
++            if matchLiteral(&input, "encoding") {
++                Whitespace<Input>().parse(&input)
++                try expectLiteral(&input, "=")
++                Whitespace<Input>().parse(&input)
++                encoding = try parseQuotedValue(&input)
++            }
++
++            var standalone: Bool? = nil
+             Whitespace<Input>().parse(&input)
+-            let value = try parseQuotedValue(&input)
+-            switch value {
+-            case "yes": standalone = true
+-            case "no": standalone = false
+-            default: throw .expected("'yes' or 'no'")
++            if matchLiteral(&input, "standalone") {
++                Whitespace<Input>().parse(&input)
++                try expectLiteral(&input, "=")
++                Whitespace<Input>().parse(&input)
++                let value = try parseQuotedValue(&input)
++                switch value {
++                case "yes": standalone = true
++                case "no": standalone = false
++                default: throw .expected("'yes' or 'no'")
++                }
+             }
++
++            Whitespace<Input>().parse(&input)
++            try expectLiteral(&input, "?>")
++
++            return W3C_XML.Declaration(
++                version: version,
++                encoding: encoding,
++                standalone: standalone
++            )
+         }
+ 
+-        Whitespace<Input>().parse(&input)
+-        try expectLiteral(&input, "?>")
++        @inlinable
++        package func parseQuotedValue(_ input: inout Input) throws(Failure) -> String {
++            guard let quote = input.xmlPeek(),
++                quote == ASCII.Code.quotationMark.byte || quote == ASCII.Code.apostrophe.byte
++            else {
++                throw .expected("\" or '")
++            }
++            _ = input.next()
+ 
+-        return W3C_XML.Declaration(
+-            version: version,
+-            encoding: encoding,
+-            standalone: standalone
+-        )
+-    }
++            var bytes: [Byte] = []
++            while let byte = input.xmlPeek(), byte != quote {
++                bytes.append(try input.xmlTake(expected: "character"))
++            }
+ 
+-    @inlinable
+-    package func parseQuotedValue(_ input: inout Input) throws(Failure) -> String {
+-        guard let quote = input.xmlPeek(),
+-            quote == ASCII.Code.quotationMark.byte || quote == ASCII.Code.apostrophe.byte
+-        else {
+-            throw .expected("\" or '")
++            guard input.xmlPeek() == quote else {
++                throw .unexpectedEndOfInput(expected: String(UnicodeScalar(quote.bitPattern)))
++            }
++            _ = input.next()
++
++            return String(decoding: bytes, as: UTF8.self)
+         }
+-        _ = input.next()
+ 
+-        var bytes: [Byte] = []
+-        while let byte = input.xmlPeek(), byte != quote {
+-            bytes.append(try input.xmlTake(expected: "character"))
++        @inlinable
++        package func matchLiteral(_ input: inout Input, _ string: StaticString) -> Bool {
++            let bytes = string.withUTF8Buffer { unsafe Swift::Array($0) }
++
++            let saved = input.checkpoint
++            for expected in bytes {
++                guard let actual = input.xmlPeek(), actual.underlying == expected else {
++                    input.seek(to: saved)
++                    return false
++                }
++                _ = input.next()
++            }
++            return true
+         }
++    }
++}
++
++extension W3C_XML.Parse {
++
++    public struct Doctype<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Doctype
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            try expectLiteral(&input, "<!DOCTYPE")
++
++            try RequiredWhitespace<Input>().parse(&input)
++
++            let name = try Name<Input>().parse(&input)
++
++            var publicID: String? = nil
++            var systemID: String? = nil
++            var internalSubset: String? = nil
++
++            Whitespace<Input>().parse(&input)
+ 
+-        guard input.xmlPeek() == quote else {
+-            throw .unexpectedEndOfInput(expected: String(UnicodeScalar(quote.bitPattern)))
++            if matchLiteral(&input, "PUBLIC") {
++                try RequiredWhitespace<Input>().parse(&input)
++                publicID = try parseQuotedValue(&input)
++                try RequiredWhitespace<Input>().parse(&input)
++                systemID = try parseQuotedValue(&input)
++            } else if matchLiteral(&input, "SYSTEM") {
++                try RequiredWhitespace<Input>().parse(&input)
++                systemID = try parseQuotedValue(&input)
++            }
++
++            Whitespace<Input>().parse(&input)
++
++            if input.xmlPeek() == ASCII.Code.leftBracket.byte {
++                _ = input.next()
++                var bytes: [Byte] = []
++                var depth = 1
++
++                while depth > 0 {
++                    guard let byte = input.xmlPeek() else {
++                        throw .unexpectedEndOfInput(expected: "]")
++                    }
++                    if byte == ASCII.Code.leftBracket.byte {
++                        depth += 1
++                    } else if byte == ASCII.Code.rightBracket.byte {
++                        depth -= 1
++                        if depth == 0 {
++                            _ = input.next()
++                            break
++                        }
++                    }
++                    bytes.append(try input.xmlTake(expected: "character"))
++                }
++                internalSubset = String(decoding: bytes, as: UTF8.self)
++            }
++
++            Whitespace<Input>().parse(&input)
++
++            guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
++                throw .expected(">")
++            }
++            _ = input.next()
++
++            return W3C_XML.Doctype(
++                name: name.qualified,
++                publicID: publicID,
++                systemID: systemID,
++                internalSubset: internalSubset
++            )
+         }
+-        _ = input.next()
+ 
+-        return String(decoding: bytes, as: UTF8.self)
+-    }
++        @inlinable
++        package func parseQuotedValue(_ input: inout Input) throws(Failure) -> String {
++            guard let quote = input.xmlPeek(),
++                quote == ASCII.Code.quotationMark.byte || quote == ASCII.Code.apostrophe.byte
++            else {
++                throw .expected("\" or '")
++            }
++            _ = input.next()
+ 
+-    @inlinable
+-    package func matchLiteral(_ input: inout Input, _ string: StaticString) -> Bool {
+-        let bytes = string.withUTF8Buffer { unsafe Swift::Array($0) }
++            var bytes: [Byte] = []
++            while let byte = input.xmlPeek(), byte != quote {
++                bytes.append(try input.xmlTake(expected: "character"))
++            }
+ 
+-        let saved = input.checkpoint
+-        for expected in bytes {
+-            guard let actual = input.xmlPeek(), actual.underlying == expected else {
+-                input.seek(to: saved)
+-                return false
++            guard input.xmlPeek() == quote else {
++                throw .unexpectedEndOfInput(expected: String(UnicodeScalar(quote.bitPattern)))
+             }
+             _ = input.next()
++
++            return String(decoding: bytes, as: UTF8.self)
++        }
++
++        @inlinable
++        package func matchLiteral(_ input: inout Input, _ string: StaticString) -> Bool {
++            let bytes = string.withUTF8Buffer { unsafe Swift::Array($0) }
++
++            let saved = input.checkpoint
++            for expected in bytes {
++                guard let actual = input.xmlPeek(), actual.underlying == expected else {
++                    input.seek(to: saved)
++                    return false
++                }
++                _ = input.next()
++            }
++            return true
+         }
+-        return true
+     }
+ }
+ 
+ extension W3C_XML.Parse {
+-}
+ 
+-extension W3C_XML.Parse {
+     public struct Document<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Document
++        public typealias Failure = W3C_XML.Parse.Error
++
+         @usableFromInline
+         let maxDepth: Int
+ 
+@@ -124,119 +241,120 @@ extension W3C_XML.Parse {
+         public init(maxDepth: Int = 512) {
+             self.maxDepth = maxDepth
+         }
+-    }
+-}
+ 
+-extension W3C_XML.Parse.Document {
+-    public typealias Output = W3C_XML.Document
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++            var declaration: W3C_XML.Declaration? = nil
++            var doctype: W3C_XML.Doctype? = nil
++            var prologue: [W3C_XML.Instruction] = []
++            var root: W3C_XML.Element? = nil
++            var epilogue: [W3C_XML.Content] = []
+ 
+-    public typealias Failure = W3C_XML.Parse.Error
++            Whitespace<Input>().parse(&input)
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        var declaration: W3C_XML.Declaration? = nil
+-        var doctype: W3C_XML.Doctype? = nil
+-        var prologue: [W3C_XML.Instruction] = []
+-        var root: W3C_XML.Element? = nil
+-        var epilogue: [W3C_XML.Content] = []
++            while let byte = input.xmlPeek() {
++                if byte == ASCII.Code.lessThanSign.byte {
++                    let saved = input.checkpoint
++                    _ = input.next()
+ 
+-        Whitespace<Input>().parse(&input)
++                    guard let next = input.xmlPeek() else {
++                        input.seek(to: saved)
++                        throw .unexpectedEndOfInput(expected: "element")
++                    }
+ 
+-        while let byte = input.xmlPeek() {
+-            if byte == ASCII.Code.lessThanSign.byte {
+-                let saved = input.checkpoint
+-                _ = input.next()
++                    if next == ASCII.Code.questionMark.byte {
+ 
+-                guard let next = input.xmlPeek() else {
+-                    input.seek(to: saved)
+-                    throw .unexpectedEndOfInput(expected: "element")
+-                }
++                        input.seek(to: saved)
+ 
+-                if next == ASCII.Code.questionMark.byte {
+-                    input.seek(to: saved)
++                        if isXMLDeclaration(&input) {
++                            declaration = try XMLDeclaration<Input>().parse(&input)
++                        } else {
++                            let pi = try ProcessingInstruction<Input>().parse(&input)
++                            if root == nil {
++                                prologue.append(pi)
++                            } else {
++                                epilogue.append(.instruction(pi))
++                            }
++                        }
++                    } else if next == ASCII.Code.exclamationPoint.byte {
+ 
+-                    if isXMLDeclaration(&input) {
+-                        declaration = try XMLDeclaration<Input>().parse(&input)
+-                    } else {
+-                        let pi = try ProcessingInstruction<Input>().parse(&input)
+-                        if root == nil {
+-                            prologue.append(pi)
++                        _ = input.next()
++                        guard let third = input.xmlPeek() else {
++                            input.seek(to: saved)
++                            throw .unexpectedEndOfInput(expected: "comment or DOCTYPE")
++                        }
++
++                        if third == ASCII.Code.hyphen.byte {
++
++                            input.seek(to: saved)
++                            let text = try Comment<Input>().parse(&input)
++                            if root != nil {
++                                epilogue.append(.comment(text))
++                            }
++
++                        } else if third == ASCII.Code.D.byte {
++
++                            input.seek(to: saved)
++                            doctype = try Doctype<Input>().parse(&input)
+                         } else {
+-                            epilogue.append(.instruction(pi))
++                            input.seek(to: saved)
++                            throw .expected("comment or DOCTYPE")
+                         }
+-                    }
+-                } else if next == ASCII.Code.exclamationPoint.byte {
+-                    _ = input.next()
+-                    guard let third = input.xmlPeek() else {
+-                        input.seek(to: saved)
+-                        throw .unexpectedEndOfInput(expected: "comment or DOCTYPE")
+-                    }
++                    } else {
+ 
+-                    if third == ASCII.Code.hyphen.byte {
+                         input.seek(to: saved)
+-                        let text = try Comment<Input>().parse(&input)
+                         if root != nil {
+-                            epilogue.append(.comment(text))
++                            throw .multipleRootElements
+                         }
+-                    } else if third == ASCII.Code.D.byte {
+-                        input.seek(to: saved)
+-                        doctype = try Doctype<Input>().parse(&input)
+-                    } else {
+-                        input.seek(to: saved)
+-                        throw .expected("comment or DOCTYPE")
++                        root = try Element<Input>(depth: Depth(limit: maxDepth)).parse(&input)
+                     }
++                } else if W3C_XML.isWhitespace(byte) {
++                    Whitespace<Input>().parse(&input)
+                 } else {
+-                    input.seek(to: saved)
+-                    if root != nil {
+-                        throw .multipleRootElements
+-                    }
+-                    root = try Element<Input>(depth: Depth(limit: maxDepth)).parse(&input)
++                    throw .expected("< or whitespace")
+                 }
+-            } else if W3C_XML.isWhitespace(byte) {
+-                Whitespace<Input>().parse(&input)
+-            } else {
+-                throw .expected("< or whitespace")
+             }
+-        }
+ 
+-        guard let rootElement = root else {
+-            throw .missingRootElement
+-        }
++            guard let rootElement = root else {
++                throw .missingRootElement
++            }
+ 
+-        return W3C_XML.Document(
+-            declaration: declaration,
+-            doctype: doctype,
+-            root: rootElement,
+-            prologue: prologue,
+-            epilogue: epilogue
+-        )
+-    }
++            return W3C_XML.Document(
++                declaration: declaration,
++                doctype: doctype,
++                root: rootElement,
++                prologue: prologue,
++                epilogue: epilogue
++            )
++        }
+ 
+-    @inlinable
+-    package func isXMLDeclaration(_ input: inout Input) -> Bool {
+-        let saved = input.checkpoint
++        @inlinable
++        package func isXMLDeclaration(_ input: inout Input) -> Bool {
++            let saved = input.checkpoint
+ 
+-        let pattern: [Byte] = [
+-            ASCII.Code.lessThanSign.byte,
+-            ASCII.Code.questionMark.byte,
+-            ASCII.Code.x.byte, ASCII.Code.m.byte, ASCII.Code.l.byte,
+-        ]
++            let pattern: [Byte] = [
++                ASCII.Code.lessThanSign.byte,
++                ASCII.Code.questionMark.byte,
++                ASCII.Code.x.byte, ASCII.Code.m.byte, ASCII.Code.l.byte,
++            ]
+ 
+-        for expected in pattern {
+-            guard let actual = input.xmlPeek(), actual == expected else {
+-                input.seek(to: saved)
+-                return false
++            for expected in pattern {
++                guard let actual = input.xmlPeek(), actual == expected else {
++                    input.seek(to: saved)
++                    return false
++                }
++                _ = input.next()
+             }
+-            _ = input.next()
+-        }
+ 
+-        let result = input.xmlPeek().map { W3C_XML.isWhitespace($0) } ?? false
+-        input.seek(to: saved)
+-        return result
++            let result = input.xmlPeek().map { W3C_XML.isWhitespace($0) } ?? false
++            input.seek(to: saved)
++            return result
++        }
+     }
+ }
+ 
+ extension W3C_XML {
++
+     public static func parse(
+         _ string: String,
+         maxDepth: Int = 10000
+@@ -254,6 +372,7 @@ extension W3C_XML {
+                 do {
+                     declaration = try Parse.XMLDeclaration<ArraySlice<Byte>>().parse(&input)
+                 } catch {
++
+                     input.seek(to: saved)
+                 }
+             } else {
+@@ -274,6 +393,7 @@ extension W3C_XML {
+             }
+ 
+             if next == ASCII.Code.questionMark.byte {
++
+                 input.seek(to: saved)
+                 do {
+                     let pi = try Parse.ProcessingInstruction<ArraySlice<Byte>>().parse(&input)
+@@ -284,6 +404,7 @@ extension W3C_XML {
+                     break
+                 }
+             } else if next == ASCII.Code.exclamationPoint.byte {
++
+                 input.seek(to: saved)
+ 
+                 do {
+@@ -294,6 +415,7 @@ extension W3C_XML {
+                     break
+                 }
+             } else {
++
+                 input.seek(to: saved)
+                 break
+             }
+@@ -317,6 +439,7 @@ extension W3C_XML {
+             }
+ 
+             if next == ASCII.Code.questionMark.byte {
++
+                 input.seek(to: saved)
+                 do {
+                     let pi = try Parse.ProcessingInstruction<ArraySlice<Byte>>().parse(&input)
+@@ -327,6 +450,7 @@ extension W3C_XML {
+                     break
+                 }
+             } else if next == ASCII.Code.exclamationPoint.byte {
++
+                 input.seek(to: saved)
+                 do {
+                     let comment = try Parse.Comment<ArraySlice<Byte>>().parse(&input)
+@@ -337,6 +461,7 @@ extension W3C_XML {
+                     break
+                 }
+             } else {
++
+                 input.seek(to: saved)
+                 throw Parse.Error.expected("end of input (multiple root elements not allowed)")
+             }
+@@ -374,6 +499,7 @@ extension W3C_XML {
+                 do {
+                     declaration = try Parse.XMLDeclaration<ArraySlice<Byte>>().parse(&input)
+                 } catch {
++
+                     input.seek(to: saved)
+                 }
+             } else {
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Element.swift b/Sources/W3C XML/W3C_XML.Parse.Element.swift
+index 88c787a..7872f30 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.Element.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.Element.swift	
+@@ -2,68 +2,75 @@ public import Cursor
+ import Parser
+ 
+ extension W3C_XML.Parse {
++
+     public struct Attribute<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Attribute
++        public typealias Failure = W3C_XML.Parse.Error
++
+         @inlinable
+         public init() {}
+-    }
+-}
+ 
+-extension W3C_XML.Parse.Attribute {
+-    public typealias Output = W3C_XML.Attribute
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            let name = try Name<Input>().parse(&input)
++
++            Whitespace<Input>().parse(&input)
+ 
+-    public typealias Failure = W3C_XML.Parse.Error
++            guard input.xmlPeek() == ASCII.Code.equalsSign.byte else {
++                throw .expected("=")
++            }
++            _ = input.next()
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        let name = try Name<Input>().parse(&input)
++            Whitespace<Input>().parse(&input)
+ 
+-        Whitespace<Input>().parse(&input)
++            let value = try parseAttValue(&input)
+ 
+-        guard input.xmlPeek() == ASCII.Code.equalsSign.byte else {
+-            throw .expected("=")
++            return W3C_XML.Attribute(name: name, value: value)
+         }
+-        _ = input.next()
+ 
+-        Whitespace<Input>().parse(&input)
++        @inlinable
++        package func parseAttValue(_ input: inout Input) throws(Failure) -> String {
++            guard let quote = input.xmlPeek(),
++                quote == ASCII.Code.quotationMark.byte || quote == ASCII.Code.apostrophe.byte
++            else {
++                throw .expected("\" or '")
++            }
++            _ = input.next()
+ 
+-        let value = try parseAttValue(&input)
++            var result = ""
+ 
+-        return W3C_XML.Attribute(name: name, value: value)
+-    }
++            while let byte = input.xmlPeek() {
++                if byte == quote {
++                    _ = input.next()
++                    return result
++                } else if byte == ASCII.Code.ampersand.byte {
+ 
+-    @inlinable
+-    package func parseAttValue(_ input: inout Input) throws(Failure) -> String {
+-        guard let quote = input.xmlPeek(),
+-            quote == ASCII.Code.quotationMark.byte || quote == ASCII.Code.apostrophe.byte
+-        else {
+-            throw .expected("\" or '")
+-        }
+-        _ = input.next()
+-
+-        var result = ""
+-
+-        while let byte = input.xmlPeek() {
+-            if byte == quote {
+-                _ = input.next()
+-                return result
+-            } else if byte == ASCII.Code.ampersand.byte {
+-                let resolved = try Reference<Input>().parse(&input)
+-                result += resolved
+-            } else if byte == ASCII.Code.lessThanSign.byte {
+-                throw .expected("valid attribute character (not <)")
+-            } else {
+-                result.append(Character(UnicodeScalar(try input.xmlTake(expected: "character").bitPattern)))
++                    let resolved = try Reference<Input>().parse(&input)
++                    result += resolved
++                } else if byte == ASCII.Code.lessThanSign.byte {
++
++                    throw .expected("valid attribute character (not <)")
++                } else {
++                    result.append(Character(UnicodeScalar(try input.xmlTake(expected: "character").bitPattern)))
++                }
+             }
+-        }
+ 
+-        throw .unexpectedEndOfInput(expected: String(UnicodeScalar(quote.bitPattern)))
++            throw .unexpectedEndOfInput(expected: String(UnicodeScalar(quote.bitPattern)))
++        }
+     }
+ }
+ 
+ extension W3C_XML.Parse {
++
+     public struct Element<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Element
++        public typealias Failure = W3C_XML.Parse.Error
++
+         @usableFromInline
+         let depth: Depth
+ 
+@@ -71,110 +78,111 @@ extension W3C_XML.Parse {
+         public init(depth: Depth = Depth()) {
+             self.depth = depth
+         }
+-    }
+-}
+ 
+-extension W3C_XML.Parse.Element {
+-    public typealias Output = W3C_XML.Element
+-
+-    public typealias Failure = W3C_XML.Parse.Error
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        guard !depth.isExceeded else {
+-            throw .depthExceeded(limit: depth.limit)
+-        }
++            guard !depth.isExceeded else {
++                throw .depthExceeded(limit: depth.limit)
++            }
+ 
+-        guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
+-            throw .expected("<")
+-        }
+-        _ = input.next()
++            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
++                throw .expected("<")
++            }
++            _ = input.next()
+ 
+-        let name = try Name<Input>().parse(&input)
++            let name = try Name<Input>().parse(&input)
+ 
+-        var attributes: [W3C_XML.Attribute] = []
+-        var namespaces: [W3C_XML.Namespace] = []
+-        var seenAttributes: Swift::Set<String> = Swift::Set()
++            var attributes: [W3C_XML.Attribute] = []
++            var namespaces: [W3C_XML.Namespace] = []
++            var seenAttributes: Swift::Set<String> = Swift::Set()
+ 
+-        while true {
+-            Whitespace<Input>().parse(&input)
++            while true {
++                Whitespace<Input>().parse(&input)
+ 
+-            guard let byte = input.xmlPeek() else {
+-                throw .unexpectedEndOfInput(expected: "> or />")
+-            }
++                guard let byte = input.xmlPeek() else {
++                    throw .unexpectedEndOfInput(expected: "> or />")
++                }
+ 
+-            if byte == ASCII.Code.greaterThanSign.byte {
+-                _ = input.next()
+-                break
+-            }
++                if byte == ASCII.Code.greaterThanSign.byte {
++                    _ = input.next()
++                    break
++                }
+ 
+-            if byte == ASCII.Code.solidus.byte {
+-                _ = input.next()
+-                guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
+-                    throw .expected(">")
++                if byte == ASCII.Code.solidus.byte {
++                    _ = input.next()
++                    guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
++                        throw .expected(">")
++                    }
++                    _ = input.next()
++
++                    return W3C_XML.Element(
++                        name: name,
++                        attributes: attributes,
++                        content: [],
++                        namespaces: namespaces
++                    )
+                 }
+-                _ = input.next()
+-
+-                return W3C_XML.Element(
+-                    name: name,
+-                    attributes: attributes,
+-                    content: [],
+-                    namespaces: namespaces
+-                )
+-            }
+ 
+-            let attr = try Attribute<Input>().parse(&input)
++                let attr = try Attribute<Input>().parse(&input)
+ 
+-            if attr.name.qualified == "xmlns" {
+-                namespaces.append(W3C_XML.Namespace(prefix: nil, uri: attr.value))
+-            } else if attr.name.prefix == "xmlns" {
+-                namespaces.append(W3C_XML.Namespace(prefix: attr.name.local, uri: attr.value))
+-            } else {
+-                guard !seenAttributes.contains(attr.name.qualified) else {
+-                    throw .duplicateAttribute(name: attr.name.qualified)
++                if attr.name.qualified == "xmlns" {
++                    namespaces.append(W3C_XML.Namespace(prefix: nil, uri: attr.value))
++                } else if attr.name.prefix == "xmlns" {
++                    namespaces.append(W3C_XML.Namespace(prefix: attr.name.local, uri: attr.value))
++                } else {
++
++                    guard !seenAttributes.contains(attr.name.qualified) else {
++                        throw .duplicateAttribute(name: attr.name.qualified)
++                    }
++                    seenAttributes.insert(attr.name.qualified)
++                    attributes.append(attr)
+                 }
+-                seenAttributes.insert(attr.name.qualified)
+-                attributes.append(attr)
+             }
+-        }
+ 
+-        let content = try Content<Input>(depth: depth).parse(&input)
++            let content = try Content<Input>(depth: depth).parse(&input)
+ 
+-        guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
+-            throw .expected("</")
+-        }
+-        _ = input.next()
++            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
++                throw .expected("</")
++            }
++            _ = input.next()
+ 
+-        guard input.xmlPeek() == ASCII.Code.solidus.byte else {
+-            throw .expected("</")
+-        }
+-        _ = input.next()
++            guard input.xmlPeek() == ASCII.Code.solidus.byte else {
++                throw .expected("</")
++            }
++            _ = input.next()
+ 
+-        let endName = try Name<Input>().parse(&input)
++            let endName = try Name<Input>().parse(&input)
+ 
+-        Whitespace<Input>().parse(&input)
++            Whitespace<Input>().parse(&input)
+ 
+-        guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
+-            throw .expected(">")
+-        }
+-        _ = input.next()
++            guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
++                throw .expected(">")
++            }
++            _ = input.next()
+ 
+-        guard name.qualified == endName.qualified else {
+-            throw .mismatchedTags(open: name.qualified, close: endName.qualified)
+-        }
++            guard name.qualified == endName.qualified else {
++                throw .mismatchedTags(open: name.qualified, close: endName.qualified)
++            }
+ 
+-        return W3C_XML.Element(
+-            name: name,
+-            attributes: attributes,
+-            content: content,
+-            namespaces: namespaces
+-        )
++            return W3C_XML.Element(
++                name: name,
++                attributes: attributes,
++                content: content,
++                namespaces: namespaces
++            )
++        }
+     }
+ }
+ 
+ extension W3C_XML.Parse {
++
+     public struct Content<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = [W3C_XML.Content]
++        public typealias Failure = W3C_XML.Parse.Error
++
+         @usableFromInline
+         let depth: Depth
+ 
+@@ -182,101 +190,107 @@ extension W3C_XML.Parse {
+         public init(depth: Depth) {
+             self.depth = depth
+         }
+-    }
+-}
+ 
+-extension W3C_XML.Parse.Content {
+-    public typealias Output = [W3C_XML.Content]
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++            var content: [W3C_XML.Content] = []
++
++            while let byte = input.xmlPeek() {
+ 
+-    public typealias Failure = W3C_XML.Parse.Error
++                if byte == ASCII.Code.lessThanSign.byte {
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        var content: [W3C_XML.Content] = []
++                    let saved = input.checkpoint
++                    _ = input.next()
+ 
+-        while let byte = input.xmlPeek() {
+-            if byte == ASCII.Code.lessThanSign.byte {
+-                let saved = input.checkpoint
+-                _ = input.next()
++                    guard let next = input.xmlPeek() else {
++                        input.seek(to: saved)
++                        throw .unexpectedEndOfInput(expected: "element or end tag")
++                    }
+ 
+-                guard let next = input.xmlPeek() else {
+-                    input.seek(to: saved)
+-                    throw .unexpectedEndOfInput(expected: "element or end tag")
+-                }
++                    if next == ASCII.Code.solidus.byte {
+ 
+-                if next == ASCII.Code.solidus.byte {
+-                    input.seek(to: saved)
+-                    return content
+-                } else if next == ASCII.Code.exclamationPoint.byte {
+-                    input.seek(to: saved)
+-                    if let item = try parseMarkup(&input) {
+-                        content.append(item)
++                        input.seek(to: saved)
++                        return content
++                    } else if next == ASCII.Code.exclamationPoint.byte {
++
++                        input.seek(to: saved)
++                        if let item = try parseMarkup(&input) {
++                            content.append(item)
++                        }
++                    } else if next == ASCII.Code.questionMark.byte {
++
++                        input.seek(to: saved)
++                        let pi = try ProcessingInstruction<Input>().parse(&input)
++                        content.append(.instruction(pi))
++                    } else {
++
++                        input.seek(to: saved)
++                        let element = try Element<Input>(depth: depth.incremented()).parse(&input)
++                        content.append(.element(element))
+                     }
+-                } else if next == ASCII.Code.questionMark.byte {
+-                    input.seek(to: saved)
+-                    let pi = try ProcessingInstruction<Input>().parse(&input)
+-                    content.append(.instruction(pi))
++                } else if byte == ASCII.Code.ampersand.byte {
++
++                    let resolved = try Reference<Input>().parse(&input)
++                    appendText(&content, resolved)
+                 } else {
+-                    input.seek(to: saved)
+-                    let element = try Element<Input>(depth: depth.incremented()).parse(&input)
+-                    content.append(.element(element))
+-                }
+-            } else if byte == ASCII.Code.ampersand.byte {
+-                let resolved = try Reference<Input>().parse(&input)
+-                appendText(&content, resolved)
+-            } else {
+-                let text = CharData<Input>().parse(&input)
+-                guard !text.isEmpty else {
+-                    break
++
++                    let text = CharData<Input>().parse(&input)
++                    guard !text.isEmpty else {
++
++                        break
++                    }
++                    appendText(&content, text)
+                 }
+-                appendText(&content, text)
+             }
++
++            return content
+         }
+ 
+-        return content
+-    }
++        @inlinable
++        package func parseMarkup(_ input: inout Input) throws(Failure) -> W3C_XML.Content? {
+ 
+-    @inlinable
+-    package func parseMarkup(_ input: inout Input) throws(Failure) -> W3C_XML.Content? {
+-        let saved = input.checkpoint
++            let saved = input.checkpoint
+ 
+-        guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
+-            return nil
+-        }
+-        _ = input.next()
++            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
++                return nil
++            }
++            _ = input.next()
+ 
+-        guard input.xmlPeek() == ASCII.Code.exclamationPoint.byte else {
+-            input.seek(to: saved)
+-            return nil
+-        }
+-        _ = input.next()
++            guard input.xmlPeek() == ASCII.Code.exclamationPoint.byte else {
++                input.seek(to: saved)
++                return nil
++            }
++            _ = input.next()
+ 
+-        guard let next = input.xmlPeek() else {
+-            input.seek(to: saved)
+-            throw .unexpectedEndOfInput(expected: "comment or CDATA")
+-        }
++            guard let next = input.xmlPeek() else {
++                input.seek(to: saved)
++                throw .unexpectedEndOfInput(expected: "comment or CDATA")
++            }
+ 
+-        if next == ASCII.Code.hyphen.byte {
+-            input.seek(to: saved)
+-            let text = try Comment<Input>().parse(&input)
+-            return .comment(text)
+-        } else if next == ASCII.Code.leftBracket.byte {
+-            input.seek(to: saved)
+-            let text = try CDATASection<Input>().parse(&input)
+-            return .cdata(text)
+-        } else {
+-            input.seek(to: saved)
+-            throw .expected("comment or CDATA section")
++            if next == ASCII.Code.hyphen.byte {
++
++                input.seek(to: saved)
++                let text = try Comment<Input>().parse(&input)
++                return .comment(text)
++            } else if next == ASCII.Code.leftBracket.byte {
++
++                input.seek(to: saved)
++                let text = try CDATASection<Input>().parse(&input)
++                return .cdata(text)
++            } else {
++                input.seek(to: saved)
++                throw .expected("comment or CDATA section")
++            }
+         }
+-    }
+ 
+-    @inlinable
+-    package func appendText(_ content: inout [W3C_XML.Content], _ text: String) {
+-        if let last = content.last, case .text(let prevText) = last {
+-            content.removeLast()
+-            content.append(.text(prevText + text))
+-        } else {
+-            content.append(.text(text))
++        @inlinable
++        package func appendText(_ content: inout [W3C_XML.Content], _ text: String) {
++            if let last = content.last, case .text(let prevText) = last {
++                content.removeLast()
++                content.append(.text(prevText + text))
++            } else {
++                content.append(.text(text))
++            }
+         }
+     }
+ }
+diff --git a/Sources/W3C XML/W3C_XML.Parse.EndTagAny.swift b/Sources/W3C XML/W3C_XML.Parse.EndTagAny.swift
+deleted file mode 100644
+index f2d0684..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.EndTagAny.swift	
++++ /dev/null
+@@ -1,44 +0,0 @@
+-public import Cursor
+-import Machine
+-import Parser
+-import Parser_Machine
+-
+-
+-extension W3C_XML.Parse {
+-    @usableFromInline
+-    struct EndTagAny<Input: Cursor.`Protocol`>: Parser::Parsing,
+-        Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-
+-        @usableFromInline typealias Output = W3C_XML.Name
+-        @usableFromInline typealias Failure = W3C_XML.Parse.Error
+-
+-        @usableFromInline
+-        init() {}
+-
+-        @usableFromInline
+-        func parse(_ input: inout Input) throws(Failure) -> W3C_XML.Name {
+-
+-            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
+-                throw .expected("</")
+-            }
+-            _ = input.next()
+-
+-            guard input.xmlPeek() == ASCII.Code.solidus.byte else {
+-                throw .expected("</")
+-            }
+-            _ = input.next()
+-
+-            let endName = try Name<Input>().parse(&input)
+-
+-            Whitespace<Input>().parse(&input)
+-
+-            guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
+-                throw .expected(">")
+-            }
+-            _ = input.next()
+-
+-            return endName
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Error.swift b/Sources/W3C XML/W3C_XML.Parse.Error.swift
+deleted file mode 100644
+index 7087d6a..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.Error.swift	
++++ /dev/null
+@@ -1,29 +0,0 @@
+-import Byte
+-import Cursor
+-import Parser
+-
+-
+-extension W3C_XML.Parse {
+-    public enum Error: Swift::Error, Sendable, Hashable {
+-
+-        case depthExceeded(limit: Int)
+-
+-        case expected(String)
+-
+-        case mismatchedTags(open: String, close: String)
+-
+-        case invalidName
+-
+-        case invalidCharacterReference(String)
+-
+-        case unknownEntity(String)
+-
+-        case unexpectedEndOfInput(expected: String)
+-
+-        case duplicateAttribute(name: String)
+-
+-        case multipleRootElements
+-
+-        case missingRootElement
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.MachineElement.swift b/Sources/W3C XML/W3C_XML.Parse.MachineElement.swift
+index 4af399c..73219d6 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.MachineElement.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.MachineElement.swift	
+@@ -1,4 +1,4 @@
+-import Cursor
++public import Cursor
+ import Machine
+ import Parser
+ import Parser_Machine
+@@ -26,13 +26,136 @@ extension W3C_XML.Parse {
+         }
+     }
+ 
++    @usableFromInline
++    struct StartTag<Input: Cursor.`Protocol`>: Parser::Parsing,
++        Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        @usableFromInline typealias Output = StartTagOutput
++        @usableFromInline typealias Failure = W3C_XML.Parse.Error
++
++        @usableFromInline
++        init() {}
++
++        @usableFromInline
++        func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
++                throw .expected("<")
++            }
++            _ = input.next()
++
++            let name = try Name<Input>().parse(&input)
++
++            var attributes: [W3C_XML.Attribute] = []
++            var namespaces: [W3C_XML.Namespace] = []
++            var seenAttributes: Swift::Set<String> = Swift::Set()
++
++            while true {
++                Whitespace<Input>().parse(&input)
++
++                guard let byte = input.xmlPeek() else {
++                    throw .unexpectedEndOfInput(expected: "> or />")
++                }
++
++                if byte == ASCII.Code.greaterThanSign.byte {
++                    _ = input.next()
++                    return StartTagOutput(
++                        name: name,
++                        attributes: attributes,
++                        namespaces: namespaces,
++                        isEmpty: false
++                    )
++                }
++
++                if byte == ASCII.Code.solidus.byte {
++                    _ = input.next()
++                    guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
++                        throw .expected(">")
++                    }
++                    _ = input.next()
++                    return StartTagOutput(
++                        name: name,
++                        attributes: attributes,
++                        namespaces: namespaces,
++                        isEmpty: true
++                    )
++                }
++
++                let attr = try Attribute<Input>().parse(&input)
++
++                if attr.name.qualified == "xmlns" {
++                    namespaces.append(W3C_XML.Namespace(prefix: nil, uri: attr.value))
++                } else if attr.name.prefix == "xmlns" {
++                    namespaces.append(W3C_XML.Namespace(prefix: attr.name.local, uri: attr.value))
++                } else {
++
++                    guard !seenAttributes.contains(attr.name.qualified) else {
++                        throw .duplicateAttribute(name: attr.name.qualified)
++                    }
++                    seenAttributes.insert(attr.name.qualified)
++                    attributes.append(attr)
++                }
++            }
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse {
++
++    @usableFromInline
++    struct EndTagAny<Input: Cursor.`Protocol`>: Parser::Parsing,
++        Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        @usableFromInline typealias Output = W3C_XML.Name
++        @usableFromInline typealias Failure = W3C_XML.Parse.Error
++
++        @usableFromInline
++        init() {}
++
++        @usableFromInline
++        func parse(_ input: inout Input) throws(Failure) -> W3C_XML.Name {
++
++            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
++                throw .expected("</")
++            }
++            _ = input.next()
++
++            guard input.xmlPeek() == ASCII.Code.solidus.byte else {
++                throw .expected("</")
++            }
++            _ = input.next()
++
++            let endName = try Name<Input>().parse(&input)
++
++            Whitespace<Input>().parse(&input)
++
++            guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
++                throw .expected(">")
++            }
++            _ = input.next()
++
++            return endName
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse {
+ 
++    @usableFromInline
++    struct NonEmptyElementParts: Sendable {
++        @usableFromInline let start: StartTagOutput
++        @usableFromInline let content: [W3C_XML.Content]
++        @usableFromInline let endName: W3C_XML.Name
++
++        @usableFromInline
++        init(start: StartTagOutput, content: [W3C_XML.Content], endName: W3C_XML.Name) {
++            self.start = start
++            self.content = content
++            self.endName = endName
++        }
++    }
+ 
+     static func machineElement<Input: Cursor.`Protocol`>(
+         maxDepth: Int = 10000
+@@ -180,4 +303,52 @@ extension W3C_XML.Parse {
+ }
+ 
+ extension W3C_XML.Parse {
++
++    @usableFromInline
++    struct NonEmptyTextContent<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        @usableFromInline typealias Output = String
++        @usableFromInline typealias Failure = W3C_XML.Parse.Error
++
++        @usableFromInline
++        init() {}
++
++        @usableFromInline
++        func parse(_ input: inout Input) throws(Failure) -> String {
++            var result: [Byte] = []
++            var iterationCount = 0
++            let maxIterations = 1_000_000
++
++            while let byte = input.xmlPeek() {
++                iterationCount += 1
++                precondition(
++                    iterationCount < maxIterations,
++                    "NonEmptyTextContent: runaway loop detected"
++                )
++
++                if byte == ASCII.Code.lessThanSign.byte {
++
++                    break
++                } else if byte == ASCII.Code.ampersand.byte {
++
++                    let resolved = try Reference<Input>().parse(&input)
++                    result.append(contentsOf: resolved.utf8.map(Byte.init(bitPattern:)))
++                } else {
++
++                    let text = CharData<Input>().parse(&input)
++                    if text.isEmpty {
++                        break
++                    }
++                    result.append(contentsOf: text.utf8.map(Byte.init(bitPattern:)))
++                }
++            }
++
++            guard !result.isEmpty else {
++                throw .expected("text content")
++            }
++
++            return String(decoding: result, as: UTF8.self)
++        }
++    }
+ }
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Name.swift b/Sources/W3C XML/W3C_XML.Parse.Name.swift
+deleted file mode 100644
+index 9dd0c7d..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.Name.swift	
++++ /dev/null
+@@ -1,113 +0,0 @@
+-import ASCII
+-import Byte
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct Name<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.Name {
+-    public typealias Output = W3C_XML.Name
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        var bytes: [Byte] = []
+-
+-        guard let first = input.xmlPeek() else {
+-            throw .unexpectedEndOfInput(expected: "name")
+-        }
+-
+-        if W3C_XML.isASCIINameStartChar(first) {
+-            bytes.append(try input.xmlTake(expected: "character"))
+-        } else {
+-            let scalar = try consumeUTF8Scalar(&input, bytes: &bytes, checkStart: true)
+-            guard W3C_XML.isNameStartChar(scalar) else {
+-                throw .invalidName
+-            }
+-        }
+-
+-        while let byte = input.xmlPeek() {
+-            if W3C_XML.isASCIINameChar(byte) {
+-                bytes.append(try input.xmlTake(expected: "character"))
+-            } else if byte.bitPattern >= 0x80 {
+-                let savedInput = input.checkpoint
+-                let savedBytes = bytes
+-                do throws(Failure) {
+-                    let scalar = try consumeUTF8Scalar(&input, bytes: &bytes, checkStart: false)
+-                    guard W3C_XML.isNameChar(scalar) else {
+-                        input.seek(to: savedInput)
+-                        bytes = savedBytes
+-                        break
+-                    }
+-                } catch {
+-                    input.seek(to: savedInput)
+-                    bytes = savedBytes
+-                    break
+-                }
+-            } else {
+-                break
+-            }
+-        }
+-
+-        guard !bytes.isEmpty else {
+-            throw .invalidName
+-        }
+-
+-        let qualified = String(decoding: bytes, as: UTF8.self)
+-        return W3C_XML.Name(qualified)
+-    }
+-
+-    @inlinable
+-    package func consumeUTF8Scalar(
+-        _ input: inout Input,
+-        bytes: inout [Byte],
+-        checkStart: Bool
+-    ) throws(Failure) -> Unicode.Scalar {
+-        guard let first = input.xmlPeek() else {
+-            throw .unexpectedEndOfInput(expected: "character")
+-        }
+-
+-        let byteCount: Int
+-        let value: UInt32
+-
+-        if first.bitPattern < 0x80 {
+-            bytes.append(try input.xmlTake(expected: "character"))
+-            return Unicode.Scalar(first.bitPattern)
+-        } else if first.bitPattern & 0xE0 == 0xC0 {
+-            byteCount = 2
+-            value = UInt32(first.bitPattern & 0x1F)
+-        } else if first.bitPattern & 0xF0 == 0xE0 {
+-            byteCount = 3
+-            value = UInt32(first.bitPattern & 0x0F)
+-        } else if first.bitPattern & 0xF8 == 0xF0 {
+-            byteCount = 4
+-            value = UInt32(first.bitPattern & 0x07)
+-        } else {
+-            throw .invalidName
+-        }
+-
+-        bytes.append(try input.xmlTake(expected: "character"))
+-        var scalarValue = value
+-
+-        for _ in 1..<byteCount {
+-            guard let cont = input.xmlPeek(), cont.bitPattern & 0xC0 == 0x80 else {
+-                throw .invalidName
+-            }
+-            scalarValue = (scalarValue << 6) | UInt32(cont.bitPattern & 0x3F)
+-            bytes.append(try input.xmlTake(expected: "character"))
+-        }
+-
+-        guard let scalar = Unicode.Scalar(scalarValue) else {
+-            throw .invalidName
+-        }
+-
+-        return scalar
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.NonEmptyElementParts.swift b/Sources/W3C XML/W3C_XML.Parse.NonEmptyElementParts.swift
+deleted file mode 100644
+index a5ce55a..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.NonEmptyElementParts.swift	
++++ /dev/null
+@@ -1,21 +0,0 @@
+-import Cursor
+-import Machine
+-import Parser
+-import Parser_Machine
+-
+-
+-extension W3C_XML.Parse {
+-    @usableFromInline
+-    struct NonEmptyElementParts: Sendable {
+-        @usableFromInline let start: StartTagOutput
+-        @usableFromInline let content: [W3C_XML.Content]
+-        @usableFromInline let endName: W3C_XML.Name
+-
+-        @usableFromInline
+-        init(start: StartTagOutput, content: [W3C_XML.Content], endName: W3C_XML.Name) {
+-            self.start = start
+-            self.content = content
+-            self.endName = endName
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.NonEmptyTextContent.swift b/Sources/W3C XML/W3C_XML.Parse.NonEmptyTextContent.swift
+deleted file mode 100644
+index c86d46e..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.NonEmptyTextContent.swift	
++++ /dev/null
+@@ -1,55 +0,0 @@
+-public import Cursor
+-import Machine
+-import Parser
+-import Parser_Machine
+-
+-
+-extension W3C_XML.Parse {
+-    @usableFromInline
+-    struct NonEmptyTextContent<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-
+-        @usableFromInline typealias Output = String
+-        @usableFromInline typealias Failure = W3C_XML.Parse.Error
+-
+-        @usableFromInline
+-        init() {}
+-
+-        @usableFromInline
+-        func parse(_ input: inout Input) throws(Failure) -> String {
+-            var result: [Byte] = []
+-            var iterationCount = 0
+-            let maxIterations = 1_000_000
+-
+-            while let byte = input.xmlPeek() {
+-                iterationCount += 1
+-                precondition(
+-                    iterationCount < maxIterations,
+-                    "NonEmptyTextContent: runaway loop detected"
+-                )
+-
+-                if byte == ASCII.Code.lessThanSign.byte {
+-
+-                    break
+-                } else if byte == ASCII.Code.ampersand.byte {
+-
+-                    let resolved = try Reference<Input>().parse(&input)
+-                    result.append(contentsOf: resolved.utf8.map(Byte.init(bitPattern:)))
+-                } else {
+-
+-                    let text = CharData<Input>().parse(&input)
+-                    if text.isEmpty {
+-                        break
+-                    }
+-                    result.append(contentsOf: text.utf8.map(Byte.init(bitPattern:)))
+-                }
+-            }
+-
+-            guard !result.isEmpty else {
+-                throw .expected("text content")
+-            }
+-
+-            return String(decoding: result, as: UTF8.self)
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Primitives.swift b/Sources/W3C XML/W3C_XML.Parse.Primitives.swift
+index 1a46b6f..2ec8d17 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.Primitives.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.Primitives.swift	
+@@ -4,28 +4,259 @@ public import Cursor
+ import Parser
+ 
+ extension W3C_XML.Parse {
++
+     public struct Whitespace<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+     where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = Void
++        public typealias Failure = Never
++
+         @inlinable
+         public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) {
++            while let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) {
++                _ = input.next()
++            }
++        }
+     }
+-}
+ 
+-extension W3C_XML.Parse.Whitespace {
+-    public typealias Output = Void
++    public struct RequiredWhitespace<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+ 
+-    public typealias Failure = Never
++        public typealias Output = Void
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
+ 
+-    @inlinable
+-    public func parse(_ input: inout Input) {
+-        while let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) {
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) {
++            guard let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) else {
++                throw .expected("whitespace")
++            }
+             _ = input.next()
++            while let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) {
++                _ = input.next()
++            }
+         }
+     }
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public struct Name<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = W3C_XML.Name
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++            var bytes: [Byte] = []
++
++            guard let first = input.xmlPeek() else {
++                throw .unexpectedEndOfInput(expected: "name")
++            }
++
++            if W3C_XML.isASCIINameStartChar(first) {
++                bytes.append(try input.xmlTake(expected: "character"))
++            } else {
++
++                let scalar = try consumeUTF8Scalar(&input, bytes: &bytes, checkStart: true)
++                guard W3C_XML.isNameStartChar(scalar) else {
++                    throw .invalidName
++                }
++            }
++
++            while let byte = input.xmlPeek() {
++                if W3C_XML.isASCIINameChar(byte) {
++                    bytes.append(try input.xmlTake(expected: "character"))
++                } else if byte.bitPattern >= 0x80 {
++
++                    let savedInput = input.checkpoint
++                    let savedBytes = bytes
++                    do throws(Failure) {
++                        let scalar = try consumeUTF8Scalar(&input, bytes: &bytes, checkStart: false)
++                        guard W3C_XML.isNameChar(scalar) else {
++                            input.seek(to: savedInput)
++                            bytes = savedBytes
++                            break
++                        }
++                    } catch {
++                        input.seek(to: savedInput)
++                        bytes = savedBytes
++                        break
++                    }
++                } else {
++                    break
++                }
++            }
++
++            guard !bytes.isEmpty else {
++                throw .invalidName
++            }
++
++            let qualified = String(decoding: bytes, as: UTF8.self)
++            return W3C_XML.Name(qualified)
++        }
++
++        @inlinable
++        package func consumeUTF8Scalar(
++            _ input: inout Input,
++            bytes: inout [Byte],
++            checkStart: Bool
++        ) throws(Failure) -> Unicode.Scalar {
++            guard let first = input.xmlPeek() else {
++                throw .unexpectedEndOfInput(expected: "character")
++            }
++
++            let byteCount: Int
++            let value: UInt32
++
++            if first.bitPattern < 0x80 {
++
++                bytes.append(try input.xmlTake(expected: "character"))
++                return Unicode.Scalar(first.bitPattern)
++            } else if first.bitPattern & 0xE0 == 0xC0 {
++
++                byteCount = 2
++                value = UInt32(first.bitPattern & 0x1F)
++            } else if first.bitPattern & 0xF0 == 0xE0 {
++
++                byteCount = 3
++                value = UInt32(first.bitPattern & 0x0F)
++            } else if first.bitPattern & 0xF8 == 0xF0 {
++
++                byteCount = 4
++                value = UInt32(first.bitPattern & 0x07)
++            } else {
++                throw .invalidName
++            }
++
++            bytes.append(try input.xmlTake(expected: "character"))
++            var scalarValue = value
++
++            for _ in 1..<byteCount {
++                guard let cont = input.xmlPeek(), cont.bitPattern & 0xC0 == 0x80 else {
++                    throw .invalidName
++                }
++                scalarValue = (scalarValue << 6) | UInt32(cont.bitPattern & 0x3F)
++                bytes.append(try input.xmlTake(expected: "character"))
++            }
++
++            guard let scalar = Unicode.Scalar(scalarValue) else {
++                throw .invalidName
++            }
++
++            return scalar
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public struct Reference<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
++    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
++
++        public typealias Output = String
++        public typealias Failure = W3C_XML.Parse.Error
++
++        @inlinable
++        public init() {}
++
++        @inlinable
++        public func parse(_ input: inout Input) throws(Failure) -> Output {
++
++            guard input.xmlPeek() == ASCII.Code.ampersand.byte else {
++                throw .expected("&")
++            }
++            _ = input.next()
++
++            guard let next = input.xmlPeek() else {
++                throw .unexpectedEndOfInput(expected: "entity or character reference")
++            }
++
++            guard next == ASCII.Code.numberSign.byte else {
++
++                return try parseEntityRef(&input)
++            }
++            _ = input.next()
++            return try parseCharRef(&input)
++        }
++
++        @usableFromInline
++        func parseCharRef(_ input: inout Input) throws(Failure) -> String {
++            var isHex = false
++
++            if input.xmlPeek() == ASCII.Code.x.byte || input.xmlPeek() == ASCII.Code.X.byte {
++                isHex = true
++                _ = input.next()
++            }
++
++            var digits: [Byte] = []
++            while let byte = input.xmlPeek(), byte != ASCII.Code.semicolon.byte {
++                digits.append(byte)
++                _ = input.next()
++            }
++
++            guard !digits.isEmpty else {
++                throw .invalidCharacterReference(isHex ? "&#x;" : "&#;")
++            }
++
++            var slice = digits[...]
++            let value: UInt32
++            do {
++                if isHex {
++                    value = try ASCII.Hexadecimal.Parser<ArraySlice<Byte>, UInt32>().parse(&slice)
++                } else {
++                    value = try ASCII.Decimal.Parser<ArraySlice<Byte>, UInt32>().parse(&slice)
++                }
++            } catch {
++
++                throw .invalidCharacterReference(isHex ? "&#x..." : "&#...")
++            }
++
++            guard slice.isEmpty else {
++                throw .invalidCharacterReference(isHex ? "&#x..." : "&#...")
++            }
++
++            guard input.xmlPeek() == ASCII.Code.semicolon.byte else {
++                throw .expected(";")
++            }
++            _ = input.next()
++
++            guard let scalar = Unicode.Scalar(value), W3C_XML.isChar(scalar) else {
++                throw .invalidCharacterReference("&#\(isHex ? "x" : "")\(value);")
++            }
++
++            return String(scalar)
++        }
++
++        @inlinable
++        package func parseEntityRef(_ input: inout Input) throws(Failure) -> String {
++
++            let name = try Name<Input>().parse(&input)
++
++            guard input.xmlPeek() == ASCII.Code.semicolon.byte else {
++                throw .expected(";")
++            }
++            _ = input.next()
++
++            switch name.qualified {
++            case "lt": return "<"
++            case "gt": return ">"
++            case "amp": return "&"
++            case "apos": return "'"
++            case "quot": return "\""
++
++            default:
++                throw .unknownEntity(name.qualified)
++            }
++        }
++    }
+ }
+diff --git a/Sources/W3C XML/W3C_XML.Parse.ProcessingInstruction.swift b/Sources/W3C XML/W3C_XML.Parse.ProcessingInstruction.swift
+deleted file mode 100644
+index 36992c7..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.ProcessingInstruction.swift	
++++ /dev/null
+@@ -1,60 +0,0 @@
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct ProcessingInstruction<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.ProcessingInstruction {
+-    public typealias Output = W3C_XML.Instruction
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        try expectLiteral(&input, "<?")
+-
+-        let target = try Name<Input>().parse(&input)
+-
+-        if target.qualified.lowercased() == "xml" {
+-            throw .expected("processing instruction target (not 'xml')")
+-        }
+-
+-        var data: String? = nil
+-
+-        if let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) {
+-            Whitespace<Input>().parse(&input)
+-
+-            var bytes: [Byte] = []
+-
+-            while true {
+-                guard let byte = input.xmlPeek() else {
+-                    throw .unexpectedEndOfInput(expected: "?>")
+-                }
+-
+-                if byte == ASCII.Code.questionMark.byte {
+-                    _ = input.next()
+-                    if input.xmlPeek() == ASCII.Code.greaterThanSign.byte {
+-                        _ = input.next()
+-                        if !bytes.isEmpty {
+-                            data = String(decoding: bytes, as: UTF8.self)
+-                        }
+-                        return W3C_XML.Instruction(target: target.qualified, data: data)
+-                    }
+-
+-                    bytes.append(ASCII.Code.questionMark.byte)
+-                    continue
+-                }
+-                bytes.append(try input.xmlTake(expected: "character"))
+-            }
+-        }
+-
+-        try expectLiteral(&input, "?>")
+-
+-        return W3C_XML.Instruction(target: target.qualified, data: nil)
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Reference.swift b/Sources/W3C XML/W3C_XML.Parse.Reference.swift
+deleted file mode 100644
+index 118b9d9..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.Reference.swift	
++++ /dev/null
+@@ -1,104 +0,0 @@
+-import ASCII
+-import Byte
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct Reference<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.Reference {
+-    public typealias Output = String
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        guard input.xmlPeek() == ASCII.Code.ampersand.byte else {
+-            throw .expected("&")
+-        }
+-        _ = input.next()
+-
+-        guard let next = input.xmlPeek() else {
+-            throw .unexpectedEndOfInput(expected: "entity or character reference")
+-        }
+-
+-        guard next == ASCII.Code.numberSign.byte else {
+-            return try parseEntityRef(&input)
+-        }
+-        _ = input.next()
+-        return try parseCharRef(&input)
+-    }
+-
+-    @usableFromInline
+-    func parseCharRef(_ input: inout Input) throws(Failure) -> String {
+-        var isHex = false
+-
+-        if input.xmlPeek() == ASCII.Code.x.byte || input.xmlPeek() == ASCII.Code.X.byte {
+-            isHex = true
+-            _ = input.next()
+-        }
+-
+-        var digits: [Byte] = []
+-        while let byte = input.xmlPeek(), byte != ASCII.Code.semicolon.byte {
+-            digits.append(byte)
+-            _ = input.next()
+-        }
+-
+-        guard !digits.isEmpty else {
+-            throw .invalidCharacterReference(isHex ? "&#x;" : "&#;")
+-        }
+-
+-        var slice = digits[...]
+-        let value: UInt32
+-        do {
+-            if isHex {
+-                value = try ASCII.Hexadecimal.Parser<ArraySlice<Byte>, UInt32>().parse(&slice)
+-            } else {
+-                value = try ASCII.Decimal.Parser<ArraySlice<Byte>, UInt32>().parse(&slice)
+-            }
+-        } catch {
+-            throw .invalidCharacterReference(isHex ? "&#x..." : "&#...")
+-        }
+-
+-        guard slice.isEmpty else {
+-            throw .invalidCharacterReference(isHex ? "&#x..." : "&#...")
+-        }
+-
+-        guard input.xmlPeek() == ASCII.Code.semicolon.byte else {
+-            throw .expected(";")
+-        }
+-        _ = input.next()
+-
+-        guard let scalar = Unicode.Scalar(value), W3C_XML.isChar(scalar) else {
+-            throw .invalidCharacterReference("&#\(isHex ? "x" : "")\(value);")
+-        }
+-
+-        return String(scalar)
+-    }
+-
+-    @inlinable
+-    package func parseEntityRef(_ input: inout Input) throws(Failure) -> String {
+-        let name = try Name<Input>().parse(&input)
+-
+-        guard input.xmlPeek() == ASCII.Code.semicolon.byte else {
+-            throw .expected(";")
+-        }
+-        _ = input.next()
+-
+-        switch name.qualified {
+-        case "lt": return "<"
+-        case "gt": return ">"
+-        case "amp": return "&"
+-        case "apos": return "'"
+-        case "quot": return "\""
+-
+-        default:
+-            throw .unknownEntity(name.qualified)
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.RequiredWhitespace.swift b/Sources/W3C XML/W3C_XML.Parse.RequiredWhitespace.swift
+deleted file mode 100644
+index 70a515b..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.RequiredWhitespace.swift	
++++ /dev/null
+@@ -1,34 +0,0 @@
+-import ASCII
+-import Byte
+-public import Cursor
+-import Parser
+-
+-import ASCII
+-import Byte
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct RequiredWhitespace<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.RequiredWhitespace {
+-    public typealias Output = Void
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) {
+-        guard let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) else {
+-            throw .expected("whitespace")
+-        }
+-        _ = input.next()
+-        while let byte = input.xmlPeek(), W3C_XML.isWhitespace(byte) {
+-            _ = input.next()
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.StartTag.swift b/Sources/W3C XML/W3C_XML.Parse.StartTag.swift
+deleted file mode 100644
+index c805bf6..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.StartTag.swift	
++++ /dev/null
+@@ -1,85 +0,0 @@
+-public import Cursor
+-import Machine
+-import Parser
+-import Parser_Machine
+-
+-public import Cursor
+-import Machine
+-import Parser
+-import Parser_Machine
+-
+-extension W3C_XML.Parse {
+-    @usableFromInline
+-    struct StartTag<Input: Cursor.`Protocol`>: Parser::Parsing,
+-        Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-
+-        @usableFromInline typealias Output = StartTagOutput
+-        @usableFromInline typealias Failure = W3C_XML.Parse.Error
+-
+-        @usableFromInline
+-        init() {}
+-
+-        @usableFromInline
+-        func parse(_ input: inout Input) throws(Failure) -> Output {
+-
+-            guard input.xmlPeek() == ASCII.Code.lessThanSign.byte else {
+-                throw .expected("<")
+-            }
+-            _ = input.next()
+-
+-            let name = try Name<Input>().parse(&input)
+-
+-            var attributes: [W3C_XML.Attribute] = []
+-            var namespaces: [W3C_XML.Namespace] = []
+-            var seenAttributes: Swift::Set<String> = Swift::Set()
+-
+-            while true {
+-                Whitespace<Input>().parse(&input)
+-
+-                guard let byte = input.xmlPeek() else {
+-                    throw .unexpectedEndOfInput(expected: "> or />")
+-                }
+-
+-                if byte == ASCII.Code.greaterThanSign.byte {
+-                    _ = input.next()
+-                    return StartTagOutput(
+-                        name: name,
+-                        attributes: attributes,
+-                        namespaces: namespaces,
+-                        isEmpty: false
+-                    )
+-                }
+-
+-                if byte == ASCII.Code.solidus.byte {
+-                    _ = input.next()
+-                    guard input.xmlPeek() == ASCII.Code.greaterThanSign.byte else {
+-                        throw .expected(">")
+-                    }
+-                    _ = input.next()
+-                    return StartTagOutput(
+-                        name: name,
+-                        attributes: attributes,
+-                        namespaces: namespaces,
+-                        isEmpty: true
+-                    )
+-                }
+-
+-                let attr = try Attribute<Input>().parse(&input)
+-
+-                if attr.name.qualified == "xmlns" {
+-                    namespaces.append(W3C_XML.Namespace(prefix: nil, uri: attr.value))
+-                } else if attr.name.prefix == "xmlns" {
+-                    namespaces.append(W3C_XML.Namespace(prefix: attr.name.local, uri: attr.value))
+-                } else {
+-
+-                    guard !seenAttributes.contains(attr.name.qualified) else {
+-                        throw .duplicateAttribute(name: attr.name.qualified)
+-                    }
+-                    seenAttributes.insert(attr.name.qualified)
+-                    attributes.append(attr)
+-                }
+-            }
+-        }
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.TextContent.swift b/Sources/W3C XML/W3C_XML.Parse.TextContent.swift
+deleted file mode 100644
+index 1113c7d..0000000
+--- a/Sources/W3C XML/W3C_XML.Parse.TextContent.swift	
++++ /dev/null
+@@ -1,37 +0,0 @@
+-public import Cursor
+-import Parser
+-
+-public import Cursor
+-import Parser
+-
+-extension W3C_XML.Parse {
+-    public struct TextContent<Input: Cursor.`Protocol`>: Parser::Parsing, Sendable
+-    where Input: Sendable, Input.Element == Byte, Input.Failure == Never {
+-        @inlinable
+-        public init() {}
+-    }
+-}
+-
+-extension W3C_XML.Parse.TextContent {
+-    public typealias Output = String
+-
+-    public typealias Failure = W3C_XML.Parse.Error
+-
+-    @inlinable
+-    public func parse(_ input: inout Input) throws(Failure) -> Output {
+-        var result = ""
+-
+-        while let byte = input.xmlPeek() {
+-            if byte == ASCII.Code.lessThanSign.byte {
+-                break
+-            } else if byte == ASCII.Code.ampersand.byte {
+-                let resolved = try Reference<Input>().parse(&input)
+-                result += resolved
+-            } else {
+-                result.append(Character(UnicodeScalar(try input.xmlTake(expected: "character").bitPattern)))
+-            }
+-        }
+-
+-        return result
+-    }
+-}
+diff --git a/Sources/W3C XML/W3C_XML.Parse.swift b/Sources/W3C XML/W3C_XML.Parse.swift
+index a687729..872d4a3 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.swift	
+@@ -8,6 +8,19 @@ extension W3C_XML {
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public struct Depth: Sendable, Hashable {
++
++        public let value: Int
++
++        public let limit: Int
++
++        @inlinable
++        public init(value: Int = 0, limit: Int = 512) {
++            self.value = value
++            self.limit = limit
++        }
++    }
+ }
+ 
+ extension W3C_XML.Parse.Depth {
+@@ -24,6 +37,29 @@ extension W3C_XML.Parse.Depth {
+ }
+ 
+ extension W3C_XML.Parse {
++
++    public enum Error: Swift::Error, Sendable, Hashable {
++
++        case depthExceeded(limit: Int)
++
++        case expected(String)
++
++        case mismatchedTags(open: String, close: String)
++
++        case invalidName
++
++        case invalidCharacterReference(String)
++
++        case unknownEntity(String)
++
++        case unexpectedEndOfInput(expected: String)
++
++        case duplicateAttribute(name: String)
++
++        case multipleRootElements
++
++        case missingRootElement
++    }
+ }
+ 
+ extension W3C_XML.Parse.Error: CustomStringConvertible {
+diff --git a/Sources/W3C XML/W3C_XML.Token.swift b/Sources/W3C XML/W3C_XML.Token.swift
+index 86da7c2..7c9756c 100644
+--- a/Sources/W3C XML/W3C_XML.Token.swift	
++++ b/Sources/W3C XML/W3C_XML.Token.swift	
+@@ -31,6 +31,23 @@ extension W3C_XML {
+ }
+ 
+ extension W3C_XML {
++
++    public enum TokenKind: Sendable, Hashable {
++        case startTag
++        case endTag
++        case tagClose
++        case emptyTagClose
++        case attributeName
++        case attributeValue
++        case equals
++        case text
++        case cdata
++        case comment
++        case instruction
++        case xmlDeclaration
++        case doctype
++        case unknown(Byte)
++    }
+ }
+ 
+ extension W3C_XML.TokenKind: CustomStringConvertible {
+diff --git a/Sources/W3C XML/W3C_XML.TokenKind.swift b/Sources/W3C XML/W3C_XML.TokenKind.swift
+deleted file mode 100644
+index 76e8289..0000000
+--- a/Sources/W3C XML/W3C_XML.TokenKind.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-
+-extension W3C_XML {
+-    public enum TokenKind: Sendable, Hashable {
+-        case startTag
+-        case endTag
+-        case tagClose
+-        case emptyTagClose
+-        case attributeName
+-        case attributeValue
+-        case equals
+-        case text
+-        case cdata
+-        case comment
+-        case instruction
+-        case xmlDeclaration
+-        case doctype
+-        case unknown(Byte)
+-    }
+-}
+-- 
+2.43.0
+

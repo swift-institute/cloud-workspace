@@ -1,0 +1,116 @@
+From dce7a584fea056359d17b580eae6994bfef72473 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:19:23 +0000
+Subject: [PATCH 16/17] Revert Sources/RFC 9110/Absorbed
+ swift-rfc-9110-coder/HTTP.Whitespace.Coder.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../HTTP.Whitespace.Coder.swift               | 55 ++++++++++---------
+ 1 file changed, 29 insertions(+), 26 deletions(-)
+
+diff --git a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Whitespace.Coder.swift b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Whitespace.Coder.swift
+index 388151c..5b23f74 100644
+--- a/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Whitespace.Coder.swift	
++++ b/Sources/RFC 9110/Absorbed swift-rfc-9110-coder/HTTP.Whitespace.Coder.swift	
+@@ -6,42 +6,57 @@
+     import Serializer
+ 
+     extension RFC_9110 {
++
+         public enum OWS {}
+ 
+         public enum RWS {}
+     }
+ 
+     extension RFC_9110.OWS {
++
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Output = Void
++
++            public typealias Failure = Never
++
+             public let canonical: [Byte]
+ 
+             public init(canonical: [Byte] = []) {
+                 self.canonical = canonical
+             }
++
++            public borrowing func parse(_ input: inout Input) {
++                _ = RFC_9110.Whitespace.skip(&input)
++            }
++
++            public borrowing func serialize(_ output: Void, into buffer: inout Buffer) {
++                buffer.append(contentsOf: canonical)
++            }
+         }
+     }
+ 
+-extension RFC_9110.OWS.Coder {
+-        public typealias Output = Void
++    extension RFC_9110.RWS {
+ 
+-        public typealias Failure = Never
++        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+ 
+-        public borrowing func parse(_ input: inout Input) {
+-            _ = RFC_9110.Whitespace.skip(&input)
+-        }
++            public typealias Output = Void
+ 
+-        public borrowing func serialize(_ output: Void, into buffer: inout Buffer) {
+-            buffer.append(contentsOf: canonical)
+-        }
+-}
++            public typealias Failure = Error
+ 
+-    extension RFC_9110.RWS {
+-        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+             public let canonical: [Byte]
+ 
+             public init(canonical: [Byte] = [Byte(bitPattern: 0x20)]) {
+                 self.canonical = canonical
+             }
++
++            public borrowing func parse(_ input: inout Input) throws(Error) {
++                guard RFC_9110.Whitespace.skip(&input) > 0 else { throw .expectedWhitespace }
++            }
++
++            public borrowing func serialize(_ output: Void, into buffer: inout Buffer) throws(Failure) {
++                buffer.append(contentsOf: canonical)
++            }
+         }
+ 
+         public enum Error: Swift::Error, Equatable {
+@@ -49,25 +64,13 @@ extension RFC_9110.OWS.Coder {
+         }
+     }
+ 
+-extension RFC_9110.RWS.Coder {
+-        public typealias Output = Void
+-
+-        public typealias Failure = Error
+-
+-        public borrowing func parse(_ input: inout Input) throws(Error) {
+-            guard RFC_9110.Whitespace.skip(&input) > 0 else { throw .expectedWhitespace }
+-        }
+-
+-        public borrowing func serialize(_ output: Void, into buffer: inout Buffer) throws(Failure) {
+-            buffer.append(contentsOf: canonical)
+-        }
+-}
+-
+     extension RFC_9110 {
++
+         enum Whitespace {}
+     }
+ 
+     extension RFC_9110.Whitespace {
++
+         static func isWhitespace(_ byte: Byte) -> Bool {
+             byte.bitPattern == 0x20 || byte.bitPattern == 0x09
+         }
+-- 
+2.43.0
+

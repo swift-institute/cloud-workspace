@@ -1,0 +1,565 @@
+From df853c8cf578633f7379d0e313e1350095b119f3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:18:31 +0000
+Subject: [PATCH 15/17] Revert Sources/RFC 5322/Absorbed
+ swift-rfc-5322-coder/RFC_5322.DateTime.Coder.swift: it broke the type-check
+ (coenttb/work#242)
+
+---
+ .../RFC_5322.DateTime.Coder.swift             | 459 +++++++++---------
+ 1 file changed, 230 insertions(+), 229 deletions(-)
+
+diff --git a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.DateTime.Coder.swift b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.DateTime.Coder.swift
+index 09f801d..0d4c797 100644
+--- a/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.DateTime.Coder.swift	
++++ b/Sources/RFC 5322/Absorbed swift-rfc-5322-coder/RFC_5322.DateTime.Coder.swift	
+@@ -10,105 +10,107 @@
+     import Serializer
+ 
+     extension RFC_5322.DateTime {
+-        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-            public init() {}
+-        }
+ 
+-        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+-    }
+-
+-extension RFC_5322.DateTime.Coder {
+-        public typealias Output = RFC_5322.DateTime
++        public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+ 
+-        public typealias Failure = RFC_5322.DateTime.Error
++            public typealias Output = RFC_5322.DateTime
+ 
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            let parts: Fields.Output
+-            do throws(Fields.Error) {
+-                parts = try Fields.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .invalidFormat("\(error)")
+-            }
++            public typealias Failure = RFC_5322.DateTime.Error
+ 
+-            let monthName = String(decoding: parts.month, as: UTF8.self)
+-            guard let monthIndex = RFC_5322.DateTime.monthNames.firstIndex(of: monthName) else {
+-                input.seek(to: start)
+-                throw .invalidMonth(monthName)
+-            }
++            public init() {}
+ 
+-            let zone = String(decoding: parts.zone, as: UTF8.self)
+-            guard parts.zone.count == 5,
+-                let sign = Self.sign(parts.zone[0]),
+-                let hours = Self.decimal(parts.zone[1...2]), hours <= 23,
+-                let minutes = Self.decimal(parts.zone[3...4]), minutes <= 59
+-            else {
+-                input.seek(to: start)
+-                throw .invalidTimezone(zone)
+-            }
+-            let offset = sign * (hours * 3600 + minutes * 60)
+-
+-            let dateTime: RFC_5322.DateTime
+-            do {
+-                dateTime = try RFC_5322.DateTime(
+-                    year: parts.year,
+-                    month: monthIndex + 1,
+-                    day: parts.day,
+-                    hour: parts.hour,
+-                    minute: parts.minute,
+-                    second: parts.second ?? 0,
+-                    timezoneOffsetSeconds: offset
+-                )
+-            } catch {
+-                input.seek(to: start)
+-                throw .invalidFormat("Date components invalid: \(error)")
+-            }
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                let parts: Fields.Output
++                do throws(Fields.Error) {
++                    parts = try Fields.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .invalidFormat("\(error)")
++                }
+ 
+-            if let dayOfWeek = parts.dayOfWeek {
+-                let dayName = String(decoding: dayOfWeek, as: UTF8.self)
+-                guard let expected = RFC_5322.DateTime.dayNames.firstIndex(of: dayName) else {
++                let monthName = String(decoding: parts.month, as: UTF8.self)
++                guard let monthIndex = RFC_5322.DateTime.monthNames.firstIndex(of: monthName) else {
+                     input.seek(to: start)
+-                    throw .invalidDayName(dayName)
++                    throw .invalidMonth(monthName)
+                 }
+-                let actual = dateTime.components.weekday
+-                guard actual == expected else {
++
++                let zone = String(decoding: parts.zone, as: UTF8.self)
++                guard parts.zone.count == 5,
++                    let sign = Self.sign(parts.zone[0]),
++                    let hours = Self.decimal(parts.zone[1...2]), hours <= 23,
++                    let minutes = Self.decimal(parts.zone[3...4]), minutes <= 59
++                else {
+                     input.seek(to: start)
+-                    throw .weekdayMismatch(
+-                        expected: RFC_5322.DateTime.dayNames[expected],
+-                        actual: RFC_5322.DateTime.dayNames[actual]
++                    throw .invalidTimezone(zone)
++                }
++                let offset = sign * (hours * 3600 + minutes * 60)
++
++                let dateTime: RFC_5322.DateTime
++                do {
++                    dateTime = try RFC_5322.DateTime(
++                        year: parts.year,
++                        month: monthIndex + 1,
++                        day: parts.day,
++                        hour: parts.hour,
++                        minute: parts.minute,
++                        second: parts.second ?? 0,
++                        timezoneOffsetSeconds: offset
+                     )
++                } catch {
++                    input.seek(to: start)
++                    throw .invalidFormat("Date components invalid: \(error)")
+                 }
+-            }
+ 
+-            return dateTime
+-        }
++                if let dayOfWeek = parts.dayOfWeek {
++                    let dayName = String(decoding: dayOfWeek, as: UTF8.self)
++                    guard let expected = RFC_5322.DateTime.dayNames.firstIndex(of: dayName) else {
++                        input.seek(to: start)
++                        throw .invalidDayName(dayName)
++                    }
++                    let actual = dateTime.components.weekday
++                    guard actual == expected else {
++                        input.seek(to: start)
++                        throw .weekdayMismatch(
++                            expected: RFC_5322.DateTime.dayNames[expected],
++                            actual: RFC_5322.DateTime.dayNames[actual]
++                        )
++                    }
++                }
+ 
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            RFC_5322.DateTime.serialize(output, into: &buffer)
+-        }
++                return dateTime
++            }
+ 
+-        private static func decimal(_ bytes: some Swift::Collection<Byte>) -> Int? {
+-            bytes.reduce(Int?.some(0)) { value, byte in
+-                guard let value, (0x30...0x39).contains(byte.bitPattern) else { return nil }
+-                return value * 10 + Int(byte.bitPattern - 0x30)
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                RFC_5322.DateTime.serialize(output, into: &buffer)
+             }
+-        }
+ 
+-        private static func sign(_ byte: Byte) -> Int? {
+-            switch byte.bitPattern {
+-            case 0x2B: 1
+-            case 0x2D: -1
+-            default: nil
++            private static func decimal(_ bytes: some Swift::Collection<Byte>) -> Int? {
++                bytes.reduce(Int?.some(0)) { value, byte in
++                    guard let value, (0x30...0x39).contains(byte.bitPattern) else { return nil }
++                    return value * 10 + Int(byte.bitPattern - 0x30)
++                }
++            }
++
++            private static func sign(_ byte: Byte) -> Int? {
++                switch byte.bitPattern {
++                case 0x2B: 1
++                case 0x2D: -1
++                default: nil
++                }
+             }
+         }
+-}
++
++        public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
++    }
+ 
+     extension RFC_5322.DateTime {
++
+         public enum Fields {}
+     }
+ 
+     extension RFC_5322.DateTime.Fields {
++
+         public typealias Output = (
+             dayOfWeek: [Byte]?,
+             day: Int,
+@@ -127,7 +129,73 @@ extension RFC_5322.DateTime.Coder {
+         }
+ 
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Failure = RFC_5322.DateTime.Fields.Error
++
+             public init() {}
++
++            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++                let start = input.checkpoint
++                RFC_5322.Whitespace.Coder<Input, Buffer>().parse(&input)
++                let probe = input.checkpoint
++                let beginsWeekday = input.next().map(RFC_5322.DateTime.Fields.isLetter) ?? false
++                input.seek(to: probe)
++                let dayOfWeek: [Byte]?
++                if beginsWeekday {
++                    do throws(DayOfWeek.Error) {
++                        dayOfWeek = try DayOfWeek.Coder<Input, Buffer>().parse(&input)
++                    } catch { throw .expectedDate }
++                } else {
++                    dayOfWeek = nil
++                }
++                let date: (Int, [Byte], Int)
++                do throws(Date.Error) {
++                    date = try Date.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .expectedDate
++                }
++                let time: (Int, Int, Int?)
++                do throws(Time.Error) {
++                    time = try Time.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .expectedTime
++                }
++                let zone: [Byte]
++                do throws(Zone.Error) {
++                    zone = try Zone.Coder<Input, Buffer>().parse(&input)
++                } catch {
++                    input.seek(to: start)
++                    throw .expectedZone
++                }
++                return (dayOfWeek, date.0, date.1, date.2, time.0, time.1, time.2, zone)
++            }
++
++            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++                if let dayOfWeek = output.dayOfWeek {
++                    do throws(DayOfWeek.Error) {
++                        try DayOfWeek.Coder<Input, Buffer>().serialize(dayOfWeek, into: &buffer)
++                    } catch {
++                        throw .expectedDate
++                    }
++                }
++                do throws(Date.Error) {
++                    try Date.Coder<Input, Buffer>().serialize((output.day, output.month, output.year), into: &buffer)
++                } catch {
++                    throw .expectedDate
++                }
++                do throws(Time.Error) {
++                    try Time.Coder<Input, Buffer>().serialize((output.hour, output.minute, output.second), into: &buffer)
++                } catch {
++                    throw .expectedTime
++                }
++                do throws(Zone.Error) {
++                    try Zone.Coder<Input, Buffer>().serialize(output.zone, into: &buffer)
++                } catch {
++                    throw .expectedZone
++                }
++            }
+         }
+ 
+         static func isLetter(_ byte: Byte) -> Bool {
+@@ -144,202 +212,135 @@ extension RFC_5322.DateTime.Coder {
+         public enum Zone {}
+     }
+ 
+-extension RFC_5322.DateTime.Fields.Coder {
+-        public typealias Failure = RFC_5322.DateTime.Fields.Error
+-
+-        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-            let start = input.checkpoint
+-            RFC_5322.Whitespace.Coder<Input, Buffer>().parse(&input)
+-            let probe = input.checkpoint
+-            let beginsWeekday = input.next().map(RFC_5322.DateTime.Fields.isLetter) ?? false
+-            input.seek(to: probe)
+-            let dayOfWeek: [Byte]?
+-            if beginsWeekday {
+-                do throws(DayOfWeek.Error) {
+-                    dayOfWeek = try DayOfWeek.Coder<Input, Buffer>().parse(&input)
+-                } catch { throw .expectedDate }
+-            } else {
+-                dayOfWeek = nil
+-            }
+-            let date: (Int, [Byte], Int)
+-            do throws(Date.Error) {
+-                date = try Date.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .expectedDate
+-            }
+-            let time: (Int, Int, Int?)
+-            do throws(Time.Error) {
+-                time = try Time.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .expectedTime
+-            }
+-            let zone: [Byte]
+-            do throws(Zone.Error) {
+-                zone = try Zone.Coder<Input, Buffer>().parse(&input)
+-            } catch {
+-                input.seek(to: start)
+-                throw .expectedZone
+-            }
+-            return (dayOfWeek, date.0, date.1, date.2, time.0, time.1, time.2, zone)
+-        }
+-
+-        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-            if let dayOfWeek = output.dayOfWeek {
+-                do throws(DayOfWeek.Error) {
+-                    try DayOfWeek.Coder<Input, Buffer>().serialize(dayOfWeek, into: &buffer)
+-                } catch {
+-                    throw .expectedDate
+-                }
+-            }
+-            do throws(Date.Error) {
+-                try Date.Coder<Input, Buffer>().serialize((output.day, output.month, output.year), into: &buffer)
+-            } catch {
+-                throw .expectedDate
+-            }
+-            do throws(Time.Error) {
+-                try Time.Coder<Input, Buffer>().serialize((output.hour, output.minute, output.second), into: &buffer)
+-            } catch {
+-                throw .expectedTime
+-            }
+-            do throws(Zone.Error) {
+-                try Zone.Coder<Input, Buffer>().serialize(output.zone, into: &buffer)
+-            } catch {
+-                throw .expectedZone
+-            }
+-        }
+-}
+-
+     extension RFC_5322.DateTime.Fields.DayOfWeek {
++
+         public enum Error: Swift::Error, Equatable {
+             case malformed
+         }
+ 
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Failure = RFC_5322.DateTime.Fields.DayOfWeek.Error
++
+             public init() {}
+-        }
+-    }
+ 
+-extension RFC_5322.DateTime.Fields.DayOfWeek.Coder {
+-        public typealias Failure = RFC_5322.DateTime.Fields.DayOfWeek.Error
+-
+-        @Coder::Builder<Input, Buffer>
+-        public var body:
+-            some Coding
+-                & Parsing<Input, [Byte], Failure>
+-                & Serializing<[Byte], Buffer, Failure>
+-        {
+-            Coder::Coder(Input.self, Buffer.self) {
+-                Parser::Many(3...3, Coder::First.Where(RFC_5322.DateTime.Fields.isLetter), rejected: { _ in true })
+-                Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ","))
+-                RFC_5322.Whitespace.Coder(canonical: " ")
++            @Coder::Builder<Input, Buffer>
++            public var body:
++                some Coding
++                    & Parsing<Input, [Byte], Failure>
++                    & Serializing<[Byte], Buffer, Failure>
++            {
++                Coder::Coder(Input.self, Buffer.self) {
++                    Parser::Many(3...3, Coder::First.Where(RFC_5322.DateTime.Fields.isLetter), rejected: { _ in true })
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ","))
++                    RFC_5322.Whitespace.Coder(canonical: " ")
++                }
++                .mapFailure { (_) -> Failure in .malformed }
+             }
+-            .mapFailure { (_) -> Failure in .malformed }
+         }
+-}
++    }
+ 
+     extension RFC_5322.DateTime.Fields.Date {
++
+         public enum Error: Swift::Error, Equatable {
+             case malformed
+         }
+ 
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Failure = RFC_5322.DateTime.Fields.Date.Error
++
+             public init() {}
+-        }
+-    }
+ 
+-extension RFC_5322.DateTime.Fields.Date.Coder {
+-        public typealias Failure = RFC_5322.DateTime.Fields.Date.Error
+-
+-        @Coder::Builder<Input, Buffer>
+-        public var body:
+-            some Coding
+-                & Parsing<Input, (Int, [Byte], Int), Failure>
+-                & Serializing<(Int, [Byte], Int), Buffer, Failure>
+-        {
+-            Coder::Coder(Input.self, Buffer.self) {
+-                ASCII.Decimal.Coder<Input, Buffer, Int>()
+-                RFC_5322.Whitespace.Coder(canonical: " ")
+-                Parser::Many(3...3, Coder::First.Where(RFC_5322.DateTime.Fields.isLetter), rejected: { _ in true })
+-                RFC_5322.Whitespace.Coder(canonical: " ")
+-                ASCII.Decimal.Coder<Input, Buffer, Int>()
++            @Coder::Builder<Input, Buffer>
++            public var body:
++                some Coding
++                    & Parsing<Input, (Int, [Byte], Int), Failure>
++                    & Serializing<(Int, [Byte], Int), Buffer, Failure>
++            {
++                Coder::Coder(Input.self, Buffer.self) {
++                    ASCII.Decimal.Coder<Input, Buffer, Int>()
++                    RFC_5322.Whitespace.Coder(canonical: " ")
++                    Parser::Many(3...3, Coder::First.Where(RFC_5322.DateTime.Fields.isLetter), rejected: { _ in true })
++                    RFC_5322.Whitespace.Coder(canonical: " ")
++                    ASCII.Decimal.Coder<Input, Buffer, Int>()
++                }
++                .map(
++                    to: { ($0.first.first, $0.first.second, $0.second) },
++                    from: { .init(.init($0.0, $0.1), $0.2) }
++                )
++                .mapFailure { (_) -> Failure in .malformed }
+             }
+-            .map(
+-                to: { ($0.first.first, $0.first.second, $0.second) },
+-                from: { .init(.init($0.0, $0.1), $0.2) }
+-            )
+-            .mapFailure { (_) -> Failure in .malformed }
+         }
+-}
++    }
+ 
+     extension RFC_5322.DateTime.Fields.Time {
++
+         public enum Error: Swift::Error, Equatable {
+             case malformed
+         }
+ 
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Failure = RFC_5322.DateTime.Fields.Time.Error
++
+             public init() {}
+-        }
+-    }
+ 
+-extension RFC_5322.DateTime.Fields.Time.Coder {
+-        public typealias Failure = RFC_5322.DateTime.Fields.Time.Error
+-
+-        @Coder::Builder<Input, Buffer>
+-        public var body:
+-            some Coding
+-                & Parsing<Input, (Int, Int, Int?), Failure>
+-                & Serializing<(Int, Int, Int?), Buffer, Failure>
+-        {
+-            Coder::Coder(Input.self, Buffer.self) {
+-                RFC_5322.Whitespace.Coder(canonical: " ")
+-                ASCII.Decimal.Coder<Input, Buffer, Int>()
+-                Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ":"))
+-                ASCII.Decimal.Coder<Input, Buffer, Int>()
+-                Parser::Optionally(
+-                    Coder::Coder(Input.self, Buffer.self) {
+-                        Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ":"))
+-                        ASCII.Decimal.Coder<Input, Buffer, Int>()
+-                    },
+-                    rejected: { failure in
+-                        if case .left = failure { return true }
+-                        return false
+-                    }
++            @Coder::Builder<Input, Buffer>
++            public var body:
++                some Coding
++                    & Parsing<Input, (Int, Int, Int?), Failure>
++                    & Serializing<(Int, Int, Int?), Buffer, Failure>
++            {
++                Coder::Coder(Input.self, Buffer.self) {
++                    RFC_5322.Whitespace.Coder(canonical: " ")
++                    ASCII.Decimal.Coder<Input, Buffer, Int>()
++                    Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ":"))
++                    ASCII.Decimal.Coder<Input, Buffer, Int>()
++                    Parser::Optionally(
++                        Coder::Coder(Input.self, Buffer.self) {
++                            Coder::ConsumingLiteral<Input, Buffer>([Byte](utf8: ":"))
++                            ASCII.Decimal.Coder<Input, Buffer, Int>()
++                        },
++                        rejected: { failure in
++                            if case .left = failure { return true }
++                            return false
++                        }
++                    )
++                }
++                .map(
++                    to: { ($0.first.first, $0.first.second, $0.second) },
++                    from: { .init(.init($0.0, $0.1), $0.2) }
+                 )
++                .mapFailure { (_) -> Failure in .malformed }
+             }
+-            .map(
+-                to: { ($0.first.first, $0.first.second, $0.second) },
+-                from: { .init(.init($0.0, $0.1), $0.2) }
+-            )
+-            .mapFailure { (_) -> Failure in .malformed }
+         }
+-}
++    }
+ 
+     extension RFC_5322.DateTime.Fields.Zone {
++
+         public enum Error: Swift::Error, Equatable {
+             case malformed
+         }
+ 
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
++
++            public typealias Failure = RFC_5322.DateTime.Fields.Zone.Error
++
+             public init() {}
+-        }
+-    }
+ 
+-extension RFC_5322.DateTime.Fields.Zone.Coder {
+-        public typealias Failure = RFC_5322.DateTime.Fields.Zone.Error
+-
+-        @Coder::Builder<Input, Buffer>
+-        public var body:
+-            some Coding
+-                & Parsing<Input, [Byte], Failure>
+-                & Serializing<[Byte], Buffer, Failure>
+-        {
+-            Coder::Coder(Input.self, Buffer.self) {
+-                RFC_5322.Whitespace.Coder(canonical: " ")
+-                Parser::Many(1..., Coder::First.Where { !RFC_5322.Whitespace.Coder<Input, Buffer>.isWhitespace($0) }, rejected: { _ in true })
++            @Coder::Builder<Input, Buffer>
++            public var body:
++                some Coding
++                    & Parsing<Input, [Byte], Failure>
++                    & Serializing<[Byte], Buffer, Failure>
++            {
++                Coder::Coder(Input.self, Buffer.self) {
++                    RFC_5322.Whitespace.Coder(canonical: " ")
++                    Parser::Many(1..., Coder::First.Where { !RFC_5322.Whitespace.Coder<Input, Buffer>.isWhitespace($0) }, rejected: { _ in true })
++                }
++                .mapFailure { (_) -> Failure in .malformed }
+             }
+-            .mapFailure { (_) -> Failure in .malformed }
+         }
+-}
++    }
+ #endif
+-- 
+2.43.0
+

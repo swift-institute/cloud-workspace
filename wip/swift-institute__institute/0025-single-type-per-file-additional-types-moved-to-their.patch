@@ -1,0 +1,763 @@
+From 2d73d6664de5d5d148316ce8fc6c824364ce0881 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:06:21 +0000
+Subject: [PATCH 25/28] single type per file: additional types moved to their
+ own files (type-check follows; Linux x86_64, Swift 6.4.2) (coenttb/work#242)
+
+---
+ ...tute.CI.NightlyException.Disposition.swift | 15 +++++++
+ .../Institute.CI.NightlyException.Error.swift | 16 ++++++++
+ .../Institute.CI.NightlyException.swift       | 20 +---------
+ ...itute.CI.ReleaseFloorException.Error.swift | 14 +++++++
+ .../Institute.CI.ReleaseFloorException.swift  |  9 +----
+ ...nstitute.CI.AggregateVerdict.Finding.swift | 21 ++++++++++
+ .../Institute.CI.AggregateVerdict.swift       | 16 --------
+ .../Institute.CI.Leg.Family.swift             | 10 +++++
+ .../Institute CI Model/Institute.CI.Leg.swift |  6 +--
+ .../Institute.CI.Plan.Descheduled.swift       | 26 ++++++++++++
+ .../Institute.CI.Plan.Error.swift             | 16 ++++++++
+ .../Institute.CI.Plan.Subject.swift           | 17 ++++++++
+ .../Institute.CI.Plan.swift                   | 40 -------------------
+ ...Institute.CI.Requirement.Expectation.swift |  9 +++++
+ .../Institute.CI.Requirement.swift            |  5 +--
+ ...alidation.BinaryInstallChecksum.Step.swift | 19 +++++++++
+ ....CI.Validation.BinaryInstallChecksum.swift |  9 -----
+ ...Validation.BranchPins.Baseline.Entry.swift | 20 ++++++++++
+ ...te.CI.Validation.BranchPins.Baseline.swift |  9 -----
+ ...dation.CompositeActionPins.Exemption.swift | 21 ++++++++++
+ ....Validation.CompositeActionPins.Site.swift | 14 +++++++
+ ...te.CI.Validation.CompositeActionPins.swift | 19 ---------
+ ....CI.Validation.ThinCallers.Exemption.swift | 15 +++++++
+ ....Validation.ThinCallers.FindingClass.swift | 20 ++++++++++
+ .../Institute.CI.Validation.ThinCallers.swift | 17 --------
+ ...Institute.Repository.Policy+Decision.swift | 11 +----
+ ....Repository.Policy.Manifest.Document.swift | 16 ++++++++
+ ...Institute.Repository.Policy.Manifest.swift |  9 -----
+ ...ository.Policy.Repository.CodingKeys.swift | 15 +++++++
+ 29 files changed, 289 insertions(+), 165 deletions(-)
+ create mode 100644 Sources/Institute CI Contract/Institute.CI.NightlyException.Disposition.swift
+ create mode 100644 Sources/Institute CI Contract/Institute.CI.NightlyException.Error.swift
+ create mode 100644 Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.Error.swift
+ create mode 100644 Sources/Institute CI Model/Institute.CI.AggregateVerdict.Finding.swift
+ create mode 100644 Sources/Institute CI Model/Institute.CI.Leg.Family.swift
+ create mode 100644 Sources/Institute CI Model/Institute.CI.Plan.Descheduled.swift
+ create mode 100644 Sources/Institute CI Model/Institute.CI.Plan.Error.swift
+ create mode 100644 Sources/Institute CI Model/Institute.CI.Plan.Subject.swift
+ create mode 100644 Sources/Institute CI Model/Institute.CI.Requirement.Expectation.swift
+ create mode 100644 Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.Step.swift
+ create mode 100644 Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.Entry.swift
+ create mode 100644 Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Exemption.swift
+ create mode 100644 Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Site.swift
+ create mode 100644 Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Exemption.swift
+ create mode 100644 Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.FindingClass.swift
+ create mode 100644 Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.Document.swift
+ create mode 100644 Sources/Institute Repository Policy/Institute.Repository.Policy.Repository.CodingKeys.swift
+
+diff --git a/Sources/Institute CI Contract/Institute.CI.NightlyException.Disposition.swift b/Sources/Institute CI Contract/Institute.CI.NightlyException.Disposition.swift
+new file mode 100644
+index 0000000..7ba6596
+--- /dev/null
++++ b/Sources/Institute CI Contract/Institute.CI.NightlyException.Disposition.swift	
+@@ -0,0 +1,15 @@
++public import Institute_CI_Model
++public import Institute_Model
++
++
++extension Institute.CI.NightlyException {
++    /// How an in-date-format, well-formed exception applies to this run.
++    public enum Disposition: Sendable, Equatable {
++        /// The exception is current: the advisory leg is schedulable.
++        case active
++        /// The recheck date has passed on a non-owner subject: the
++        /// advisory leg is descheduled with this typed record, and the
++        /// run otherwise proceeds.
++        case expired(recheck: String, today: String)
++    }
++}
+diff --git a/Sources/Institute CI Contract/Institute.CI.NightlyException.Error.swift b/Sources/Institute CI Contract/Institute.CI.NightlyException.Error.swift
+new file mode 100644
+index 0000000..f9adfbb
+--- /dev/null
++++ b/Sources/Institute CI Contract/Institute.CI.NightlyException.Error.swift	
+@@ -0,0 +1,16 @@
++public import Institute_CI_Model
++public import Institute_Model
++
++
++extension Institute.CI.NightlyException {
++    public enum Error: Swift.Error, Equatable {
++        case image(String)
++        case upstreamIssue(String)
++        case recheck(String)
++        case expired(recheck: String, today: String)
++        /// The exception claims to classify a leg that is gating
++        /// (mechanically: in ci-ok's needs). Advisory-class expiry
++        /// semantics must not be obtainable for a gating obligation.
++        case classifiedGatingLeg(String)
++    }
++}
+diff --git a/Sources/Institute CI Contract/Institute.CI.NightlyException.swift b/Sources/Institute CI Contract/Institute.CI.NightlyException.swift
+index e4dca32..3b5f687 100644
+--- a/Sources/Institute CI Contract/Institute.CI.NightlyException.swift	
++++ b/Sources/Institute CI Contract/Institute.CI.NightlyException.swift	
+@@ -39,26 +39,8 @@ extension Institute.CI {
+ }
+ 
+ extension Institute.CI.NightlyException {
+-    public enum Error: Swift.Error, Equatable {
+-        case image(String)
+-        case upstreamIssue(String)
+-        case recheck(String)
+-        case expired(recheck: String, today: String)
+-        /// The exception claims to classify a leg that is gating
+-        /// (mechanically: in ci-ok's needs). Advisory-class expiry
+-        /// semantics must not be obtainable for a gating obligation.
+-        case classifiedGatingLeg(String)
+-    }
+ 
+-    /// How an in-date-format, well-formed exception applies to this run.
+-    public enum Disposition: Sendable, Equatable {
+-        /// The exception is current: the advisory leg is schedulable.
+-        case active
+-        /// The recheck date has passed on a non-owner subject: the
+-        /// advisory leg is descheduled with this typed record, and the
+-        /// run otherwise proceeds.
+-        case expired(recheck: String, today: String)
+-    }
++
+ 
+     /// The control-plane repository that owns this exception. Its own
+     /// plan stays fail-closed red on expiry so a lapsed exception still
+diff --git a/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.Error.swift b/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.Error.swift
+new file mode 100644
+index 0000000..155c284
+--- /dev/null
++++ b/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.Error.swift	
+@@ -0,0 +1,14 @@
++public import Institute_CI_Model
++public import Institute_Model
++
++
++extension Institute.CI.ReleaseFloorException {
++    public enum Error: Swift.Error, Equatable {
++        case swiftVersion(String)
++        case image(String)
++        case upstreamRelease(String)
++        case recheck(String)
++        case beyondBoundary(recheck: String, boundary: String)
++        case expired(recheck: String, today: String)
++    }
++}
+diff --git a/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.swift b/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.swift
+index aa70196..724604e 100644
+--- a/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.swift	
++++ b/Sources/Institute CI Contract/Institute.CI.ReleaseFloorException.swift	
+@@ -53,14 +53,7 @@ extension Institute.CI {
+ }
+ 
+ extension Institute.CI.ReleaseFloorException {
+-    public enum Error: Swift.Error, Equatable {
+-        case swiftVersion(String)
+-        case image(String)
+-        case upstreamRelease(String)
+-        case recheck(String)
+-        case beyondBoundary(recheck: String, boundary: String)
+-        case expired(recheck: String, today: String)
+-    }
++
+ 
+     /// The RC/stable boundary this class of exception may never outlive.
+     ///
+diff --git a/Sources/Institute CI Model/Institute.CI.AggregateVerdict.Finding.swift b/Sources/Institute CI Model/Institute.CI.AggregateVerdict.Finding.swift
+new file mode 100644
+index 0000000..1f6cec1
+--- /dev/null
++++ b/Sources/Institute CI Model/Institute.CI.AggregateVerdict.Finding.swift	
+@@ -0,0 +1,21 @@
++public import Institute_Model
++
++
++extension Institute.CI.AggregateVerdict {
++    public enum Finding: Sendable, Equatable {
++        case planDidNotSucceed(result: String)
++        case emptyGating
++        case emptySubject
++        case fullTierRequired(got: String)
++        case selectedLegNotSuccessful(job: String, result: String)
++        case unselectedLegRan(job: String, result: String)
++        case nothingBuilt
++        /// A leg the plan descheduled with a reason nevertheless ran —
++        /// the descheduling record and the execution graph disagree.
++        case descheduledLegRan(job: String, result: String)
++        /// The plan's descheduled record names a gating leg. Advisory-
++        /// class descheduling must never be able to account for a
++        /// gating obligation.
++        case descheduledGatingLeg(job: String)
++    }
++}
+diff --git a/Sources/Institute CI Model/Institute.CI.AggregateVerdict.swift b/Sources/Institute CI Model/Institute.CI.AggregateVerdict.swift
+index 61cc64e..e8482a5 100644
+--- a/Sources/Institute CI Model/Institute.CI.AggregateVerdict.swift	
++++ b/Sources/Institute CI Model/Institute.CI.AggregateVerdict.swift	
+@@ -86,20 +86,4 @@ extension Institute.CI {
+ }
+ 
+ extension Institute.CI.AggregateVerdict {
+-    public enum Finding: Sendable, Equatable {
+-        case planDidNotSucceed(result: String)
+-        case emptyGating
+-        case emptySubject
+-        case fullTierRequired(got: String)
+-        case selectedLegNotSuccessful(job: String, result: String)
+-        case unselectedLegRan(job: String, result: String)
+-        case nothingBuilt
+-        /// A leg the plan descheduled with a reason nevertheless ran —
+-        /// the descheduling record and the execution graph disagree.
+-        case descheduledLegRan(job: String, result: String)
+-        /// The plan's descheduled record names a gating leg. Advisory-
+-        /// class descheduling must never be able to account for a
+-        /// gating obligation.
+-        case descheduledGatingLeg(job: String)
+-    }
+ }
+diff --git a/Sources/Institute CI Model/Institute.CI.Leg.Family.swift b/Sources/Institute CI Model/Institute.CI.Leg.Family.swift
+new file mode 100644
+index 0000000..5257481
+--- /dev/null
++++ b/Sources/Institute CI Model/Institute.CI.Leg.Family.swift	
+@@ -0,0 +1,10 @@
++public import Institute_Model
++
++
++extension Institute.CI.Leg {
++    public enum Family: String, Sendable, Equatable {
++        case apple
++        case linux
++        case windows
++    }
++}
+diff --git a/Sources/Institute CI Model/Institute.CI.Leg.swift b/Sources/Institute CI Model/Institute.CI.Leg.swift
+index 97b9687..b2bd19d 100644
+--- a/Sources/Institute CI Model/Institute.CI.Leg.swift	
++++ b/Sources/Institute CI Model/Institute.CI.Leg.swift	
+@@ -14,11 +14,7 @@ extension Institute.CI {
+ }
+ 
+ extension Institute.CI.Leg {
+-    public enum Family: String, Sendable, Equatable {
+-        case apple
+-        case linux
+-        case windows
+-    }
++
+ 
+     /// The platform family the platform-support filter keys on;
+     /// nil for platform-neutral legs (quality gates, advisory).
+diff --git a/Sources/Institute CI Model/Institute.CI.Plan.Descheduled.swift b/Sources/Institute CI Model/Institute.CI.Plan.Descheduled.swift
+new file mode 100644
+index 0000000..3d6baf4
+--- /dev/null
++++ b/Sources/Institute CI Model/Institute.CI.Plan.Descheduled.swift	
+@@ -0,0 +1,26 @@
++public import GitHub_Standard
++public import Institute_Model
++
++
++extension Institute.CI.Plan {
++    /// One leg the plan removed from ``legs`` with a stated reason —
++    /// the third audited state beside scheduled and absent.
++    /// Descheduling is typed, never silent: the aggregate receives
++    /// this list and verifies each entry actually skipped, so a
++    /// descheduled leg stays distinguishable from a platform-filter
++    /// drop or a plan defect.
++    ///
++    /// The reason is an opaque token rather than an enumeration: what
++    /// makes a leg unschedulable is policy, and policy is owned a
++    /// layer up. This owner records the reason and audits the
++    /// consequence without interpreting either.
++    public struct Descheduled: Sendable, Equatable {
++        public let leg: Leg
++        public let reason: String
++
++        public init(leg: Leg, reason: String) {
++            self.leg = leg
++            self.reason = reason
++        }
++    }
++}
+diff --git a/Sources/Institute CI Model/Institute.CI.Plan.Error.swift b/Sources/Institute CI Model/Institute.CI.Plan.Error.swift
+new file mode 100644
+index 0000000..a0abd9f
+--- /dev/null
++++ b/Sources/Institute CI Model/Institute.CI.Plan.Error.swift	
+@@ -0,0 +1,16 @@
++public import GitHub_Standard
++public import Institute_Model
++
++
++extension Institute.CI.Plan {
++    public enum Error: Swift.Error, Equatable {
++        case retiredLintTier
++        case unknownForcedTier(String)
++        case invalidPlatformFamily(String)
++        case duplicatePlatformFamily(String)
++        case trailingEmptyPlatformFamily(String)
++        case noRecognizedPlatformFamily(String)
++        case invalidLintBundle(String)
++        case noGatingBuildLeg(tier: Tier, platformSupport: String)
++    }
++}
+diff --git a/Sources/Institute CI Model/Institute.CI.Plan.Subject.swift b/Sources/Institute CI Model/Institute.CI.Plan.Subject.swift
+new file mode 100644
+index 0000000..ff9bb09
+--- /dev/null
++++ b/Sources/Institute CI Model/Institute.CI.Plan.Subject.swift	
+@@ -0,0 +1,17 @@
++public import GitHub_Standard
++public import Institute_Model
++
++
++extension Institute.CI.Plan {
++    public struct Subject: Sendable, Equatable {
++        public let repository: GitHub_Standard::GitHub.Repository.Slug
++        public let ref: String
++        public let sha: String
++
++        public init(repository: GitHub_Standard::GitHub.Repository.Slug, ref: String, sha: String) {
++            self.repository = repository
++            self.ref = ref
++            self.sha = sha
++        }
++    }
++}
+diff --git a/Sources/Institute CI Model/Institute.CI.Plan.swift b/Sources/Institute CI Model/Institute.CI.Plan.swift
+index 965a6b4..91e0274 100644
+--- a/Sources/Institute CI Model/Institute.CI.Plan.swift	
++++ b/Sources/Institute CI Model/Institute.CI.Plan.swift	
+@@ -117,49 +117,9 @@ extension Institute.CI {
+ }
+ 
+ extension Institute.CI.Plan {
+-    public enum Error: Swift.Error, Equatable {
+-        case retiredLintTier
+-        case unknownForcedTier(String)
+-        case invalidPlatformFamily(String)
+-        case duplicatePlatformFamily(String)
+-        case trailingEmptyPlatformFamily(String)
+-        case noRecognizedPlatformFamily(String)
+-        case invalidLintBundle(String)
+-        case noGatingBuildLeg(tier: Tier, platformSupport: String)
+-    }
+ 
+-    public struct Subject: Sendable, Equatable {
+-        public let repository: GitHub_Standard::GitHub.Repository.Slug
+-        public let ref: String
+-        public let sha: String
+ 
+-        public init(repository: GitHub_Standard::GitHub.Repository.Slug, ref: String, sha: String) {
+-            self.repository = repository
+-            self.ref = ref
+-            self.sha = sha
+-        }
+-    }
+ 
+-    /// One leg the plan removed from ``legs`` with a stated reason —
+-    /// the third audited state beside scheduled and absent.
+-    /// Descheduling is typed, never silent: the aggregate receives
+-    /// this list and verifies each entry actually skipped, so a
+-    /// descheduled leg stays distinguishable from a platform-filter
+-    /// drop or a plan defect.
+-    ///
+-    /// The reason is an opaque token rather than an enumeration: what
+-    /// makes a leg unschedulable is policy, and policy is owned a
+-    /// layer up. This owner records the reason and audits the
+-    /// consequence without interpreting either.
+-    public struct Descheduled: Sendable, Equatable {
+-        public let leg: Leg
+-        public let reason: String
+-
+-        public init(leg: Leg, reason: String) {
+-            self.leg = leg
+-            self.reason = reason
+-        }
+-    }
+ 
+     public var gating: [Leg] { legs.filter(\.gating) }
+ 
+diff --git a/Sources/Institute CI Model/Institute.CI.Requirement.Expectation.swift b/Sources/Institute CI Model/Institute.CI.Requirement.Expectation.swift
+new file mode 100644
+index 0000000..c0cd2ef
+--- /dev/null
++++ b/Sources/Institute CI Model/Institute.CI.Requirement.Expectation.swift	
+@@ -0,0 +1,9 @@
++public import Institute_Model
++
++
++extension Institute.CI.Requirement {
++    public enum Expectation: String, Sendable, Equatable {
++        case success
++        case skipped
++    }
++}
+diff --git a/Sources/Institute CI Model/Institute.CI.Requirement.swift b/Sources/Institute CI Model/Institute.CI.Requirement.swift
+index 63f3202..021b9d8 100644
+--- a/Sources/Institute CI Model/Institute.CI.Requirement.swift	
++++ b/Sources/Institute CI Model/Institute.CI.Requirement.swift	
+@@ -17,10 +17,7 @@ extension Institute.CI {
+ }
+ 
+ extension Institute.CI.Requirement {
+-    public enum Expectation: String, Sendable, Equatable {
+-        case success
+-        case skipped
+-    }
++
+ 
+     public static let checkContext = "ci / matrix / ci-ok"
+ 
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.Step.swift b/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.Step.swift
+new file mode 100644
+index 0000000..69e1cad
+--- /dev/null
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.Step.swift	
+@@ -0,0 +1,19 @@
++import GitHub_Standard
++public import Institute_CI_Model
++import Institute_CI_Workflow
++public import Institute_Model
++import Standard_Library_Extensions
++import struct Swift.String
++
++
++extension Institute.CI.Validation.BinaryInstallChecksum {
++    /// One step, with the label a finding cites it by.
++    struct Step {
++        let run: String?
++        /// The step's `name:`, or `#<index>` when it has none — and
++        /// the index counts **every** entry of `steps:`, including
++        /// malformed ones, so the number a reader counts down the
++        /// file is the number they are given.
++        let label: String
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.swift b/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.swift
+index 6f56403..2cabdab 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.BinaryInstallChecksum.swift	
+@@ -70,15 +70,6 @@ extension Institute.CI.Validation.BinaryInstallChecksum {
+         return findings
+     }
+ 
+-    /// One step, with the label a finding cites it by.
+-    struct Step {
+-        let run: String?
+-        /// The step's `name:`, or `#<index>` when it has none — and
+-        /// the index counts **every** entry of `steps:`, including
+-        /// malformed ones, so the number a reader counts down the
+-        /// file is the number they are given.
+-        let label: String
+-    }
+ 
+     static func steps(of job: Institute.CI.Workflow.Job) -> [Step] {
+         guard let entries = job.body["steps"]?.sequence else { return [] }
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.Entry.swift b/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.Entry.swift
+new file mode 100644
+index 0000000..429f2ec
+--- /dev/null
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.Entry.swift	
+@@ -0,0 +1,20 @@
++public import File_System
++public import GitHub_Standard
++public import Institute_CI_Model
++public import Institute_Model
++public import Package_Manager
++import struct Swift.String
++
++
++extension Institute.CI.Validation.BranchPins.Baseline {
++    /// One suppressed declaration.
++    public struct Entry: Sendable, Hashable {
++        public let repository: GitHub_Standard::GitHub.Repository.Slug
++        public let url: Package.Manifest.Dependency.Location
++
++        public init(repository: GitHub_Standard::GitHub.Repository.Slug, url: Package.Manifest.Dependency.Location) {
++            self.repository = repository
++            self.url = url
++        }
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.swift b/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.swift
+index 6e8cc5a..fe2d06c 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.BranchPins.Baseline.swift	
+@@ -29,16 +29,7 @@ extension Institute.CI.Validation.BranchPins {
+ }
+ 
+ extension Institute.CI.Validation.BranchPins.Baseline {
+-    /// One suppressed declaration.
+-    public struct Entry: Sendable, Hashable {
+-        public let repository: GitHub_Standard::GitHub.Repository.Slug
+-        public let url: Package.Manifest.Dependency.Location
+ 
+-        public init(repository: GitHub_Standard::GitHub.Repository.Slug, url: Package.Manifest.Dependency.Location) {
+-            self.repository = repository
+-            self.url = url
+-        }
+-    }
+ 
+     public static let empty = Self(entries: [])
+ 
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Exemption.swift b/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Exemption.swift
+new file mode 100644
+index 0000000..e5b1082
+--- /dev/null
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Exemption.swift	
+@@ -0,0 +1,21 @@
++import GitHub_Standard
++public import Institute_CI_Model
++public import Institute_Model
++import struct Swift.String
++
++
++extension Institute.CI.Validation.CompositeActionPins {
++    /// A typed, reasoned exemption — owner, trigger, reason,
++    /// retirement condition — recorded as data rather than as a
++    /// wildcard.
++    ///
++    /// The site is an exact `(workflow file, action)` **pair, never a
++    /// filename wildcard**: a *different* action gaining an unpinned
++    /// reference in the same file must still fire, and the retired
++    /// suite's control asserts exactly that.
++    public struct Exemption: Sendable, Hashable {
++        public let workflow: String
++        public let action: String
++        public let reason: String
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Site.swift b/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Site.swift
+new file mode 100644
+index 0000000..6411134
+--- /dev/null
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.Site.swift	
+@@ -0,0 +1,14 @@
++import GitHub_Standard
++public import Institute_CI_Model
++public import Institute_Model
++import struct Swift.String
++
++
++extension Institute.CI.Validation.CompositeActionPins {
++    /// One unpinned self-referential composite-action reference.
++    public struct Site: Sendable, Equatable {
++        public let line: Int
++        public let action: String
++        public let reference: String
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.swift b/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.swift
+index 4b9cead..0e09464 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.CompositeActionPins.swift	
+@@ -63,12 +63,6 @@ extension Institute.CI.Validation.CompositeActionPins {
+         return findings
+     }
+ 
+-    /// One unpinned self-referential composite-action reference.
+-    public struct Site: Sendable, Equatable {
+-        public let line: Int
+-        public let action: String
+-        public let reference: String
+-    }
+ 
+     /// The path prefix that makes a `uses:` line this rule's business.
+     ///
+@@ -147,19 +141,6 @@ extension Institute.CI.Validation.CompositeActionPins {
+         return lines
+     }
+ 
+-    /// A typed, reasoned exemption — owner, trigger, reason,
+-    /// retirement condition — recorded as data rather than as a
+-    /// wildcard.
+-    ///
+-    /// The site is an exact `(workflow file, action)` **pair, never a
+-    /// filename wildcard**: a *different* action gaining an unpinned
+-    /// reference in the same file must still fire, and the retired
+-    /// suite's control asserts exactly that.
+-    public struct Exemption: Sendable, Hashable {
+-        public let workflow: String
+-        public let action: String
+-        public let reason: String
+-    }
+ 
+     /// `lint-validators-weekly.yml`'s two sites.
+     ///
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Exemption.swift b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Exemption.swift
+new file mode 100644
+index 0000000..cc0d531
+--- /dev/null
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Exemption.swift	
+@@ -0,0 +1,15 @@
++import GitHub_Standard
++public import Institute_CI_Model
++import Institute_CI_Workflow
++public import Institute_Model
++import struct Swift.String
++
++
++extension Institute.CI.Validation.ThinCallers {
++    struct Exemption {
++        let repository: GitHub_Standard::GitHub.Repository.Slug
++        let path: String
++        let admits: FindingClass
++        let ruling: String
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.FindingClass.swift b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.FindingClass.swift
+new file mode 100644
+index 0000000..e9306e5
+--- /dev/null
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.FindingClass.swift	
+@@ -0,0 +1,20 @@
++import GitHub_Standard
++public import Institute_CI_Model
++import Institute_CI_Workflow
++public import Institute_Model
++import struct Swift.String
++
++
++extension Institute.CI.Validation.ThinCallers {
++    /// One `[CI-059]` predicate. An exemption admits exactly one of
++    /// these in exactly one file; every other class in the same file
++    /// still fires.
++    enum FindingClass: String {
++        case sameOrganizationExplicit = "same-org-explicit"
++        case sameOrganizationOmitted = "same-org-omitted"
++        case crossOrganizationInherit = "cross-org-inherit"
++        case crossOrganizationMissingNames = "cross-org-missing-names"
++        case crossOrganizationExtraNames = "cross-org-extra-names"
++        case crossOrganizationOmitted = "cross-org-omitted"
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.swift b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.swift
+index 6886ed4..82d16b1 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.swift	
+@@ -87,17 +87,6 @@ extension Institute.CI.Validation.ThinCallers {
+     /// so an exempted finding stays visible without counting.
+     static let exemptRule: Rule = "CI-059-EXEMPT"
+ 
+-    /// One `[CI-059]` predicate. An exemption admits exactly one of
+-    /// these in exactly one file; every other class in the same file
+-    /// still fires.
+-    enum FindingClass: String {
+-        case sameOrganizationExplicit = "same-org-explicit"
+-        case sameOrganizationOmitted = "same-org-omitted"
+-        case crossOrganizationInherit = "cross-org-inherit"
+-        case crossOrganizationMissingNames = "cross-org-missing-names"
+-        case crossOrganizationExtraNames = "cross-org-extra-names"
+-        case crossOrganizationOmitted = "cross-org-omitted"
+-    }
+ 
+     /// The typed `[CI-059]` exemptions, keyed by repository and
+     /// workflow path (#92: "exceptions exist only as typed whitelist
+@@ -118,12 +107,6 @@ extension Institute.CI.Validation.ThinCallers {
+         )
+     ]
+ 
+-    struct Exemption {
+-        let repository: GitHub_Standard::GitHub.Repository.Slug
+-        let path: String
+-        let admits: FindingClass
+-        let ruling: String
+-    }
+ 
+     public func findings(in subject: Subject) throws(EnvironmentDefect) -> [Finding] {
+         guard try subject.text(at: "Package.swift") != nil else { return [] }
+diff --git a/Sources/Institute Repository Policy/Institute.Repository.Policy+Decision.swift b/Sources/Institute Repository Policy/Institute.Repository.Policy+Decision.swift
+index 31dd654..1a8ae17 100644
+--- a/Sources/Institute Repository Policy/Institute.Repository.Policy+Decision.swift	
++++ b/Sources/Institute Repository Policy/Institute.Repository.Policy+Decision.swift	
+@@ -76,16 +76,7 @@ extension Institute.Repository.Policy {
+ }
+ 
+ extension Institute.Repository.Policy.Repository {
+-    enum CodingKeys: String, CodingKey {
+-        case id
+-        case name
+-        case fullName = "full_name"
+-        case visibility
+-        case archived
+-        case disabled
+-        case fork
+-        case size
+-    }
++
+ 
+     public var owner: String {
+         String(fullName.prefix { $0 != "/" })
+diff --git a/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.Document.swift b/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.Document.swift
+new file mode 100644
+index 0000000..2f2462b
+--- /dev/null
++++ b/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.Document.swift	
+@@ -0,0 +1,16 @@
++public import Institute_Model
++public import GitHub_Standard
++public import Package_Manager
++
++
++extension Institute.Repository.Policy.Manifest {
++    public struct Document: Sendable, Equatable {
++        public let name: String
++        public let source: String
++
++        public init(name: String, source: String) {
++            self.name = name
++            self.source = source
++        }
++    }
++}
+diff --git a/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.swift b/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.swift
+index edd6a95..3b1b6f7 100644
+--- a/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.swift	
++++ b/Sources/Institute Repository Policy/Institute.Repository.Policy.Manifest.swift	
+@@ -21,15 +21,6 @@ extension Institute.Repository.Policy {
+ }
+ 
+ extension Institute.Repository.Policy.Manifest {
+-    public struct Document: Sendable, Equatable {
+-        public let name: String
+-        public let source: String
+-
+-        public init(name: String, source: String) {
+-            self.name = name
+-            self.source = source
+-        }
+-    }
+ }
+ 
+ extension Institute.Repository.Policy.Manifest {
+diff --git a/Sources/Institute Repository Policy/Institute.Repository.Policy.Repository.CodingKeys.swift b/Sources/Institute Repository Policy/Institute.Repository.Policy.Repository.CodingKeys.swift
+new file mode 100644
+index 0000000..d59db53
+--- /dev/null
++++ b/Sources/Institute Repository Policy/Institute.Repository.Policy.Repository.CodingKeys.swift	
+@@ -0,0 +1,15 @@
++public import Institute_Model
++
++
++extension Institute.Repository.Policy.Repository {
++    enum CodingKeys: String, CodingKey {
++        case id
++        case name
++        case fullName = "full_name"
++        case visibility
++        case archived
++        case disabled
++        case fork
++        case size
++    }
++}
+-- 
+2.43.0
+

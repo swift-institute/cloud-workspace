@@ -1,0 +1,558 @@
+From 531bc49f9a0ffa683a958f090f53f79c3cbed9e3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:06:17 +0000
+Subject: [PATCH 11/12] single type per file: additional types moved to their
+ own files (type-check follows; Linux x86_64, Swift 6.4.2) (coenttb/work#242)
+
+---
+ .../Async.CompactMap.Iterator.swift           | 45 +++++++++++++
+ .../Async.CompactMap.Transform.swift          | 10 +++
+ Sources/Async Sequence/Async.CompactMap.swift | 45 -------------
+ .../Async.Filter.Iterator.swift               | 45 +++++++++++++
+ .../Async.Filter.Predicate.swift              | 10 +++
+ Sources/Async Sequence/Async.Filter.swift     | 45 -------------
+ .../Async.FlatMap.Iterator.swift              | 64 +++++++++++++++++++
+ .../Async.FlatMap.Transform.swift             | 10 +++
+ Sources/Async Sequence/Async.FlatMap.swift    | 64 -------------------
+ .../Async Sequence/Async.Map.Iterator.swift   | 41 ++++++++++++
+ .../Async Sequence/Async.Map.Transform.swift  | 10 +++
+ Sources/Async Sequence/Async.Map.swift        | 41 ------------
+ 12 files changed, 235 insertions(+), 195 deletions(-)
+ create mode 100644 Sources/Async Sequence/Async.CompactMap.Iterator.swift
+ create mode 100644 Sources/Async Sequence/Async.CompactMap.Transform.swift
+ create mode 100644 Sources/Async Sequence/Async.Filter.Iterator.swift
+ create mode 100644 Sources/Async Sequence/Async.Filter.Predicate.swift
+ create mode 100644 Sources/Async Sequence/Async.FlatMap.Iterator.swift
+ create mode 100644 Sources/Async Sequence/Async.FlatMap.Transform.swift
+ create mode 100644 Sources/Async Sequence/Async.Map.Iterator.swift
+ create mode 100644 Sources/Async Sequence/Async.Map.Transform.swift
+
+diff --git a/Sources/Async Sequence/Async.CompactMap.Iterator.swift b/Sources/Async Sequence/Async.CompactMap.Iterator.swift
+new file mode 100644
+index 0000000..8feaa6b
+--- /dev/null
++++ b/Sources/Async Sequence/Async.CompactMap.Iterator.swift	
+@@ -0,0 +1,45 @@
++import _Concurrency
++
++
++extension Async.CompactMap {
++    public struct Iterator: AsyncIteratorProtocol {
++        @usableFromInline
++        var baseIterator: Base.AsyncIterator
++
++        @usableFromInline
++        let transform: Transform
++
++        @usableFromInline
++        init(
++            baseIterator: Base.AsyncIterator,
++            transform: Transform
++        ) {
++            self.baseIterator = baseIterator
++            self.transform = transform
++        }
++
++        @inlinable
++        public mutating func next(
++
++            isolation actor: isolated (any Actor)? = #isolation
++        ) async -> Output? {
++            while true {
++                let element: Base.Element?
++                do throws(Base.Failure) {
++                    element = try await baseIterator.next(isolation: actor)
++                } catch {
++                    return nil
++                }
++                guard let element else { return nil }
++                let result: Output?
++                switch transform {
++                case .sync(let f): result = f(element)
++                case .async(let f): result = await f(element)
++                }
++                if let output = result {
++                    return output
++                }
++            }
++        }
++    }
++}
+diff --git a/Sources/Async Sequence/Async.CompactMap.Transform.swift b/Sources/Async Sequence/Async.CompactMap.Transform.swift
+new file mode 100644
+index 0000000..4366433
+--- /dev/null
++++ b/Sources/Async Sequence/Async.CompactMap.Transform.swift	
+@@ -0,0 +1,10 @@
++import _Concurrency
++
++
++extension Async.CompactMap {
++    @usableFromInline
++    enum Transform {
++        case sync((Base.Element) -> Output?)
++        case async((Base.Element) async -> Output?)
++    }
++}
+diff --git a/Sources/Async Sequence/Async.CompactMap.swift b/Sources/Async Sequence/Async.CompactMap.swift
+index 7b43bc0..82e8244 100644
+--- a/Sources/Async Sequence/Async.CompactMap.swift	
++++ b/Sources/Async Sequence/Async.CompactMap.swift	
+@@ -19,52 +19,7 @@ extension Async {
+ extension Async.CompactMap {
+     public typealias Element = Output
+ 
+-    @usableFromInline
+-    enum Transform {
+-        case sync((Base.Element) -> Output?)
+-        case async((Base.Element) async -> Output?)
+-    }
+-
+-    public struct Iterator: AsyncIteratorProtocol {
+-        @usableFromInline
+-        var baseIterator: Base.AsyncIterator
+ 
+-        @usableFromInline
+-        let transform: Transform
+-
+-        @usableFromInline
+-        init(
+-            baseIterator: Base.AsyncIterator,
+-            transform: Transform
+-        ) {
+-            self.baseIterator = baseIterator
+-            self.transform = transform
+-        }
+-
+-        @inlinable
+-        public mutating func next(
+-
+-            isolation actor: isolated (any Actor)? = #isolation
+-        ) async -> Output? {
+-            while true {
+-                let element: Base.Element?
+-                do throws(Base.Failure) {
+-                    element = try await baseIterator.next(isolation: actor)
+-                } catch {
+-                    return nil
+-                }
+-                guard let element else { return nil }
+-                let result: Output?
+-                switch transform {
+-                case .sync(let f): result = f(element)
+-                case .async(let f): result = await f(element)
+-                }
+-                if let output = result {
+-                    return output
+-                }
+-            }
+-        }
+-    }
+ }
+ 
+ extension Async.CompactMap {
+diff --git a/Sources/Async Sequence/Async.Filter.Iterator.swift b/Sources/Async Sequence/Async.Filter.Iterator.swift
+new file mode 100644
+index 0000000..62b9f4b
+--- /dev/null
++++ b/Sources/Async Sequence/Async.Filter.Iterator.swift	
+@@ -0,0 +1,45 @@
++import _Concurrency
++
++
++extension Async.Filter {
++    public struct Iterator: AsyncIteratorProtocol {
++        @usableFromInline
++        var baseIterator: Base.AsyncIterator
++
++        @usableFromInline
++        let predicate: Predicate
++
++        @usableFromInline
++        init(
++            baseIterator: Base.AsyncIterator,
++            predicate: Predicate
++        ) {
++            self.baseIterator = baseIterator
++            self.predicate = predicate
++        }
++
++        @inlinable
++        public mutating func next(
++
++            isolation actor: isolated (any Actor)? = #isolation
++        ) async -> Base.Element? {
++            while true {
++                let element: Base.Element?
++                do throws(Base.Failure) {
++                    element = try await baseIterator.next(isolation: actor)
++                } catch {
++                    return nil
++                }
++                guard let element else { return nil }
++                let included: Bool
++                switch predicate {
++                case .sync(let f): included = f(element)
++                case .async(let f): included = await f(element)
++                }
++                if included {
++                    return element
++                }
++            }
++        }
++    }
++}
+diff --git a/Sources/Async Sequence/Async.Filter.Predicate.swift b/Sources/Async Sequence/Async.Filter.Predicate.swift
+new file mode 100644
+index 0000000..66ad0d1
+--- /dev/null
++++ b/Sources/Async Sequence/Async.Filter.Predicate.swift	
+@@ -0,0 +1,10 @@
++import _Concurrency
++
++
++extension Async.Filter {
++    @usableFromInline
++    enum Predicate {
++        case sync((Base.Element) -> Bool)
++        case async((Base.Element) async -> Bool)
++    }
++}
+diff --git a/Sources/Async Sequence/Async.Filter.swift b/Sources/Async Sequence/Async.Filter.swift
+index e83dc74..3afc2d7 100644
+--- a/Sources/Async Sequence/Async.Filter.swift	
++++ b/Sources/Async Sequence/Async.Filter.swift	
+@@ -19,52 +19,7 @@ extension Async {
+ extension Async.Filter {
+     public typealias Element = Base.Element
+ 
+-    @usableFromInline
+-    enum Predicate {
+-        case sync((Base.Element) -> Bool)
+-        case async((Base.Element) async -> Bool)
+-    }
+-
+-    public struct Iterator: AsyncIteratorProtocol {
+-        @usableFromInline
+-        var baseIterator: Base.AsyncIterator
+ 
+-        @usableFromInline
+-        let predicate: Predicate
+-
+-        @usableFromInline
+-        init(
+-            baseIterator: Base.AsyncIterator,
+-            predicate: Predicate
+-        ) {
+-            self.baseIterator = baseIterator
+-            self.predicate = predicate
+-        }
+-
+-        @inlinable
+-        public mutating func next(
+-
+-            isolation actor: isolated (any Actor)? = #isolation
+-        ) async -> Base.Element? {
+-            while true {
+-                let element: Base.Element?
+-                do throws(Base.Failure) {
+-                    element = try await baseIterator.next(isolation: actor)
+-                } catch {
+-                    return nil
+-                }
+-                guard let element else { return nil }
+-                let included: Bool
+-                switch predicate {
+-                case .sync(let f): included = f(element)
+-                case .async(let f): included = await f(element)
+-                }
+-                if included {
+-                    return element
+-                }
+-            }
+-        }
+-    }
+ }
+ 
+ extension Async.Filter {
+diff --git a/Sources/Async Sequence/Async.FlatMap.Iterator.swift b/Sources/Async Sequence/Async.FlatMap.Iterator.swift
+new file mode 100644
+index 0000000..636282f
+--- /dev/null
++++ b/Sources/Async Sequence/Async.FlatMap.Iterator.swift	
+@@ -0,0 +1,64 @@
++import _Concurrency
++
++
++extension Async.FlatMap {
++    public struct Iterator: AsyncIteratorProtocol {
++        @usableFromInline
++        var baseIterator: Base.AsyncIterator
++
++        @usableFromInline
++        let transform: Transform
++
++        @usableFromInline
++        var currentIterator: Segment.AsyncIterator?
++
++        @usableFromInline
++        init(
++            baseIterator: Base.AsyncIterator,
++            transform: Transform
++        ) {
++            self.baseIterator = baseIterator
++            self.transform = transform
++            self.currentIterator = nil
++        }
++
++        @inlinable
++        public mutating func next(
++
++            isolation actor: isolated (any Actor)? = #isolation
++        ) async -> Segment.Element? {
++            while true {
++                if var inner = currentIterator {
++                    let element: Segment.Element?
++                    do throws(Segment.Failure) {
++                        element = try await inner.next(isolation: actor)
++                    } catch {
++                        element = nil
++                    }
++                    if let element {
++                        currentIterator = inner
++                        return element
++                    }
++                    currentIterator = nil
++                }
++
++                let base: Base.Element?
++                do throws(Base.Failure) {
++                    base = try await baseIterator.next(isolation: actor)
++                } catch {
++                    return nil
++                }
++                guard let base else {
++                    return nil
++                }
++
++                let segment: Segment
++                switch transform {
++                case .sync(let f): segment = f(base)
++                case .async(let f): segment = await f(base)
++                }
++                currentIterator = segment.makeAsyncIterator()
++            }
++        }
++    }
++}
+diff --git a/Sources/Async Sequence/Async.FlatMap.Transform.swift b/Sources/Async Sequence/Async.FlatMap.Transform.swift
+new file mode 100644
+index 0000000..7f51a91
+--- /dev/null
++++ b/Sources/Async Sequence/Async.FlatMap.Transform.swift	
+@@ -0,0 +1,10 @@
++import _Concurrency
++
++
++extension Async.FlatMap {
++    @usableFromInline
++    enum Transform {
++        case sync((Base.Element) -> Segment)
++        case async((Base.Element) async -> Segment)
++    }
++}
+diff --git a/Sources/Async Sequence/Async.FlatMap.swift b/Sources/Async Sequence/Async.FlatMap.swift
+index dc57412..0aff035 100644
+--- a/Sources/Async Sequence/Async.FlatMap.swift	
++++ b/Sources/Async Sequence/Async.FlatMap.swift	
+@@ -19,71 +19,7 @@ extension Async {
+ extension Async.FlatMap {
+     public typealias Element = Segment.Element
+ 
+-    @usableFromInline
+-    enum Transform {
+-        case sync((Base.Element) -> Segment)
+-        case async((Base.Element) async -> Segment)
+-    }
+-
+-    public struct Iterator: AsyncIteratorProtocol {
+-        @usableFromInline
+-        var baseIterator: Base.AsyncIterator
+ 
+-        @usableFromInline
+-        let transform: Transform
+-
+-        @usableFromInline
+-        var currentIterator: Segment.AsyncIterator?
+-
+-        @usableFromInline
+-        init(
+-            baseIterator: Base.AsyncIterator,
+-            transform: Transform
+-        ) {
+-            self.baseIterator = baseIterator
+-            self.transform = transform
+-            self.currentIterator = nil
+-        }
+-
+-        @inlinable
+-        public mutating func next(
+-
+-            isolation actor: isolated (any Actor)? = #isolation
+-        ) async -> Segment.Element? {
+-            while true {
+-                if var inner = currentIterator {
+-                    let element: Segment.Element?
+-                    do throws(Segment.Failure) {
+-                        element = try await inner.next(isolation: actor)
+-                    } catch {
+-                        element = nil
+-                    }
+-                    if let element {
+-                        currentIterator = inner
+-                        return element
+-                    }
+-                    currentIterator = nil
+-                }
+-
+-                let base: Base.Element?
+-                do throws(Base.Failure) {
+-                    base = try await baseIterator.next(isolation: actor)
+-                } catch {
+-                    return nil
+-                }
+-                guard let base else {
+-                    return nil
+-                }
+-
+-                let segment: Segment
+-                switch transform {
+-                case .sync(let f): segment = f(base)
+-                case .async(let f): segment = await f(base)
+-                }
+-                currentIterator = segment.makeAsyncIterator()
+-            }
+-        }
+-    }
+ }
+ 
+ extension Async.FlatMap {
+diff --git a/Sources/Async Sequence/Async.Map.Iterator.swift b/Sources/Async Sequence/Async.Map.Iterator.swift
+new file mode 100644
+index 0000000..160421f
+--- /dev/null
++++ b/Sources/Async Sequence/Async.Map.Iterator.swift	
+@@ -0,0 +1,41 @@
++import _Concurrency
++
++
++extension Async.Map {
++    public struct Iterator: AsyncIteratorProtocol {
++        @usableFromInline
++        var baseIterator: Base.AsyncIterator
++
++        @usableFromInline
++        let transform: Transform
++
++        @usableFromInline
++        init(
++            baseIterator: Base.AsyncIterator,
++            transform: Transform
++        ) {
++            self.baseIterator = baseIterator
++            self.transform = transform
++        }
++
++        @inlinable
++        public mutating func next(
++
++            isolation actor: isolated (any Actor)? = #isolation
++        ) async -> Output? {
++            let element: Base.Element?
++            do throws(Base.Failure) {
++                element = try await baseIterator.next(isolation: actor)
++            } catch {
++                return nil
++            }
++            guard let element else {
++                return nil
++            }
++            switch transform {
++            case .sync(let f): return f(element)
++            case .async(let f): return await f(element)
++            }
++        }
++    }
++}
+diff --git a/Sources/Async Sequence/Async.Map.Transform.swift b/Sources/Async Sequence/Async.Map.Transform.swift
+new file mode 100644
+index 0000000..c6c29c8
+--- /dev/null
++++ b/Sources/Async Sequence/Async.Map.Transform.swift	
+@@ -0,0 +1,10 @@
++import _Concurrency
++
++
++extension Async.Map {
++    @usableFromInline
++    enum Transform {
++        case sync((Base.Element) -> Output)
++        case async((Base.Element) async -> Output)
++    }
++}
+diff --git a/Sources/Async Sequence/Async.Map.swift b/Sources/Async Sequence/Async.Map.swift
+index 4226b8c..a8dfb94 100644
+--- a/Sources/Async Sequence/Async.Map.swift	
++++ b/Sources/Async Sequence/Async.Map.swift	
+@@ -19,48 +19,7 @@ extension Async {
+ extension Async.Map {
+     public typealias Element = Output
+ 
+-    @usableFromInline
+-    enum Transform {
+-        case sync((Base.Element) -> Output)
+-        case async((Base.Element) async -> Output)
+-    }
+-
+-    public struct Iterator: AsyncIteratorProtocol {
+-        @usableFromInline
+-        var baseIterator: Base.AsyncIterator
+ 
+-        @usableFromInline
+-        let transform: Transform
+-
+-        @usableFromInline
+-        init(
+-            baseIterator: Base.AsyncIterator,
+-            transform: Transform
+-        ) {
+-            self.baseIterator = baseIterator
+-            self.transform = transform
+-        }
+-
+-        @inlinable
+-        public mutating func next(
+-
+-            isolation actor: isolated (any Actor)? = #isolation
+-        ) async -> Output? {
+-            let element: Base.Element?
+-            do throws(Base.Failure) {
+-                element = try await baseIterator.next(isolation: actor)
+-            } catch {
+-                return nil
+-            }
+-            guard let element else {
+-                return nil
+-            }
+-            switch transform {
+-            case .sync(let f): return f(element)
+-            case .async(let f): return await f(element)
+-            }
+-        }
+-    }
+ }
+ 
+ extension Async.Map {
+-- 
+2.43.0
+

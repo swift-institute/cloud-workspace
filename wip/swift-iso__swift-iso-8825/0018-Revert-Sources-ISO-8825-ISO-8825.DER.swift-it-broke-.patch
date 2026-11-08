@@ -1,0 +1,278 @@
+From 45d705d1ba2b525f1b96717a3bcfc439753da93e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:12:08 +0000
+Subject: [PATCH 18/26] Revert Sources/ISO 8825/ISO 8825.DER.swift: it broke
+ the type-check (coenttb/work#242)
+
+---
+ Sources/ISO 8825/ISO 8825.DER.swift | 241 ++++++++++++++++++++++++++++
+ 1 file changed, 241 insertions(+)
+
+diff --git a/Sources/ISO 8825/ISO 8825.DER.swift b/Sources/ISO 8825/ISO 8825.DER.swift
+index 7a1fde3..1a8ac32 100644
+--- a/Sources/ISO 8825/ISO 8825.DER.swift	
++++ b/Sources/ISO 8825/ISO 8825.DER.swift	
+@@ -419,9 +419,231 @@ extension ISO_8825.DER {
+ }
+ 
+ extension ISO_8825.DER {
++
++    public struct Serializer: Sendable {
++        @usableFromInline
++        var _serializedBytes: [UInt8]
++
++        @inlinable
++        public var serializedBytes: [UInt8] {
++            self._serializedBytes
++        }
++
++        @inlinable
++        public init() {
++
++            self._serializedBytes = []
++            self._serializedBytes.reserveCapacity(1024)
++        }
++
++        @inlinable
++        public mutating func appendPrimitiveNode<E: Swift.Error>(
++            identifier: ISO_8824.Identifier,
++            _ contentWriter: (inout [UInt8]) throws(E) -> Void
++        ) throws(E) {
++            try self._appendNode(identifier: identifier, constructed: false) {
++                (serializer: inout Serializer) throws(E) in
++                try contentWriter(&serializer._serializedBytes)
++            }
++        }
++
++        @inlinable
++        public mutating func appendConstructedNode<E: Swift.Error>(
++            identifier: ISO_8824.Identifier,
++            _ contentWriter: (inout Serializer) throws(E) -> Void
++        ) throws(E) {
++            try self._appendNode(identifier: identifier, constructed: true, contentWriter)
++        }
++
++        @inlinable
++        public mutating func serialize<T: ISO_8825.DER.Serializable>(
++            _ node: T
++        ) throws(ISO_8824.Error) {
++            try node.serialize(into: &self)
++        }
++
++        @inlinable
++        public mutating func serialize<T: ISO_8825.DER.Serializable>(
++            _ node: T,
++            explicitlyTaggedWithTagNumber tagNumber: UInt,
++            tagClass: ISO_8824.Identifier.Class
++        ) throws(ISO_8824.Error) {
++            let identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
++            return try self.serialize(node, explicitlyTaggedWithIdentifier: identifier)
++        }
++
++        @inlinable
++        public mutating func serialize<T: ISO_8825.DER.Serializable>(
++            _ node: T,
++            explicitlyTaggedWithIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error) {
++            try self.appendConstructedNode(identifier: identifier) {
++                (coder: inout Serializer) throws(ISO_8824.Error) in
++                try coder.serialize(node)
++            }
++        }
++
++        @inlinable
++        public mutating func serializeOptionalImplicitlyTagged<T: ISO_8825.DER.Serializable>(
++            _ node: T?
++        ) throws(ISO_8824.Error) {
++            if let node {
++                try self.serialize(node)
++            }
++        }
++
++        @inlinable
++        public mutating func serializeOptionalImplicitlyTagged<T: ISO_8825.DER.ImplicitlyTaggable>(
++            _ node: T?,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error) {
++            if let node {
++                try node.serialize(into: &self, withIdentifier: identifier)
++            }
++        }
++
++        @inlinable
++        public mutating func serialize<E: Swift.Error>(
++            explicitlyTaggedWithTagNumber tagNumber: UInt,
++            tagClass: ISO_8824.Identifier.Class,
++            _ block: (inout Serializer) throws(E) -> Void
++        ) throws(E) {
++            let identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
++            try self.appendConstructedNode(identifier: identifier) {
++                (coder: inout Serializer) throws(E) in
++                try block(&coder)
++            }
++        }
++
++        @inlinable
++        public mutating func serializeSequenceOf<Elements: Swift.Sequence>(
++            _ elements: Elements,
++            identifier: ISO_8824.Identifier = .sequence
++        ) throws(ISO_8824.Error) where Elements.Element: ISO_8825.DER.Serializable {
++            try self.appendConstructedNode(identifier: identifier) {
++                (coder: inout Serializer) throws(ISO_8824.Error) in
++                for element in elements {
++                    try coder.serialize(element)
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func serializeSetOf<Elements: Swift.Sequence>(
++            _ elements: Elements,
++            identifier: ISO_8824.Identifier = .set
++        ) throws(ISO_8824.Error) where Elements.Element: ISO_8825.DER.Serializable {
++
++            var intermediateSerializer = ISO_8825.DER.Serializer()
++            let serializedRanges = try elements.map {
++                (element: Elements.Element) throws(ISO_8824.Error) -> Range<Int> in
++                let startIndex = intermediateSerializer.serializedBytes.endIndex
++                try intermediateSerializer.serialize(element)
++                let endIndex = intermediateSerializer.serializedBytes.endIndex
++
++                return startIndex..<endIndex
++            }
++
++            let serializedBytes = intermediateSerializer.serializedBytes
++
++            let sortedRanges = serializedRanges.sorted { lhs, rhs in
++                asn1SetElementLessThan(serializedBytes[lhs], serializedBytes[rhs])
++            }
++
++            self.appendConstructedNode(identifier: identifier) { serializer in
++                for range in sortedRanges {
++                    serializer.serializeRawBytes(serializedBytes[range])
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func serialize(_ node: ISO_8825.Node) {
++            let identifier = node.identifier
++            let constructed: Bool
++
++            if case .constructed = node.content {
++                constructed = true
++            } else {
++                constructed = false
++            }
++
++            self._appendNode(identifier: identifier, constructed: constructed) { coder in
++                switch node.content {
++                case .constructed(let nodes):
++                    for node in nodes {
++                        coder.serialize(node)
++                    }
++
++                case .primitive(let baseData):
++                    coder.serializeRawBytes(baseData)
++                }
++            }
++        }
++
++        @inlinable
++        public mutating func serializeRawBytes<Bytes: Swift.Sequence>(_ bytes: Bytes)
++        where Bytes.Element == UInt8 {
++            self._serializedBytes.append(contentsOf: bytes)
++        }
++
++        @inlinable
++        package mutating func _appendNode<E: Swift.Error>(
++            identifier: ISO_8824.Identifier,
++            constructed: Bool,
++            _ contentWriter: (inout Serializer) throws(E) -> Void
++        ) throws(E) {
++
++            self._serializedBytes.writeIdentifier(identifier, constructed: constructed)
++
++            self._serializedBytes.append(0)
++
++            let originalEndIndex = self._serializedBytes.endIndex
++            let lengthIndex = self._serializedBytes.index(before: originalEndIndex)
++
++            try contentWriter(&self)
++
++            let contentLength = self._serializedBytes.distance(
++                from: originalEndIndex,
++                to: self._serializedBytes.endIndex
++            )
++            let lengthBytesNeeded = contentLength._bytesNeededToEncode
++            if lengthBytesNeeded == 1 {
++
++                assert(contentLength <= 0x7F)
++                self._serializedBytes[lengthIndex] = UInt8(contentLength)
++                return
++            }
++
++            self._serializedBytes._moveRange(
++                offset: lengthBytesNeeded - 1,
++                range: originalEndIndex..<self._serializedBytes.endIndex
++            )
++
++            self._serializedBytes[lengthIndex] = 0x80 | UInt8(lengthBytesNeeded - 1)
++            var writeIndex = lengthIndex
++
++            (0..<(lengthBytesNeeded - 1)).reversed().forEach { shift in
++
++                self._serializedBytes.formIndex(after: &writeIndex)
++                self._serializedBytes[writeIndex] = UInt8(
++                    truncatingIfNeeded: (contentLength >> (shift * 8))
++                )
++            }
++
++            assert(
++                writeIndex
++                    == self._serializedBytes.index(lengthIndex, offsetBy: lengthBytesNeeded - 1)
++            )
++        }
++    }
+ }
+ 
+ extension ISO_8825.DER {
++    public protocol Parseable {
++
++        init(derEncoded node: ISO_8825.Node) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.DER.Parseable {
+@@ -451,9 +673,28 @@ extension ISO_8825.DER.Parseable {
+ }
+ 
+ extension ISO_8825.DER {
++    public protocol Serializable {
++
++        func serialize(into coder: inout ISO_8825.DER.Serializer) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.DER {
++
++    public protocol ImplicitlyTaggable: ISO_8825.DER.Parseable, ISO_8825.DER.Serializable {
++
++        static var defaultIdentifier: ISO_8824.Identifier { get }
++
++        init(
++            derEncoded: ISO_8825.Node,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error)
++
++        func serialize(
++            into coder: inout ISO_8825.DER.Serializer,
++            withIdentifier identifier: ISO_8824.Identifier
++        ) throws(ISO_8824.Error)
++    }
+ }
+ 
+ extension ISO_8825.DER.ImplicitlyTaggable {
+-- 
+2.43.0
+

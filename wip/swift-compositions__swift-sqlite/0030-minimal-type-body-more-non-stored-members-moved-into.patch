@@ -1,0 +1,194 @@
+From 33772b59b3a08c49377d71279183ac13226414ee Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:17:17 +0000
+Subject: [PATCH 30/48] minimal type body: more non-stored members moved into
+ an extension of their type (batch 18; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ Sources/SQLite SQL/Instant+JulianDay.swift  | 14 +++++++------
+ Sources/SQLite SQL/Instant+UnixTime.swift   | 14 +++++++------
+ Sources/SQLite SQL/JSONEach.swift           |  6 ++++--
+ Sources/SQLite SQL/Triggers.swift           | 17 ++++++++--------
+ Sources/SQLite SQL/UUID+Bytes.swift         | 22 +++++++++++----------
+ Sources/SQLite/GRDB/SQLite.Connection.swift |  8 +++++---
+ 6 files changed, 46 insertions(+), 35 deletions(-)
+
+diff --git a/Sources/SQLite SQL/Instant+JulianDay.swift b/Sources/SQLite SQL/Instant+JulianDay.swift
+index e96404f..d317ce0 100644
+--- a/Sources/SQLite SQL/Instant+JulianDay.swift	
++++ b/Sources/SQLite SQL/Instant+JulianDay.swift	
+@@ -9,14 +9,16 @@ extension Time.Instant {
+         public init(queryOutput: Time.Instant) {
+             self.queryOutput = queryOutput
+         }
++    }
++}
+ 
+-        public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            subsecDateTime([queryFragment, "'julianday'"])
+-        }
++extension Time.Instant.JulianDayRepresentation {
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        subsecDateTime([queryFragment, "'julianday'"])
++    }
+ 
+-        public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            "julianday(\(queryFragment))"
+-        }
++    public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "julianday(\(queryFragment))"
+     }
+ }
+ 
+diff --git a/Sources/SQLite SQL/Instant+UnixTime.swift b/Sources/SQLite SQL/Instant+UnixTime.swift
+index 28971e9..7581f75 100644
+--- a/Sources/SQLite SQL/Instant+UnixTime.swift	
++++ b/Sources/SQLite SQL/Instant+UnixTime.swift	
+@@ -9,14 +9,16 @@ extension Time.Instant {
+         public init(queryOutput: Time.Instant) {
+             self.queryOutput = queryOutput
+         }
++    }
++}
+ 
+-        public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            "datetime(\(queryFragment), 'unixepoch')"
+-        }
++extension Time.Instant.UnixTimeRepresentation {
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "datetime(\(queryFragment), 'unixepoch')"
++    }
+ 
+-        public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            "unixepoch(\(queryFragment))"
+-        }
++    public static func _queryFragment(jsonDecoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        "unixepoch(\(queryFragment))"
+     }
+ }
+ 
+diff --git a/Sources/SQLite SQL/JSONEach.swift b/Sources/SQLite SQL/JSONEach.swift
+index 922f4d4..75db541 100644
+--- a/Sources/SQLite SQL/JSONEach.swift	
++++ b/Sources/SQLite SQL/JSONEach.swift	
+@@ -213,11 +213,12 @@ public struct JSONEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
+-
+     public let key: Key.QueryOutput
+ 
+     public let value: Value.QueryOutput
++}
+ 
++extension JSONEach {
+     public struct TableColumns: TableDefinition, Sendable {
+         public typealias QueryValue = JSONEach
+ 
+@@ -266,11 +267,12 @@ public struct JSONBEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
+-
+     public let key: Key.QueryOutput
+ 
+     public let value: Value.QueryOutput
++}
+ 
++extension JSONBEach {
+     public struct TableColumns: TableDefinition, Sendable {
+         public typealias QueryValue = JSONBEach
+ 
+diff --git a/Sources/SQLite SQL/Triggers.swift b/Sources/SQLite SQL/Triggers.swift
+index c1c0a5b..8c264e5 100644
+--- a/Sources/SQLite SQL/Triggers.swift	
++++ b/Sources/SQLite SQL/Triggers.swift	
+@@ -62,7 +62,16 @@ extension Table {
+ }
+ 
+ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
++    fileprivate let name: String?
++    fileprivate let ifNotExists: Bool
++    fileprivate let operation: Operation
++    fileprivate let when: When
++    fileprivate let fileID: StaticString
++    fileprivate let line: UInt
++    fileprivate let column: UInt
++}
+ 
++extension TemporaryTrigger {
+     public struct Operation: Sendable, QueryExpression {
+         public typealias QueryValue = ()
+ 
+@@ -309,14 +318,6 @@ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
+             }
+         }
+     }
+-
+-    fileprivate let name: String?
+-    fileprivate let ifNotExists: Bool
+-    fileprivate let operation: Operation
+-    fileprivate let when: When
+-    fileprivate let fileID: StaticString
+-    fileprivate let line: UInt
+-    fileprivate let column: UInt
+ }
+ 
+ @TaskLocal public var _isCreatingTemporaryTrigger = false
+diff --git a/Sources/SQLite SQL/UUID+Bytes.swift b/Sources/SQLite SQL/UUID+Bytes.swift
+index 120aacb..83a3d9d 100644
+--- a/Sources/SQLite SQL/UUID+Bytes.swift	
++++ b/Sources/SQLite SQL/UUID+Bytes.swift	
+@@ -10,17 +10,19 @@ extension RFC_4122.UUID {
+         public init(queryOutput: RFC_4122.UUID) {
+             self.queryOutput = queryOutput
+         }
++    }
++}
+ 
+-        public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
+-            """
+-            CASE WHEN \(queryFragment) IS NULL THEN NULL ELSE lower(printf('%s-%s-%s-%s-%s', \
+-            substr(hex(\(queryFragment)), 1, 8), \
+-            substr(hex(\(queryFragment)), 9, 4), \
+-            substr(hex(\(queryFragment)), 13, 4), \
+-            substr(hex(\(queryFragment)), 17, 4), \
+-            substr(hex(\(queryFragment)), 21, 12))) END
+-            """
+-        }
++extension RFC_4122.UUID.BytesRepresentation {
++    public static func _queryFragment(jsonEncoding queryFragment: ISO_9075.Fragment) -> ISO_9075.Fragment {
++        """
++        CASE WHEN \(queryFragment) IS NULL THEN NULL ELSE lower(printf('%s-%s-%s-%s-%s', \
++        substr(hex(\(queryFragment)), 1, 8), \
++        substr(hex(\(queryFragment)), 9, 4), \
++        substr(hex(\(queryFragment)), 13, 4), \
++        substr(hex(\(queryFragment)), 17, 4), \
++        substr(hex(\(queryFragment)), 21, 12))) END
++        """
+     }
+ }
+ 
+diff --git a/Sources/SQLite/GRDB/SQLite.Connection.swift b/Sources/SQLite/GRDB/SQLite.Connection.swift
+index 9245fcd..67af046 100644
+--- a/Sources/SQLite/GRDB/SQLite.Connection.swift
++++ b/Sources/SQLite/GRDB/SQLite.Connection.swift
+@@ -166,9 +166,11 @@ extension SQLite.Connection.Trace {
+         public struct Options: OptionSet, Sendable {
+             public let rawValue: Int
+             public init(rawValue: Int) { self.rawValue = rawValue }
+-
+-            /// Every statement about to run.
+-            public static let statement = Options(rawValue: 1 << 0)
+         }
+ }
++
++extension SQLite.Connection.Trace.Options {
++        /// Every statement about to run.
++        public static let statement = Options(rawValue: 1 << 0)
++}
+ #endif
+-- 
+2.43.0
+

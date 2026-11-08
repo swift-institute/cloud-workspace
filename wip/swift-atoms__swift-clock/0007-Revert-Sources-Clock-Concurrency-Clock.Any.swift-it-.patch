@@ -1,0 +1,102 @@
+From 58899270985f0a0a7ebb58648e70fe1195068132 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:18:30 +0000
+Subject: [PATCH 7/8] Revert Sources/Clock Concurrency/Clock.Any.swift: it
+ broke the type-check (coenttb/work#242)
+
+---
+ Sources/Clock Concurrency/Clock.Any.swift | 57 +++++++++++------------
+ 1 file changed, 26 insertions(+), 31 deletions(-)
+
+diff --git a/Sources/Clock Concurrency/Clock.Any.swift b/Sources/Clock Concurrency/Clock.Any.swift
+index cb2b7dc..3ca440a 100644
+--- a/Sources/Clock Concurrency/Clock.Any.swift	
++++ b/Sources/Clock Concurrency/Clock.Any.swift	
+@@ -1,10 +1,18 @@
+ #if !hasFeature(Embedded)
+     extension Clock {
+         public struct `Any`<D: DurationProtocol & Hashable>: Clock.Nonsending, Sendable {
++            public struct Instant: InstantProtocol, Sendable {
++                fileprivate let box: any Clock.InstantBox<D>
++            }
++
+             private let _now: @Sendable () -> Instant
+             private let _minimumResolution: @Sendable () -> D
+             private let _sleep: @Sendable (Instant, D?, isolated (any Actor)?) async throws -> Void
+ 
++            public var now: Instant { _now() }
++
++            public var minimumResolution: D { _minimumResolution() }
++
+             /// Wraps `clock`, whose sleeps keep the caller's actor (``Clock/Nonsending``).
+             public init<C: Clock.Nonsending>(_ clock: C)
+             where C.Duration == D, C: Sendable, C.Instant: Sendable {
+@@ -19,31 +27,20 @@
+             }
+ 
+             nonisolated(nonsending)
+-        }
+-    }
+-
+-extension Clock.`Any` {
+-        public struct Instant: InstantProtocol, Sendable {
+-            fileprivate let box: any Clock.InstantBox<D>
+-        }
+-
+-        public var now: Instant { _now() }
+-
+-        public var minimumResolution: D { _minimumResolution() }
+-
+-            public func sleep(until deadline: Instant, tolerance: D? = nil) async throws
+-        {
+-            try await sleep(until: deadline, tolerance: tolerance, isolation: #isolation)
+-        }
++                public func sleep(until deadline: Instant, tolerance: D? = nil) async throws
++            {
++                try await sleep(until: deadline, tolerance: tolerance, isolation: #isolation)
++            }
+ 
+-        public func sleep(
+-            until deadline: Instant,
+-            tolerance: D?,
+-            isolation: isolated (any Actor)?
+-        ) async throws {
+-            try await _sleep(deadline, tolerance, isolation)
++            public func sleep(
++                until deadline: Instant,
++                tolerance: D?,
++                isolation: isolated (any Actor)?
++            ) async throws {
++                try await _sleep(deadline, tolerance, isolation)
++            }
+         }
+-}
++    }
+ 
+     extension Clock.`Any`.Instant {
+         public func advanced(by duration: D) -> Self {
+@@ -103,15 +100,13 @@ extension Clock.`Any` {
+             func hash(into hasher: inout Hasher) {
+                 hasher.combine(instant)
+             }
+-        }
+-    }
+ 
+-extension Clock.`Any`.Instant.Box {
+-        private func unbox(_ other: any Clock.InstantBox<D>) -> I {
+-            guard let other = other as? Self else {
+-                preconditionFailure("Mismatched clock instant types")
++            private func unbox(_ other: any Clock.InstantBox<D>) -> I {
++                guard let other = other as? Self else {
++                    preconditionFailure("Mismatched clock instant types")
++                }
++                return other.instant
+             }
+-            return other.instant
+         }
+-}
++    }
+ #endif
+-- 
+2.43.0
+

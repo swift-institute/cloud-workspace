@@ -1,0 +1,371 @@
+From 0d98b11d08b8c3f4343d067806adbf21778bfbde Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:11:19 +0000
+Subject: [PATCH 16/26] Revert Sources/ISO 8825/ISO 8825.Node.swift: it broke
+ the type-check (coenttb/work#242)
+
+---
+ Sources/ISO 8825/ISO 8825.Node.swift | 308 ++++++++++++++++++++++++++-
+ 1 file changed, 307 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/ISO 8825/ISO 8825.Node.swift b/Sources/ISO 8825/ISO 8825.Node.swift
+index f2466c7..53198ee 100644
+--- a/Sources/ISO 8825/ISO 8825.Node.swift	
++++ b/Sources/ISO 8825/ISO 8825.Node.swift	
+@@ -36,6 +36,40 @@ extension ISO_8825.EncodingRules {
+ }
+ 
+ extension ISO_8825 {
++
++    @usableFromInline
++    struct TLV {
++
++        @usableFromInline
++        var identifier: ISO_8824.Identifier
++
++        @usableFromInline
++        var depth: Int
++
++        @usableFromInline
++        var isConstructed: Bool
++
++        @usableFromInline
++        var encodedBytes: ArraySlice<UInt8>
++
++        @usableFromInline
++        var dataBytes: ArraySlice<UInt8>?
++
++        @inlinable
++        init(
++            identifier: ISO_8824.Identifier,
++            depth: Int,
++            isConstructed: Bool,
++            encodedBytes: ArraySlice<UInt8>,
++            dataBytes: ArraySlice<UInt8>? = nil
++        ) {
++            self.identifier = identifier
++            self.depth = depth
++            self.isConstructed = isConstructed
++            self.encodedBytes = encodedBytes
++            self.dataBytes = dataBytes
++        }
++    }
+ }
+ 
+ extension ISO_8825.TLV: Hashable {}
+@@ -61,11 +95,195 @@ extension ISO_8825.TLV {
+ }
+ 
+ extension ISO_8825.TLV {
++    @usableFromInline
++    struct Parser: Sendable {
++        @inlinable
++        static var _maximumNodeDepth: Int { 50 }
++
++        @usableFromInline
++        var nodes: ArraySlice<ISO_8825.TLV>
++
++        @inlinable
++        init(_ nodes: ArraySlice<ISO_8825.TLV>) {
++            self.nodes = nodes
++        }
++
++        @inlinable
++        static func parse(
++            _ data: ArraySlice<UInt8>,
++            encoding rules: ISO_8825.EncodingRules
++        ) throws(ISO_8824.Error) -> Parser {
++            var data = data
++            var nodes = [ISO_8825.TLV]()
++            nodes.reserveCapacity(16)
++            try _parseNode(from: &data, encoding: rules, depth: 1, into: &nodes)
++            guard data.count == 0 else {
++                throw ISO_8824.Error.invalidASN1Object(reason: "Trailing unparsed data is present")
++            }
++            return Parser(nodes[...])
++        }
++
++        @inlinable
++        static func _parseNode(
++            from data: inout ArraySlice<UInt8>,
++            encoding rules: ISO_8825.EncodingRules,
++            depth: Int,
++            into nodes: inout [ISO_8825.TLV]
++        ) throws(ISO_8824.Error) {
++            guard depth <= Parser._maximumNodeDepth else {
++                throw ISO_8824.Error.invalidASN1Object(reason: "Excessive stack depth was reached")
++            }
++
++            let originalData = data
++
++            guard let rawIdentifier = data.popFirst() else {
++                throw ISO_8824.Error.truncatedASN1Field()
++            }
++
++            let constructed = (rawIdentifier & 0x20) != 0
++            let identifier: ISO_8824.Identifier
++            if (rawIdentifier & 0x1f) == 0x1f {
++                let tagClass = ISO_8824.Identifier.Class(topByteInWireFormat: rawIdentifier)
++
++                let tagNumber = try data.readUIntUsing8BitBytesASN1Discipline()
++
++                guard tagNumber >= 0x1f else {
++                    throw ISO_8824.Error.invalidASN1Object(
++                        reason: "ASN.1 tag incorrectly encoded in long form: \(tagNumber)"
++                    )
++                }
++                identifier = ISO_8824.Identifier(tagWithNumber: tagNumber, tagClass: tagClass)
++            } else {
++                identifier = ISO_8824.Identifier(shortIdentifier: rawIdentifier)
++            }
++
++            guard let wideLength = try data._readLength(!rules.nonMinimalEncodedLengthsAllowed)
++            else {
++                throw ISO_8824.Error.truncatedASN1Field()
++            }
++
++            switch wideLength {
++            case .definite(let wideLength):
++                guard let length = Int(exactly: wideLength) else {
++                    throw ISO_8824.Error.invalidASN1Object(
++                        reason: "Excessively large field: \(wideLength)"
++                    )
++                }
++
++                var subData = data.prefix(length)
++                data = data.dropFirst(length)
++
++                guard subData.count == length else {
++                    throw ISO_8824.Error.truncatedASN1Field()
++                }
++
++                let encodedBytes = originalData[..<subData.endIndex]
++
++                if constructed {
++                    nodes.append(
++                        ISO_8825.TLV(
++                            identifier: identifier,
++                            depth: depth,
++                            isConstructed: true,
++                            encodedBytes: encodedBytes
++                        )
++                    )
++                    while subData.count > 0 {
++                        try _parseNode(
++                            from: &subData,
++                            encoding: rules,
++                            depth: depth + 1,
++                            into: &nodes
++                        )
++                    }
++                } else {
++                    nodes.append(
++                        ISO_8825.TLV(
++                            identifier: identifier,
++                            depth: depth,
++                            isConstructed: false,
++                            encodedBytes: encodedBytes,
++                            dataBytes: subData
++                        )
++                    )
++                }
++
++            case .indefinite:
++                guard rules.indefiniteLengthAllowed == true else {
++
++                    throw ISO_8824.Error.unsupportedFieldLength(
++                        reason: "Indefinite form of field length not supported in DER."
++                    )
++                }
++
++                guard constructed == true else {
++                    throw ISO_8824.Error.unsupportedFieldLength(
++                        reason: "Indefinite-length field must have constructed identifier"
++                    )
++                }
++
++                nodes.append(
++                    ISO_8825.TLV(
++                        identifier: identifier,
++                        depth: depth,
++                        isConstructed: true,
++                        encodedBytes: []
++                    )
++                )
++                let lastIndex = nodes.endIndex - 1
++                repeat {
++                    try _parseNode(from: &data, encoding: rules, depth: depth + 1, into: &nodes)
++                } while data.count > 0 && nodes.last?.isEndMarker == false
++                guard let endMarker = nodes.popLast() else {
++                    preconditionFailure("Parsing a constructed indefinite-length TLV always appends nodes")
++                }
++                let encodedBytes = originalData[..<endMarker.encodedBytes.endIndex]
++                nodes[lastIndex].encodedBytes = encodedBytes
++            }
++        }
++    }
+ }
+ 
+ extension ISO_8825.TLV.Parser: Hashable {}
+ 
+ extension ISO_8825 {
++
++    public struct LazySetOfSequence<T>: Swift.Sequence {
++        public typealias Element = Result<T, ISO_8824.Error>
++
++        @usableFromInline
++        package typealias Wrapped = LazyMapSequence<
++            LazySequence<(ISO_8825.Node.Collection)>.Elements, Result<T, ISO_8824.Error>
++        >
++
++        public struct Iterator: IteratorProtocol {
++            @usableFromInline
++            var wrapped: Wrapped.Iterator
++
++            @inlinable
++            public mutating func next() -> Element? {
++                wrapped.next()
++            }
++
++            @inlinable
++            package init(_ wrapped: Wrapped.Iterator) {
++                self.wrapped = wrapped
++            }
++        }
++
++        @usableFromInline
++        var wrapped: Wrapped
++
++        @inlinable
++        package init(_ wrapped: Wrapped) {
++            self.wrapped = wrapped
++        }
++
++        @inlinable
++        public func makeIterator() -> Iterator {
++            .init(wrapped.makeIterator())
++        }
++    }
+ }
+ 
+ @available(*, unavailable)
+@@ -75,6 +293,23 @@ extension ISO_8825.LazySetOfSequence: Sendable {}
+ extension ISO_8825.LazySetOfSequence.Iterator: Sendable {}
+ 
+ extension ISO_8825.Node {
++    public struct Collection {
++        @usableFromInline var _nodes: ArraySlice<ISO_8825.TLV>
++
++        @usableFromInline var _depth: Int
++
++        @inlinable
++
++        init(nodes: ArraySlice<ISO_8825.TLV>, depth: Int) {
++            self._nodes = nodes
++            self._depth = depth
++
++            precondition(self._nodes.allSatisfy({ $0.depth > depth }))
++            if let firstDepth = self._nodes.first?.depth {
++                precondition(firstDepth == depth + 1)
++            }
++        }
++    }
+ }
+ 
+ extension ISO_8825.Node.Collection: Hashable {}
+@@ -83,6 +318,47 @@ extension ISO_8825.Node.Collection: Sendable {}
+ 
+ extension ISO_8825.Node.Collection: Swift.Sequence {
+ 
++    public struct Iterator: IteratorProtocol, Sendable {
++        @usableFromInline
++        var _nodes: ArraySlice<ISO_8825.TLV>
++
++        @usableFromInline
++        var _depth: Int
++
++        @inlinable
++
++        init(nodes: ArraySlice<ISO_8825.TLV>, depth: Int) {
++            self._nodes = nodes
++            self._depth = depth
++        }
++
++        @inlinable
++        public mutating func next() -> ISO_8825.Node? {
++            guard let nextNode = self._nodes.popFirst() else {
++                return nil
++            }
++
++            assert(nextNode.depth == self._depth + 1)
++            guard nextNode.isConstructed else {
++                guard let dataBytes = nextNode.dataBytes else {
++                    preconditionFailure("A primitive TLV always carries its data bytes")
++                }
++                return ISO_8825.Node(
++                    identifier: nextNode.identifier,
++                    content: .primitive(dataBytes),
++                    encodedBytes: nextNode.encodedBytes
++                )
++            }
++
++            let nodeCollection = self._nodes.prefix { $0.depth > nextNode.depth }
++            self._nodes = self._nodes.dropFirst(nodeCollection.count)
++            return ISO_8825.Node(
++                identifier: nextNode.identifier,
++                content: .constructed(.init(nodes: nodeCollection, depth: nextNode.depth)),
++                encodedBytes: nextNode.encodedBytes
++            )
++        }
++    }
+ 
+     @inlinable
+     public func makeIterator() -> Iterator {
+@@ -91,13 +367,43 @@ extension ISO_8825.Node.Collection: Swift.Sequence {
+ }
+ 
+ extension ISO_8825 {
++    public struct Node: Hashable, Sendable {
++
++        public var identifier: ISO_8824.Identifier
++
++        public var content: Content
++
++        public var encodedBytes: ArraySlice<UInt8>
++
++        @inlinable
++        package init(
++            identifier: ISO_8824.Identifier,
++            content: ISO_8825.Node.Content,
++            encodedBytes: ArraySlice<UInt8>
++        ) {
++            self.identifier = identifier
++            self.content = content
++            self.encodedBytes = encodedBytes
++        }
++    }
+ }
+ 
+ extension ISO_8825.Node {
++
++    public enum Content: Hashable, Sendable {
++
++        case constructed(ISO_8825.Node.Collection)
++
++        case primitive(ArraySlice<UInt8>)
++    }
+ }
+ 
+ extension ArraySlice where Element == UInt8 {
+-
++    @usableFromInline
++    package enum Length: Sendable {
++        case indefinite
++        case definite(_: UInt)
++    }
+ 
+     @inlinable
+     package mutating func _readLength(_ minimalEncoding: Bool) throws(ISO_8824.Error) -> Length? {
+-- 
+2.43.0
+

@@ -1,0 +1,1318 @@
+From 79aec1020e0b195432943dd440c018ab397818ad Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:20:15 +0000
+Subject: [PATCH 28/28] Revert Sources/Type Algebra/Type.Family.swift: it broke
+ the type-check (coenttb/work#242)
+
+---
+ Sources/Type Algebra/Type.Atom.swift         |  11 -
+ Sources/Type Algebra/Type.Construction.swift |  29 ++-
+ Sources/Type Algebra/Type.Equation.swift     |  13 -
+ Sources/Type Algebra/Type.Failure.swift      |   7 -
+ Sources/Type Algebra/Type.Family.swift       |  19 --
+ Sources/Type Algebra/Type.Interface.swift    |  49 ++--
+ Sources/Type Algebra/Type.Isomorphism.swift  |  41 ---
+ Sources/Type Algebra/Type.Lens.swift         |  40 ++-
+ Sources/Type Algebra/Type.Mapping.swift      |  98 ++++----
+ Sources/Type Algebra/Type.Morphism.swift     | 247 +++++++++----------
+ Sources/Type Algebra/Type.Polynomial.swift   | 160 ++++++------
+ Sources/Type Algebra/Type.Program.swift      | 103 ++++----
+ Sources/Type Algebra/Type.Quotient.swift     |  10 -
+ Sources/Type Algebra/Type.Record.swift       |  33 +++
+ Sources/Type Algebra/Type.Recursion.swift    |  43 ----
+ Sources/Type Algebra/Type.Refinement.swift   |  10 -
+ Sources/Type Algebra/Type.Signature.swift    | 104 +++++---
+ Sources/Type Algebra/Type.Theory.swift       |  10 -
+ Sources/Type Algebra/Type.Variable.swift     |   7 -
+ Sources/Type Algebra/Type.swift              |  19 ++
+ 20 files changed, 487 insertions(+), 566 deletions(-)
+ delete mode 100644 Sources/Type Algebra/Type.Atom.swift
+ delete mode 100644 Sources/Type Algebra/Type.Equation.swift
+ delete mode 100644 Sources/Type Algebra/Type.Failure.swift
+ delete mode 100644 Sources/Type Algebra/Type.Family.swift
+ delete mode 100644 Sources/Type Algebra/Type.Isomorphism.swift
+ delete mode 100644 Sources/Type Algebra/Type.Quotient.swift
+ delete mode 100644 Sources/Type Algebra/Type.Recursion.swift
+ delete mode 100644 Sources/Type Algebra/Type.Refinement.swift
+ delete mode 100644 Sources/Type Algebra/Type.Theory.swift
+ delete mode 100644 Sources/Type Algebra/Type.Variable.swift
+
+diff --git a/Sources/Type Algebra/Type.Atom.swift b/Sources/Type Algebra/Type.Atom.swift
+deleted file mode 100644
+index 43a42b7..0000000
+--- a/Sources/Type Algebra/Type.Atom.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-
+-extension Type {
+-    public struct Atom: Hashable, Sendable {
+-        public let scope: [String]
+-        public let name: String
+-        public init(_ name: String, scope: [String] = []) {
+-            self.name = name
+-            self.scope = scope
+-        }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Construction.swift b/Sources/Type Algebra/Type.Construction.swift
+index 8ffcf9a..b945494 100644
+--- a/Sources/Type Algebra/Type.Construction.swift	
++++ b/Sources/Type Algebra/Type.Construction.swift	
+@@ -34,8 +34,35 @@ extension Type {
+         }
+     }
+ 
++    public struct Refinement: Equatable, Sendable {
++        public let base: Expression
++        public let predicate: Atom
++        public init(_ base: Expression, satisfying predicate: Atom) {
++            self.base = base
++            self.predicate = predicate
++        }
++    }
++    public struct Quotient: Equatable, Sendable {
++        public let base: Expression
++        public let relation: Atom
++        public init(_ base: Expression, by relation: Atom) {
++            self.base = base
++            self.relation = relation
++        }
++    }
+ 
+-
++    public struct Family: Equatable, Sendable {
++        public let fibers: Record
++        public init(_ fibers: Record) { self.fibers = fibers }
++        public var sum: Expression { fibers.alternatives }
++        public var product: Expression { fibers.expression }
++        public func fiber(at index: String) throws -> Expression {
++            guard let field = fibers.fields.first(where: { $0.name == index }) else {
++                throw Failure("unknown family index")
++            }
++            return field.type
++        }
++    }
+ }
+ 
+ extension Type.Record {
+diff --git a/Sources/Type Algebra/Type.Equation.swift b/Sources/Type Algebra/Type.Equation.swift
+deleted file mode 100644
+index fd3d4d0..0000000
+--- a/Sources/Type Algebra/Type.Equation.swift	
++++ /dev/null
+@@ -1,13 +0,0 @@
+-extension Type {
+-    public struct Equation: Equatable, Sendable {
+-        public let lhs: Morphism
+-        public let rhs: Morphism
+-        public init(_ lhs: Morphism, _ rhs: Morphism) throws {
+-            guard lhs.domain == rhs.domain, lhs.codomain == rhs.codomain else {
+-                throw Failure("an equation requires parallel maps")
+-            }
+-            self.lhs = lhs
+-            self.rhs = rhs
+-        }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Failure.swift b/Sources/Type Algebra/Type.Failure.swift
+deleted file mode 100644
+index 7cb173c..0000000
+--- a/Sources/Type Algebra/Type.Failure.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-
+-extension Type {
+-    public struct Failure: Swift.Error, Equatable, Sendable, CustomStringConvertible {
+-        public let description: String
+-        public init(_ description: String) { self.description = description }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Family.swift b/Sources/Type Algebra/Type.Family.swift
+deleted file mode 100644
+index 157cd78..0000000
+--- a/Sources/Type Algebra/Type.Family.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-extension Type {
+-    public struct Family: Equatable, Sendable {
+-        public let fibers: Record
+-        public init(_ fibers: Record) { self.fibers = fibers }
+-    }
+-}
+-
+-extension Type.Family {
+-    public var sum: Expression { fibers.alternatives }
+-
+-    public var product: Expression { fibers.expression }
+-
+-    public func fiber(at index: String) throws -> Expression {
+-        guard let field = fibers.fields.first(where: { $0.name == index }) else {
+-            throw Failure("unknown family index")
+-        }
+-        return field.type
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Interface.swift b/Sources/Type Algebra/Type.Interface.swift
+index 90fb773..c2267f8 100644
+--- a/Sources/Type Algebra/Type.Interface.swift	
++++ b/Sources/Type Algebra/Type.Interface.swift	
+@@ -11,28 +11,43 @@ extension Type {
+             self.signature = signature
+             self.children = children
+         }
+-    }
+-}
+-
+-extension Type.Interface {
+-    public var implementation: Record {
+-        get throws {
+-            try Record(
+-                signature.operations.map { .init($0.name, $0.implementation) } + children.fields
++        public var implementation: Record {
++            get throws {
++                try Record(
++                    signature.operations.map { .init($0.name, $0.implementation) } + children.fields
++                )
++            }
++        }
++        public func requests(children requests: Record) throws -> Expression {
++            try requestRecord(children: requests).alternatives
++        }
++        public func requestRecord(children requests: Record) throws -> Record {
++            guard requests.fields.map(\.name) == children.fields.map(\.name) else {
++                throw Failure("child requests must match the child coordinates in order")
++            }
++            return try Record(
++                signature.operations.map { .init($0.name, $0.input) } + requests.fields
+             )
+         }
+     }
+ 
+-    public func requests(children requests: Record) throws -> Expression {
+-        try requestRecord(children: requests).alternatives
++    public struct Equation: Equatable, Sendable {
++        public let lhs: Morphism
++        public let rhs: Morphism
++        public init(_ lhs: Morphism, _ rhs: Morphism) throws {
++            guard lhs.domain == rhs.domain, lhs.codomain == rhs.codomain else {
++                throw Failure("an equation requires parallel maps")
++            }
++            self.lhs = lhs
++            self.rhs = rhs
++        }
+     }
+-
+-    public func requestRecord(children requests: Record) throws -> Record {
+-        guard requests.fields.map(\.name) == children.fields.map(\.name) else {
+-            throw Failure("child requests must match the child coordinates in order")
++    public struct Theory: Equatable, Sendable {
++        public let signature: Signature
++        public let equations: [Equation]
++        public init(signature: Signature, equations: [Equation]) {
++            self.signature = signature
++            self.equations = equations
+         }
+-        return try Record(
+-            signature.operations.map { .init($0.name, $0.input) } + requests.fields
+-        )
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Isomorphism.swift b/Sources/Type Algebra/Type.Isomorphism.swift
+deleted file mode 100644
+index 25126cd..0000000
+--- a/Sources/Type Algebra/Type.Isomorphism.swift	
++++ /dev/null
+@@ -1,41 +0,0 @@
+-extension Type {
+-    public struct Isomorphism: Equatable, Sendable {
+-        public let forward: Morphism
+-        public let backward: Morphism
+-    }
+-}
+-
+-extension Type.Isomorphism {
+-    public static func distribution(
+-        _ factor: Expression,
+-        over alternatives: [Expression]
+-    ) -> Self {
+-        Self(
+-            forward: .distribution(factor, over: alternatives),
+-            backward: .factorization(factor, from: alternatives)
+-        )
+-    }
+-
+-    public static func productUnit(_ value: Expression) throws -> Self {
+-        Self(
+-            forward: try .projection([.unit, value], at: 1),
+-            backward: try .pairing(from: value, [.terminal(from: value), .identity(value)])
+-        )
+-    }
+-
+-    public static func sumZero(_ value: Expression) throws -> Self {
+-        Self(
+-            forward: try .elimination(to: value, [.initial(to: value), .identity(value)]),
+-            backward: try .injection([.zero, value], at: 1)
+-        )
+-    }
+-
+-    public static func permutation(of record: Record, order: [String]) throws -> Self {
+-        guard order.count == record.fields.count else {
+-            throw Failure("a permutation must include every coordinate")
+-        }
+-        let selected = try record.selecting(order)
+-        let inverse = try selected.record.selecting(record.fields.map(\.name))
+-        return Self(forward: selected.projection, backward: inverse.projection)
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Lens.swift b/Sources/Type Algebra/Type.Lens.swift
+index 3472ec7..8a6ae8c 100644
+--- a/Sources/Type Algebra/Type.Lens.swift	
++++ b/Sources/Type Algebra/Type.Lens.swift	
+@@ -2,28 +2,26 @@ extension Type {
+     public struct Lens: Equatable, Sendable {
+         public let get: Morphism
+         public let put: Morphism
+-    }
+-}
+ 
+-extension Type.Lens {
+-    public static func coordinate(
+-        _ label: String,
+-        in record: Record,
+-        replacingWith replacementType: Expression? = nil
+-    ) throws -> Self {
+-        guard let index = record.fields.firstIndex(where: { $0.name == label }) else {
+-            throw Failure("unknown lens coordinate")
+-        }
+-        let types = record.fields.map(\.type)
+-        let domain = [record.expression, replacementType ?? types[index]]
+-        let old = try Morphism.projection(domain, at: 0)
+-        let replacement = try Morphism.projection(domain, at: 1)
+-        let fields = try types.indices.map { field in
+-            field == index ? replacement : try old.followed(by: .projection(types, at: field))
++        public static func coordinate(
++            _ label: String,
++            in record: Record,
++            replacingWith replacementType: Expression? = nil
++        ) throws -> Self {
++            guard let index = record.fields.firstIndex(where: { $0.name == label }) else {
++                throw Failure("unknown lens coordinate")
++            }
++            let types = record.fields.map(\.type)
++            let domain = [record.expression, replacementType ?? types[index]]
++            let old = try Morphism.projection(domain, at: 0)
++            let replacement = try Morphism.projection(domain, at: 1)
++            let fields = try types.indices.map { field in
++                field == index ? replacement : try old.followed(by: .projection(types, at: field))
++            }
++            return Self(
++                get: try .projection(types, at: index),
++                put: try .pairing(from: .product(domain), fields)
++            )
+         }
+-        return Self(
+-            get: try .projection(types, at: index),
+-            put: try .pairing(from: .product(domain), fields)
+-        )
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Mapping.swift b/Sources/Type Algebra/Type.Mapping.swift
+index bc0227b..da44c66 100644
+--- a/Sources/Type Algebra/Type.Mapping.swift	
++++ b/Sources/Type Algebra/Type.Mapping.swift	
+@@ -6,60 +6,58 @@ extension Type {
+         case product([Mapping])
+         case list(Mapping)
+         case exponential(domain: Mapping, codomain: Mapping)
+-    }
+-}
+ 
+-extension Type.Mapping {
+-    public enum Direction: Equatable, Sendable { case forward, backward }
++        public enum Direction: Equatable, Sendable { case forward, backward }
+ 
+-    public static func derive(
+-        _ type: Expression,
+-        forward: Set<Variable>,
+-        backward: Set<Variable> = [],
+-        direction: Direction = .forward
+-    ) throws -> Self {
+-        switch type {
+-        case .zero, .unit, .atom: return .identity
+-        case .variable(let variable):
+-            guard (direction == .forward ? forward : backward).contains(variable) else {
+-                throw Failure(
+-                    "parameter `\(variable.name)` occurs in the wrong variance position; supply a bidirectional mapping or an explicit implementation"
+-                )
+-            }
+-            return .transform(variable, direction)
+-        case .sum(let types):
+-            return .sum(
+-                try types.map {
+-                    try derive($0, forward: forward, backward: backward, direction: direction)
+-                }
+-            )
+-        case .product(let types):
+-            return .product(
+-                try types.map {
+-                    try derive($0, forward: forward, backward: backward, direction: direction)
++        public static func derive(
++            _ type: Expression,
++            forward: Set<Variable>,
++            backward: Set<Variable> = [],
++            direction: Direction = .forward
++        ) throws -> Self {
++            switch type {
++            case .zero, .unit, .atom: return .identity
++            case .variable(let variable):
++                guard (direction == .forward ? forward : backward).contains(variable) else {
++                    throw Failure(
++                        "parameter `\(variable.name)` occurs in the wrong variance position; supply a bidirectional mapping or an explicit implementation"
++                    )
+                 }
+-            )
+-        case .list(let type):
+-            return .list(
+-                try derive(type, forward: forward, backward: backward, direction: direction)
+-            )
+-        case .exponential(let domain, let codomain):
+-            return .exponential(
+-                domain: try derive(
+-                    domain,
+-                    forward: forward,
+-                    backward: backward,
+-                    direction: direction == .forward ? .backward : .forward
+-                ),
+-                codomain: try derive(
+-                    codomain,
+-                    forward: forward,
+-                    backward: backward,
+-                    direction: direction
++                return .transform(variable, direction)
++            case .sum(let types):
++                return .sum(
++                    try types.map {
++                        try derive($0, forward: forward, backward: backward, direction: direction)
++                    }
+                 )
+-            )
+-        case .effect, .opaque:
+-            throw Failure("mapping this constructor requires an explicit functor action")
++            case .product(let types):
++                return .product(
++                    try types.map {
++                        try derive($0, forward: forward, backward: backward, direction: direction)
++                    }
++                )
++            case .list(let type):
++                return .list(
++                    try derive(type, forward: forward, backward: backward, direction: direction)
++                )
++            case .exponential(let domain, let codomain):
++                return .exponential(
++                    domain: try derive(
++                        domain,
++                        forward: forward,
++                        backward: backward,
++                        direction: direction == .forward ? .backward : .forward
++                    ),
++                    codomain: try derive(
++                        codomain,
++                        forward: forward,
++                        backward: backward,
++                        direction: direction
++                    )
++                )
++            case .effect, .opaque:
++                throw Failure("mapping this constructor requires an explicit functor action")
++            }
+         }
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Morphism.swift b/Sources/Type Algebra/Type.Morphism.swift
+index 9d4d28f..df54805 100644
+--- a/Sources/Type Algebra/Type.Morphism.swift	
++++ b/Sources/Type Algebra/Type.Morphism.swift	
+@@ -4,11 +4,112 @@ extension Type {
+         public let codomain: Expression
+         public let term: Term
+ 
++        public indirect enum Term: Equatable, Sendable {
++            case identity
++            case composition(Morphism, Morphism)
++            case projection(Int)
++            case pairing([Morphism])
++            case injection(Int)
++            case elimination([Morphism])
++            case terminal
++            case initial
++            case evaluation
++            case curry(Morphism)
++            case uncurry(Morphism)
++            case distribution
++            case factorization
++            case generator(Atom)
++        }
++
+         private init(_ domain: Expression, _ codomain: Expression, _ term: Term) {
+             self.domain = domain
+             self.codomain = codomain
+             self.term = term
+         }
++
++        public static func identity(_ type: Expression) -> Self { Self(type, type, .identity) }
++        public static func generator(_ name: Atom, domain: Expression, codomain: Expression) -> Self {
++            Self(domain, codomain, .generator(name))
++        }
++        public static func distribution(
++            _ factor: Expression,
++            over alternatives: [Expression]
++        ) -> Self {
++            Self(
++                .product([factor, .sum(alternatives)]),
++                .sum(alternatives.map { .product([factor, $0]) }),
++                .distribution
++            )
++        }
++        public static func factorization(
++            _ factor: Expression,
++            from alternatives: [Expression]
++        ) -> Self {
++            Self(
++                .sum(alternatives.map { .product([factor, $0]) }),
++                .product([factor, .sum(alternatives)]),
++                .factorization
++            )
++        }
++        public func followed(by next: Self) throws -> Self {
++            guard codomain == next.domain else {
++                throw Failure("composition requires matching intermediate types")
++            }
++            return Self(domain, next.codomain, .composition(self, next))
++        }
++        public static func projection(_ factors: [Expression], at index: Int) throws -> Self {
++            guard factors.indices.contains(index) else {
++                throw Failure("projection index is outside the product")
++            }
++            return Self(.product(factors), factors[index], .projection(index))
++        }
++        public static func pairing(from domain: Expression, _ maps: [Self]) throws -> Self {
++            guard maps.allSatisfy({ $0.domain == domain }) else {
++                throw Failure("pairing requires a common domain")
++            }
++            return Self(domain, .product(maps.map(\.codomain)), .pairing(maps))
++        }
++        public static func injection(_ alternatives: [Expression], at index: Int) throws -> Self {
++            guard alternatives.indices.contains(index) else {
++                throw Failure("injection index is outside the coproduct")
++            }
++            return Self(alternatives[index], .sum(alternatives), .injection(index))
++        }
++        public static func elimination(to codomain: Expression, _ maps: [Self]) throws -> Self {
++            guard maps.allSatisfy({ $0.codomain == codomain }) else {
++                throw Failure("elimination requires a common codomain")
++            }
++            return Self(.sum(maps.map(\.domain)), codomain, .elimination(maps))
++        }
++        public static func terminal(from domain: Expression) -> Self {
++            Self(domain, .unit, .terminal)
++        }
++        public static func initial(to codomain: Expression) -> Self {
++            Self(.zero, codomain, .initial)
++        }
++        public static func evaluation(domain: Expression, codomain: Expression) -> Self {
++            Self(
++                .product([.exponential(domain: domain, codomain: codomain), domain]),
++                codomain,
++                .evaluation
++            )
++        }
++        public func curried() throws -> Self {
++            guard case .product(let factors) = domain, factors.count == 2 else {
++                throw Failure("currying requires a binary product domain")
++            }
++            return Self(
++                factors[0],
++                .exponential(domain: factors[1], codomain: codomain),
++                .curry(self)
++            )
++        }
++        public func uncurried() throws -> Self {
++            guard case .exponential(let input, let output) = codomain else {
++                throw Failure("uncurrying requires an exponential codomain")
++            }
++            return Self(.product([domain, input]), output, .uncurry(self))
++        }
+     }
+ 
+     public indirect enum Value: Equatable, Sendable {
+@@ -18,139 +119,21 @@ extension Type {
+         case product([Value])
+         case sum(Int, Value)
+         case list([Value])
+-    }
+-}
+-
+-extension Type.Morphism {
+-    public indirect enum Term: Equatable, Sendable {
+-        case identity
+-        case composition(Morphism, Morphism)
+-        case projection(Int)
+-        case pairing([Morphism])
+-        case injection(Int)
+-        case elimination([Morphism])
+-        case terminal
+-        case initial
+-        case evaluation
+-        case curry(Morphism)
+-        case uncurry(Morphism)
+-        case distribution
+-        case factorization
+-        case generator(Atom)
+-    }
+ 
+-    public static func identity(_ type: Expression) -> Self { Self(type, type, .identity) }
+-
+-    public static func generator(_ name: Atom, domain: Expression, codomain: Expression) -> Self {
+-        Self(domain, codomain, .generator(name))
+-    }
+-
+-    public static func distribution(
+-        _ factor: Expression,
+-        over alternatives: [Expression]
+-    ) -> Self {
+-        Self(
+-            .product([factor, .sum(alternatives)]),
+-            .sum(alternatives.map { .product([factor, $0]) }),
+-            .distribution
+-        )
+-    }
+-
+-    public static func factorization(
+-        _ factor: Expression,
+-        from alternatives: [Expression]
+-    ) -> Self {
+-        Self(
+-            .sum(alternatives.map { .product([factor, $0]) }),
+-            .product([factor, .sum(alternatives)]),
+-            .factorization
+-        )
+-    }
+-
+-    public func followed(by next: Self) throws -> Self {
+-        guard codomain == next.domain else {
+-            throw Failure("composition requires matching intermediate types")
+-        }
+-        return Self(domain, next.codomain, .composition(self, next))
+-    }
+-
+-    public static func projection(_ factors: [Expression], at index: Int) throws -> Self {
+-        guard factors.indices.contains(index) else {
+-            throw Failure("projection index is outside the product")
+-        }
+-        return Self(.product(factors), factors[index], .projection(index))
+-    }
+-
+-    public static func pairing(from domain: Expression, _ maps: [Self]) throws -> Self {
+-        guard maps.allSatisfy({ $0.domain == domain }) else {
+-            throw Failure("pairing requires a common domain")
+-        }
+-        return Self(domain, .product(maps.map(\.codomain)), .pairing(maps))
+-    }
+-
+-    public static func injection(_ alternatives: [Expression], at index: Int) throws -> Self {
+-        guard alternatives.indices.contains(index) else {
+-            throw Failure("injection index is outside the coproduct")
+-        }
+-        return Self(alternatives[index], .sum(alternatives), .injection(index))
+-    }
+-
+-    public static func elimination(to codomain: Expression, _ maps: [Self]) throws -> Self {
+-        guard maps.allSatisfy({ $0.codomain == codomain }) else {
+-            throw Failure("elimination requires a common codomain")
+-        }
+-        return Self(.sum(maps.map(\.domain)), codomain, .elimination(maps))
+-    }
+-
+-    public static func terminal(from domain: Expression) -> Self {
+-        Self(domain, .unit, .terminal)
+-    }
+-
+-    public static func initial(to codomain: Expression) -> Self {
+-        Self(.zero, codomain, .initial)
+-    }
+-
+-    public static func evaluation(domain: Expression, codomain: Expression) -> Self {
+-        Self(
+-            .product([.exponential(domain: domain, codomain: codomain), domain]),
+-            codomain,
+-            .evaluation
+-        )
+-    }
+-
+-    public func curried() throws -> Self {
+-        guard case .product(let factors) = domain, factors.count == 2 else {
+-            throw Failure("currying requires a binary product domain")
+-        }
+-        return Self(
+-            factors[0],
+-            .exponential(domain: factors[1], codomain: codomain),
+-            .curry(self)
+-        )
+-    }
+-
+-    public func uncurried() throws -> Self {
+-        guard case .exponential(let input, let output) = codomain else {
+-            throw Failure("uncurrying requires an exponential codomain")
+-        }
+-        return Self(.product([domain, input]), output, .uncurry(self))
+-    }
+-}
+-
+-extension Type.Value {
+-    public func inhabits(_ expression: Expression) -> Bool {
+-        switch (self, expression) {
+-        case (.unit, .unit): return true
+-        case (.atom(let a, _), .atom(let b)): return a == b
+-        case (.variable(let a, _), .variable(let b)): return a == b
+-        case (.product(let values), .product(let types)):
+-            return values.count == types.count
+-                && zip(values, types).allSatisfy { $0.inhabits($1) }
+-        case (.sum(let index, let value), .sum(let types)):
+-            return types.indices.contains(index) && value.inhabits(types[index])
+-        case (.list(let values), .list(let type)):
+-            return values.allSatisfy { $0.inhabits(type) }
+-        default: return false
++        public func inhabits(_ expression: Expression) -> Bool {
++            switch (self, expression) {
++            case (.unit, .unit): return true
++            case (.atom(let a, _), .atom(let b)): return a == b
++            case (.variable(let a, _), .variable(let b)): return a == b
++            case (.product(let values), .product(let types)):
++                return values.count == types.count
++                    && zip(values, types).allSatisfy { $0.inhabits($1) }
++            case (.sum(let index, let value), .sum(let types)):
++                return types.indices.contains(index) && value.inhabits(types[index])
++            case (.list(let values), .list(let type)):
++                return values.allSatisfy { $0.inhabits(type) }
++            default: return false
++            }
+         }
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Polynomial.swift b/Sources/Type Algebra/Type.Polynomial.swift
+index 02cb8e4..f6c674f 100644
+--- a/Sources/Type Algebra/Type.Polynomial.swift	
++++ b/Sources/Type Algebra/Type.Polynomial.swift	
+@@ -21,100 +21,98 @@ extension Type {
+                 )
+             }
+         }
+-    }
+-}
+-
+-extension Type.Polynomial {
+-    public var expression: Expression {
+-        switch self {
+-        case .zero: return .zero
+-        case .unit: return .unit
+-        case .atom(let value): return .atom(value)
+-        case .variable(let value): return .variable(value)
+-        case .sum(let values): return .sum(values.map(\.expression))
+-        case .product(let values): return .product(values.map(\.expression))
+-        }
+-    }
+ 
+-    public func derivative(withRespectTo variable: Variable) -> Self {
+-        switch self {
+-        case .zero, .unit, .atom: return .zero
+-        case .variable(let found): return found == variable ? .unit : .zero
+-        case .sum(let values):
+-            return .sum(values.map { $0.derivative(withRespectTo: variable) })
+-        case .product(let values):
+-            return .sum(
+-                values.indices.map { hole in
+-                    .product(
+-                        values.enumerated().map { index, value in
+-                            index == hole ? value.derivative(withRespectTo: variable) : value
+-                        }
+-                    )
+-                }
+-            )
++        public var expression: Expression {
++            switch self {
++            case .zero: return .zero
++            case .unit: return .unit
++            case .atom(let value): return .atom(value)
++            case .variable(let value): return .variable(value)
++            case .sum(let values): return .sum(values.map(\.expression))
++            case .product(let values): return .product(values.map(\.expression))
++            }
+         }
+-    }
+ 
+-    public func cardinality(
+-        atoms: [Atom: Int] = [:],
+-        variables: [Variable: Int] = [:]
+-    ) throws -> Int {
+-        func checked(_ value: Int?) throws -> Int {
+-            guard let value, value >= 0 else {
+-                throw Failure(
+-                    "cardinality requires a nonnegative interpretation for every sort"
++        public func derivative(withRespectTo variable: Variable) -> Self {
++            switch self {
++            case .zero, .unit, .atom: return .zero
++            case .variable(let found): return found == variable ? .unit : .zero
++            case .sum(let values):
++                return .sum(values.map { $0.derivative(withRespectTo: variable) })
++            case .product(let values):
++                return .sum(
++                    values.indices.map { hole in
++                        .product(
++                            values.enumerated().map { index, value in
++                                index == hole ? value.derivative(withRespectTo: variable) : value
++                            }
++                        )
++                    }
+                 )
+             }
+-            return value
+         }
+-        switch self {
+-        case .zero: return 0
+-        case .unit: return 1
+-        case .atom(let atom): return try checked(atoms[atom])
+-        case .variable(let variable): return try checked(variables[variable])
+-        case .sum(let values), .product(let values):
+-            let product: Bool
+-            product = if case .product = self { true } else { false }
+-            return try values.reduce(product ? 1 : 0) { accumulated, value in
+-                let next = try value.cardinality(atoms: atoms, variables: variables)
+-                let result =
+-                    product
+-                    ? accumulated.multipliedReportingOverflow(by: next)
+-                    : accumulated.addingReportingOverflow(next)
+-                guard !result.overflow else { throw Failure("finite cardinality exceeds Int") }
+-                return result.partialValue
++
++        public func cardinality(
++            atoms: [Atom: Int] = [:],
++            variables: [Variable: Int] = [:]
++        ) throws -> Int {
++            func checked(_ value: Int?) throws -> Int {
++                guard let value, value >= 0 else {
++                    throw Failure(
++                        "cardinality requires a nonnegative interpretation for every sort"
++                    )
++                }
++                return value
++            }
++            switch self {
++            case .zero: return 0
++            case .unit: return 1
++            case .atom(let atom): return try checked(atoms[atom])
++            case .variable(let variable): return try checked(variables[variable])
++            case .sum(let values), .product(let values):
++                let product: Bool
++                if case .product = self { product = true } else { product = false }
++                return try values.reduce(product ? 1 : 0) { accumulated, value in
++                    let next = try value.cardinality(atoms: atoms, variables: variables)
++                    let result =
++                        product
++                        ? accumulated.multipliedReportingOverflow(by: next)
++                        : accumulated.addingReportingOverflow(next)
++                    guard !result.overflow else { throw Failure("finite cardinality exceeds Int") }
++                    return result.partialValue
++                }
+             }
+         }
+-    }
+ 
+-    public struct Context: Hashable, Sendable {
+-        public let alternative: Int
+-        public let position: Int
+-        public let remainder: [Polynomial]
+-    }
+-
+-    public func contexts(for variable: Variable) throws -> [Context] {
+-        guard case .sum(let alternatives) = self else {
+-            throw Failure("direct contexts require a sum of products")
++        public struct Context: Hashable, Sendable {
++            public let alternative: Int
++            public let position: Int
++            public let remainder: [Polynomial]
+         }
+-        return try alternatives.enumerated().flatMap { alternative, term in
+-            guard case .product(let fields) = term else {
+-                throw Failure("each constructor must be a product")
++
++        public func contexts(for variable: Variable) throws -> [Context] {
++            guard case .sum(let alternatives) = self else {
++                throw Failure("direct contexts require a sum of products")
+             }
+-            return try fields.enumerated().compactMap { position, field in
+-                if field == .variable(variable) {
+-                    return Context(
+-                        alternative: alternative,
+-                        position: position,
+-                        remainder: fields.enumerated().filter { $0.offset != position }.map(
+-                            \.element
+-                        )
+-                    )
++            return try alternatives.enumerated().flatMap { alternative, term in
++                guard case .product(let fields) = term else {
++                    throw Failure("each constructor must be a product")
+                 }
+-                guard !field.expression.variables.contains(variable) else {
+-                    throw Failure("direct contexts do not support nested recursive positions")
++                return try fields.enumerated().compactMap { position, field in
++                    if field == .variable(variable) {
++                        return Context(
++                            alternative: alternative,
++                            position: position,
++                            remainder: fields.enumerated().filter { $0.offset != position }.map(
++                                \.element
++                            )
++                        )
++                    }
++                    guard !field.expression.variables.contains(variable) else {
++                        throw Failure("direct contexts do not support nested recursive positions")
++                    }
++                    return nil
+                 }
+-                return nil
+             }
+         }
+     }
+diff --git a/Sources/Type Algebra/Type.Program.swift b/Sources/Type Algebra/Type.Program.swift
+index d4b01ca..664f477 100644
+--- a/Sources/Type Algebra/Type.Program.swift	
++++ b/Sources/Type Algebra/Type.Program.swift	
+@@ -1,63 +1,60 @@
+ extension Type {
+     public enum Program {
+-    }
+-}
+-
+-extension Type.Program {
+-    public struct Batch: Equatable, Sendable {
+-        public let operations: [Operation]
+-        public let result: Expression
+-        public init(
+-            _ names: [String],
+-            in signature: Signature,
+-            returning result: Expression
+-        ) throws {
+-            operations = try names.map { name in
+-                guard let operation = signature.operations.first(where: { $0.name == name })
+-                else {
+-                    throw Failure("unknown operation in applicative batch")
++        public struct Batch: Equatable, Sendable {
++            public let operations: [Operation]
++            public let result: Expression
++            public init(
++                _ names: [String],
++                in signature: Signature,
++                returning result: Expression
++            ) throws {
++                operations = try names.map { name in
++                    guard let operation = signature.operations.first(where: { $0.name == name })
++                    else {
++                        throw Failure("unknown operation in applicative batch")
++                    }
++                    return operation
+                 }
+-                return operation
++                self.result = result
++            }
++            public var inputs: Expression { .product(operations.map(\.input)) }
++            public var outputs: Expression { .product(operations.map(\.output)) }
++            public var expression: Expression {
++                .product([inputs, .exponential(domain: outputs, codomain: result)])
+             }
+-            self.result = result
+-        }
+-        public var inputs: Expression { .product(operations.map(\.input)) }
+-        public var outputs: Expression { .product(operations.map(\.output)) }
+-        public var expression: Expression {
+-            .product([inputs, .exponential(domain: outputs, codomain: result)])
+         }
+-    }
+ 
+-    public static func monadic(
+-        _ signature: Signature,
+-        returning result: Expression,
+-        variable: Variable
+-    ) throws -> Recursion {
+-        guard
+-            signature.operations.allSatisfy({
+-                !$0.input.variables.contains(variable)
+-                    && !$0.output.variables.contains(variable)
+-            })
+-        else {
+-            throw Failure("program recursion must not capture an operation's sort variable")
++        public static func monadic(
++            _ signature: Signature,
++            returning result: Expression,
++            variable: Variable
++        ) throws -> Recursion {
++            guard
++                signature.operations.allSatisfy({
++                    !$0.input.variables.contains(variable)
++                        && !$0.output.variables.contains(variable)
++                })
++            else {
++                throw Failure("program recursion must not capture an operation's sort variable")
++            }
++            return try .free(
++                layer: signature.continuation(.variable(variable)),
++                variable: variable,
++                returning: result
++            )
+         }
+-        return try .free(
+-            layer: signature.continuation(.variable(variable)),
+-            variable: variable,
+-            returning: result
+-        )
+-    }
+ 
+-    public static func interaction(
+-        _ signature: Signature,
+-        returning result: Expression,
+-        variable: Variable
+-    ) throws -> Recursion {
+-        let finite = try monadic(signature, returning: result, variable: variable)
+-        return try Recursion(
+-            .greatest,
+-            variable: variable,
+-            body: .sum([finite.body, .variable(variable)])
+-        )
++        public static func interaction(
++            _ signature: Signature,
++            returning result: Expression,
++            variable: Variable
++        ) throws -> Recursion {
++            let finite = try monadic(signature, returning: result, variable: variable)
++            return try Recursion(
++                .greatest,
++                variable: variable,
++                body: .sum([finite.body, .variable(variable)])
++            )
++        }
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Quotient.swift b/Sources/Type Algebra/Type.Quotient.swift
+deleted file mode 100644
+index f2465df..0000000
+--- a/Sources/Type Algebra/Type.Quotient.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Type {
+-    public struct Quotient: Equatable, Sendable {
+-        public let base: Expression
+-        public let relation: Atom
+-        public init(_ base: Expression, by relation: Atom) {
+-            self.base = base
+-            self.relation = relation
+-        }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Record.swift b/Sources/Type Algebra/Type.Record.swift
+index c42daeb..039314f 100644
+--- a/Sources/Type Algebra/Type.Record.swift	
++++ b/Sources/Type Algebra/Type.Record.swift	
+@@ -63,4 +63,37 @@ extension Type {
+         }
+     }
+ 
++    public struct Isomorphism: Equatable, Sendable {
++        public let forward: Morphism
++        public let backward: Morphism
++        public static func distribution(
++            _ factor: Expression,
++            over alternatives: [Expression]
++        ) -> Self {
++            Self(
++                forward: .distribution(factor, over: alternatives),
++                backward: .factorization(factor, from: alternatives)
++            )
++        }
++        public static func productUnit(_ value: Expression) throws -> Self {
++            Self(
++                forward: try .projection([.unit, value], at: 1),
++                backward: try .pairing(from: value, [.terminal(from: value), .identity(value)])
++            )
++        }
++        public static func sumZero(_ value: Expression) throws -> Self {
++            Self(
++                forward: try .elimination(to: value, [.initial(to: value), .identity(value)]),
++                backward: try .injection([.zero, value], at: 1)
++            )
++        }
++        public static func permutation(of record: Record, order: [String]) throws -> Self {
++            guard order.count == record.fields.count else {
++                throw Failure("a permutation must include every coordinate")
++            }
++            let selected = try record.selecting(order)
++            let inverse = try selected.record.selecting(record.fields.map(\.name))
++            return Self(forward: selected.projection, backward: inverse.projection)
++        }
++    }
+ }
+diff --git a/Sources/Type Algebra/Type.Recursion.swift b/Sources/Type Algebra/Type.Recursion.swift
+deleted file mode 100644
+index 98698ae..0000000
+--- a/Sources/Type Algebra/Type.Recursion.swift	
++++ /dev/null
+@@ -1,43 +0,0 @@
+-extension Type {
+-    public struct Recursion: Equatable, Sendable {
+-        public let kind: Kind
+-        public let variable: Variable
+-        public let body: Expression
+-        public init(_ kind: Kind, variable: Variable, body: Expression) throws {
+-            guard body.isStrictlyPositive(in: variable) else {
+-                throw Failure(
+-                    "recursive carrier requires a strictly positive, known action in its bound variable"
+-                )
+-            }
+-            self.kind = kind
+-            self.variable = variable
+-            self.body = body
+-        }
+-    }
+-}
+-
+-extension Type.Recursion {
+-    public enum Kind: Equatable, Sendable { case least, greatest }
+-
+-    public static func free(
+-        layer: Expression,
+-        variable: Variable,
+-        returning result: Expression
+-    ) throws -> Self {
+-        guard !result.variables.contains(variable) else {
+-            throw Failure("free carrier would capture the result variable")
+-        }
+-        return try Self(.least, variable: variable, body: .sum([result, layer]))
+-    }
+-
+-    public static func cofree(
+-        layer: Expression,
+-        variable: Variable,
+-        observing result: Expression
+-    ) throws -> Self {
+-        guard !result.variables.contains(variable) else {
+-            throw Failure("cofree carrier would capture the observation variable")
+-        }
+-        return try Self(.greatest, variable: variable, body: .product([result, layer]))
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Refinement.swift b/Sources/Type Algebra/Type.Refinement.swift
+deleted file mode 100644
+index 25ff238..0000000
+--- a/Sources/Type Algebra/Type.Refinement.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Type {
+-    public struct Refinement: Equatable, Sendable {
+-        public let base: Expression
+-        public let predicate: Atom
+-        public init(_ base: Expression, satisfying predicate: Atom) {
+-            self.base = base
+-            self.predicate = predicate
+-        }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Signature.swift b/Sources/Type Algebra/Type.Signature.swift
+index 4814388..6a91a97 100644
+--- a/Sources/Type Algebra/Type.Signature.swift	
++++ b/Sources/Type Algebra/Type.Signature.swift	
+@@ -10,6 +10,12 @@ extension Type {
+             self.output = output
+             self.effect = effect
+         }
++        public var implementation: Expression {
++            .exponential(domain: input, codomain: effect.map { .effect($0, output) } ?? output)
++        }
++        public func continuation(_ result: Expression) -> Expression {
++            .product([input, .exponential(domain: output, codomain: result)])
++        }
+     }
+ 
+     public struct Signature: Equatable, Sendable {
+@@ -20,50 +26,68 @@ extension Type {
+             }
+             self.operations = operations
+         }
+-    }
+-}
+-
+-extension Type.Operation {
+-    public var implementation: Expression {
+-        .exponential(domain: input, codomain: effect.map { .effect($0, output) } ?? output)
+-    }
+-
+-    public func continuation(_ result: Expression) -> Expression {
+-        .product([input, .exponential(domain: output, codomain: result)])
+-    }
+-}
+-
+-extension Type.Signature {
+-    public var implementation: Expression { .product(operations.map(\.implementation)) }
+-
+-    public var request: Expression { .sum(operations.map(\.input)) }
+-
+-    public var exchanges: Expression {
+-        .sum(operations.map { .product([$0.input, $0.output]) })
+-    }
+-
+-    public var requests: Expression { .list(request) }
+-
+-    public func response(to operation: String) throws -> Expression {
+-        guard let value = operations.first(where: { $0.name == operation }) else {
+-            throw Failure("unknown operation `\(operation)`")
++        public var implementation: Expression { .product(operations.map(\.implementation)) }
++        public var request: Expression { .sum(operations.map(\.input)) }
++        public var exchanges: Expression {
++            .sum(operations.map { .product([$0.input, $0.output]) })
++        }
++        public var requests: Expression { .list(request) }
++        public func response(to operation: String) throws -> Expression {
++            guard let value = operations.first(where: { $0.name == operation }) else {
++                throw Failure("unknown operation `\(operation)`")
++            }
++            return value.output
++        }
++        public func continuation(_ result: Expression) -> Expression {
++            .sum(operations.map { $0.continuation(result) })
++        }
++        public func machine(state: Expression) -> Expression {
++            .product(
++                operations.map { operation in
++                    let outcome = Expression.product([operation.output, state])
++                    return .exponential(
++                        domain: operation.input,
++                        codomain: operation.effect.map { .effect($0, outcome) } ?? outcome
++                    )
++                }
++            )
+         }
+-        return value.output
+-    }
+-
+-    public func continuation(_ result: Expression) -> Expression {
+-        .sum(operations.map { $0.continuation(result) })
+     }
+ 
+-    public func machine(state: Expression) -> Expression {
+-        .product(
+-            operations.map { operation in
+-                let outcome = Expression.product([operation.output, state])
+-                return .exponential(
+-                    domain: operation.input,
+-                    codomain: operation.effect.map { .effect($0, outcome) } ?? outcome
++    public struct Recursion: Equatable, Sendable {
++        public enum Kind: Equatable, Sendable { case least, greatest }
++        public let kind: Kind
++        public let variable: Variable
++        public let body: Expression
++        public init(_ kind: Kind, variable: Variable, body: Expression) throws {
++            guard body.isStrictlyPositive(in: variable) else {
++                throw Failure(
++                    "recursive carrier requires a strictly positive, known action in its bound variable"
+                 )
+             }
+-        )
++            self.kind = kind
++            self.variable = variable
++            self.body = body
++        }
++        public static func free(
++            layer: Expression,
++            variable: Variable,
++            returning result: Expression
++        ) throws -> Self {
++            guard !result.variables.contains(variable) else {
++                throw Failure("free carrier would capture the result variable")
++            }
++            return try Self(.least, variable: variable, body: .sum([result, layer]))
++        }
++        public static func cofree(
++            layer: Expression,
++            variable: Variable,
++            observing result: Expression
++        ) throws -> Self {
++            guard !result.variables.contains(variable) else {
++                throw Failure("cofree carrier would capture the observation variable")
++            }
++            return try Self(.greatest, variable: variable, body: .product([result, layer]))
++        }
+     }
+ }
+diff --git a/Sources/Type Algebra/Type.Theory.swift b/Sources/Type Algebra/Type.Theory.swift
+deleted file mode 100644
+index c5eb3f1..0000000
+--- a/Sources/Type Algebra/Type.Theory.swift	
++++ /dev/null
+@@ -1,10 +0,0 @@
+-extension Type {
+-    public struct Theory: Equatable, Sendable {
+-        public let signature: Signature
+-        public let equations: [Equation]
+-        public init(signature: Signature, equations: [Equation]) {
+-            self.signature = signature
+-            self.equations = equations
+-        }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.Variable.swift b/Sources/Type Algebra/Type.Variable.swift
+deleted file mode 100644
+index 2c27e61..0000000
+--- a/Sources/Type Algebra/Type.Variable.swift	
++++ /dev/null
+@@ -1,7 +0,0 @@
+-
+-extension Type {
+-    public struct Variable: Hashable, Sendable {
+-        public let name: String
+-        public init(_ name: String) { self.name = name }
+-    }
+-}
+diff --git a/Sources/Type Algebra/Type.swift b/Sources/Type Algebra/Type.swift
+index 37fa6ad..bcc4069 100644
+--- a/Sources/Type Algebra/Type.swift	
++++ b/Sources/Type Algebra/Type.swift	
+@@ -1,4 +1,5 @@
+ public enum Type {
++
+     public struct Polarity: OptionSet, Hashable, Sendable {
+         public let rawValue: Int
+         public init(rawValue: Int) { self.rawValue = rawValue }
+@@ -117,4 +118,22 @@ public enum Type {
+ }
+ 
+ extension Type {
++    public struct Atom: Hashable, Sendable {
++        public let scope: [String]
++        public let name: String
++        public init(_ name: String, scope: [String] = []) {
++            self.name = name
++            self.scope = scope
++        }
++    }
++
++    public struct Variable: Hashable, Sendable {
++        public let name: String
++        public init(_ name: String) { self.name = name }
++    }
++
++    public struct Failure: Error, Equatable, Sendable, CustomStringConvertible {
++        public let description: String
++        public init(_ description: String) { self.description = description }
++    }
+ }
+-- 
+2.43.0
+

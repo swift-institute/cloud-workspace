@@ -1,0 +1,470 @@
+From b1c51d4737a035de0917e36dcd581d8568dd674d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 03:17:17 +0000
+Subject: [PATCH 26/28] minimal type body: more non-stored members moved into
+ an extension of their type (batch 18; type-check follows; Linux x86_64, Swift
+ 6.4.2) (coenttb/work#242)
+
+---
+ .../Institute.CI.Canon.Gitignore.Nested.swift |   4 +-
+ .../Institute.CI.Package.Content.swift        | 134 +++++++++---------
+ .../Institute.CI.Validation.Corpus.swift      |  26 ++--
+ ...e.CI.Validation.SkillHygiene.Pattern.swift |   6 +-
+ ...te.CI.Validation.ThinCallers.Message.swift |  10 +-
+ ...stitute.CI.Workflow.YAML.BlockScalar.swift |  14 +-
+ .../Institute.CI.Command.Gitignore.swift      |  58 ++++----
+ .../Institute.CI.Command.Source.swift         |   4 +-
+ .../Source Measurement/Source.Subject.swift   |  32 +++--
+ 9 files changed, 154 insertions(+), 134 deletions(-)
+
+diff --git a/Sources/Institute CI Canon/Institute.CI.Canon.Gitignore.Nested.swift b/Sources/Institute CI Canon/Institute.CI.Canon.Gitignore.Nested.swift
+index 7b0b75b..19a7cad 100644
+--- a/Sources/Institute CI Canon/Institute.CI.Canon.Gitignore.Nested.swift	
++++ b/Sources/Institute CI Canon/Institute.CI.Canon.Gitignore.Nested.swift	
+@@ -13,7 +13,9 @@ extension Institute.CI.Canon.Gitignore.Nested {
+         .build/
+         .swiftpm/
+         .benchmarks/
++}
+ 
++    extension Nested {
+     /// The only locations at which a nested package policy may be declared.
+     public static let roots = ["Tests", "Benchmarks"]
+ 
+@@ -26,4 +28,4 @@ extension Institute.CI.Canon.Gitignore.Nested {
+             }
+         )
+     }
+-}
++    }
+diff --git a/Sources/Institute CI Contract/Institute.CI.Package.Content.swift b/Sources/Institute CI Contract/Institute.CI.Package.Content.swift
+index 54b7a95..aef7990 100644
+--- a/Sources/Institute CI Contract/Institute.CI.Package.Content.swift	
++++ b/Sources/Institute CI Contract/Institute.CI.Package.Content.swift	
+@@ -17,87 +17,89 @@ extension Institute.CI {
+ 
+ extension Institute.CI.Package {
+     public struct Content: Sendable, Equatable {
+-        public struct Change: Sendable, Equatable, Hashable {
+-            public let path: File.Path
+-            public let previousPath: File.Path?
+-
+-            public init(path: File.Path, previousPath: File.Path? = nil) {
+-                self.path = path
+-                self.previousPath = previousPath
+-            }
+-
+-            var paths: [String] { [path, previousPath].compactMap { $0?.string } }
+-        }
+-
+         public let declaredRoots: Set<String>
+ 
+         public init(declaredRoots: some Swift.Sequence<String>) {
+             self.declaredRoots = Set(declaredRoots.map(Self.normalizedRoot)).union([""])
+         }
++    }
++}
+ 
+-        /// `true` means at least one path can affect package work. An
+-        /// empty, completely enumerated diff is non-package content; a
+-        /// missing or malformed enumeration is represented by the caller
+-        /// as a refusal, never as an empty list.
+-        public func changed(_ changes: [Change]) -> Bool {
+-            changes.contains { change in
+-                change.paths.contains { affectsPackage($0) }
+-            }
++extension Institute.CI.Package.Content {
++    public struct Change: Sendable, Equatable, Hashable {
++        public let path: File.Path
++        public let previousPath: File.Path?
++
++        public init(path: File.Path, previousPath: File.Path? = nil) {
++            self.path = path
++            self.previousPath = previousPath
+         }
+ 
+-        func affectsPackage(_ rawPath: String) -> Bool {
+-            let path = Self.normalizedPath(rawPath)
+-            guard !path.isEmpty else { return true }
+-            if path == "Package.swift" || path.hasSuffix("/Package.swift") { return true }
+-            if path.hasPrefix(".swiftpm/") || path == ".swift-version"
+-                || path.hasPrefix(".swift-version/") || path == "Package.resolved"
+-            {
+-                return true
+-            }
+-            for root in declaredRoots
+-            where Self.isPackageInput(path, root: root) {
+-                return true
+-            }
+-            return !Self.isKnownNonPackage(path)
++        var paths: [String] { [path, previousPath].compactMap { $0?.string } }
++    }
++
++    /// `true` means at least one path can affect package work. An
++    /// empty, completely enumerated diff is non-package content; a
++    /// missing or malformed enumeration is represented by the caller
++    /// as a refusal, never as an empty list.
++    public func changed(_ changes: [Change]) -> Bool {
++        changes.contains { change in
++            change.paths.contains { affectsPackage($0) }
+         }
++    }
+ 
+-        static func isPackageInput(_ path: String, root: String) -> Bool {
+-            let prefix = root.isEmpty ? "" : root + "/"
+-            guard path.hasPrefix(prefix) else { return false }
+-            let relative = String(path.dropFirst(prefix.count))
+-            return ["Sources/", "Tests/", "Plugins/", "Resources/"].contains {
+-                relative.hasPrefix($0)
+-            } || relative == "module.modulemap" || relative.hasSuffix(".modulemap")
+-                || [".c", ".cc", ".cpp", ".h", ".m", ".mm"].contains {
+-                    relative.hasSuffix($0)
+-                }
++    func affectsPackage(_ rawPath: String) -> Bool {
++        let path = Self.normalizedPath(rawPath)
++        guard !path.isEmpty else { return true }
++        if path == "Package.swift" || path.hasSuffix("/Package.swift") { return true }
++        if path.hasPrefix(".swiftpm/") || path == ".swift-version"
++            || path.hasPrefix(".swift-version/") || path == "Package.resolved"
++        {
++            return true
++        }
++        for root in declaredRoots
++        where Self.isPackageInput(path, root: root) {
++            return true
+         }
++        return !Self.isKnownNonPackage(path)
++    }
+ 
+-        static func isKnownNonPackage(_ path: String) -> Bool {
+-            if ["Research/", "Experiments/", "Documentation/", "Docs/", "Provenance/"]
+-                .contains(where: path.hasPrefix)
+-            {
+-                return true
+-            }
+-            if path.hasPrefix(".snapshots/") { return true }
+-            if path.hasPrefix("README") && !path.contains("/") { return true }
+-            if ["LICENSE", "NOTICE", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", ".gitignore"]
+-                .contains(path)
+-            {
+-                return true
++    static func isPackageInput(_ path: String, root: String) -> Bool {
++        let prefix = root.isEmpty ? "" : root + "/"
++        guard path.hasPrefix(prefix) else { return false }
++        let relative = String(path.dropFirst(prefix.count))
++        return ["Sources/", "Tests/", "Plugins/", "Resources/"].contains {
++            relative.hasPrefix($0)
++        } || relative == "module.modulemap" || relative.hasSuffix(".modulemap")
++            || [".c", ".cc", ".cpp", ".h", ".m", ".mm"].contains {
++                relative.hasSuffix($0)
+             }
+-            return path.hasSuffix(".md") && !path.hasPrefix("Sources/")
+-                && !path.hasPrefix("Tests/")
+-        }
++    }
+ 
+-        static func normalizedRoot(_ root: String) -> String {
+-            let normalized = normalizedPath(root)
+-            return normalized == "." ? "" : normalized
++    static func isKnownNonPackage(_ path: String) -> Bool {
++        if ["Research/", "Experiments/", "Documentation/", "Docs/", "Provenance/"]
++            .contains(where: path.hasPrefix)
++        {
++            return true
+         }
+-
+-        static func normalizedPath(_ path: String) -> String {
+-            path.split(separator: "/").filter { $0 != "." && !$0.isEmpty }
+-                .joined(separator: "/")
++        if path.hasPrefix(".snapshots/") { return true }
++        if path.hasPrefix("README") && !path.contains("/") { return true }
++        if ["LICENSE", "NOTICE", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", ".gitignore"]
++            .contains(path)
++        {
++            return true
+         }
++        return path.hasSuffix(".md") && !path.hasPrefix("Sources/")
++            && !path.hasPrefix("Tests/")
++    }
++
++    static func normalizedRoot(_ root: String) -> String {
++        let normalized = normalizedPath(root)
++        return normalized == "." ? "" : normalized
++    }
++
++    static func normalizedPath(_ path: String) -> String {
++        path.split(separator: "/").filter { $0 != "." && !$0.isEmpty }
++            .joined(separator: "/")
+     }
+ }
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.Corpus.swift b/Sources/Institute CI Validation/Institute.CI.Validation.Corpus.swift
+index 582e03c..4d28125 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.Corpus.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.Corpus.swift	
+@@ -38,8 +38,6 @@ extension Institute.CI.Validation.Corpus {
+         /// because an exemption that silently became a plain pass is
+         /// a rule that stopped covering its hardest case.
+         case exempt = "edge"
+-
+-        var expectsFindings: Bool { self == .violating }
+     }
+ 
+     /// One scenario directory.
+@@ -54,15 +52,6 @@ extension Institute.CI.Validation.Corpus {
+         public let expectation: Expectation
+         public let name: String
+         public let root: String
+-
+-        /// The reporting name the retired harness used. Preserved
+-        /// byte-for-byte: it appears in the TSV the differential gate
+-        /// compares.
+-        public var repository: GitHub_Standard::GitHub.Repository.Slug { "swift-institute-test/\(name)" }
+-
+-        public var subject: Subject {
+-            Subject(repository: repository, root: root)
+-        }
+     }
+ 
+     /// Every rule directory, sorted, optionally restricted to a
+@@ -107,3 +96,18 @@ extension Institute.CI.Validation.Corpus {
+         Institute.CI.Validation.isDirectory(path)
+     }
+ }
++
++extension Institute.CI.Validation.Corpus.Expectation {
++    var expectsFindings: Bool { self == .violating }
++}
++
++extension Institute.CI.Validation.Corpus.Scenario {
++    /// The reporting name the retired harness used. Preserved
++    /// byte-for-byte: it appears in the TSV the differential gate
++    /// compares.
++    public var repository: GitHub_Standard::GitHub.Repository.Slug { "swift-institute-test/\(name)" }
++
++    public var subject: Subject {
++        Subject(repository: repository, root: root)
++    }
++}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.SkillHygiene.Pattern.swift b/Sources/Institute CI Validation/Institute.CI.Validation.SkillHygiene.Pattern.swift
+index 1b0687d..f070b0e 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.SkillHygiene.Pattern.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.SkillHygiene.Pattern.swift	
+@@ -41,8 +41,6 @@ extension Institute.CI.Validation.SkillHygiene.Pattern {
+     struct Match {
+         let range: Range<String.Index>
+         let groups: [String?]
+-
+-        var whole: String { groups[0] ?? "" }
+     }
+ 
+     func firstMatch(in text: String) -> Match? {
+@@ -60,6 +58,10 @@ extension Institute.CI.Validation.SkillHygiene.Pattern {
+     }
+ }
+ 
++extension Institute.CI.Validation.SkillHygiene.Pattern.Match {
++    var whole: String { groups[0] ?? "" }
++}
++
+ extension Institute.CI.Validation.SkillHygiene.Pattern {
+     /// The closing `---` of a frontmatter block.
+     static let frontmatterTerminator = Self(#"^---\s*$"#, anchorsMatchLines: true)
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Message.swift b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Message.swift
+index 824b4d8..1223f92 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Message.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.ThinCallers.Message.swift	
+@@ -38,11 +38,13 @@ extension Institute.CI.Validation.ThinCallers.Message {
+     public static let inlineRunsOn = """
+         .github/workflows/ci.yml contains inline `runs-on:` — per \
+ 
+-    public static let inlineSteps = """
+-        .github/workflows/ci.yml contains inline `steps:` — per \
+-
+     public static let noReusable = """
+         .github/workflows/ci.yml does not reference any reusable via `uses:` \
++}
++
++    extension Message {
++    public static let inlineSteps = """
++        .github/workflows/ci.yml contains inline `steps:` — per \
+ 
+     public static func standaloneWorkflow(_ name: String) -> String {
+         """
+@@ -139,4 +141,4 @@ extension Institute.CI.Validation.ThinCallers.Message {
+     static var closedSet: String {
+         Institute.CI.Validation.ThinCallers.crossOrganizationSecrets.joined(separator: ", ")
+     }
+-}
++    }
+diff --git a/Sources/Institute CI Workflow/Institute.CI.Workflow.YAML.BlockScalar.swift b/Sources/Institute CI Workflow/Institute.CI.Workflow.YAML.BlockScalar.swift
+index 916b322..c34235f 100644
+--- a/Sources/Institute CI Workflow/Institute.CI.Workflow.YAML.BlockScalar.swift	
++++ b/Sources/Institute CI Workflow/Institute.CI.Workflow.YAML.BlockScalar.swift	
+@@ -32,12 +32,6 @@ extension Institute.CI.Workflow.YAML.BlockScalar {
+             }
+             self = style == "|" ? .literal(chomping) : .folded(chomping)
+         }
+-
+-        var chomping: Chomping {
+-            switch self {
+-            case .literal(let chomping), .folded(let chomping): chomping
+-            }
+-        }
+     }
+ 
+     enum Chomping: Sendable, Equatable {
+@@ -99,3 +93,11 @@ extension Institute.CI.Workflow.YAML.BlockScalar {
+         return result
+     }
+ }
++
++extension Institute.CI.Workflow.YAML.BlockScalar.Indicator {
++    var chomping: Chomping {
++        switch self {
++        case .literal(let chomping), .folded(let chomping): chomping
++        }
++    }
++}
+diff --git a/Sources/Institute Command/Institute.CI.Command.Gitignore.swift b/Sources/Institute Command/Institute.CI.Command.Gitignore.swift
+index 27cbe2b..fcbd9a3 100644
+--- a/Sources/Institute Command/Institute.CI.Command.Gitignore.swift	
++++ b/Sources/Institute Command/Institute.CI.Command.Gitignore.swift	
+@@ -29,34 +29,6 @@ extension Institute.CI.Command.Gitignore {
+         case missingRequiredArgument(String)
+         case invalidRepository(String)
+         case invalidCanon(String)
+-
+-        public var message: String {
+-            switch self {
+-            case .missingCommand:
+-                "expected render-gitignore, validate-gitignore, or validate-gitignore-fixtures"
+-
+-            case .unknownCommand(let command):
+-                "unknown command `\(command)`"
+-
+-            case .missingValue(let option):
+-                "\(option) requires a value"
+-
+-            case .unknownArgument(let argument):
+-                "unknown argument `\(argument)`"
+-
+-            case .duplicateArgument(let option):
+-                "\(option) may appear once"
+-
+-            case .missingRequiredArgument(let option):
+-                "missing required \(option)"
+-
+-            case .invalidRepository(let value):
+-                "--repository must be owner/name, got `\(value)`"
+-
+-            case .invalidCanon(let message):
+-                message
+-            }
+-        }
+     }
+ 
+     /// Parses one of the three control-plane operations. Values are kept
+@@ -158,3 +130,33 @@ extension Institute.CI.Command.Gitignore {
+         return values
+     }
+ }
++
++extension Institute.CI.Command.Gitignore.Error {
++    public var message: String {
++        switch self {
++        case .missingCommand:
++            "expected render-gitignore, validate-gitignore, or validate-gitignore-fixtures"
++
++        case .unknownCommand(let command):
++            "unknown command `\(command)`"
++
++        case .missingValue(let option):
++            "\(option) requires a value"
++
++        case .unknownArgument(let argument):
++            "unknown argument `\(argument)`"
++
++        case .duplicateArgument(let option):
++            "\(option) may appear once"
++
++        case .missingRequiredArgument(let option):
++            "missing required \(option)"
++
++        case .invalidRepository(let value):
++            "--repository must be owner/name, got `\(value)`"
++
++        case .invalidCanon(let message):
++            message
++        }
++    }
++}
+diff --git a/Sources/Institute Command/Institute.CI.Command.Source.swift b/Sources/Institute Command/Institute.CI.Command.Source.swift
+index 5be3209..e117dd2 100644
+--- a/Sources/Institute Command/Institute.CI.Command.Source.swift	
++++ b/Sources/Institute Command/Institute.CI.Command.Source.swift	
+@@ -99,7 +99,9 @@ extension Institute.CI.Command.Source {
+     }
+ 
+     static let usage = """
++}
+ 
++    extension Source {
+     public static var schema: Command_Schema::Command.Schema.Definition<Self> {
+         .init {
+             Command_Schema::Command.Option(
+@@ -207,7 +209,7 @@ extension Institute.CI.Command.Source {
+         }
+         Process.Exit.normal(code)
+     }
+-}
++    }
+ 
+ extension Institute.CI.Command.Source {
+     static func rerun(with planner: File) throws(Institute.Error) -> Never {
+diff --git a/Sources/Source Measurement/Source.Subject.swift b/Sources/Source Measurement/Source.Subject.swift
+index 50f1e29..4dea68b 100644
+--- a/Sources/Source Measurement/Source.Subject.swift	
++++ b/Sources/Source Measurement/Source.Subject.swift	
+@@ -11,22 +11,24 @@ extension Source {
+             self.root = root
+             self.artifacts = artifacts.sorted { $0.path.string < $1.path.string }
+         }
++    }
++}
+ 
+-        /// The subject without its control artifacts: what engines measure
+-        /// and repair as governed source.
+-        public var governed: Self {
+-            .init(
+-                identity: identity,
+-                root: root,
+-                artifacts: artifacts.filter {
+-                    if case .control = $0.purpose { return false }
+-                    return true
+-                }
+-            )
+-        }
++extension Source.Subject {
++    /// The subject without its control artifacts: what engines measure
++    /// and repair as governed source.
++    public var governed: Self {
++        .init(
++            identity: identity,
++            root: root,
++            artifacts: artifacts.filter {
++                if case .control = $0.purpose { return false }
++                return true
++            }
++        )
++    }
+ 
+-        public func paths(of kind: Artifact.Kind) -> [Swift.String] {
+-            artifacts.lazy.filter { $0.kind == kind }.map { $0.path.string }
+-        }
++    public func paths(of kind: Artifact.Kind) -> [Swift.String] {
++        artifacts.lazy.filter { $0.kind == kind }.map { $0.path.string }
+     }
+ }
+-- 
+2.43.0
+
