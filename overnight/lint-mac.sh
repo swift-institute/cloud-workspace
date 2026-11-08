@@ -17,7 +17,7 @@ map="$OUT/.paths"
 : > "$map"
 for p in "${list[@]}"; do
   n=${p#*/}
-  d=$(find "$root/swift-institute" "$root" -maxdepth 4 -type d -name "$n" -not -path '*/.build/*' -not -path '*/.claude/*' 2>/dev/null | head -1)
+  d=$(find "$root/swift-institute" "$root" -maxdepth 4 -type d -name "$n" -not -path '*/.build/*' -not -path '*/.claude/*' -exec test -d "{}/.git" \; -print 2>/dev/null | head -1)
   [ -n "$d" ] && printf '%s\t%s\n' "$p" "$d" >> "$map" || echo "no checkout: $p" >&2
 done
 cut -f1,2 "$map" | xargs -P "$J" -L1 bash -c '

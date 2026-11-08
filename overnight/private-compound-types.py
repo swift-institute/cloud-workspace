@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """For `compound type name` on an internal type the rule exempts once private: a type whose name appears in no other
-file of its package becomes `fileprivate`. Skips @Suite types, a type whose body holds @Test, protocols, and
+file of its package, and in its own file only in its own body and `extension <name>` headers, becomes `fileprivate`.
+Skips @Suite types, a type whose body holds @Test, protocols, and
 extensions. Usage: overnight/private-compound-types.py <lint-dir> [--dry-run]"""
 import glob, json, os, re, subprocess, sys
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,6 +41,12 @@ for f in sorted(glob.glob(os.path.join(lint, "*.json"))):
         if "@Test" in rest[:j]: skip("holds tests"); continue
         w = re.compile(r"(?<![\w`])" + re.escape(name) + r"(?![\w`])")
         if any(w.search(text(y)) for y in files if y != path): skip("used elsewhere"); continue
+        # A declaration outside the type's own body that names it (a property, parameter, result or enclosing
+        # member) would then expose a fileprivate type: "… must be declared fileprivate because its type uses a
+        # fileprivate type". Only `extension <name>` headers may name it there.
+        outside = "\n".join(L[:i]) + "\n" + rest[j + 1:]
+        outside = re.sub(r"(?m)^[^\S\n]*(?:@[\w.]+(?:\([^)]*\))?\s+)*(?:\w+\s+)*extension\s+" + re.escape(name) + r"\b", "", outside)
+        if w.search(outside): skip("used by other declarations in its file"); continue
         new = m.group(1) + m.group(2) + "fileprivate " + m.group(4) + L[i][m.end(3) + len(m.group(4)):] if False else \
               L[i][:m.start(3)] + "fileprivate " + L[i][m.end(3):]
         edits.setdefault(path, []).append((i, new))

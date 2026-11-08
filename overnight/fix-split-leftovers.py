@@ -21,6 +21,8 @@ import os, re, sys
 package, log = sys.argv[1], sys.argv[2]
 text = re.sub(r"\x1b\[[0-9;]*m", "", open(log, errors="replace").read())
 root = os.path.realpath(package)
+if "--prefix" in sys.argv:
+    text = text.replace(sys.argv[sys.argv.index("--prefix") + 1].rstrip("/") + "/", root + "/")
 
 imports = set()
 for path, line, module in re.findall(r"^(/[^:\n]+\.swift):(\d+):\d+: error: public import of '([^']+)' was not used", text, re.M):
@@ -66,7 +68,7 @@ for path, name in sorted(synth):
         f.write("\n" + block.group(1))
     print(f"conformances moved: {full} -> {os.path.relpath(owner_file, root)}")
 
-prefix = sys.argv[sys.argv.index("--prefix") + 1] if "--prefix" in sys.argv else None
+prefix = None
 edits = {}
 for path, line, col, name in re.findall(
     r"^(/[^:\n]+\.swift):(\d+):(\d+): error: cannot find (?:type )?'(\w+)' in scope", text, re.M

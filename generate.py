@@ -46,8 +46,15 @@ with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
 
 
 
+declared = {p: [t["name"] for t in (m or {}).get("traits") or [] if t["name"] != "default"] for p, _, _, m in dumped}
+
+
 def dependency(p):
-    traits = sorted(requested.get(os.path.basename(p).lower(), ()))
+    # ALL_TRAITS=1 enables every trait each package declares, as CI's `--enable-all-traits` does for each package.
+    if os.environ.get("ALL_TRAITS"):
+        traits = sorted(set(declared.get(p, [])) | requested.get(os.path.basename(p).lower(), set()))
+    else:
+        traits = sorted(requested.get(os.path.basename(p).lower(), ()))
     if not traits:
         return f'        .package(path: "{p}"),\n'
     return f'        .package(path: "{p}", traits: [.defaults, {", ".join(chr(34) + t + chr(34) for t in traits)}]),\n'
@@ -81,6 +88,7 @@ def setting(st):
     if k == "unsafeFlags": return f".unsafeFlags({q(a)})"
     if k == "swiftLanguageMode": return f".swiftLanguageMode(.v{str(a.get('_0', a) if isinstance(a, dict) else a).split('.')[0]})" if a else None
     if k == "interoperabilityMode": return f".interoperabilityMode(.{a})"
+    if k == "defaultIsolation": return f".defaultIsolation({a}.self)" if a == "MainActor" else ".defaultIsolation(nil)"
     return None
 
 
