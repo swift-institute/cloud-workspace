@@ -16,7 +16,13 @@ for round in $(seq 1 $N); do
     c=$(git -C "$d" log --reverse --format=%H --grep="^minimal type body: \(non-stored\|more non-stored\)" | head -1)
     if [ -n "$c" ] && ! git -C "$d" diff --quiet "$c~1" -- "$rel"; then git -C "$d" checkout "$c~1" -- "$rel"
     elif ! git -C "$d" diff --quiet origin/main -- "$rel" && git -C "$d" cat-file -e "origin/main:$rel" 2>/dev/null; then git -C "$d" checkout origin/main -- "$rel"
-    else echo "  unchanged, failing: $r"; fi
+    else
+      # Unchanged by this session: a test target goes on the fallback list (built per package), and the root regenerates.
+      tdir=$(echo "$rel" | cut -d/ -f1-2)
+      name=$(grep -o "testTarget(name: \"[^\"]*\", dependencies: [^\n]*path: \"$d/$tdir\"" Package.swift | head -1 | sed 's/testTarget(name: "\([^"]*\)".*/\1/')
+      if [ -n "$name" ]; then echo "$d|$name" >> overnight/tests-fallback.txt; ./generate.py > /dev/null 2>&1; echo "  fallback $d|$name"
+      else echo "  unchanged, failing: $r"; fi
+    fi
     git -C "$d" commit -qm "Revert $rel: it broke the root build (coenttb/work#242)" 2>/dev/null && echo "  reverted $r"
   done
 done
