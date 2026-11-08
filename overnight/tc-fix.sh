@@ -19,9 +19,9 @@ grep -vE "UnusedImportAccess|is imported as|external macro implementation|no suc
   r=${f#/home/user/cloud-workspace/}; d=$(echo "$r" | cut -d/ -f1-3); rel=${r#$d/}
   c=$(git -C "$d" log --reverse --format=%H --grep="^minimal type body: \(non-stored\|more non-stored\)" | head -1)
   if ! git -C "$d" cat-file -e "origin/main:$rel" 2>/dev/null; then
-    a=$(git -C "$d" log --diff-filter=A --format=%H -1 -- "$rel"); dd=$(dirname "$rel")
+    a=$(git -C "$d" log --no-renames --diff-filter=A --format=%H -1 -- "$rel"); dd=$(dirname "$rel")
     [ -n "$a" ] || continue
-    git -C "$d" diff --name-only --diff-filter=A "$a~1" HEAD -- "$dd" | while IFS= read -r x; do git -C "$d" rm -qf -- "$x"; done
+    git -C "$d" diff --name-only --no-renames --diff-filter=A "$a~1" HEAD -- "$dd" | while IFS= read -r x; do git -C "$d" rm -qf -- "$x"; done
     git -C "$d" checkout "$a~1" -- "$dd"
   elif [ -n "$c" ] && ! git -C "$d" diff --quiet "$c~1" -- "$rel"; then git -C "$d" checkout "$c~1" -- "$rel"
   elif ! git -C "$d" diff --quiet origin/main -- "$rel"; then git -C "$d" checkout origin/main -- "$rel"
