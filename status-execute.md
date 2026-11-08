@@ -75,17 +75,10 @@ Linux x86_64, Swift 6.4.2. Runner built in release from institute main 9205733 (
 
 Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as the baseline). Backed up to `findings-wip`.
 
-**Verified at 00:45 UTC (8 Nov) by lint of all 438 packages: 30,436 → 23,611, 6,825 fixed (22.4%).** Ratchet gate clean of this session's changes.
+**Verified at 01:40 UTC (8 Nov) by lint of all 438 packages: 30,436 → 24,484, 5,952 fixed (19.6%).** Down from 00:45's 22.4%: the root build with tests found files the type-check had passed (it misses some errors: same arguments, exit 0 inside the script and 1 run directly; cause not found) and directories it can't check (macros, C shims), and those minimal-body moves were reverted per file and per directory. Ratchet gate clean of this session's changes (3 items over on origin/main already).
 
-| Rule | Baseline → now (all packages) |
-|---|---|
-| minimal type body | 3,463 → 1,560 |
-| compound suite name | 4,730 → 493 |
-| extension file naming | 2,531 → 2,192 |
-| single type per file | 1,518 → 1,404 |
-| test display name string | 541 → 420 |
-| counter loop iteration | 487 → 445 |
-
+- **Root build with tests: not green yet.** `overnight/build-revert.sh` builds, reverts each file an error names to its state before the moves, and lists a test target this session didn't change on `overnight/tests-fallback.txt` (built per package instead). On the list now: swift-slab `Slab Tests` and `Decision Slab Integration Tests` (trait-gated `Slab.Inline`), swift-rfc-8446 and swift-rfc-7519 `Standard Library Integration Tests` (fail on origin/main), swift-finite `Finite Tests`, swift-email `Email Received Tests`, swift-email-html `Email HTML Rendering Tests`, swift-effects `Effects Built-in Tests`. **To check before any push:** whether each of the last four fails on origin/main too, or through a dependency this session changed.
+- **Next:** finish the build loop; the remaining `single type per file` splits (767) and `extension file naming` merges (460) with per-file reverts; the rest of `minimal type body`; `raw value access` and `int public parameter` where no new type is needed.
 - **Batch 8:** `minimal-bodies.py` again, with failures reverted per file, not per directory (6 type-check rounds), and ratchet rises reverted per file to the state before the moves.
 - **`compound identifier` (3,236): skipped.** Its fix is nested accessors (`fetch.all()` for `fetchAll`), which needs a new accessor type for almost every finding; 2,963 are public API, many named after SQL functions. The brief leaves fixes needing new types to the semantic pass.
 - **Batch 5:** the runner's own repairs (`minimal type body`, `counter loop iteration`, `test display name string`, `swift protocol qualification`, `comment in source`), type-checked; 16 failing directories left out.
