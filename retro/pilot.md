@@ -1,6 +1,8 @@
-# Pilot: one gated batch, predicted before the run
+# Pilot: one gated batch, predicted before the run (cancelled)
 
-Written at 10:16 UTC, 8 Nov, before the pilot started. Measured results follow below once the run is done.
+**Cancelled by Coen at about 10:35 UTC, before it ran.** Nothing was applied to or pushed to any package repository; the prediction below stays unmeasured. Found while preparing it: `swiftc -typecheck` passes broken ownership code (swift-linear), `-emit-sil -wmo` catches it in 0.6 s; the cold root build of main takes 578 s on 4 cores and stops at swift-linear.
+
+Written and pushed at 10:15 UTC, 8 Nov (cloud-workspace 1f13121), before the pilot started. 
 
 ## Scope
 
