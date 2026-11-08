@@ -151,3 +151,4 @@ Root build loop capped at 2 more rounds (Coen); not green at the cap (last round
 - swift-ietf/swift-rfc-9112: type-check: HTTP.Connection.Coder
 - swift-molecules/swift-graph: type-check: duplicate import with differing access
 - swift-standards/swift-email-standard: type-check: unused public imports
+- **Pushed: 379 repositories** to main, plain fast-forward pushes, none forced, none rejected (atoms 167, molecules 49, standards 102, compositions 61). Every pushed SHA is in `overnight/pushes-checkpoint.txt`. **Held: 22** (listed above). Next: read CI once, then `./ratchet.py`.
