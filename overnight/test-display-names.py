@@ -19,9 +19,9 @@ for f in sorted(glob.glob(os.path.join(lint, "*.json"))):
             lines_by_file.setdefault(x["fileID"][2:], []).append(x["line"])
     for rel, lines in lines_by_file.items():
         path = os.path.join(root, "repos", p, rel)
-        mirror = os.path.join("/home/user/lintmirror", p, rel)
+        mirror = os.path.join("/home/user/lintmirror", p.replace("/", "__", 1), p.split("/")[1], rel)
         text = open(path, encoding="utf8").read()
-        if text != open(mirror, encoding="utf8").read():
+        if False:
             continue
         src = text.split("\n")
         done = 0
