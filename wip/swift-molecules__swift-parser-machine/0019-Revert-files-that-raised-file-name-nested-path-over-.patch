@@ -1,0 +1,96 @@
+From 791e6b4156a6f5ddc91efb8364ddcb0473638851 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 04:04:35 +0000
+Subject: [PATCH 19/20] Revert files that raised `file name nested path` over
+ its ratchet limit (coenttb/work#242)
+
+---
+ .../Parser.Machine.Compile.Witness.swift      | 34 ++++++++++++++++++-
+ .../Parser.Machine.Failure.swift              |  5 +++
+ .../Parser.Machine.Runtime.swift              |  6 ++++
+ 3 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift b/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift
+index 9a4c794..04e16d2 100644
+--- a/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift	
++++ b/Sources/Parser Machine Compile/Parser.Machine.Compile.Witness.swift	
+@@ -1,5 +1,5 @@
+ import Checkpoint
+-import Cursor
++public import Cursor
+ import Iterator
+ public import Machine
+ 
+@@ -9,6 +9,38 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Compile {
++
++    public struct Witness<P: Parser::Parsing & ~Copyable>
++    where
++        P.Input: Cursor.`Protocol`,
++        P.Failure: Swift::Error
++    {
++        @usableFromInline
++        let _compile:
++            (
++                consuming P,
++                inout Machine.Parser.Builder<P.Input, P.Failure>
++            ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output>
++
++        @inlinable
++        public init(
++            compile:
++                @escaping (
++                    consuming P,
++                    inout Machine.Parser.Builder<P.Input, P.Failure>
++                ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output>
++        ) {
++            self._compile = compile
++        }
++
++        @inlinable
++        public func compile(
++            _ parser: consuming P,
++            into builder: inout Machine.Parser.Builder<P.Input, P.Failure>
++        ) -> Machine.Parser.Expression<P.Input, P.Failure, P.Output> {
++            _compile(parser, &builder)
++        }
++    }
+ }
+ 
+ extension Machine.Parser.Compile.Witness where P: ~Copyable {
+diff --git a/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift b/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift
+index 663aa36..9eeb567 100644
+--- a/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift	
++++ b/Sources/Parser Machine Runtime/Parser.Machine.Failure.swift	
+@@ -8,6 +8,11 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Failure {
++    package enum Recovery {
++        case continueWith(ID)
++        case handleReady(Machine.Parser.Value.Handle)
++        case propagate
++    }
+ }
+ 
+ extension Machine.Parser.Failure.Recovery {
+diff --git a/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift b/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift
+index 352db05..b61a6f3 100644
+--- a/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift	
++++ b/Sources/Parser Machine Runtime/Parser.Machine.Runtime.swift	
+@@ -7,4 +7,10 @@ extension Machine.Parser {
+ }
+ 
+ extension Machine.Parser.Runtime {
++    package enum Error: Swift::Error, Sendable {
++        case depthExceeded(limit: Int)
++        case typeMismatch
++        case internalError(String)
++        case cachedFailure
++    }
+ }
+-- 
+2.43.0
+

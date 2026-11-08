@@ -1,0 +1,1357 @@
+From 31d99ac0e102282b6bf59c4b6f4f2c4c006739ec Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 04:04:01 +0000
+Subject: [PATCH 31/31] Revert files that raised `namespace adoption typealias`
+ over its ratchet limit (coenttb/work#242)
+
+---
+ ...alidation.Drift.LintValidatorsWeekly.swift | 316 ++++++------
+ ...idation.Drift.ScheduledWorkflowAlert.swift | 245 +++++-----
+ .../Institute.CI.Validation.Gitignore.swift   | 455 +++++++++---------
+ .../Institute.CI.Validation.Readme.swift      | 180 ++++---
+ 4 files changed, 609 insertions(+), 587 deletions(-)
+
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.Drift.LintValidatorsWeekly.swift b/Sources/Institute CI Validation/Institute.CI.Validation.Drift.LintValidatorsWeekly.swift
+index 2673bf6..19a4b83 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.Drift.LintValidatorsWeekly.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.Drift.LintValidatorsWeekly.swift	
+@@ -40,179 +40,197 @@ extension Institute.CI.Validation.Drift {
+     /// question, and reporting zero drift would be the silent no-op this
+     /// rule exists to prevent.
+     public struct LintValidatorsWeekly: Institute.CI.Validation.Validator {
++        public typealias Finding = Institute.CI.Validation.Finding
++
+         public let rules: [Institute.CI.Validation.Rule] = ["LINT-VALIDATORS-WEEKLY-DRIFT"]
+         public let retiredScript: String? =
+             ".github/scripts/check-lint-validators-weekly-parity.py"
+ 
+-        public init() {}
+-    }
+-}
+-
+-extension Institute.CI.Validation.Drift.LintValidatorsWeekly {
+-    public typealias Finding = Institute.CI.Validation.Finding
+-
+-    /// The workflow this rule reads. Fixed rather than swept: the
+-    /// rule is about one file's internal correspondence.
+-    public static let workflowPath = ".github/workflows/lint-validators-weekly.yml"
++        /// The workflow this rule reads. Fixed rather than swept: the
++        /// rule is about one file's internal correspondence.
++        public static let workflowPath = ".github/workflows/lint-validators-weekly.yml"
+ 
+-    static let reportJob = "report"
++        static let reportJob = "report"
++        static let buildStep = "Build issue body"
+ 
+-    static let buildStep = "Build issue body"
++        public init() {}
+ 
+-    public func findings(
+-        in subject: Institute.CI.Validation.Subject
+-    ) throws(Institute.CI.Validation.EnvironmentDefect) -> [Finding] {
+-        guard let text = try subject.text(at: Self.workflowPath) else {
+-            throw .missingSupportFile(path: subject.path(Self.workflowPath))
+-        }
+-        let document: Institute.CI.Workflow.YAML.Node
+-        do throws(Institute.CI.Workflow.YAML.Error) {
+-            document = try Institute.CI.Workflow.YAML.Parser.parse(text)
+-        } catch {
+-            throw .missingSupportFile(
+-                path: "\(subject.path(Self.workflowPath)) (YAML parse failed: \(error.message))"
+-            )
+-        }
+-        return try Self.gaps(in: document).map { gap in
+-            Finding(
+-                repository: subject.repository,
+-                rule: rules[0],
+-                message: "\(gap.surface.rawValue): \(gap.message)"
+-            )
++        public func findings(
++            in subject: Institute.CI.Validation.Subject
++        ) throws(Institute.CI.Validation.EnvironmentDefect) -> [Finding] {
++            guard let text = try subject.text(at: Self.workflowPath) else {
++                throw .missingSupportFile(path: subject.path(Self.workflowPath))
++            }
++            let document: Institute.CI.Workflow.YAML.Node
++            do throws(Institute.CI.Workflow.YAML.Error) {
++                document = try Institute.CI.Workflow.YAML.Parser.parse(text)
++            } catch {
++                throw .missingSupportFile(
++                    path: "\(subject.path(Self.workflowPath)) (YAML parse failed: \(error.message))"
++                )
++            }
++            return try Self.gaps(in: document).map { gap in
++                Finding(
++                    repository: subject.repository,
++                    rule: rules[0],
++                    message: "\(gap.surface.rawValue): \(gap.message)"
++                )
++            }
+         }
+-    }
+ 
+-    /// Every (job, surface) gap in a parsed workflow.
+-    ///
+-    /// Separate from `findings(in:)` and taking the document rather
+-    /// than the subject, because the positive controls perturb one
+-    /// surface of a synthetic document at a time. A control that had
+-    /// to write a file to disk to ask this question would be testing
+-    /// the filesystem.
+-    public static func gaps(
+-        in document: Institute.CI.Workflow.YAML.Node
+-    ) throws(Institute.CI.Validation.EnvironmentDefect) -> [Gap] {
+-        let jobs = document["jobs"]?.mapping
+-        let scanJobs = (jobs?.textKeys ?? []).filter { $0.hasPrefix("scan-") }.sorted()
+-        guard let report = jobs?[reportJob]?.mapping else {
+-            throw .missingSupportFile(path: "no '\(reportJob)' job in jobs:")
+-        }
+-        let needs: [String] =
+-            switch report["needs"] {
+-            case .sequence(let value): value.compactMap(\.text)
+-            case .text(let value): [value]
+-            default: []
++        /// Every (job, surface) gap in a parsed workflow.
++        ///
++        /// Separate from `findings(in:)` and taking the document rather
++        /// than the subject, because the positive controls perturb one
++        /// surface of a synthetic document at a time. A control that had
++        /// to write a file to disk to ask this question would be testing
++        /// the filesystem.
++        public static func gaps(
++            in document: Institute.CI.Workflow.YAML.Node
++        ) throws(Institute.CI.Validation.EnvironmentDefect) -> [Gap] {
++            let jobs = document["jobs"]?.mapping
++            let scanJobs = (jobs?.textKeys ?? []).filter { $0.hasPrefix("scan-") }.sorted()
++            guard let report = jobs?[reportJob]?.mapping else {
++                throw .missingSupportFile(path: "no '\(reportJob)' job in jobs:")
+             }
+-        let condition = report["if"]?.text ?? ""
+-        guard
+-            let step = report["steps"]?.sequence?
+-                .first(where: { $0["name"]?.text == buildStep })?.mapping
+-        else {
+-            throw .missingSupportFile(
+-                path: "no step named '\(buildStep)' in the '\(reportJob)' job"
+-            )
+-        }
+-        let environment = step["env"]?.mapping
+-        let script = step["run"]?.text ?? ""
+-        let heredoc = Self.heredoc(in: script)
++            let needs: [String] =
++                switch report["needs"] {
++                case .sequence(let value): value.compactMap(\.text)
++                case .text(let value): [value]
++                default: []
++                }
++            let condition = report["if"]?.text ?? ""
++            guard
++                let step = report["steps"]?.sequence?
++                    .first(where: { $0["name"]?.text == buildStep })?.mapping
++            else {
++                throw .missingSupportFile(
++                    path: "no step named '\(buildStep)' in the '\(reportJob)' job"
++                )
++            }
++            let environment = step["env"]?.mapping
++            let script = step["run"]?.text ?? ""
++            let heredoc = Self.heredoc(in: script)
+ 
+-        var gaps: [Gap] = []
+-        for job in scanJobs {
+-            let slug = String(job.dropFirst("scan-".count))
+-            let result = "RESULT_" + slug.uppercased().replacing("-", with: "_")
++            var gaps: [Gap] = []
++            for job in scanJobs {
++                let slug = String(job.dropFirst("scan-".count))
++                let result = "RESULT_" + slug.uppercased().replacing("-", with: "_")
+ 
+-            if !needs.contains(job) {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .needs,
+-                        message: "'\(job)' is missing from the report job's needs: list"
++                if !needs.contains(job) {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .needs,
++                            message: "'\(job)' is missing from the report job's needs: list"
++                        )
+                     )
+-                )
+-            }
+-            if !condition.contains("needs.\(job).result") {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .condition,
+-                        message: "the report job's if: condition does not reference "
+-                            + "needs.\(job).result"
++                }
++                if !condition.contains("needs.\(job).result") {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .condition,
++                            message: "the report job's if: condition does not reference "
++                                + "needs.\(job).result"
++                        )
+                     )
+-                )
+-            }
+-            let declared = environment?[result]
+-            if declared == nil {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .environment,
+-                        message: "'\(buildStep)' env: block is missing \(result)"
++                }
++                let declared = environment?[result]
++                if declared == nil {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .environment,
++                            message: "'\(buildStep)' env: block is missing \(result)"
++                        )
+                     )
+-                )
+-            } else if !(declared?.text ?? "").contains("needs.\(job).result") {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .environment,
+-                        message: "\(result) does not reference needs.\(job).result (found: "
+-                            + "\(Institute.CI.Validation.Retired.value(declared ?? .null)))"
++                } else if !(declared?.text ?? "").contains("needs.\(job).result") {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .environment,
++                            message: "\(result) does not reference needs.\(job).result (found: "
++                                + "\(Institute.CI.Validation.Retired.value(declared ?? .null)))"
++                        )
+                     )
+-                )
+-            }
+-            let pair = "\"\(slug):$\(result)\""
+-            if !script.contains(pair) {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .pairList,
+-                        message: "the aggregation pair list is missing \(pair)"
++                }
++                let pair = "\"\(slug):$\(result)\""
++                if !script.contains(pair) {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .pairList,
++                            message: "the aggregation pair list is missing \(pair)"
++                        )
+                     )
+-                )
+-            }
+-            let heading = "### validate-\(slug)"
+-            if !heredoc.contains(heading) {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .section,
+-                        message: "the issue-body heredoc is missing a '\(heading)' section"
++                }
++                let heading = "### validate-\(slug)"
++                if !heredoc.contains(heading) {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .section,
++                            message: "the issue-body heredoc is missing a '\(heading)' section"
++                        )
+                     )
+-                )
+-            } else if !heredoc.contains(result) {
+-                gaps.append(
+-                    Gap(
+-                        job: job,
+-                        surface: .section,
+-                        message: "the issue-body heredoc's '\(heading)' section does not "
+-                            + "reference \(result)"
++                } else if !heredoc.contains(result) {
++                    gaps.append(
++                        Gap(
++                            job: job,
++                            surface: .section,
++                            message: "the issue-body heredoc's '\(heading)' section does not "
++                                + "reference \(result)"
++                        )
+                     )
+-                )
++                }
+             }
++            return gaps
+         }
+-        return gaps
+-    }
+ 
+-    /// The body of the first `<<EOF … EOF` heredoc in a `run:`
+-    /// script.
+-    ///
+-    /// A script with no heredoc yields the whole script, so a caller
+-    /// grepping for a missing section still gets a real — if less
+-    /// precise — finding rather than a crash. That fallback is the
+-    /// retired script's, kept because narrowing it would change which
+-    /// documents the rule fires on.
+-    static func heredoc(in script: String) -> String {
+-        let lines = script.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+-        guard let start = lines.firstIndex(where: { $0.contains("<<EOF") }).map({ $0 + 1 })
+-        else { return script }
+-        let body = lines[start...]
+-        guard
+-            let end = body.firstIndex(where: {
+-                $0.trimmedWhitespace == "EOF"
+-            })
+-        else { return body.joined(separator: "\n") }
+-        return lines[start..<end].joined(separator: "\n")
++        /// The body of the first `<<EOF … EOF` heredoc in a `run:`
++        /// script.
++        ///
++        /// A script with no heredoc yields the whole script, so a caller
++        /// grepping for a missing section still gets a real — if less
++        /// precise — finding rather than a crash. That fallback is the
++        /// retired script's, kept because narrowing it would change which
++        /// documents the rule fires on.
++        static func heredoc(in script: String) -> String {
++            let lines = script.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
++            guard let start = lines.firstIndex(where: { $0.contains("<<EOF") }).map({ $0 + 1 })
++            else { return script }
++            let body = lines[start...]
++            guard
++                let end = body.firstIndex(where: {
++                    $0.trimmedWhitespace == "EOF"
++                })
++            else { return body.joined(separator: "\n") }
++            return lines[start..<end].joined(separator: "\n")
++        }
+     }
+ }
+ 
+ extension Institute.CI.Validation.Drift.LintValidatorsWeekly {
++    /// One of the five places a scan leg must appear.
++    public enum Surface: String, Sendable, CaseIterable {
++        case needs
++        case condition = "if-condition"
++        case environment = "result-env"
++        case pairList = "aggregation-pair-list"
++        case section = "issue-body-section"
++    }
++
++    /// One scan job missing from one surface.
++    public struct Gap: Sendable, Equatable {
++        public let job: String
++        public let surface: Surface
++        public let message: String
++
++        public init(job: String, surface: Surface, message: String) {
++            self.job = job
++            self.surface = surface
++            self.message = message
++        }
++    }
+ }
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.Drift.ScheduledWorkflowAlert.swift b/Sources/Institute CI Validation/Institute.CI.Validation.Drift.ScheduledWorkflowAlert.swift
+index 0afbc9d..abeede4 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.Drift.ScheduledWorkflowAlert.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.Drift.ScheduledWorkflowAlert.swift	
+@@ -33,145 +33,160 @@ extension Institute.CI.Validation.Drift {
+     /// key compared; a document without one falls back to its filename
+     /// stem rather than dropping out of the set.
+     public struct ScheduledWorkflowAlert: Institute.CI.Validation.Validator {
++        public typealias Finding = Institute.CI.Validation.Finding
++
+         public let rules: [Institute.CI.Validation.Rule] = ["SCHEDULED-WORKFLOW-ALERT-DRIFT"]
+         public let retiredScript: String? =
+             ".github/scripts/check-scheduled-workflow-alert-parity.py"
+ 
+-        public init() {}
+-    }
+-}
++        public static let workflowsDirectory = ".github/workflows"
++        public static let alertPath = ".github/workflows/alert-scheduled-workflow-failure.yml"
+ 
+-extension Institute.CI.Validation.Drift.ScheduledWorkflowAlert {
+-    public typealias Finding = Institute.CI.Validation.Finding
+-
+-    public static let workflowsDirectory = ".github/workflows"
++        public init() {}
+ 
+-    public static let alertPath = ".github/workflows/alert-scheduled-workflow-failure.yml"
++        public func findings(
++            in subject: Institute.CI.Validation.Subject
++        ) throws(Institute.CI.Validation.EnvironmentDefect) -> [Finding] {
++            let directory = subject.path(Self.workflowsDirectory)
++            guard Institute.CI.Validation.isDirectory(directory)
++            else { throw .missingSupportFile(path: directory) }
++            guard let alertText = try subject.text(at: Self.alertPath) else {
++                throw .missingSupportFile(path: subject.path(Self.alertPath))
++            }
+ 
+-    public func findings(
+-        in subject: Institute.CI.Validation.Subject
+-    ) throws(Institute.CI.Validation.EnvironmentDefect) -> [Finding] {
+-        let directory = subject.path(Self.workflowsDirectory)
+-        guard Institute.CI.Validation.isDirectory(directory)
+-        else { throw .missingSupportFile(path: directory) }
+-        guard let alertText = try subject.text(at: Self.alertPath) else {
+-            throw .missingSupportFile(path: subject.path(Self.alertPath))
+-        }
++            let alert = try Self.parse(alertText, at: subject.path(Self.alertPath))
++            let watched = try Self.watched(in: alert)
+ 
+-        let alert = try Self.parse(alertText, at: subject.path(Self.alertPath))
+-        let watched = try Self.watched(in: alert)
++            guard let names = Institute.CI.Validation.names(at: directory) else {
++                throw .unreadableFile(path: directory)
++            }
++            var scheduled: [String: String] = [:]
++            for name in names.sorted()
++            where name.hasSuffix(".yml") && name != Self.alertPath.finalPathComponent {
++                guard let text = try subject.text(at: "\(Self.workflowsDirectory)/\(name)") else {
++                    continue
++                }
++                let document = try Self.parse(text, at: "\(directory)/\(name)")
++                guard let mapping = document.mapping else { continue }
++                guard Self.triggers(of: mapping)?["schedule"] != nil else { continue }
++                let declared = mapping["name"]?.text ?? String(name.dropLast(".yml".count))
++                scheduled[declared] = name
++            }
+ 
+-        guard let names = Institute.CI.Validation.names(at: directory) else {
+-            throw .unreadableFile(path: directory)
+-        }
+-        var scheduled: [String: String] = [:]
+-        for name in names.sorted()
+-        where name.hasSuffix(".yml") && name != Self.alertPath.finalPathComponent {
+-            guard let text = try subject.text(at: "\(Self.workflowsDirectory)/\(name)") else {
+-                continue
++            return Self.drift(scheduled: scheduled, watched: watched).map { gap in
++                Finding(
++                    repository: subject.repository,
++                    rule: rules[0],
++                    message: "\(gap.surface.rawValue): \(gap.message)"
++                )
+             }
+-            let document = try Self.parse(text, at: "\(directory)/\(name)")
+-            guard let mapping = document.mapping else { continue }
+-            guard Self.triggers(of: mapping)?["schedule"] != nil else { continue }
+-            let declared = mapping["name"]?.text ?? String(name.dropLast(".yml".count))
+-            scheduled[declared] = name
+         }
+ 
+-        return Self.drift(scheduled: scheduled, watched: watched).map { gap in
+-            Finding(
+-                repository: subject.repository,
+-                rule: rules[0],
+-                message: "\(gap.surface.rawValue): \(gap.message)"
+-            )
++        /// The two-directional comparison.
++        ///
++        /// Split out from `findings(in:)` — and taking the two sets
++        /// rather than the subject — because the positive controls
++        /// perturb one entry of a synthetic pair at a time, and a control
++        /// that had to write workflow files to disk would be testing the
++        /// filesystem.
++        public static func drift(scheduled: [String: String], watched: Set<String>) -> [Gap] {
++            var gaps: [Gap] = []
++            for name in scheduled.keys.sorted() where !watched.contains(name) {
++                gaps.append(
++                    Gap(
++                        name: name,
++                        surface: .missing,
++                        message: "'\(scheduled[name] ?? "")' has a schedule: trigger (workflow "
++                            + "name '\(name)') but is absent from "
++                            + "alert-scheduled-workflow-failure.yml's on.workflow_run.workflows "
++                            + "list"
++                    )
++                )
++            }
++            for name in watched.sorted() where scheduled[name] == nil {
++                gaps.append(
++                    Gap(
++                        name: name,
++                        surface: .stale,
++                        message: "'\(name)' is listed in alert-scheduled-workflow-failure.yml's "
++                            + "on.workflow_run.workflows list but no workflow in the workflows "
++                            + "directory currently has a schedule: trigger with that name"
++                    )
++                )
++            }
++            return gaps
+         }
+-    }
+ 
+-    /// The two-directional comparison.
+-    ///
+-    /// Split out from `findings(in:)` — and taking the two sets
+-    /// rather than the subject — because the positive controls
+-    /// perturb one entry of a synthetic pair at a time, and a control
+-    /// that had to write workflow files to disk would be testing the
+-    /// filesystem.
+-    public static func drift(scheduled: [String: String], watched: Set<String>) -> [Gap] {
+-        var gaps: [Gap] = []
+-        for name in scheduled.keys.sorted() where !watched.contains(name) {
+-            gaps.append(
+-                Gap(
+-                    name: name,
+-                    surface: .missing,
+-                    message: "'\(scheduled[name] ?? "")' has a schedule: trigger (workflow "
+-                        + "name '\(name)') but is absent from "
+-                        + "alert-scheduled-workflow-failure.yml's on.workflow_run.workflows "
+-                        + "list"
++        /// The watch list, or a defect when the alert workflow has lost
++        /// the shape this rule reads. Not a finding: an unreadable watch
++        /// list means the question could not be asked.
++        public static func watched(
++            in alert: Institute.CI.Workflow.YAML.Node
++        ) throws(Institute.CI.Validation.EnvironmentDefect) -> Set<String> {
++            guard let mapping = alert.mapping, let triggers = triggers(of: mapping) else {
++                throw .missingSupportFile(
++                    path: "alert workflow's on: block has no workflow_run: mapping"
+                 )
+-            )
+-        }
+-        for name in watched.sorted() where scheduled[name] == nil {
+-            gaps.append(
+-                Gap(
+-                    name: name,
+-                    surface: .stale,
+-                    message: "'\(name)' is listed in alert-scheduled-workflow-failure.yml's "
+-                        + "on.workflow_run.workflows list but no workflow in the workflows "
+-                        + "directory currently has a schedule: trigger with that name"
++            }
++            guard let run = triggers["workflow_run"]?.mapping else {
++                throw .missingSupportFile(
++                    path: "alert workflow's on: block has no workflow_run: mapping"
++                )
++            }
++            guard let workflows = run["workflows"]?.sequence else {
++                throw .missingSupportFile(
++                    path: "alert workflow's on.workflow_run has no workflows: list"
+                 )
+-            )
++            }
++            return Set(workflows.compactMap(\.text))
+         }
+-        return gaps
+-    }
+ 
+-    /// The watch list, or a defect when the alert workflow has lost
+-    /// the shape this rule reads. Not a finding: an unreadable watch
+-    /// list means the question could not be asked.
+-    public static func watched(
+-        in alert: Institute.CI.Workflow.YAML.Node
+-    ) throws(Institute.CI.Validation.EnvironmentDefect) -> Set<String> {
+-        guard let mapping = alert.mapping, let triggers = triggers(of: mapping) else {
+-            throw .missingSupportFile(
+-                path: "alert workflow's on: block has no workflow_run: mapping"
+-            )
++        /// A workflow's `on:` mapping.
++        ///
++        /// The bare key `on` resolves to the **boolean** `true` under
++        /// YAML 1.1, so the lookup is two steps in a fixed order — the
++        /// string key first, the boolean key second — matching
++        /// `validate_lib.parse_on_block`. A reader that skipped the
++        /// second step would see no triggers on any workflow and report
++        /// perfect health.
++        static func triggers(of mapping: Institute.CI.Workflow.YAML.Mapping) -> Institute.CI.Workflow.YAML.Mapping? {
++            (mapping["on"] ?? mapping[node: .boolean(true)])?.mapping
+         }
+-        guard let run = triggers["workflow_run"]?.mapping else {
+-            throw .missingSupportFile(
+-                path: "alert workflow's on: block has no workflow_run: mapping"
+-            )
+-        }
+-        guard let workflows = run["workflows"]?.sequence else {
+-            throw .missingSupportFile(
+-                path: "alert workflow's on.workflow_run has no workflows: list"
+-            )
++
++        /// A parse failure here is a defect, not a finding: the retired
++        /// script exited 2 on any unreadable document in the directory,
++        /// because a checker that skipped what it could not read would
++        /// under-report the scheduled set and call the watch list clean.
++        static func parse(
++            _ text: String,
++            at path: String
++        ) throws(Institute.CI.Validation.EnvironmentDefect) -> Institute.CI.Workflow.YAML.Node {
++            do throws(Institute.CI.Workflow.YAML.Error) {
++                return try Institute.CI.Workflow.YAML.Parser.parse(text)
++            } catch {
++                throw .missingSupportFile(path: "\(path) (YAML parse failed: \(error.message))")
++            }
+         }
+-        return Set(workflows.compactMap(\.text))
+     }
++}
+ 
+-    /// A workflow's `on:` mapping.
+-    ///
+-    /// The bare key `on` resolves to the **boolean** `true` under
+-    /// YAML 1.1, so the lookup is two steps in a fixed order — the
+-    /// string key first, the boolean key second — matching
+-    /// `validate_lib.parse_on_block`. A reader that skipped the
+-    /// second step would see no triggers on any workflow and report
+-    /// perfect health.
+-    static func triggers(of mapping: Institute.CI.Workflow.YAML.Mapping) -> Institute.CI.Workflow.YAML.Mapping? {
+-        (mapping["on"] ?? mapping[node: .boolean(true)])?.mapping
++extension Institute.CI.Validation.Drift.ScheduledWorkflowAlert {
++    /// Which direction of the comparison a gap came from.
++    public enum Surface: String, Sendable, CaseIterable {
++        case missing = "missing-from-watch-list"
++        case stale = "stale-watch-entry"
+     }
+ 
+-    /// A parse failure here is a defect, not a finding: the retired
+-    /// script exited 2 on any unreadable document in the directory,
+-    /// because a checker that skipped what it could not read would
+-    /// under-report the scheduled set and call the watch list clean.
+-    static func parse(
+-        _ text: String,
+-        at path: String
+-    ) throws(Institute.CI.Validation.EnvironmentDefect) -> Institute.CI.Workflow.YAML.Node {
+-        do throws(Institute.CI.Workflow.YAML.Error) {
+-            return try Institute.CI.Workflow.YAML.Parser.parse(text)
+-        } catch {
+-            throw .missingSupportFile(path: "\(path) (YAML parse failed: \(error.message))")
++    /// One workflow out of correspondence with the watch list.
++    public struct Gap: Sendable, Equatable {
++        public let name: String
++        public let surface: Surface
++        public let message: String
++
++        public init(name: String, surface: Surface, message: String) {
++            self.name = name
++            self.surface = surface
++            self.message = message
+         }
+     }
+ }
+-
+-extension Institute.CI.Validation.Drift.ScheduledWorkflowAlert {
+-}
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.Gitignore.swift b/Sources/Institute CI Validation/Institute.CI.Validation.Gitignore.swift
+index 3f50686..2f6a68a 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.Gitignore.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.Gitignore.swift	
+@@ -57,9 +57,112 @@ extension Institute.CI.Validation {
+     /// deny-line was read as the absence of denial, when the whitelist
+     /// was denying it all along.
+     public struct Gitignore: Validator {
++        public typealias Class = Institute.CI.Canon.Gitignore.Class
++
++        /// A path the whitelist is probed with, and whether git must be
++        /// told it is a directory.
++        ///
++        /// The directory bit is carried because a pattern with a trailing
++        /// slash — `**/.*/` — never matches a path git does not know to
++        /// be one.
++        public struct Probe: Sendable, Equatable {
++            public let path: File.Path
++            public let isDirectory: Bool
++
++            public init(_ path: File.Path, isDirectory: Bool = false) {
++                self.path = path
++                self.isDirectory = isDirectory
++            }
++        }
++
++        /// Paths every class must keep: the repository's own floor.
++        public static let floor: [Probe] = [
++            Probe("README.md"),
++            Probe("LICENSE.md"),
++            Probe(".github/workflows/ci.yml"),
++            Probe(".gitignore"),
++        ]
++
++        /// Paths that carry package work. Every package-shaped class
++        /// must keep all of them.
++        public static let packageWork: [Probe] = [
++            Probe("Sources/Core/Type.swift"),
++            Probe("Sources/Core/Type.docc/Article.md"),
++            Probe("Sources/Core/Type.docc/asset.png"),
++            Probe("Tests/Core Tests/Type Tests.swift"),
++            Probe("Tests/Core Tests/Fixtures/case.json"),
++            Probe("Benchmarks/bench/main.swift"),
++            Probe("Research/paper.md"),
++            Probe("Experiments/probe/main.swift"),
++            Probe("Package.swift"),
++            Probe("Lint.swift"),
++            Probe(".spi.yml"),
++        ]
++
++        /// Paths that carry real work for a class. Every one must
++        /// survive that class's whitelist.
++        public static func work(for class: Class) -> [Probe] {
++            switch `class` {
++            case .package:
++                floor + packageWork
++
++            case .scaffold:
++                floor
++
++            case .institute:
++                floor + packageWork + [
++                    Probe("canon/gitignore-package.txt"),
++                    Probe("Policy/ruleset.json"),
++                    Probe("Tools/tool/Package.swift"),
++                    Probe("profile/README.md"),
++                    Probe("RULINGS.md"),
++                    Probe("institute control.xcworkspace/contents.xcworkspacedata"),
++                ]
++
++            case .application:
++                floor + packageWork + [
++                    Probe("Public/favicon.ico"),
++                    Probe("Resources/Views/page.html"),
++                    Probe("Configuration/production.json"),
++                    Probe(".env.example"),
++                ]
++
++            case .generator:
++                floor + packageWork + [
++                    Probe("Generation/main.swift")
++                ]
++            }
++        }
++
++        /// Paths that must be denied. Not a rule of its own — a positive
++        /// control on the probe harness. If these come back tracked,
++        /// `git check-ignore` is not being reached and every 002 pass in
++        /// the run is vacuous, which is exactly the shape of green this
++        /// ecosystem has been burned by.
++        public static let junk: [Probe] = [
++            Probe(".swift-lint/eval/Package.swift"),
++            Probe("Sources/.swift-lint/manifest.json"),
++            Probe(".build/debug/thing.o"),
++            Probe("Tests/.build/index-build/checkouts/swift-thing/Package.swift"),
++            Probe("institute control.xcworkspace/xcuserdata/user.xcuserdatad/state.plist"),
++            Probe("institute control.xcworkspace/xcshareddata/swiftpm/Package.resolved"),
++        ]
++
++        /// Paths no class admits. Each must come back ignored, or the
++        /// file is not deny-by-default and `[GH-IGNORE-003]` fires. The
++        /// spelling is deliberately unguessable so no class canon — nor
++        /// any plausible local override — ever admits it.
++        public static let unadmitted: [Probe] = [
++            Probe("Unadmitted-GH-IGNORE-003/probe.txt"),
++            Probe("unadmitted-gh-ignore-003.txt"),
++        ]
++
+         public let rules: [Rule] = [
+             "GH-IGNORE-001", "GH-IGNORE-002", "GH-IGNORE-003", "GH-IGNORE-004",
+         ]
++        /// The package-class canon's path within the control-plane
++        /// checkout. The other classes' documents are its siblings.
++        public static let canonPath = "canon/gitignore-package.txt"
+ 
+         /// Where the package-class canon lives. `nil` means *find it*:
+         /// the working directory and each of its ancestors are searched
+@@ -77,265 +180,159 @@ extension Institute.CI.Validation {
+         public init(canon: String? = nil) {
+             self.canon = canon
+         }
+-    }
+-}
+-
+-extension Institute.CI.Validation.Gitignore {
+-    public typealias Class = Institute.CI.Canon.Gitignore.Class
+-
+-    /// A path the whitelist is probed with, and whether git must be
+-    /// told it is a directory.
+-    ///
+-    /// The directory bit is carried because a pattern with a trailing
+-    /// slash — `**/.*/` — never matches a path git does not know to
+-    /// be one.
+-    public struct Probe: Sendable, Equatable {
+-        public let path: File.Path
+-        public let isDirectory: Bool
+-
+-        public init(_ path: File.Path, isDirectory: Bool = false) {
+-            self.path = path
+-            self.isDirectory = isDirectory
+-        }
+-    }
+-
+-    /// Paths every class must keep: the repository's own floor.
+-    public static let floor: [Probe] = [
+-        Probe("README.md"),
+-        Probe("LICENSE.md"),
+-        Probe(".github/workflows/ci.yml"),
+-        Probe(".gitignore"),
+-    ]
+-
+-    /// Paths that carry package work. Every package-shaped class
+-    /// must keep all of them.
+-    public static let packageWork: [Probe] = [
+-        Probe("Sources/Core/Type.swift"),
+-        Probe("Sources/Core/Type.docc/Article.md"),
+-        Probe("Sources/Core/Type.docc/asset.png"),
+-        Probe("Tests/Core Tests/Type Tests.swift"),
+-        Probe("Tests/Core Tests/Fixtures/case.json"),
+-        Probe("Benchmarks/bench/main.swift"),
+-        Probe("Research/paper.md"),
+-        Probe("Experiments/probe/main.swift"),
+-        Probe("Package.swift"),
+-        Probe("Lint.swift"),
+-        Probe(".spi.yml"),
+-    ]
+-
+-    /// Paths that carry real work for a class. Every one must
+-    /// survive that class's whitelist.
+-    public static func work(for class: Class) -> [Probe] {
+-        switch `class` {
+-        case .package:
+-            floor + packageWork
+-
+-        case .scaffold:
+-            floor
+-
+-        case .institute:
+-            floor + packageWork + [
+-                Probe("canon/gitignore-package.txt"),
+-                Probe("Policy/ruleset.json"),
+-                Probe("Tools/tool/Package.swift"),
+-                Probe("profile/README.md"),
+-                Probe("RULINGS.md"),
+-                Probe("institute control.xcworkspace/contents.xcworkspacedata"),
+-            ]
+ 
+-        case .application:
+-            floor + packageWork + [
+-                Probe("Public/favicon.ico"),
+-                Probe("Resources/Views/page.html"),
+-                Probe("Configuration/production.json"),
+-                Probe(".env.example"),
+-            ]
++        public func findings(in subject: Subject) throws(EnvironmentDefect) -> [Finding] {
++            guard Institute.CI.Validation.isDirectory(subject.root)
++            else { return [] }
++            try Self.validateRepositoryEnvironment(subject.root)
+ 
+-        case .generator:
+-            floor + packageWork + [
+-                Probe("Generation/main.swift")
+-            ]
+-        }
+-    }
+-
+-    /// Paths that must be denied. Not a rule of its own — a positive
+-    /// control on the probe harness. If these come back tracked,
+-    /// `git check-ignore` is not being reached and every 002 pass in
+-    /// the run is vacuous, which is exactly the shape of green this
+-    /// ecosystem has been burned by.
+-    public static let junk: [Probe] = [
+-        Probe(".swift-lint/eval/Package.swift"),
+-        Probe("Sources/.swift-lint/manifest.json"),
+-        Probe(".build/debug/thing.o"),
+-        Probe("Tests/.build/index-build/checkouts/swift-thing/Package.swift"),
+-        Probe("institute control.xcworkspace/xcuserdata/user.xcuserdatad/state.plist"),
+-        Probe("institute control.xcworkspace/xcshareddata/swiftpm/Package.resolved"),
+-    ]
+-
+-    /// Paths no class admits. Each must come back ignored, or the
+-    /// file is not deny-by-default and `[GH-IGNORE-003]` fires. The
+-    /// spelling is deliberately unguessable so no class canon — nor
+-    /// any plausible local override — ever admits it.
+-    public static let unadmitted: [Probe] = [
+-        Probe("Unadmitted-GH-IGNORE-003/probe.txt"),
+-        Probe("unadmitted-gh-ignore-003.txt"),
+-    ]
+-
+-    /// The package-class canon's path within the control-plane
+-    /// checkout. The other classes' documents are its siblings.
+-    public static let canonPath = "canon/gitignore-package.txt"
+-
+-    public func findings(in subject: Subject) throws(EnvironmentDefect) -> [Finding] {
+-        guard Institute.CI.Validation.isDirectory(subject.root)
+-        else { return [] }
+-        try Self.validateRepositoryEnvironment(subject.root)
+-
+-        let `class` = Class.of(
+-            repository: subject.repository,
+-            manifest: Self.read(subject.path("Package.swift"))
+-        )
+-        let path = canon ?? Self.resolvedCanonPath ?? Self.canonPath
+-        let classPath = Self.siblingCanonPath(of: path, for: `class`)
+-        guard let canonText = Self.read(classPath) else {
+-            throw .missingSupportFile(path: classPath)
+-        }
+-        do {
+-            _ = try Institute.CI.Canon.Gitignore.Render(
+-                canon: .init(canonText)
++            let `class` = Class.of(
++                repository: subject.repository,
++                manifest: Self.read(subject.path("Package.swift"))
+             )
+-        } catch {
+-            throw .missingSupportFile(path: classPath)
+-        }
+-
+-        let conformance = rules[0]
+-        let workLoss = rules[1]
+-        let shape = rules[2]
+-        let indexedCoverage = rules[3]
+-        guard let text = Self.read(subject.path(".gitignore")) else {
+-            return [
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: conformance,
+-                    message: "no .gitignore; the canonical \(`class`.rawValue)-class "
+-                        + "whitelist is absent"
++            let path = canon ?? Self.resolvedCanonPath ?? Self.canonPath
++            let classPath = Self.siblingCanonPath(of: path, for: `class`)
++            guard let canonText = Self.read(classPath) else {
++                throw .missingSupportFile(path: classPath)
++            }
++            do {
++                _ = try Institute.CI.Canon.Gitignore.Render(
++                    canon: .init(canonText)
+                 )
+-            ]
+-        }
++            } catch {
++                throw .missingSupportFile(path: classPath)
++            }
++
++            let conformance = rules[0]
++            let workLoss = rules[1]
++            let shape = rules[2]
++            let indexedCoverage = rules[3]
++            guard let text = Self.read(subject.path(".gitignore")) else {
++                return [
++                    Finding(
++                        repository: subject.repository,
++                        rule: conformance,
++                        message: "no .gitignore; the canonical \(`class`.rawValue)-class "
++                            + "whitelist is absent"
++                    )
++                ]
++            }
+ 
+-        var findings: [Finding] = []
+-        switch Institute.CI.Canon.Gitignore(text).isGenerated {
+-        case false:
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: conformance,
+-                    message: "no CANONICAL section; file predates the canonical whitelist"
++            var findings: [Finding] = []
++            switch Institute.CI.Canon.Gitignore(text).isGenerated {
++            case false:
++                findings.append(
++                    Finding(
++                        repository: subject.repository,
++                        rule: conformance,
++                        message: "no CANONICAL section; file predates the canonical whitelist"
++                    )
+                 )
+-            )
+ 
+-        case true where text != canonText:
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: conformance,
+-                    message: "complete generated policy diverges from \(`class`.canonPath) "
+-                        + "(class: \(`class`.rawValue)); handwritten tails are forbidden"
++            case true where text != canonText:
++                findings.append(
++                    Finding(
++                        repository: subject.repository,
++                        rule: conformance,
++                        message: "complete generated policy diverges from \(`class`.canonPath) "
++                            + "(class: \(`class`.rawValue)); handwritten tails are forbidden"
++                    )
+                 )
+-            )
+ 
+-        case true:
+-            break
+-        }
++            case true:
++                break
++            }
+ 
+-        let declaredNested = Institute.CI.Canon.Gitignore.Nested.roots
+-            .filter { Self.read(subject.path("\($0)/Package.swift")) != nil }
+-        for root in Institute.CI.Canon.Gitignore.Nested.roots {
+-            let nestedPath = subject.path("\(root)/.gitignore")
+-            let nestedText = Self.read(nestedPath)
+-            if declaredNested.contains(root) {
+-                if nestedText != Institute.CI.Canon.Gitignore.Nested.text {
++            let declaredNested = Institute.CI.Canon.Gitignore.Nested.roots
++                .filter { Self.read(subject.path("\($0)/Package.swift")) != nil }
++            for root in Institute.CI.Canon.Gitignore.Nested.roots {
++                let nestedPath = subject.path("\(root)/.gitignore")
++                let nestedText = Self.read(nestedPath)
++                if declaredNested.contains(root) {
++                    if nestedText != Institute.CI.Canon.Gitignore.Nested.text {
++                        findings.append(
++                            Finding(
++                                repository: subject.repository,
++                                rule: conformance,
++                                message:
++                                    "declared nested package `\(root)/Package.swift` requires exact generated `\(root)/.gitignore` policy"
++                            )
++                        )
++                    }
++                } else if nestedText != nil {
+                     findings.append(
+                         Finding(
+                             repository: subject.repository,
+                             rule: conformance,
+-                            message:
+-                                "declared nested package `\(root)/Package.swift` requires exact generated `\(root)/.gitignore` policy"
++                            message: "undeclared nested policy `\(root)/.gitignore` is forbidden"
+                         )
+                     )
+                 }
+-            } else if nestedText != nil {
++            }
++            let lawfulPolicyPaths = Set([".gitignore"] + declaredNested.map { "\($0)/.gitignore" })
++            for policyPath in try Self.policyPaths(in: subject.root)
++            where !lawfulPolicyPaths.contains(policyPath) {
+                 findings.append(
+                     Finding(
+                         repository: subject.repository,
+                         rule: conformance,
+-                        message: "undeclared nested policy `\(root)/.gitignore` is forbidden"
++                        message:
++                            "ignore policy `\(policyPath)` is not a declared generated policy location"
+                     )
+                 )
+             }
+-        }
+-        let lawfulPolicyPaths = Set([".gitignore"] + declaredNested.map { "\($0)/.gitignore" })
+-        for policyPath in try Self.policyPaths(in: subject.root)
+-        where !lawfulPolicyPaths.contains(policyPath) {
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: conformance,
+-                    message:
+-                        "ignore policy `\(policyPath)` is not a declared generated policy location"
+-                )
+-            )
+-        }
+ 
+-        let work = Self.work(for: `class`)
+-        let ignored = try Self.ignored(
+-            under: text,
+-            probes: work + Self.junk + Self.unadmitted
+-        )
+-        for probe in work where ignored.contains(probe.path.string) {
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: workLoss,
+-                    message: "whitelist denies real work: `\(probe.path)` "
+-                        + "would be silently untracked"
+-                )
++            let work = Self.work(for: `class`)
++            let ignored = try Self.ignored(
++                under: text,
++                probes: work + Self.junk + Self.unadmitted
+             )
+-        }
+-        let tracked = Self.junk.filter { !ignored.contains($0.path.string) }
+-        if !tracked.isEmpty {
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: workLoss,
+-                    message: "probe control failed — tool state not denied ("
+-                        + tracked.map { "`\($0.path)`" }.joined(separator: ", ")
+-                        + "); this run's whitelist verdicts are not evidence"
++            for probe in work where ignored.contains(probe.path.string) {
++                findings.append(
++                    Finding(
++                        repository: subject.repository,
++                        rule: workLoss,
++                        message: "whitelist denies real work: `\(probe.path)` "
++                            + "would be silently untracked"
++                    )
+                 )
+-            )
+-        }
+-        for probe in Self.unadmitted where !ignored.contains(probe.path.string) {
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: shape,
+-                    message: "not deny-by-default: unadmitted path `\(probe.path)` "
+-                        + "would be tracked"
++            }
++            let tracked = Self.junk.filter { !ignored.contains($0.path.string) }
++            if !tracked.isEmpty {
++                findings.append(
++                    Finding(
++                        repository: subject.repository,
++                        rule: workLoss,
++                        message: "probe control failed — tool state not denied ("
++                            + tracked.map { "`\($0.path)`" }.joined(separator: ", ")
++                            + "); this run's whitelist verdicts are not evidence"
++                    )
+                 )
+-            )
+-        }
+-        let indexed = try Self.indexedPaths(in: subject.root)
+-        let ignoredIndexed = try Self.ignoredIndexedPaths(indexed, in: subject.root)
+-        for path in ignoredIndexed {
+-            findings.append(
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: indexedCoverage,
+-                    message:
+-                        "tracked index path is ignored by generated repository policy: `\(path)`"
++            }
++            for probe in Self.unadmitted where !ignored.contains(probe.path.string) {
++                findings.append(
++                    Finding(
++                        repository: subject.repository,
++                        rule: shape,
++                        message: "not deny-by-default: unadmitted path `\(probe.path)` "
++                            + "would be tracked"
++                    )
+                 )
+-            )
++            }
++            let indexed = try Self.indexedPaths(in: subject.root)
++            let ignoredIndexed = try Self.ignoredIndexedPaths(indexed, in: subject.root)
++            for path in ignoredIndexed {
++                findings.append(
++                    Finding(
++                        repository: subject.repository,
++                        rule: indexedCoverage,
++                        message:
++                            "tracked index path is ignored by generated repository policy: `\(path)`"
++                    )
++                )
++            }
++            return findings
+         }
+-        return findings
+     }
+ }
+ 
+diff --git a/Sources/Institute CI Validation/Institute.CI.Validation.Readme.swift b/Sources/Institute CI Validation/Institute.CI.Validation.Readme.swift
+index ab585cc..2b0d7db 100644
+--- a/Sources/Institute CI Validation/Institute.CI.Validation.Readme.swift	
++++ b/Sources/Institute CI Validation/Institute.CI.Validation.Readme.swift	
+@@ -79,113 +79,105 @@ extension Institute.CI.Validation {
+             "README-presence",
+             "README-read-failed",
+         ]
++        /// Declared exemptions from family routing, per
++        /// `metadata-schema.json` `readme.exempt`.
++        public static let exemptions: Set<String> = ["vendored-upstream"]
+ 
+-        public init() {}
+-    }
+-}
+-
+-extension Institute.CI.Validation.Readme {
+-    /// Declared exemptions from family routing, per
+-    /// `metadata-schema.json` `readme.exempt`.
+-    public static let exemptions: Set<String> = ["vendored-upstream"]
+-
+-    /// Accepted `readme.family` letters, per `metadata-schema.json`
+-    /// `readme.family`. B and D are deliberately absent, not retired.
+-    public static let families: Set<String> = ["A", "C", "E", "F", "G"]
+-
+-    static let statusValues: Set<String> = [
+-        "Pre-implementation", "Namespace-reservation", "Unnecessary", "Archived",
+-    ]
+-
+-    typealias Pattern = Institute.CI.Validation.SkillHygiene.Pattern
+-
+-    /// Internal rule-ID citations — `[README-017]`,
+-    /// `[PLAT-ARCH-008e]` — as the retired `FORBIDDEN_RULE_ID` spelled
+-    /// them. The curated first segment separates an internal ID from
+-    /// an external standards citation such as `[RFC-7231]`.
+-    static let forbiddenRuleID = Pattern(
+-        #"\[(README|MEM|DOC|API|MOD|PRIM|IMPL|PLAT|ARCH|TEST|SWIFT-TEST|BENCH|INST-TEST|"#
+-            + #"PATTERN|GH-REPO|SKILL|RES|EXP|BLOG|REFL|AUDIT|CONV|IDX|LEG|NL-WET|RL|"#
+-            + #"COPY|SEM|API-NAME|API-ERR|API-IMPL|API-LAYER|MEM-COPY|MEM-OWN|MEM-LIFE|"#
+-            + #"MEM-LINEAR|MEM-REF|MEM-SAFE|MEM-SEND|MEM-UNSAFE|MEM-SPAN|"#
+-            + #"INFRA|MOD-EXCEPT|CI|README-PROC|SOC|SUPER|HANDOFF|COLLAB|GIT|"#
+-            + #"FREVIEW|SAVE|DOC-MARKUP|RELEASE|META|REFL-PROC|SKILL-CREATE|"#
+-            + #"SKILL-LIFE|REFL-PROC)(?:-[A-Z][A-Z0-9]*)*-[0-9]+[a-z]?\]"#
+-    )
+-
+-    static let h1Line = Pattern(#"^#\s+\S"#)
++        /// Accepted `readme.family` letters, per `metadata-schema.json`
++        /// `readme.family`. B and D are deliberately absent, not retired.
++        public static let families: Set<String> = ["A", "C", "E", "F", "G"]
+ 
+-    static let h2Line = Pattern(#"^##\s+\S"#)
+-
+-    static let h2OrDeeper = Pattern(#"^#{2,6}\s+\S"#)
+-
+-    static let fencedBlock = Pattern(#"```.*?```"#, dotMatchesNewlines: true)
+-
+-    static let installDependency = Pattern(#"\.package\("#)
++        static let statusValues: Set<String> = [
++            "Pre-implementation", "Namespace-reservation", "Unnecessary", "Archived",
++        ]
+ 
+-    static let statusLine = Pattern(#">\s*\*\*Status:\s*([^*]+?)\*\*"#)
++        typealias Pattern = Institute.CI.Validation.SkillHygiene.Pattern
++
++        /// Internal rule-ID citations — `[README-017]`,
++        /// `[PLAT-ARCH-008e]` — as the retired `FORBIDDEN_RULE_ID` spelled
++        /// them. The curated first segment separates an internal ID from
++        /// an external standards citation such as `[RFC-7231]`.
++        static let forbiddenRuleID = Pattern(
++            #"\[(README|MEM|DOC|API|MOD|PRIM|IMPL|PLAT|ARCH|TEST|SWIFT-TEST|BENCH|INST-TEST|"#
++                + #"PATTERN|GH-REPO|SKILL|RES|EXP|BLOG|REFL|AUDIT|CONV|IDX|LEG|NL-WET|RL|"#
++                + #"COPY|SEM|API-NAME|API-ERR|API-IMPL|API-LAYER|MEM-COPY|MEM-OWN|MEM-LIFE|"#
++                + #"MEM-LINEAR|MEM-REF|MEM-SAFE|MEM-SEND|MEM-UNSAFE|MEM-SPAN|"#
++                + #"INFRA|MOD-EXCEPT|CI|README-PROC|SOC|SUPER|HANDOFF|COLLAB|GIT|"#
++                + #"FREVIEW|SAVE|DOC-MARKUP|RELEASE|META|REFL-PROC|SKILL-CREATE|"#
++                + #"SKILL-LIFE|REFL-PROC)(?:-[A-Z][A-Z0-9]*)*-[0-9]+[a-z]?\]"#
++        )
++
++        static let h1Line = Pattern(#"^#\s+\S"#)
++        static let h2Line = Pattern(#"^##\s+\S"#)
++        static let h2OrDeeper = Pattern(#"^#{2,6}\s+\S"#)
++        static let fencedBlock = Pattern(#"```.*?```"#, dotMatchesNewlines: true)
++        static let installDependency = Pattern(#"\.package\("#)
++        static let statusLine = Pattern(#">\s*\*\*Status:\s*([^*]+?)\*\*"#)
+ 
+-    public func findings(in subject: Subject) throws(EnvironmentDefect) -> [Finding] {
+-        guard let family = Self.family(of: subject) else {
+-            return [
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: "README-family-unset",
+-                    message: ".github/metadata.yaml lacks readme.family field; "
+-                        + "cannot apply per-family rules"
+-                )
+-            ]
+-        }
+-        if family == "exempt" {
+-            return []
+-        }
++        public init() {}
+ 
+-        let relative = Self.readmePath(family: family, repository: subject.repository)
+-        let content: String?
+-        do {
+-            content = try subject.text(at: relative)
+-        } catch {
+-            return [
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: "README-read-failed",
+-                    message: "\(subject.path(relative)): could not be read"
+-                )
+-            ]
+-        }
+-        guard let content else {
+-            if family == "F" {
++        public func findings(in subject: Subject) throws(EnvironmentDefect) -> [Finding] {
++            guard let family = Self.family(of: subject) else {
++                return [
++                    Finding(
++                        repository: subject.repository,
++                        rule: "README-family-unset",
++                        message: ".github/metadata.yaml lacks readme.family field; "
++                            + "cannot apply per-family rules"
++                    )
++                ]
++            }
++            if family == "exempt" {
+                 return []
+             }
+-            return [
+-                Finding(
+-                    repository: subject.repository,
+-                    rule: "README-presence",
+-                    message: "family=\(family) but README not found at expected path "
+-                        + relative
+-                )
+-            ]
+-        }
+ 
+-        let name = relative.finalPathComponent
+-        var findings = Self.universal(subject.repository, name: name, content: content)
+-        switch family {
+-        case "E":
+-            findings += Self.familyE(subject, name: name, content: content)
++            let relative = Self.readmePath(family: family, repository: subject.repository)
++            let content: String?
++            do {
++                content = try subject.text(at: relative)
++            } catch {
++                return [
++                    Finding(
++                        repository: subject.repository,
++                        rule: "README-read-failed",
++                        message: "\(subject.path(relative)): could not be read"
++                    )
++                ]
++            }
++            guard let content else {
++                if family == "F" {
++                    return []
++                }
++                return [
++                    Finding(
++                        repository: subject.repository,
++                        rule: "README-presence",
++                        message: "family=\(family) but README not found at expected path "
++                            + relative
++                    )
++                ]
++            }
++
++            let name = relative.finalPathComponent
++            var findings = Self.universal(subject.repository, name: name, content: content)
++            switch family {
++            case "E":
++                findings += Self.familyE(subject, name: name, content: content)
+ 
+-        case "C":
+-            findings += Self.familyC(subject.repository, name: name, content: content)
++            case "C":
++                findings += Self.familyC(subject.repository, name: name, content: content)
+ 
+-        case "F":
+-            findings += Self.familyF(subject.repository, name: name, content: content)
++            case "F":
++                findings += Self.familyF(subject.repository, name: name, content: content)
+ 
+-        case "G":
+-            findings += Self.familyG(subject.repository, name: name, content: content)
++            case "G":
++                findings += Self.familyG(subject.repository, name: name, content: content)
+ 
+-        default:
+-            break
++            default:
++                break
++            }
++            return findings
+         }
+-        return findings
+     }
+ }
+ 
+-- 
+2.43.0
+

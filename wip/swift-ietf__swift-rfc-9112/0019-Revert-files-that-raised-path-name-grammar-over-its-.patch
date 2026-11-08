@@ -1,0 +1,307 @@
+From 7b6afbb51daeca7cf50d2308c7113dfc8ead4626 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 04:04:01 +0000
+Subject: [PATCH 19/21] Revert files that raised `path name grammar` over its
+ ratchet limit (coenttb/work#242)
+
+---
+ .../HTTP.Host.Coder.swift                     | 45 +++++++++----------
+ .../HTTP.Request.Target.Coder.swift           | 38 ++++++++--------
+ Sources/RFC 9112/HTTP.Field.swift             | 11 +++++
+ .../RFC 9112/HTTP.Message.Body.Length.swift   | 22 ++++++++-
+ .../RFC_9112.Field.ObsFold.Policy.swift       | 11 -----
+ Sources/RFC 9112/RFC_9112.Field.ObsFold.swift |  4 --
+ ...RFC_9112.Message.Body.Length.Context.swift | 11 -----
+ .../RFC_9112.Message.Body.Length.Error.swift  | 17 -------
+ 8 files changed, 71 insertions(+), 88 deletions(-)
+ delete mode 100644 Sources/RFC 9112/RFC_9112.Field.ObsFold.Policy.swift
+ delete mode 100644 Sources/RFC 9112/RFC_9112.Field.ObsFold.swift
+ delete mode 100644 Sources/RFC 9112/RFC_9112.Message.Body.Length.Context.swift
+ delete mode 100644 Sources/RFC 9112/RFC_9112.Message.Body.Length.Error.swift
+
+diff --git a/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Host.Coder.swift b/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Host.Coder.swift
+index c029053..6f1f1ae 100644
+--- a/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Host.Coder.swift	
++++ b/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Host.Coder.swift	
+@@ -8,38 +8,16 @@
+     import Serializer
+ 
+     extension RFC_9112.Host {
+-
+         public struct Coder<
+             Input: Cursor.`Protocol`<Byte, Never>,
+             Buffer: RangeReplaceableCollection<Byte>
+         >: Coding {
+-
+-            public typealias Output = RFC_9112.Host
+-
+-            public typealias Failure = RFC_9112.Host.Failure
+-
+             public init() {}
+-
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> RFC_9112.Host {
+-                let token = Scanning.take(&input) { byte in
+-                    byte.bitPattern != 0x0D && byte.bitPattern != 0x0A
+-                }
+-
+-                return try RFC_9112.Host(text: Scanning.trimmed(Scanning.text(token)))
+-            }
+-
+-            public borrowing func serialize(
+-                _ output: RFC_9112.Host,
+-                into buffer: inout Buffer
+-            ) throws(Failure) {
+-                buffer.append(contentsOf: Scanning.bytes(output.description))
+-            }
+         }
+ 
+         public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+ 
+         public enum Failure: Swift::Error, Equatable {
+-
+             case empty
+ 
+             case whitespace(String)
+@@ -56,8 +34,28 @@
+         }
+     }
+ 
+-    extension RFC_9112.Host {
++extension RFC_9112.Host.Coder {
++        public typealias Output = RFC_9112.Host
++
++        public typealias Failure = RFC_9112.Host.Failure
++
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> RFC_9112.Host {
++            let token = Scanning.take(&input) { byte in
++                byte.bitPattern != 0x0D && byte.bitPattern != 0x0A
++            }
++
++            return try RFC_9112.Host(text: Scanning.trimmed(Scanning.text(token)))
++        }
++
++        public borrowing func serialize(
++            _ output: RFC_9112.Host,
++            into buffer: inout Buffer
++        ) throws(Failure) {
++            buffer.append(contentsOf: Scanning.bytes(output.description))
++        }
++}
+ 
++    extension RFC_9112.Host {
+         public init(text: String) throws(Failure) {
+             guard !text.isEmpty else { throw .empty }
+             guard !text.contains(where: \.isWhitespace) else { throw .whitespace(text) }
+@@ -95,7 +93,6 @@
+     }
+ 
+     extension RFC_9112.Message.Request {
+-
+         public var host: RFC_9112.Host? {
+             get throws(RFC_9112.Host.Failure) {
+                 let values = headers.values(.host)
+diff --git a/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Request.Target.Coder.swift b/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Request.Target.Coder.swift
+index 44810b9..6b6c6e9 100644
+--- a/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Request.Target.Coder.swift	
++++ b/Sources/RFC 9112/Absorbed swift-rfc-9112-coder/HTTP.Request.Target.Coder.swift	
+@@ -9,36 +9,17 @@
+     import Serializer
+ 
+     extension RFC_9112.Request.Target {
+-
+         public struct Coder<Input: Cursor.`Protocol`<Byte, Never>, Buffer: RangeReplaceableCollection<Byte>>: Coding {
+-
+-            public typealias Output = RFC_9112.Request.Target
+-
+-            public typealias Failure = RFC_9112.Request.Target.Failure
+-
+             public let method: RFC_9110.Method
+ 
+             public init(method: RFC_9110.Method = .get) {
+                 self.method = method
+             }
+-
+-            public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
+-                let token = Scanning.take(&input) { byte in
+-                    byte.bitPattern != 0x20 && byte.bitPattern != 0x0D && byte.bitPattern != 0x0A
+-                }
+-                guard !token.isEmpty else { throw .empty }
+-                return try RFC_9112.Request.Target(Scanning.text(token), method: method)
+-            }
+-
+-            public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
+-                buffer.append(contentsOf: Scanning.bytes(output.text))
+-            }
+         }
+ 
+         public static var coder: Coder<ArraySlice<Byte>, [Byte]> { .init() }
+ 
+         public enum Failure: Swift::Error, Equatable {
+-
+             case empty
+ 
+             case absolute
+@@ -51,8 +32,25 @@
+         }
+     }
+ 
+-    extension RFC_9112.Request.Target {
++extension RFC_9112.Request.Target.Coder {
++        public typealias Output = RFC_9112.Request.Target
++
++        public typealias Failure = RFC_9112.Request.Target.Failure
+ 
++        public borrowing func parse(_ input: inout Input) throws(Failure) -> Output {
++            let token = Scanning.take(&input) { byte in
++                byte.bitPattern != 0x20 && byte.bitPattern != 0x0D && byte.bitPattern != 0x0A
++            }
++            guard !token.isEmpty else { throw .empty }
++            return try RFC_9112.Request.Target(Scanning.text(token), method: method)
++        }
++
++        public borrowing func serialize(_ output: Output, into buffer: inout Buffer) throws(Failure) {
++            buffer.append(contentsOf: Scanning.bytes(output.text))
++        }
++}
++
++    extension RFC_9112.Request.Target {
+         init(_ text: String, method: RFC_9110.Method) throws(Failure) {
+             if text == "*" {
+                 self = .asterisk
+diff --git a/Sources/RFC 9112/HTTP.Field.swift b/Sources/RFC 9112/HTTP.Field.swift
+index c3e1a55..9c08c91 100644
+--- a/Sources/RFC 9112/HTTP.Field.swift	
++++ b/Sources/RFC 9112/HTTP.Field.swift	
+@@ -3,7 +3,18 @@ extension RFC_9112 {
+ }
+ 
+ extension RFC_9112.Field {
++
++    public enum ObsFold {}
+ }
+ 
+ extension RFC_9112.Field.ObsFold {
++
++    public enum Policy: Equatable, Hashable {
++
++        case reject
++
++        case space
++
++        case discard
++    }
+ }
+diff --git a/Sources/RFC 9112/HTTP.Message.Body.Length.swift b/Sources/RFC 9112/HTTP.Message.Body.Length.swift
+index d35f0a3..00bf240 100644
+--- a/Sources/RFC 9112/HTTP.Message.Body.Length.swift	
++++ b/Sources/RFC 9112/HTTP.Message.Body.Length.swift	
+@@ -1,4 +1,4 @@
+-import RFC_9110
++public import RFC_9110
+ 
+ extension RFC_9112.Message.Body {
+ 
+@@ -17,6 +17,13 @@ extension RFC_9112.Message.Body {
+ }
+ 
+ extension RFC_9112.Message.Body.Length {
++
++    public enum Context: Equatable, Hashable {
++
++        case request
++
++        case response(status: RFC_9110.Status, to: RFC_9110.Method)
++    }
+ }
+ 
+ extension RFC_9112.Message.Body.Length.Context {
+@@ -30,6 +37,19 @@ extension RFC_9112.Message.Body.Length.Context {
+ }
+ 
+ extension RFC_9112.Message.Body.Length {
++
++    public enum Error: Swift::Error, Equatable {
++
++        case transferEncodingWithContentLength
++
++        case transferEncodingWithIncompatibleStatus(RFC_9110.Status)
++
++        case chunkedNotFinal
++
++        case chunkedAppliedMultipleTimes
++
++        case transferEncodingWithoutChunked
++    }
+ }
+ 
+ extension RFC_9112.Message.Body.Length {
+diff --git a/Sources/RFC 9112/RFC_9112.Field.ObsFold.Policy.swift b/Sources/RFC 9112/RFC_9112.Field.ObsFold.Policy.swift
+deleted file mode 100644
+index bea5ad8..0000000
+--- a/Sources/RFC 9112/RFC_9112.Field.ObsFold.Policy.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-
+-extension RFC_9112.Field.ObsFold {
+-    public enum Policy: Equatable, Hashable {
+-
+-        case reject
+-
+-        case space
+-
+-        case discard
+-    }
+-}
+diff --git a/Sources/RFC 9112/RFC_9112.Field.ObsFold.swift b/Sources/RFC 9112/RFC_9112.Field.ObsFold.swift
+deleted file mode 100644
+index 5de868d..0000000
+--- a/Sources/RFC 9112/RFC_9112.Field.ObsFold.swift	
++++ /dev/null
+@@ -1,4 +0,0 @@
+-
+-extension RFC_9112.Field {
+-    public enum ObsFold {}
+-}
+diff --git a/Sources/RFC 9112/RFC_9112.Message.Body.Length.Context.swift b/Sources/RFC 9112/RFC_9112.Message.Body.Length.Context.swift
+deleted file mode 100644
+index 93f17dc..0000000
+--- a/Sources/RFC 9112/RFC_9112.Message.Body.Length.Context.swift	
++++ /dev/null
+@@ -1,11 +0,0 @@
+-public import RFC_9110
+-
+-
+-extension RFC_9112.Message.Body.Length {
+-    public enum Context: Equatable, Hashable {
+-
+-        case request
+-
+-        case response(status: RFC_9110.Status, to: RFC_9110.Method)
+-    }
+-}
+diff --git a/Sources/RFC 9112/RFC_9112.Message.Body.Length.Error.swift b/Sources/RFC 9112/RFC_9112.Message.Body.Length.Error.swift
+deleted file mode 100644
+index 1f7f45a..0000000
+--- a/Sources/RFC 9112/RFC_9112.Message.Body.Length.Error.swift	
++++ /dev/null
+@@ -1,17 +0,0 @@
+-public import RFC_9110
+-
+-
+-extension RFC_9112.Message.Body.Length {
+-    public enum Error: Swift::Error, Equatable {
+-
+-        case transferEncodingWithContentLength
+-
+-        case transferEncodingWithIncompatibleStatus(RFC_9110.Status)
+-
+-        case chunkedNotFinal
+-
+-        case chunkedAppliedMultipleTimes
+-
+-        case transferEncodingWithoutChunked
+-    }
+-}
+-- 
+2.43.0
+

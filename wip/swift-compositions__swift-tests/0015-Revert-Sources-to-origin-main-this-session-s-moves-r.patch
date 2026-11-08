@@ -1,0 +1,798 @@
+From 72a64b2753e42629a8412c6f67899d9da8e25428 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 05:04:58 +0000
+Subject: [PATCH 15/16] Revert Sources to origin/main: this session's moves
+ raised rules over the ratchet limit (coenttb/work#242)
+
+---
+ .../Test.Snapshot.Inline.Configuration.swift  |  13 +
+ .../Test.Environment+Capture.swift            |  58 +++++
+ .../Tests Performance/Test.Environment.swift  |  57 -----
+ Sources/Tests Performance/Test.Runner.swift   |  47 ++--
+ .../Tests.Complexity+analyze.swift            | 236 ++++++++++++++++++
+ .../Tests.Complexity+classify.swift           | 158 ++++++++++++
+ .../Tests.Complexity+sizes.swift              |  40 +++
+ ...omplexity.Baseline+JSON.Serializable.swift |   6 +-
+ .../Tests Reporter/Test.Reporter.Tee.swift    |  16 ++
+ .../Test.Snapshot.Configuration.Key.swift     |  15 --
+ .../Test.Snapshot.Configuration.swift         |   5 +
+ 11 files changed, 551 insertions(+), 100 deletions(-)
+ create mode 100644 Sources/Tests Inline Snapshot/Test.Snapshot.Inline.Configuration.swift
+ create mode 100644 Sources/Tests Performance/Test.Environment+Capture.swift
+ create mode 100644 Sources/Tests Performance/Tests.Complexity+analyze.swift
+ create mode 100644 Sources/Tests Performance/Tests.Complexity+classify.swift
+ create mode 100644 Sources/Tests Performance/Tests.Complexity+sizes.swift
+ create mode 100644 Sources/Tests Reporter/Test.Reporter.Tee.swift
+ delete mode 100644 Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift
+
+diff --git a/Sources/Tests Inline Snapshot/Test.Snapshot.Inline.Configuration.swift b/Sources/Tests Inline Snapshot/Test.Snapshot.Inline.Configuration.swift
+new file mode 100644
+index 0000000..d7c0ef9
+--- /dev/null
++++ b/Sources/Tests Inline Snapshot/Test.Snapshot.Inline.Configuration.swift	
+@@ -0,0 +1,13 @@
++public import Test
++
++extension Test::Test.Snapshot.Inline {
++    /// Global state accumulator for the current test run.
++    ///
++    /// Entries are registered during test execution via ``assertInlineSnapshot``
++    /// and drained by the runner's post-run write-back hook. The ``State``
++    /// class uses a `Mutex` internally for concurrent safety.
++    ///
++    /// Process-global singleton is appropriate here — inline snapshot collection
++    /// spans the entire test run and must survive across individual test scopes.
++    public static let state = State()
++}
+diff --git a/Sources/Tests Performance/Test.Environment+Capture.swift b/Sources/Tests Performance/Test.Environment+Capture.swift
+new file mode 100644
+index 0000000..6c9a3e7
+--- /dev/null
++++ b/Sources/Tests Performance/Test.Environment+Capture.swift	
+@@ -0,0 +1,58 @@
++import Kernel
++
++extension Test.Environment {
++    /// Captures the current runtime and compile-time environment.
++    public static func capture() -> Self {
++        let osVersion = Kernel.Name.current.map { "\($0.system) \($0.release)" } ?? "unknown"
++        let physical = Int(CPU.Core.count)
++        let logical = Int(CPU.Logical.count)
++        let memory = Memory.Physical.capacity.underlying
++        return Self(
++            architecture: _architecture,
++            physicalCPUCount: physical,
++            logicalCPUCount: logical,
++            memoryBytes: memory,
++            osVersion: osVersion,
++            swiftVersion: _swiftVersion,
++            optimization: .current,
++            features: .current
++        )
++    }
++
++    /// Human-readable fingerprint for file keying and display.
++    ///
++    /// Example: `"arm64-10c-debug-nnbd-sms"` or `"x86_64-8c-release"`
++    public var fingerprint: Swift.String {
++        var parts = [architecture, "\(physicalCPUCount)c"]
++        parts.append(optimization.rawValue)
++        if features.nonisolatedNonsendingByDefault { parts.append("nnbd") }
++        if features.strictMemorySafety { parts.append("sms") }
++        return parts.joined(separator: "-")
++    }
++}
++
++extension Test.Environment {
++    private static var _architecture: Swift.String {
++        #if arch(arm64)
++            "arm64"
++        #elseif arch(x86_64)
++            "x86_64"
++        #elseif arch(i386)
++            "i386"
++        #else
++            "unknown"
++        #endif
++    }
++
++    private static var _swiftVersion: Swift.String {
++        #if swift(>=6.2)
++            "6.2"
++        #elseif swift(>=6.1)
++            "6.1"
++        #elseif swift(>=6.0)
++            "6.0"
++        #else
++            "< 6.0"
++        #endif
++    }
++}
+diff --git a/Sources/Tests Performance/Test.Environment.swift b/Sources/Tests Performance/Test.Environment.swift
+index 197bfd4..72ebcb8 100644
+--- a/Sources/Tests Performance/Test.Environment.swift	
++++ b/Sources/Tests Performance/Test.Environment.swift	
+@@ -67,60 +67,3 @@ extension Test {
+         }
+     }
+ }
+-
+-extension Test.Environment {
+-    /// Captures the current runtime and compile-time environment.
+-    public static func capture() -> Self {
+-        let osVersion = Kernel.Name.current.map { "\($0.system) \($0.release)" } ?? "unknown"
+-        let physical = Int(CPU.Core.count)
+-        let logical = Int(CPU.Logical.count)
+-        let memory = Memory.Physical.capacity.underlying
+-        return Self(
+-            architecture: _architecture,
+-            physicalCPUCount: physical,
+-            logicalCPUCount: logical,
+-            memoryBytes: memory,
+-            osVersion: osVersion,
+-            swiftVersion: _swiftVersion,
+-            optimization: .current,
+-            features: .current
+-        )
+-    }
+-
+-    /// Human-readable fingerprint for file keying and display.
+-    ///
+-    /// Example: `"arm64-10c-debug-nnbd-sms"` or `"x86_64-8c-release"`
+-    public var fingerprint: Swift.String {
+-        var parts = [architecture, "\(physicalCPUCount)c"]
+-        parts.append(optimization.rawValue)
+-        if features.nonisolatedNonsendingByDefault { parts.append("nnbd") }
+-        if features.strictMemorySafety { parts.append("sms") }
+-        return parts.joined(separator: "-")
+-    }
+-}
+-
+-extension Test.Environment {
+-    private static var _architecture: Swift.String {
+-        #if arch(arm64)
+-            "arm64"
+-        #elseif arch(x86_64)
+-            "x86_64"
+-        #elseif arch(i386)
+-            "i386"
+-        #else
+-            "unknown"
+-        #endif
+-    }
+-
+-    private static var _swiftVersion: Swift.String {
+-        #if swift(>=6.2)
+-            "6.2"
+-        #elseif swift(>=6.1)
+-            "6.1"
+-        #elseif swift(>=6.0)
+-            "6.0"
+-        #else
+-            "< 6.0"
+-        #endif
+-    }
+-}
+diff --git a/Sources/Tests Performance/Test.Runner.swift b/Sources/Tests Performance/Test.Runner.swift
+index fe67833..075191f 100644
+--- a/Sources/Tests Performance/Test.Runner.swift	
++++ b/Sources/Tests Performance/Test.Runner.swift	
+@@ -251,10 +251,10 @@ extension Test.Runner {
+         }
+ 
+         let effective: Concurrency
+-        effective = if let traits, traits[Test.Trait.Serialized.self] {
+-            .serial
++        if let traits, traits[Test.Trait.Serialized.self] {
++            effective = .serial
+         } else {
+-            concurrency
++            effective = concurrency
+         }
+ 
+         switch effective {
+@@ -376,12 +376,12 @@ extension Test.Runner {
+             bodyThrew = true
+ 
+             let isRequirementFailure: Bool
+-            isRequirementFailure = if let runnerError = error as? Self.Error,
++            if let runnerError = error as? Self.Error,
+                 case .bodyFailed(.requirementFailed) = runnerError
+             {
+-                true
++                isRequirementFailure = true
+             } else {
+-                false
++                isRequirementFailure = false
+             }
+ 
+             if !isRequirementFailure {
+@@ -430,10 +430,10 @@ extension Test.Runner {
+             }
+         }
+ 
+-        testResult = if bodyThrew || hasExpectationFailures {
+-            .failed
++        if bodyThrew || hasExpectationFailures {
++            testResult = .failed
+         } else {
+-            .passed
++            testResult = .passed
+         }
+ 
+         await sender.send(
+@@ -565,10 +565,22 @@ extension Test.Runner {
+     /// Each `walk` call returns a `Counters` value. These are aggregated
+     /// functionally — no shared mutable state needed, even across concurrent
+     /// task groups.
+-    fileprivate struct Counters: Sendable {
++    private struct Counters: Sendable {
+         var passed: Int = 0
+         var failed: Int = 0
+         var skipped: Int = 0
++
++        static func + (lhs: Self, rhs: Self) -> Self {
++            Self(
++                passed: lhs.passed + rhs.passed,
++                failed: lhs.failed + rhs.failed,
++                skipped: lhs.skipped + rhs.skipped
++            )
++        }
++
++        static func += (lhs: inout Self, rhs: Self) {
++            lhs = lhs + rhs
++        }
+     }
+ }
+ 
+@@ -628,18 +640,3 @@ extension Test.Runner {
+     /// Errors thrown during test execution.
+     public typealias Error = Test.Trait.Scope.Provider.Error
+ }
+-
+-extension Test.Runner.Counters {
+-
+-    static func + (lhs: Self, rhs: Self) -> Self {
+-        Self(
+-            passed: lhs.passed + rhs.passed,
+-            failed: lhs.failed + rhs.failed,
+-            skipped: lhs.skipped + rhs.skipped
+-        )
+-    }
+-
+-    static func += (lhs: inout Self, rhs: Self) {
+-        lhs = lhs + rhs
+-    }
+-}
+diff --git a/Sources/Tests Performance/Tests.Complexity+analyze.swift b/Sources/Tests Performance/Tests.Complexity+analyze.swift
+new file mode 100644
+index 0000000..b3bfba8
+--- /dev/null
++++ b/Sources/Tests Performance/Tests.Complexity+analyze.swift	
+@@ -0,0 +1,236 @@
++import Kernel_Clock
++import Test
++
++extension Tests.Complexity {
++    /// Analyzes the empirical complexity of an operation.
++    ///
++    /// Measures execution time at each input size, constructs analytical
++    /// evidence via L1 fitting, and applies policy-based classification.
++    /// Returns a ``Diagnostic`` containing the ``Result`` and all
++    /// measurement data needed for human or machine interpretation.
++    ///
++    /// The operation closure receives the input size and should perform
++    /// the workload under test. The framework measures **total** execution
++    /// time of the closure (total-work semantics). If you want per-operation
++    /// complexity, structure the closure accordingly.
++    ///
++    /// ```swift
++    /// @Test(.serialized)
++    /// func sortIsNLogN() async throws {
++    ///     let diagnostic = try Tests.Complexity.analyze(
++    ///         sizes: [1_000, 10_000, 100_000, 1_000_000]
++    ///     ) { n in
++    ///         var array = (0..<n).map { _ in Int.random(in: 0..<n) }
++    ///         array.sort()
++    ///     }
++    ///     #expect(diagnostic.result.isCompatible(with: .linearithmic))
++    /// }
++    /// ```
++    ///
++    /// - Parameters:
++    ///   - sizes: Input sizes to measure at. Should span >= 2 orders of magnitude.
++    ///   - warmup: Warmup iterations per size point (not timed).
++    ///   - iterations: Timed iterations per size point.
++    ///   - metric: Which statistic represents each size point (default: median).
++    ///   - policy: Classification thresholds.
++    ///   - baselineKey: Optional key for baseline storage. When provided,
++    ///     loads the previous baseline, compares, and saves the current result.
++    ///   - printDiagnostic: Whether to print the diagnostic to console (default: true).
++    ///   - operation: The workload to measure. Receives the input size.
++    /// - Returns: A ``Diagnostic`` containing the ``Result`` and measurement data.
++    @discardableResult
++    public static func analyze<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int = 2,
++        iterations: Int = 10,
++        metric: Sample.Metric = .median,
++        policy: Policy = .default,
++        baselineKey: Swift.String? = nil,
++        printDiagnostic: Bool = true,
++        operation: (Int) throws(E) -> Void
++    ) throws(E) -> Diagnostic {
++        let points = try _measure(
++            sizes: sizes,
++            warmup: warmup,
++            iterations: iterations,
++            metric: metric,
++            operation: operation
++        )
++
++        return _finalize(
++            points: points,
++            metric: metric,
++            policy: policy,
++            baselineKey: baselineKey,
++            printDiagnostic: printDiagnostic
++        )
++    }
++
++    /// Async variant for async workloads.
++    @discardableResult
++    public static func analyze<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int = 2,
++        iterations: Int = 10,
++        metric: Sample.Metric = .median,
++        policy: Policy = .default,
++        baselineKey: Swift.String? = nil,
++        printDiagnostic: Bool = true,
++        operation: (Int) async throws(E) -> Void
++    ) async throws(E) -> Diagnostic {
++        let points = try await _measureAsync(
++            sizes: sizes,
++            warmup: warmup,
++            iterations: iterations,
++            metric: metric,
++            operation: operation
++        )
++
++        return _finalize(
++            points: points,
++            metric: metric,
++            policy: policy,
++            baselineKey: baselineKey,
++            printDiagnostic: printDiagnostic
++        )
++    }
++}
++
++extension Tests.Complexity {
++    private static func _finalize(
++        points: [(size: Int, metric: Duration)],
++        metric: Sample.Metric,
++        policy: Policy,
++        baselineKey: Swift.String?,
++        printDiagnostic: Bool
++    ) -> Diagnostic {
++        let evidence = Test.Benchmark.Complexity.evidence(
++            from: points,
++            classes: policy.candidateClasses
++        )
++
++        let result = classify(evidence, under: policy)
++
++        var diagnostic = Diagnostic(
++            result: result,
++            points: points,
++            metric: metric,
++            policy: policy
++        )
++
++        _handleBaseline(key: baselineKey, result: result, diagnostic: &diagnostic)
++
++        if printDiagnostic {
++            print(diagnostic.formatted())
++        }
++
++        return diagnostic
++    }
++}
++
++extension Tests.Complexity {
++    private static func _measure<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int,
++        iterations: Int,
++        metric: Sample.Metric,
++        operation: (Int) throws(E) -> Void
++    ) throws(E) -> [(size: Int, metric: Duration)] {
++        var points: [(size: Int, metric: Duration)] = []
++        points.reserveCapacity(sizes.count)
++
++        for size in sizes.sorted() {
++            for _ in 0..<warmup {
++                try operation(size)
++            }
++
++            var durations: [Duration] = []
++            durations.reserveCapacity(iterations)
++            for _ in 0..<iterations {
++                let start = Clock::Clock.Continuous.now
++                try operation(size)
++                durations.append(Clock::Clock.Continuous.now.offset - start.offset)
++            }
++
++            let measurement = Test.Benchmark.Measurement(durations: durations)
++            let value = metric.extract(from: measurement)
++            points.append((size: size, metric: value))
++        }
++
++        return points
++    }
++
++    private static func _measureAsync<E: Swift.Error>(
++        sizes: [Int],
++        warmup: Int,
++        iterations: Int,
++        metric: Sample.Metric,
++        operation: (Int) async throws(E) -> Void
++    ) async throws(E) -> [(size: Int, metric: Duration)] {
++        var points: [(size: Int, metric: Duration)] = []
++        points.reserveCapacity(sizes.count)
++
++        for size in sizes.sorted() {
++            for _ in 0..<warmup {
++                try await operation(size)
++            }
++
++            var durations: [Duration] = []
++            durations.reserveCapacity(iterations)
++            for _ in 0..<iterations {
++                let start = Clock::Clock.Continuous.now
++                try await operation(size)
++                durations.append(Clock::Clock.Continuous.now.offset - start.offset)
++            }
++
++            let measurement = Test.Benchmark.Measurement(durations: durations)
++            let value = metric.extract(from: measurement)
++            points.append((size: size, metric: value))
++        }
++
++        return points
++    }
++}
++
++extension Tests.Complexity {
++    private static func _handleBaseline(
++        key: Swift.String?,
++        result: Result,
++        diagnostic: inout Diagnostic
++    ) {
++        guard let key else { return }
++
++        let path = Baseline.path(key: key)
++        let recording = Tests.Baseline.Recording.current
++
++        let previous = Baseline.load(at: path)
++
++        if let previous {
++            let current = Baseline(result: result)
++            diagnostic.baselineComparison = Baseline.Comparison(
++                previous: previous,
++                current: current
++            )
++        }
++
++        let shouldSave: Bool
++        switch recording {
++        case .all:
++            shouldSave = true
++
++        case .normal:
++            shouldSave = previous == nil
++
++        case .never:
++            shouldSave = false
++        }
++
++        if shouldSave {
++            let current = Baseline(result: result)
++            do throws(Tests.Baseline.Storage.Error) {
++                try current.save(to: path)
++            } catch {
++            }
++        }
++    }
++}
+diff --git a/Sources/Tests Performance/Tests.Complexity+classify.swift b/Sources/Tests Performance/Tests.Complexity+classify.swift
+new file mode 100644
+index 0000000..b31ffff
+--- /dev/null
++++ b/Sources/Tests Performance/Tests.Complexity+classify.swift	
+@@ -0,0 +1,158 @@
++import Sample
++public import Test
++
++extension Tests.Complexity {
++    /// Interprets raw complexity evidence under a policy to produce a result.
++    ///
++    /// Applies constant-time detection, adequacy gates, monotonicity checks,
++    /// fit quality thresholds, separation analysis, and cross-validation to
++    /// derive a confidence level and best candidate classification.
++    ///
++    /// All thresholds come from the ``Policy`` and are provisional.
++    ///
++    /// - Parameters:
++    ///   - evidence: Raw analytical evidence from L1 fitting.
++    ///   - policy: Classification thresholds and candidate set.
++    /// - Returns: An interpreted ``Result`` with confidence and classification.
++    public static func classify(
++        _ evidence: Test.Benchmark.Complexity.Evidence,
++        under policy: Policy = .default
++    ) -> Result {
++        if policy.constantCVThreshold > 0,
++            evidence.monotonicity.interpretation == .none,
++            evidence.metricCV < policy.constantCVThreshold,
++            evidence.points.count >= policy.minimumSizePoints,
++            Self.hasScaleRange(evidence, policy: policy)
++        {
++            let constantCandidate =
++                evidence.candidates
++                .first { $0.complexity == .constant }
++                ?? Test.Benchmark.Complexity.Candidate.Fit(
++                    complexity: .constant,
++                    regression: Sample.Regression.Fit(
++                        slope: 0,
++                        intercept: 0,
++                        rSquared: 0,
++                        meanSquaredError: 0
++                    ),
++                    effectiveExponent: 0
++                )
++            let confidence: Confidence
++            if evidence.metricCV < policy.constantCVThreshold * 0.2 {
++                confidence = .high
++            } else if evidence.metricCV < policy.constantCVThreshold * 0.5 {
++                confidence = .medium
++            } else {
++                confidence = .low
++            }
++            return Result(
++                evidence: evidence,
++                best: constantCandidate,
++                confidence: confidence,
++                ambiguousWith: [],
++                reasons: []
++            )
++        }
++
++        var reasons: [InconclusiveReason] = []
++
++        if evidence.points.count < policy.minimumSizePoints {
++            reasons.append(.insufficientData)
++        }
++
++        if !Self.hasScaleRange(evidence, policy: policy) {
++            reasons.append(.insufficientScaleRange)
++        }
++
++        if evidence.monotonicity.interpretation == .none
++            || evidence.monotonicity.interpretation == .decreasing
++        {
++            reasons.append(.nonMonotone)
++        }
++
++        if evidence.exponent.fit.rSquared < policy.logLogRSquaredFloor {
++            reasons.append(.weakContinuousFit)
++        }
++
++        if !reasons.isEmpty {
++            return Result(
++                evidence: evidence,
++                best: nil,
++                confidence: .inconclusive,
++                ambiguousWith: [],
++                reasons: reasons
++            )
++        }
++
++        let viable = evidence.candidates.filter {
++            $0.regression.slope > 0
++                && $0.regression.rSquared >= policy.candidateRSquaredFloor
++        }
++
++        guard let best = viable.first else {
++            return Result(
++                evidence: evidence,
++                best: nil,
++                confidence: .inconclusive,
++                ambiguousWith: [],
++                reasons: [.noSeparatedWinner]
++            )
++        }
++
++        let runnerUp = viable.dropFirst().first
++        let separation =
++            runnerUp.map {
++                best.regression.rSquared - $0.regression.rSquared
++            } ?? 1.0
++
++        let ambiguous = viable.filter {
++            $0.complexity != best.complexity
++                && (best.regression.rSquared - $0.regression.rSquared)
++                    < policy.mediumSeparationThreshold
++        }.map(\.complexity)
++
++        var confidence: Confidence
++        if separation >= policy.highSeparationThreshold {
++            confidence = .high
++        } else if separation >= policy.mediumSeparationThreshold {
++            confidence = .medium
++        } else {
++            confidence = .low
++        }
++
++        let tolerance = Swift.max(
++            policy.exponentConsistencyTolerance,
++            0.3 * Swift.abs(best.effectiveExponent)
++        )
++        let deviation = Swift.abs(
++            evidence.exponent.value - best.effectiveExponent
++        )
++        if deviation > tolerance {
++            switch confidence {
++            case .high: confidence = .medium
++            case .medium: confidence = .low
++            case .low, .inconclusive: break
++            }
++            reasons.append(.inconsistentSignals)
++        }
++
++        return Result(
++            evidence: evidence,
++            best: best,
++            confidence: confidence,
++            ambiguousWith: ambiguous,
++            reasons: reasons
++        )
++    }
++
++    private static func hasScaleRange(
++        _ evidence: Test.Benchmark.Complexity.Evidence,
++        policy: Policy
++    ) -> Bool {
++        guard let first = evidence.points.first,
++            let last = evidence.points.last,
++            first.size > 0
++        else { return false }
++        return Double(last.size) / Double(first.size) >= policy.minimumScaleRange
++    }
++}
+diff --git a/Sources/Tests Performance/Tests.Complexity+sizes.swift b/Sources/Tests Performance/Tests.Complexity+sizes.swift
+new file mode 100644
+index 0000000..fb184b2
+--- /dev/null
++++ b/Sources/Tests Performance/Tests.Complexity+sizes.swift	
+@@ -0,0 +1,40 @@
++extension Tests.Complexity {
++    /// Generates a geometric sequence of input sizes.
++    ///
++    /// Produces sizes starting at `from`, multiplied by `factor` at each
++    /// step, up to and including `through`. The result is deterministic
++    /// and always includes the endpoint if it's reachable.
++    ///
++    /// ```swift
++    /// Tests.Complexity.sizes(from: 100, through: 1_000_000)
++    /// // [100, 1_000, 10_000, 100_000, 1_000_000]
++    ///
++    /// Tests.Complexity.sizes(from: 1_024, through: 1_048_576, factor: 4)
++    /// // [1_024, 4_096, 16_384, 65_536, 262_144, 1_048_576]
++    /// ```
++    ///
++    /// - Parameters:
++    ///   - from: Starting size (must be > 0).
++    ///   - through: Maximum size (inclusive if reachable).
++    ///   - factor: Multiplicative step between sizes (default: 10).
++    /// - Returns: Array of input sizes in ascending order.
++    public static func sizes(
++        from: Int,
++        through: Int,
++        factor: Int = 10
++    ) -> [Int] {
++        precondition(from > 0, "Starting size must be positive")
++        precondition(through >= from, "End size must be >= start size")
++        precondition(factor >= 2, "Factor must be >= 2")
++
++        var result: [Int] = []
++        var current = from
++        while current <= through {
++            result.append(current)
++            let next = current.multipliedReportingOverflow(by: factor)
++            if next.overflow { break }
++            current = next.partialValue
++        }
++        return result
++    }
++}
+diff --git a/Sources/Tests Performance/Tests.Complexity.Baseline+JSON.Serializable.swift b/Sources/Tests Performance/Tests.Complexity.Baseline+JSON.Serializable.swift
+index 8f63054..b56a65a 100644
+--- a/Sources/Tests Performance/Tests.Complexity.Baseline+JSON.Serializable.swift	
++++ b/Sources/Tests Performance/Tests.Complexity.Baseline+JSON.Serializable.swift	
+@@ -48,10 +48,10 @@ extension Tests.Complexity.Baseline: JSON.Serializable {
+         }
+ 
+         let bestRSquared: Double?
+-        bestRSquared = if json.bestRSquared.isNull || !json.bestRSquared.isNumber {
+-            nil
++        if json.bestRSquared.isNull || !json.bestRSquared.isNumber {
++            bestRSquared = nil
+         } else {
+-            Double(json.bestRSquared)
++            bestRSquared = Double(json.bestRSquared)
+         }
+ 
+         return Self(
+diff --git a/Sources/Tests Reporter/Test.Reporter.Tee.swift b/Sources/Tests Reporter/Test.Reporter.Tee.swift
+new file mode 100644
+index 0000000..fa714b3
+--- /dev/null
++++ b/Sources/Tests Reporter/Test.Reporter.Tee.swift	
+@@ -0,0 +1,16 @@
++import Test
++
++extension Test.Reporter {
++    /// Creates a reporter that forwards events to both reporters.
++    ///
++    /// Each call to ``sink()`` creates sinks from both reporters and
++    /// combines them via ``Test/Reporter/Sink/tee(_:_:)``.
++    ///
++    /// - Parameters:
++    ///   - first: The first reporter.
++    ///   - second: The second reporter.
++    /// - Returns: A reporter that tees to both.
++    public static func tee(_ first: Test.Reporter, _ second: Test.Reporter) -> Test.Reporter {
++        Test.Reporter { .tee(first.sink(), second.sink()) }
++    }
++}
+diff --git a/Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift b/Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift
+deleted file mode 100644
+index f5e0cd5..0000000
+--- a/Sources/Tests Snapshot/Test.Snapshot.Configuration.Key.swift	
++++ /dev/null
+@@ -1,15 +0,0 @@
+-public import Dependency
+-public import File_System
+-internal import Kernel
+-import Standard_Library_Extensions
+-internal import Strings
+-public import Test
+-
+-
+-extension Test.Snapshot.Configuration {
+-    /// Dependency key for snapshot configuration.
+-    ///
+-    /// Provides optional configuration for each scope.
+-    public enum Key: Dependency.Key {
+-    }
+-}
+diff --git a/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift b/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift
+index ae41bc1..46143eb 100644
+--- a/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift	
++++ b/Sources/Tests Snapshot/Test.Snapshot.Configuration.swift	
+@@ -73,6 +73,11 @@ extension Test.Snapshot.Configuration {
+         Self()
+     }
+ 
++    /// Dependency key for snapshot configuration.
++    ///
++    /// Provides optional configuration for each scope.
++    public enum Key: Dependency.Key {
++    }
+ 
+     /// Current configuration for this scope.
+     public static var current: Self? {
+-- 
+2.43.0
+

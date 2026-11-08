@@ -1,0 +1,1183 @@
+From ccaa19ed682a51c9623bbd1cc35cee5d8bc41051 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 05:04:09 +0000
+Subject: [PATCH 13/16] Revert files that raised `compound identifier` over its
+ ratchet limit (coenttb/work#242)
+
+---
+ Sources/Tests Core/Test.Expectation.swift     | 162 ---------
+ Sources/Tests Core/Test.swift                 |  59 ----
+ ...st.Event, Underlying == Swift.String.swift |  19 -
+ .../Tests Performance/Test.Benchmark.swift    | 143 --------
+ .../Test.Trait.Scope.Provider.swift           | 197 -----------
+ ...Diffing where Format == Swift.String.swift | 113 ------
+ ...daction where Format == Swift.String.swift | 333 ------------------
+ .../Test.Trait.Collection.Modifier.swift      |  44 ---
+ .../Test.Trait.Scope.Provider.swift           |  29 --
+ 9 files changed, 1099 deletions(-)
+ delete mode 100644 Sources/Tests Core/Test.Expectation.swift
+ delete mode 100644 Sources/Tests Core/Test.swift
+ delete mode 100644 Sources/Tests Performance/Tagged where Tag == Test.Event, Underlying == Swift.String.swift
+ delete mode 100644 Sources/Tests Performance/Test.Benchmark.swift
+ delete mode 100644 Sources/Tests Performance/Test.Trait.Scope.Provider.swift
+ delete mode 100644 Sources/Tests Snapshot/Test.Snapshot.Diffing where Format == Swift.String.swift
+ delete mode 100644 Sources/Tests Snapshot/Test.Snapshot.Redaction where Format == Swift.String.swift
+ delete mode 100644 Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift
+ delete mode 100644 Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift
+
+diff --git a/Sources/Tests Core/Test.Expectation.swift b/Sources/Tests Core/Test.Expectation.swift
+deleted file mode 100644
+index 4ed1cd2..0000000
+--- a/Sources/Tests Core/Test.Expectation.swift	
++++ /dev/null
+@@ -1,162 +0,0 @@
+-import Loader
+-import Synchronization
+-public import Test
+-
+-private let _expressionCounter = Atomic<UInt64>(0)
+-private let _expectationCounter = Atomic<UInt64>(0)
+-
+-func _nextExpressionID() -> Test.Expression.ID {
+-    Test.Expression.ID(
+-        _unchecked: _expressionCounter.wrappingAdd(1, ordering: .relaxed).newValue
+-    )
+-}
+-
+-func _nextExpectationID() -> Test.Expectation.ID {
+-    Test.Expectation.ID(
+-        _unchecked: _expectationCounter.wrappingAdd(1, ordering: .relaxed).newValue
+-    )
+-}
+-
+-extension Test.Expectation {
+-    /// External failure handler for bridging to test frameworks.
+-    ///
+-    /// When no ``Collector`` is installed (i.e., tests run without the
+-    /// Institute's `Test.Runner`), this handler is called for each failure.
+-    /// It can be set by a bridge module (e.g., `Tests Apple Testing Bridge`)
+-    /// to forward failures to the active test runner.
+-    ///
+-    /// Set once before tests run; read during test execution.
+-    /// When the Institute's runner is active, ``Collector/current`` is
+-    /// non-nil and this handler is never invoked.
+-    nonisolated(unsafe) public static var externalFailureHandler: (@Sendable (_ message: Swift.String, _ location: Source.Location) -> Void)?
+-}
+-
+-extension Test.Expectation {
+-    /// Lazily resolves and installs the external failure bridge.
+-    ///
+-    /// Uses symbol lookup to find `_swift_tests_bridge_install` at runtime.
+-    /// If the bridge module is linked, its installer is called. If not
+-    /// linked, the symbol is not found and no action is taken.
+-    ///
+-    /// Thread-safe: `static let` guarantees exactly-once initialization.
+-    private static let _resolveBridge: Void = {
+-        guard unsafe externalFailureHandler == nil else { return }
+-        let symbol: UnsafeRawPointer
+-        do throws(Loader.Error) {
+-            unsafe symbol = try Loader.Symbol.lookup(
+-                name: "_swift_tests_bridge_install",
+-                in: .default
+-            )
+-        } catch {
+-            return
+-        }
+-        unsafe unsafeBitCast(symbol, to: (@convention(c) () -> Void).self)()
+-    }()
+-
+-    /// Reports a failure to the external bridge when no collector is active.
+-    ///
+-    /// Called by `expect()` and `require()` to ensure failures surface
+-    /// under Apple's Swift Testing runner (where ``Collector/current`` is nil).
+-    ///
+-    /// On first call, lazily resolves the bridge via symbol lookup.
+-    ///
+-    /// - Parameters:
+-    ///   - message: Description of the failure.
+-    ///   - location: Source location of the failing assertion.
+-    static func _reportExternalFailure(
+-        _ message: Swift.String,
+-        at location: Source.Location
+-    ) {
+-        guard Collector.current == nil else { return }
+-        _ = _resolveBridge
+-        unsafe externalFailureHandler?(message, location)
+-    }
+-}
+-
+-extension Test.Expectation {
+-    /// Creates a passing expectation.
+-    ///
+-    /// - Parameters:
+-    ///   - sourceCode: Source code representation of the assertion.
+-    ///   - location: Source location of the assertion.
+-    /// - Returns: A passing expectation with auto-generated IDs.
+-    public static func passing(
+-        sourceCode: Swift.String,
+-        at location: Source.Location
+-    ) -> Self {
+-        let expression = Test.Expression(
+-            id: _nextExpressionID(),
+-            sourceCode: sourceCode,
+-            sourceLocation: location
+-        )
+-        return Self(
+-            id: _nextExpectationID(),
+-            expression: expression,
+-            isPassing: true
+-        )
+-    }
+-
+-    /// Creates a failing expectation.
+-    ///
+-    /// - Parameters:
+-    ///   - message: Description of the failure.
+-    ///   - sourceCode: Source code representation of the assertion.
+-    ///   - location: Source location of the assertion.
+-    /// - Returns: A failing expectation with auto-generated IDs.
+-    public static func failing(
+-        _ message: Swift.String,
+-        sourceCode: Swift.String,
+-        at location: Source.Location
+-    ) -> Self {
+-        let expression = Test.Expression(
+-            id: _nextExpressionID(),
+-            sourceCode: sourceCode,
+-            sourceLocation: location
+-        )
+-        return Self(
+-            id: _nextExpectationID(),
+-            expression: expression,
+-            isPassing: false,
+-            failure: Failure(message: Test.Text(message))
+-        )
+-    }
+-
+-    /// Creates a passing expectation and records it with the current collector.
+-    ///
+-    /// - Parameters:
+-    ///   - sourceCode: Source code representation of the assertion.
+-    ///   - location: Source location of the assertion.
+-    /// - Returns: The recorded passing expectation.
+-    @discardableResult
+-    public static func record(
+-        passing sourceCode: Swift.String,
+-        at location: Source.Location
+-    ) -> Self {
+-        let result = passing(sourceCode: sourceCode, at: location)
+-        Collector.current?.record(result)
+-        return result
+-    }
+-
+-    /// Creates a failing expectation and records it with the current collector.
+-    ///
+-    /// When no collector is installed, the failure is forwarded to
+-    /// ``externalFailureHandler`` if one has been installed by a bridge
+-    /// module (e.g., `Tests Apple Testing Bridge`).
+-    ///
+-    /// - Parameters:
+-    ///   - message: Description of the failure.
+-    ///   - sourceCode: Source code representation of the assertion.
+-    ///   - location: Source location of the assertion.
+-    /// - Returns: The recorded failing expectation.
+-    @discardableResult
+-    public static func record(
+-        failing message: Swift.String,
+-        sourceCode: Swift.String,
+-        at location: Source.Location
+-    ) -> Self {
+-        let result = failing(message, sourceCode: sourceCode, at: location)
+-        Collector.current?.record(result)
+-        _reportExternalFailure(message, at: location)
+-        return result
+-    }
+-}
+diff --git a/Sources/Tests Core/Test.swift b/Sources/Tests Core/Test.swift
+deleted file mode 100644
+index b3e8093..0000000
+--- a/Sources/Tests Core/Test.swift	
++++ /dev/null
+@@ -1,59 +0,0 @@
+-public import Ownership
+-
+-extension Test {
+-    /// Typealias to Ownership.Shared for API compatibility.
+-    ///
+-    /// Used by @Test macro expansion to box registrations for transfer
+-    /// via C-compatible function signatures.
+-    ///
+-    /// - SeeAlso: `Ownership.Box` from swift-ownership
+-    public typealias Box<T: Sendable> = Ownership.Box<T>
+-}
+-
+-extension Test {
+-    /// The accessor function signature for test content records.
+-    ///
+-    /// This signature matches the official swift-testing accessor signature.
+-    /// The accessor is called during discovery to load test metadata.
+-    ///
+-    /// - Parameters:
+-    ///   - outValue: Pointer to write the test value into.
+-    ///   - type: The type metadata for the expected type.
+-    ///   - hint: Optional hint for accessor behavior.
+-    ///   - reserved: Reserved for future use.
+-    /// - Returns: `true` if the accessor successfully wrote a value.
+-    ///
+-    /// - Warning: This type is used by the `@Test` macro. Do not use directly.
+-    public typealias __TestContentRecordAccessor =
+-        @convention(c) (
+-            _ outValue: UnsafeMutableRawPointer,
+-            _ type: UnsafeRawPointer,
+-            _ hint: UnsafeRawPointer?,
+-            _ reserved: UInt
+-        ) -> CBool
+-
+-    /// A test content record stored in the binary's test section.
+-    ///
+-    /// Records are placed in platform-specific sections:
+-    /// - macOS/iOS: `__DATA_CONST,__swift5_tests`
+-    /// - Linux: `swift5_tests`
+-    /// - Windows: `.sw5test$B`
+-    ///
+-    /// The macro generates these records, and discovery enumerates them
+-    /// at runtime to find all tests.
+-    ///
+-    /// - Warning: This type is used by the `@Test` macro. Do not use directly.
+-    public typealias __TestContentRecord = (
+-        /// Record kind: 'test' for tests, 'suit' for suites, 'exit' for exit tests.
+-        /// See ``Test/__TestContentKind``.
+-        kind: UInt32,
+-        /// Reserved for future use.
+-        reserved1: UInt32,
+-        /// Accessor function that loads the test metadata.
+-        accessor: __TestContentRecordAccessor?,
+-        /// Context flags (e.g., for suites, parameterized tests).
+-        context: UInt,
+-        /// Reserved for future use.
+-        reserved2: UInt
+-    )
+-}
+diff --git a/Sources/Tests Performance/Tagged where Tag == Test.Event, Underlying == Swift.String.swift b/Sources/Tests Performance/Tagged where Tag == Test.Event, Underlying == Swift.String.swift
+deleted file mode 100644
+index ba2cbff..0000000
+--- a/Sources/Tests Performance/Tagged where Tag == Test.Event, Underlying == Swift.String.swift	
++++ /dev/null
+@@ -1,19 +0,0 @@
+-import Test
+-
+-extension Tagged where Tag == Test.Event, Underlying == Swift.String {
+-
+-    /// Structured plan record with git, environment, and test list.
+-    public static var planRecord: Self { Self(_unchecked: "planRecord") }
+-
+-    /// Structured summary record with counts and failures.
+-    public static var summaryRecord: Self { Self(_unchecked: "summaryRecord") }
+-
+-    /// A single performance diagnostic from a `.timed()` test.
+-    public static var performanceDiagnostic: Self { Self(_unchecked: "performanceDiagnostic") }
+-
+-    /// A complexity analysis diagnostic.
+-    public static var complexityDiagnostic: Self { Self(_unchecked: "complexityDiagnostic") }
+-
+-    /// Summary table across all performance tests in the run.
+-    public static var performanceSummary: Self { Self(_unchecked: "performanceSummary") }
+-}
+diff --git a/Sources/Tests Performance/Test.Benchmark.swift b/Sources/Tests Performance/Test.Benchmark.swift
+deleted file mode 100644
+index 651128c..0000000
+--- a/Sources/Tests Performance/Test.Benchmark.swift	
++++ /dev/null
+@@ -1,143 +0,0 @@
+-import Formatter
+-import Kernel_Clock
+-public import Test
+-public import Time
+-
+-private let durationFormat = Formatter::Formatter.Duration(numeric: Formatter::Formatter.Number())
+-
+-extension Test.Benchmark {
+-    /// Measures the execution time of a block of code with multiple iterations.
+-    ///
+-    /// Use this when you need stable state across iterations (e.g., the test struct's
+-    /// init runs expensive setup). The `.timed()` trait creates a new test instance
+-    /// per iteration, while `measure` runs all iterations within a single invocation.
+-    ///
+-    /// ```swift
+-    /// @Test("move files benchmark")
+-    /// func moveFiles() async throws {
+-    ///     // Setup (done once)
+-    ///     let fixture = try await FileSystemFixture.make()
+-    ///     createFiles(fixture)
+-    ///
+-    ///     // Measured iterations (same state)
+-    ///     try Test.Benchmark.measure(iterations: 3, warmup: 1, name: "move x 1000") {
+-    ///         for i in 0..<1000 {
+-    ///             try moveFile(i)
+-    ///         }
+-    ///     }
+-    /// }
+-    /// ```
+-    ///
+-    /// - Parameters:
+-    ///   - iterations: Number of timed iterations to run.
+-    ///   - warmup: Number of warmup iterations (not timed).
+-    ///   - name: Optional name for the measurement output.
+-    ///   - threshold: Optional performance threshold to enforce.
+-    ///   - metric: Which metric to check against threshold.
+-    ///   - body: The code block to measure.
+-    /// - Throws: Rethrows any error from the body, or fails if threshold exceeded.
+-    @discardableResult
+-    public static func measure<E: Swift.Error>(
+-        iterations: Int = 10,
+-        warmup: Int = 0,
+-        name: Swift.String? = nil,
+-        threshold: Duration? = nil,
+-        metric: Metric = .median,
+-        _ body: () throws(E) -> Void
+-    ) throws(E) -> Measurement {
+-        for _ in 0..<warmup {
+-            try body()
+-        }
+-
+-        var durations: [Duration] = []
+-        durations.reserveCapacity(iterations)
+-
+-        for _ in 0..<iterations {
+-            let start = Clock::Clock.Continuous.now
+-            try body()
+-            durations.append(Clock::Clock.Continuous.now.offset - start.offset)
+-        }
+-
+-        let measurement = Measurement(durations: durations)
+-
+-        let displayName = name ?? "Benchmark"
+-        printPerformance(displayName, measurement)
+-
+-        if let threshold {
+-            let actualMetric = metric.extract(from: measurement)
+-            if actualMetric > threshold {
+-                print(
+-                    """
+-                    ⚠️ Performance threshold exceeded in '\(displayName)':
+-                    Expected \(metric): < \(threshold.formatted(durationFormat))
+-                    Actual \(metric): \(actualMetric.formatted(durationFormat))
+-                    """
+-                )
+-            }
+-        }
+-
+-        return measurement
+-    }
+-
+-    /// Async version of measure for async test bodies.
+-    @discardableResult
+-    public static func measure<E: Swift.Error>(
+-        iterations: Int = 10,
+-        warmup: Int = 0,
+-        name: Swift.String? = nil,
+-        threshold: Duration? = nil,
+-        metric: Metric = .median,
+-        _ body: () async throws(E) -> Void
+-    ) async throws(E) -> Measurement {
+-        for _ in 0..<warmup {
+-            try await body()
+-        }
+-
+-        var durations: [Duration] = []
+-        durations.reserveCapacity(iterations)
+-
+-        for _ in 0..<iterations {
+-            let start = Clock::Clock.Continuous.now
+-            try await body()
+-            durations.append(Clock::Clock.Continuous.now.offset - start.offset)
+-        }
+-
+-        let measurement = Measurement(durations: durations)
+-
+-        let displayName = name ?? "Benchmark"
+-        printPerformance(displayName, measurement)
+-
+-        if let threshold {
+-            let actualMetric = metric.extract(from: measurement)
+-            if actualMetric > threshold {
+-                print(
+-                    """
+-                    ⚠️ Performance threshold exceeded in '\(displayName)':
+-                    Expected \(metric): < \(threshold.formatted(durationFormat))
+-                    Actual \(metric): \(actualMetric.formatted(durationFormat))
+-                    """
+-                )
+-            }
+-        }
+-
+-        return measurement
+-    }
+-
+-    /// Prints a performance measurement summary.
+-    @usableFromInline
+-    static func printPerformance(_ name: Swift.String, _ measurement: Measurement) {
+-        print(
+-            """
+-            ⏱️ \(name)
+-               Iterations: \(measurement.durations.count)
+-               Min:        \(measurement.min.formatted(durationFormat))
+-               Median:     \(measurement.median.formatted(durationFormat))
+-               Mean:       \(measurement.mean.formatted(durationFormat))
+-               p95:        \(measurement.p95.formatted(durationFormat))
+-               p99:        \(measurement.p99.formatted(durationFormat))
+-               Max:        \(measurement.max.formatted(durationFormat))
+-               StdDev:     \(measurement.standardDeviation.formatted(durationFormat))
+-            """
+-        )
+-    }
+-}
+diff --git a/Sources/Tests Performance/Test.Trait.Scope.Provider.swift b/Sources/Tests Performance/Test.Trait.Scope.Provider.swift
+deleted file mode 100644
+index f2501cc..0000000
+--- a/Sources/Tests Performance/Test.Trait.Scope.Provider.swift	
++++ /dev/null
+@@ -1,197 +0,0 @@
+-import File_System
+-import IO_Kernel
+-import Kernel
+-import Kernel_Clock
+-import Memory_Mapping
+-import Thread_Pool
+-
+-extension Test.Trait.Scope.Provider {
+-    /// Scope provider for timed benchmark measurement.
+-    public static var timed: Self {
+-        Self(
+-            id: "timed",
+-            priority: 50,
+-            shouldActivate: { $0[Test.Trait.Timed.self] != nil },
+-            provideScope: _timedScope
+-        )
+-    }
+-
+-    @Sendable
+-    private static func _timedScope(
+-        _ entry: Test.Plan.Entry,
+-        _ traits: Test.Trait.Collection,
+-        _ operation: @Sendable () async throws(Error) -> Void
+-    ) async throws(Error) {
+-        guard let config = traits[Test.Trait.Timed.self] else {
+-            preconditionFailure("the timed scope runs only for entries carrying the trait")
+-        }
+-
+-        for _ in 0..<config.iteration.warmup {
+-            try await operation()
+-        }
+-
+-        var durations: [Duration] = []
+-        durations.reserveCapacity(config.iteration.count)
+-        var allocationStats: [Memory.Allocation.Statistics]? =
+-            config.evaluation.trackAllocations ? [] : nil
+-
+-        for _ in 0..<config.iteration.count {
+-            let before =
+-                config.evaluation.trackAllocations
+-                ? Memory.Allocation.Statistics.capture()
+-                : nil
+-            let start = Clock::Clock.Continuous.now
+-            try await operation()
+-            durations.append(Clock::Clock.Continuous.now.offset - start.offset)
+-            if let before {
+-                let after = Memory.Allocation.Statistics.capture()
+-                allocationStats?.append(Memory.Allocation.Statistics.delta(from: before, to: after))
+-            }
+-        }
+-
+-        let measurement = Test.Benchmark.Measurement(durations: durations)
+-
+-        let environment = Test.Environment.capture()
+-
+-        let root = Tests.Baseline.Storage.root()
+-
+-        var storedBaseline: Test.Benchmark.Measurement? = nil
+-        var comparison: Tests.Comparison? = nil
+-
+-        if config.evaluation.baselineTolerance != nil {
+-            let baselinePath = Tests.Baseline.Storage.path(
+-                root: root,
+-                testID: entry.id,
+-                fingerprint: environment.fingerprint
+-            )
+-            let recording = Tests.Baseline.Recording.current
+-
+-            do throws(Kernel.Thread.Pool.Error) {
+-                storedBaseline = try await Tests.Baseline.Storage.load(at: baselinePath)
+-            } catch {}
+-
+-            if let baseline = storedBaseline {
+-                comparison = Tests.Comparison(
+-                    name: entry.id.name,
+-                    current: measurement,
+-                    baseline: baseline,
+-                    metric: config.evaluation.metric
+-                )
+-
+-                if recording == .all {
+-                    do throws(Either<Kernel.Thread.Pool.Error, Tests.Baseline.Storage.Error>) {
+-                        try await Tests.Baseline.Storage.save(measurement, to: baselinePath)
+-                    } catch {
+-                    }
+-                }
+-            } else {
+-                switch recording {
+-                case .normal, .all:
+-                    do throws(Either<Kernel.Thread.Pool.Error, Tests.Baseline.Storage.Error>) {
+-                        try await Tests.Baseline.Storage.save(measurement, to: baselinePath)
+-                    } catch {
+-                    }
+-
+-                case .never:
+-                    throw .baselineMissing(
+-                        test: entry.id.name,
+-                        path: Swift.String(baselinePath)
+-                    )
+-                }
+-            }
+-        }
+-
+-        let cv = measurement.coefficientOfVariation
+-        let mad = measurement.medianAbsoluteDeviation
+-        let outliers = measurement.outlierCount()
+-        let trend = Test.Benchmark.Trend.mannKendall(measurement.durations)
+-
+-        let metricValue = config.evaluation.metric.extract(from: measurement)
+-        let exceeded = config.evaluation.threshold.map { metricValue > $0 } ?? false
+-        let factor: Double? =
+-            if let threshold = config.evaluation.threshold, exceeded {
+-                metricValue.inSeconds / threshold.inSeconds
+-            } else {
+-                nil
+-            }
+-
+-        var historyAnalysis: Tests.History.Analysis? = nil
+-
+-        if Tests.History.Storage.isEnabled {
+-            let record = Tests.History.Record(
+-                timestamp: Kernel.Time.realtime(),
+-                testID: entry.id,
+-                metric: config.evaluation.metric,
+-                metricValue: metricValue,
+-                measurement: measurement,
+-                environment: environment,
+-                coefficientOfVariation: cv,
+-                outlierCount: outliers
+-            )
+-
+-            do throws(Either<Kernel.Thread.Pool.Error, Tests.History.Storage.Error>) {
+-                try await Tests.History.Storage.append(record, root: root)
+-            } catch {
+-            }
+-
+-            let records: [Tests.History.Record]
+-            do throws(Kernel.Thread.Pool.Error) {
+-                records = try await Tests.History.Storage.load(
+-                    root: root,
+-                    testID: entry.id,
+-                    fingerprint: environment.fingerprint
+-                )
+-            } catch {
+-                records = []
+-            }
+-            historyAnalysis = Tests.History.Analysis.analyze(records)
+-        }
+-
+-        let diagnostic = Tests.Diagnostic(
+-            testName: entry.id.name,
+-            suiteName: entry.id.suite,
+-            qualifiedName: entry.id.fullyQualifiedName,
+-            metric: config.evaluation.metric,
+-            measurement: measurement,
+-            environment: environment,
+-            coefficientOfVariation: cv,
+-            medianAbsoluteDeviation: mad,
+-            outlierCount: outliers,
+-            trend: trend,
+-            threshold: config.evaluation.threshold,
+-            exceedanceFactor: factor,
+-            allocations: allocationStats,
+-            baseline: storedBaseline,
+-            comparison: comparison,
+-            historyAnalysis: historyAnalysis
+-        )
+-
+-        Tests.Diagnostic.Collector.shared.append(diagnostic)
+-
+-        if exceeded, let threshold = config.evaluation.threshold {
+-            throw .benchmarkFailed(
+-                .thresholdExceeded(
+-                    test: entry.id.name,
+-                    metric: config.evaluation.metric,
+-                    expected: threshold,
+-                    actual: metricValue
+-                )
+-            )
+-        }
+-
+-        if let comparison, let tolerance = config.evaluation.baselineTolerance,
+-            comparison.change > tolerance
+-        {
+-            throw .benchmarkFailed(
+-                .regressionDetected(
+-                    test: entry.id.name,
+-                    metric: config.evaluation.metric,
+-                    baseline: comparison.baselineValue,
+-                    current: comparison.currentValue,
+-                    regression: comparison.change,
+-                    tolerance: tolerance
+-                )
+-            )
+-        }
+-    }
+-}
+diff --git a/Sources/Tests Snapshot/Test.Snapshot.Diffing where Format == Swift.String.swift b/Sources/Tests Snapshot/Test.Snapshot.Diffing where Format == Swift.String.swift
+deleted file mode 100644
+index 61f7acd..0000000
+--- a/Sources/Tests Snapshot/Test.Snapshot.Diffing where Format == Swift.String.swift	
++++ /dev/null
+@@ -1,113 +0,0 @@
+-import Byte
+-import JSON
+-public import Test
+-internal import Tree_Keyed
+-
+-extension Test.Snapshot.Diffing where Format == Swift.String {
+-    /// Structural JSON diff — parses to tree, compares by key, produces semantic output.
+-    ///
+-    /// Unlike ``lines`` which compares text line-by-line, structural diffing
+-    /// understands JSON semantics. It identifies exactly which keys changed,
+-    /// were added, or were removed — independent of formatting or key ordering.
+-    ///
+-    /// ## Example Output
+-    ///
+-    /// ```
+-    /// 3 structural changes:
+-    /// + email: "alice@example.com"
+-    /// ~ name: "Alice" → "Bob"
+-    /// - phone: "555-1234"
+-    /// ```
+-    public static var structuralJSON: Self {
+-        structuralJSON()
+-    }
+-
+-    /// Structural JSON diff with formatting options.
+-    ///
+-    /// - Parameters:
+-    ///   - sortKeys: Whether to sort keys in serialized output. Default: `true`.
+-    ///   - pretty: Whether to pretty-print serialized output. Default: `true`.
+-    /// - Returns: A diffing strategy that performs structural JSON comparison.
+-    public static func structuralJSON(
+-        sortKeys: Bool = true,
+-        pretty: Bool = true
+-    ) -> Self {
+-        Self(
+-            toBytes: { $0.utf8.map(Byte.init(bitPattern:)) },
+-            fromBytes: { Swift.String(decoding: $0.map(\.bitPattern), as: UTF8.self) },
+-            diff: { old, new in
+-                let oldValue: RFC_8259.Value
+-                let newValue: RFC_8259.Value
+-                do throws(RFC_8259.Error) {
+-                    oldValue = try JSON.Decode.parse(old)
+-                    newValue = try JSON.Decode.parse(new)
+-                } catch {
+-                    return Self.lines.diff(old, new)
+-                }
+-
+-                let oldTree: __Tree<TreeStorage.Keyed<RFC_8259.Value, Swift.String>>
+-                let newTree: __Tree<TreeStorage.Keyed<RFC_8259.Value, Swift.String>>
+-                do throws(__Tree<TreeStorage.Keyed<RFC_8259.Value, Swift.String>>.Error) {
+-                    oldTree = try _jsonToKeyedTree(oldValue)
+-                    newTree = try _jsonToKeyedTree(newValue)
+-                } catch {
+-                    return Self.lines.diff(old, new)
+-                }
+-                let treeDiff = __Tree<TreeStorage.Keyed<RFC_8259.Value, Swift.String>>.diff(
+-                    from: oldTree,
+-                    to: newTree
+-                )
+-
+-                guard !treeDiff.isEmpty else { return nil }
+-
+-                let structuralOps: [Test.Snapshot.Diff.Result.Operation] =
+-                    treeDiff.operations.compactMap { op in
+-                        switch op {
+-                        case .added(let path, let value):
+-                            guard !_jsonIsContainer(value) else { return nil }
+-                            return .added(
+-                                path: _jsonFormatPath(path),
+-                                value: _jsonDisplayValue(value)
+-                            )
+-
+-                        case .removed(let path, let value):
+-                            guard !_jsonIsContainer(value) else { return nil }
+-                            return .removed(
+-                                path: _jsonFormatPath(path),
+-                                value: _jsonDisplayValue(value)
+-                            )
+-
+-                        case .modified(let path, let old, let new):
+-                            return .modified(
+-                                path: _jsonFormatPath(path),
+-                                old: _jsonDisplayValue(old),
+-                                new: _jsonDisplayValue(new)
+-                            )
+-                        }
+-                    }
+-
+-                let lines: [Swift.String] = structuralOps.map { op in
+-                    switch op {
+-                    case .added(let path, let value):
+-                        "+ \(path): \(value)"
+-
+-                    case .removed(let path, let value):
+-                        "- \(path): \(value)"
+-
+-                    case .modified(let path, let old, let new):
+-                        "~ \(path): \(old) → \(new)"
+-                    }
+-                }
+-
+-                let count = structuralOps.count
+-                let noun = count == 1 ? "change" : "changes"
+-                let summary = "\(count) structural \(noun):\n" + lines.joined(separator: "\n")
+-
+-                return Test.Snapshot.Diff.Result(
+-                    summary: summary,
+-                    structuralOperations: structuralOps
+-                )
+-            }
+-        )
+-    }
+-}
+diff --git a/Sources/Tests Snapshot/Test.Snapshot.Redaction where Format == Swift.String.swift b/Sources/Tests Snapshot/Test.Snapshot.Redaction where Format == Swift.String.swift
+deleted file mode 100644
+index 5b37398..0000000
+--- a/Sources/Tests Snapshot/Test.Snapshot.Redaction where Format == Swift.String.swift	
++++ /dev/null
+@@ -1,333 +0,0 @@
+-import JSON
+-public import Test
+-
+-extension Test.Snapshot.Redaction where Format == Swift.String {
+-    /// Redacts a JSON key path with a static replacement.
+-    ///
+-    /// Navigates the JSON structure using a dot-separated path and replaces
+-    /// the value at that location with the given replacement string.
+-    ///
+-    /// ## Example
+-    ///
+-    /// ```swift
+-    /// assertSnapshot(
+-    ///     of: user,
+-    ///     as: .json,
+-    ///     redacting: [.json(path: "id", replacement: "[uuid]")]
+-    /// )
+-    /// ```
+-    ///
+-    /// Paths support array indexing with numeric segments:
+-    /// ```swift
+-    /// .json(path: "users.0.id", replacement: "[uuid]")
+-    /// ```
+-    ///
+-    /// - Parameters:
+-    ///   - path: Dot-separated key path (e.g., "user.id", "meta.created_at").
+-    ///   - replacement: Static string to insert at the matched location.
+-    /// - Returns: A redaction that replaces the value at the given path.
+-    public static func json(
+-        // swift-linter:disable:next raw concept
+-        // REASON: a dot-separated JSON key path such as users.0.id, not a file path, so File.Path does not own it; RFC 6901 pointers have another grammar and no type here holds this one.
+-        path: Swift.String,
+-        replacement: Swift.String
+-    ) -> Self {
+-        let segments = path.split(separator: ".").map(Swift.String.init)
+-        return Self { jsonString in
+-            _redactJSON(jsonString, at: segments, replacement: .string(replacement))
+-        }
+-    }
+-
+-    /// Redacts a JSON key path with a dynamic replacement.
+-    ///
+-    /// The replacement closure receives the current value as a string and
+-    /// returns the replacement.
+-    ///
+-    /// ## Example
+-    ///
+-    /// ```swift
+-    /// .json(path: "timestamp") { value in
+-    ///     "[timestamp:\(value.count) chars]"
+-    /// }
+-    /// ```
+-    ///
+-    /// - Parameters:
+-    ///   - path: Dot-separated key path.
+-    ///   - replacement: Closure producing a replacement from the current value.
+-    /// - Returns: A redaction that applies the dynamic replacement at the path.
+-    public static func json(
+-        // swift-linter:disable:next raw concept
+-        // REASON: a dot-separated JSON key path such as users.0.id, not a file path, so File.Path does not own it; RFC 6901 pointers have another grammar and no type here holds this one.
+-        path: Swift.String,
+-        replacement: @escaping @Sendable (Swift.String) -> Swift.String
+-    ) -> Self {
+-        let segments = path.split(separator: ".").map(Swift.String.init)
+-        return Self { jsonString in
+-            _redactJSON(jsonString, at: segments, dynamicReplacement: replacement)
+-        }
+-    }
+-
+-    /// Redacts all JSON keys matching a glob pattern.
+-    ///
+-    /// Supports `**` for recursive descent and `*` for single-level wildcard.
+-    ///
+-    /// ## Example
+-    ///
+-    /// ```swift
+-    /// // Redact all "created_at" keys at any depth
+-    /// .json(glob: "**.created_at", replacement: "[timestamp]")
+-    ///
+-    /// // Redact all keys one level under "meta"
+-    /// .json(glob: "meta.*", replacement: "[redacted]")
+-    /// ```
+-    ///
+-    /// - Parameters:
+-    ///   - pattern: Glob pattern with `.` as separator.
+-    ///   - replacement: Static replacement string.
+-    /// - Returns: A redaction that replaces all matching values.
+-    public static func json(
+-        glob pattern: Swift.String,
+-        replacement: Swift.String
+-    ) -> Self {
+-        let segments = pattern.split(separator: ".").map(Swift.String.init)
+-        return Self { jsonString in
+-            _redactJSONGlob(jsonString, pattern: segments, replacement: replacement)
+-        }
+-    }
+-}
+-
+-/// Parses a JSON string, applies a path-based replacement, and re-serializes.
+-private func _redactJSON(
+-    _ jsonString: Swift.String,
+-    at path: [Swift.String],
+-    replacement: RFC_8259.Value
+-) -> Swift.String {
+-    let value: RFC_8259.Value
+-    do throws(RFC_8259.Error) {
+-        value = try JSON.Decode.parse(jsonString)
+-    } catch {
+-        return jsonString
+-    }
+-    let modified = _replaceAtPath(value, path: path[...], replacement: replacement)
+-    return JSON(modified).serialize(pretty: true, sortKeys: true)
+-}
+-
+-/// Parses a JSON string, applies a dynamic path-based replacement, and re-serializes.
+-private func _redactJSON(
+-    _ jsonString: Swift.String,
+-    at path: [Swift.String],
+-    dynamicReplacement: (Swift.String) -> Swift.String
+-) -> Swift.String {
+-    let value: RFC_8259.Value
+-    do throws(RFC_8259.Error) {
+-        value = try JSON.Decode.parse(jsonString)
+-    } catch {
+-        return jsonString
+-    }
+-    let modified = _replaceAtPathDynamic(value, path: path[...], replacement: dynamicReplacement)
+-    return JSON(modified).serialize(pretty: true, sortKeys: true)
+-}
+-
+-/// Parses a JSON string, applies glob-based replacement, and re-serializes.
+-private func _redactJSONGlob(
+-    _ jsonString: Swift.String,
+-    pattern: [Swift.String],
+-    replacement: Swift.String
+-) -> Swift.String {
+-    let value: RFC_8259.Value
+-    do throws(RFC_8259.Error) {
+-        value = try JSON.Decode.parse(jsonString)
+-    } catch {
+-        return jsonString
+-    }
+-    let modified = _replaceGlob(value, pattern: pattern[...], replacement: .string(replacement))
+-    return JSON(modified).serialize(pretty: true, sortKeys: true)
+-}
+-
+-/// Creates a new Object with one key's value replaced.
+-private func _objectReplacing(
+-    _ obj: RFC_8259.Object,
+-    key: Swift.String,
+-    value: RFC_8259.Value
+-) -> RFC_8259.Object {
+-    var mutable = obj
+-    mutable[key] = value
+-    return mutable
+-}
+-
+-/// Creates a new Array with one index's value replaced.
+-private func _arrayReplacing(
+-    _ arr: RFC_8259.Array,
+-    index: Int,
+-    value: RFC_8259.Value
+-) -> RFC_8259.Array {
+-    var mutable = arr
+-    mutable[index] = value
+-    return mutable
+-}
+-
+-/// Recursively navigates an RFC_8259.Value and replaces the leaf at the path.
+-private func _replaceAtPath(
+-    _ value: RFC_8259.Value,
+-    path: ArraySlice<Swift.String>,
+-    replacement: RFC_8259.Value
+-) -> RFC_8259.Value {
+-    guard let segment = path.first else {
+-        return replacement
+-    }
+-
+-    let remaining = path.dropFirst()
+-
+-    switch value {
+-    case .object(let obj):
+-        guard let existing = obj[segment] else { return value }
+-        let replaced = _replaceAtPath(existing, path: remaining, replacement: replacement)
+-        return .object(_objectReplacing(obj, key: segment, value: replaced))
+-
+-    case .array(let arr):
+-        if let idx = Int(segment), arr.indices.contains(idx) {
+-            let replaced = _replaceAtPath(arr[idx], path: remaining, replacement: replacement)
+-            return .array(_arrayReplacing(arr, index: idx, value: replaced))
+-        }
+-        return value
+-
+-    default:
+-        return value
+-    }
+-}
+-
+-/// Recursively navigates and applies a dynamic replacement at the path.
+-private func _replaceAtPathDynamic(
+-    _ value: RFC_8259.Value,
+-    path: ArraySlice<Swift.String>,
+-    replacement: (Swift.String) -> Swift.String
+-) -> RFC_8259.Value {
+-    guard let segment = path.first else {
+-        let currentString: Swift.String
+-        switch value {
+-        case .string(let s): currentString = s
+-        case .number(let n): currentString = "\(n)"
+-        case .bool(let b): currentString = "\(b)"
+-        case .null: currentString = "null"
+-        default: currentString = "\(value)"
+-        }
+-        return .string(replacement(currentString))
+-    }
+-
+-    let remaining = path.dropFirst()
+-
+-    switch value {
+-    case .object(let obj):
+-        guard let existing = obj[segment] else { return value }
+-        let replaced = _replaceAtPathDynamic(existing, path: remaining, replacement: replacement)
+-        return .object(_objectReplacing(obj, key: segment, value: replaced))
+-
+-    case .array(let arr):
+-        if let idx = Int(segment), arr.indices.contains(idx) {
+-            let replaced = _replaceAtPathDynamic(
+-                arr[idx],
+-                path: remaining,
+-                replacement: replacement
+-            )
+-            return .array(_arrayReplacing(arr, index: idx, value: replaced))
+-        }
+-        return value
+-
+-    default:
+-        return value
+-    }
+-}
+-
+-/// Recursively matches a glob pattern against the JSON tree structure.
+-private func _replaceGlob(
+-    _ value: RFC_8259.Value,
+-    pattern: ArraySlice<Swift.String>,
+-    replacement: RFC_8259.Value
+-) -> RFC_8259.Value {
+-    guard let segment = pattern.first else {
+-        return replacement
+-    }
+-
+-    let remaining = pattern.dropFirst()
+-
+-    if segment == "**" {
+-        var result = _replaceGlob(value, pattern: remaining, replacement: replacement)
+-
+-        switch result {
+-        case .object(let obj):
+-            var newPairs: [(key: Swift.String, value: RFC_8259.Value)] = []
+-            for (key, childValue) in obj {
+-                newPairs.append(
+-                    (
+-                        key: key,
+-                        value: _replaceGlob(childValue, pattern: pattern, replacement: replacement)
+-                    )
+-                )
+-            }
+-            result = .object(RFC_8259.Object(newPairs))
+-
+-        case .array(let arr):
+-            var newElements: [RFC_8259.Value] = []
+-            for element in arr {
+-                newElements.append(
+-                    _replaceGlob(element, pattern: pattern, replacement: replacement)
+-                )
+-            }
+-            result = .array(RFC_8259.Array(newElements))
+-
+-        default:
+-            break
+-        }
+-
+-        return result
+-    }
+-
+-    if segment == "*" {
+-        switch value {
+-        case .object(let obj):
+-            var newPairs: [(key: Swift.String, value: RFC_8259.Value)] = []
+-            for (key, childValue) in obj {
+-                newPairs.append(
+-                    (
+-                        key: key,
+-                        value: _replaceGlob(
+-                            childValue,
+-                            pattern: remaining,
+-                            replacement: replacement
+-                        )
+-                    )
+-                )
+-            }
+-            return .object(RFC_8259.Object(newPairs))
+-
+-        case .array(let arr):
+-            var newElements: [RFC_8259.Value] = []
+-            for element in arr {
+-                newElements.append(
+-                    _replaceGlob(element, pattern: remaining, replacement: replacement)
+-                )
+-            }
+-            return .array(RFC_8259.Array(newElements))
+-
+-        default:
+-            return value
+-        }
+-    }
+-
+-    switch value {
+-    case .object(let obj):
+-        guard let existing = obj[segment] else { return value }
+-        let replaced = _replaceGlob(existing, pattern: remaining, replacement: replacement)
+-        return .object(_objectReplacing(obj, key: segment, value: replaced))
+-
+-    case .array(let arr):
+-        if let idx = Int(segment), arr.indices.contains(idx) {
+-            let replaced = _replaceGlob(arr[idx], pattern: remaining, replacement: replacement)
+-            return .array(_arrayReplacing(arr, index: idx, value: replaced))
+-        }
+-        return value
+-
+-    default:
+-        return value
+-    }
+-}
+diff --git a/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift b/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift
+deleted file mode 100644
+index eeed7db..0000000
+--- a/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift	
++++ /dev/null
+@@ -1,44 +0,0 @@
+-import Dependency
+-
+-extension Test.Trait.Collection.Modifier {
+-    /// Creates a modifier that sets snapshot configuration on the trait collection.
+-    ///
+-    /// Used in `@Suite` and `#Tests` macro expansions:
+-    /// ```swift
+-    /// @Suite(.serialized, .snapshots(configuration: config))
+-    /// struct MySnapshotTests { }
+-    /// ```
+-    ///
+-    /// - Parameter configuration: The snapshot configuration to apply.
+-    /// - Returns: A modifier that sets the snapshot recording mode.
+-    public static func snapshots(configuration: Test.Snapshot.Configuration) -> Self {
+-        Self(
+-            apply: { collection in
+-                collection[Test.Trait.Snapshot.self] = Test.Trait.Snapshot(
+-                    recording: configuration.recording
+-                )
+-            },
+-            provideScope: { function in
+-                try await Dependency.Scope.with(
+-                    { $0[Test.Snapshot.Configuration.Key.self] = configuration },
+-                    operation: function
+-                )
+-            }
+-        )
+-    }
+-
+-    /// Creates a modifier that sets snapshot recording mode.
+-    ///
+-    /// Shorthand for `.snapshots(configuration: .init(recording: recording))`.
+-    ///
+-    /// ```swift
+-    /// @Suite(.serialized, .snapshots(record: .missing))
+-    /// struct MySnapshotTests { }
+-    /// ```
+-    ///
+-    /// - Parameter recording: The recording mode to apply.
+-    /// - Returns: A modifier that sets the snapshot recording mode.
+-    public static func snapshots(record recording: Test.Snapshot.Recording) -> Self {
+-        .snapshots(configuration: .init(recording: recording))
+-    }
+-}
+diff --git a/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift b/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift
+deleted file mode 100644
+index 519005b..0000000
+--- a/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift	
++++ /dev/null
+@@ -1,29 +0,0 @@
+-import Dependency
+-
+-extension Test.Trait.Scope.Provider {
+-    /// Scope provider that injects snapshot configuration into the dependency scope.
+-    public static var snapshot: Self {
+-        Self(
+-            id: "snapshot",
+-            priority: 300,
+-            shouldActivate: { $0[Test.Trait.Snapshot.self] != nil },
+-            provideScope: _snapshotScope
+-        )
+-    }
+-
+-    @Sendable
+-    private static func _snapshotScope(
+-        _ entry: Test.Plan.Entry,
+-        _ traits: Test.Trait.Collection,
+-        _ operation: @Sendable () async throws(Error) -> Void
+-    ) async throws(Error) {
+-        guard let snapshot = traits[Test.Trait.Snapshot.self] else {
+-            preconditionFailure("the snapshot scope runs only for entries carrying the trait")
+-        }
+-        let config = Test.Snapshot.Configuration(recording: snapshot.recording)
+-        try await Dependency.Scope.with(
+-            { $0[Test.Snapshot.Configuration.Key.self] = config },
+-            operation: operation
+-        )
+-    }
+-}
+-- 
+2.43.0
+

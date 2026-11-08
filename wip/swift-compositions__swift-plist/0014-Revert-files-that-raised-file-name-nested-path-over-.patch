@@ -1,0 +1,209 @@
+From 889d8cc221eb6150d83687b91a8f39dc332aebe7 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 04:03:58 +0000
+Subject: [PATCH 14/16] Revert files that raised `file name nested path` over
+ its ratchet limit (coenttb/work#242)
+
+---
+ .../Plist.Binary.Serializer.swift             | 35 +++++++++++++------
+ Sources/Plist/Plist.Parse.Accessor.swift      | 23 ++++++++++++
+ Sources/Plist/Plist.Stream.swift              | 18 ++++++++++
+ 3 files changed, 65 insertions(+), 11 deletions(-)
+
+diff --git a/Sources/Plist Binary/Plist.Binary.Serializer.swift b/Sources/Plist Binary/Plist.Binary.Serializer.swift
+index d6a96e6..b12bc30 100644
+--- a/Sources/Plist Binary/Plist.Binary.Serializer.swift	
++++ b/Sources/Plist Binary/Plist.Binary.Serializer.swift	
+@@ -1,6 +1,7 @@
+ import Plist_Core
+ 
+ extension Plist.Binary {
++
+     public static func serialize(_ plist: Plist) -> [UInt8] {
+         let writer = Writer()
+         writer.write(plist)
+@@ -9,6 +10,7 @@ extension Plist.Binary {
+ }
+ 
+ extension Plist.Binary {
++
+     final class Writer {
+         var bytes: [UInt8] = []
+         var objects: [ObjectRef] = []
+@@ -18,15 +20,20 @@ extension Plist.Binary {
+ }
+ 
+ extension Plist.Binary.Writer {
++    struct ObjectRef {
++        let value: Plist.Value
++        var offset: Int = 0
++    }
+ }
+ 
+ extension Plist.Binary.Writer {
+     func write(_ plist: Plist) {
++
+         let rootIndex = collectObjects(plist.value)
+ 
+         writeHeader()
+ 
+-        (0..<objects.count).forEach { i in
++        for i in 0..<objects.count {
+             objectOffsets.append(bytes.count)
+             writeObject(objects[i].value)
+         }
+@@ -49,6 +56,7 @@ extension Plist.Binary.Writer {
+ 
+ extension Plist.Binary.Writer {
+     func collectObjects(_ value: Plist.Value) -> Int {
++
+         if let existingIndex = uniqueObjects[value] {
+             return existingIndex
+         }
+@@ -79,6 +87,7 @@ extension Plist.Binary.Writer {
+ 
+ extension Plist.Binary.Writer {
+     func writeHeader() {
++
+         bytes.append(contentsOf: [0x62, 0x70, 0x6C, 0x69, 0x73, 0x74, 0x30, 0x30])
+     }
+ }
+@@ -122,24 +131,25 @@ extension Plist.Binary.Writer {
+         let size: Int
+ 
+         if value >= 0 {
+-            size = if unsigned <= 0xFF {
+-                1
++            if unsigned <= 0xFF {
++                size = 1
+             } else if unsigned <= 0xFFFF {
+-                2
++                size = 2
+             } else if unsigned <= 0xFFFF_FFFF {
+-                4
++                size = 4
+             } else {
+-                8
++                size = 8
+             }
+         } else {
+-            size = if value >= Int8.min {
+-                1
++
++            if value >= Int8.min {
++                size = 1
+             } else if value >= Int16.min {
+-                2
++                size = 2
+             } else if value >= Int32.min {
+-                4
++                size = 4
+             } else {
+-                8
++                size = 8
+             }
+         }
+ 
+@@ -172,12 +182,14 @@ extension Plist.Binary.Writer {
+     }
+ 
+     func writeString(_ text: String) {
++
+         let isASCII = text.utf8.allSatisfy { $0 < 128 }
+ 
+         if isASCII {
+             writeMarkerWithLength(Plist.Binary.Marker.asciiType, length: text.utf8.count)
+             bytes.append(contentsOf: text.utf8)
+         } else {
++
+             let utf16 = Array(text.utf16)
+             writeMarkerWithLength(Plist.Binary.Marker.unicodeType, length: utf16.count)
+             for codeUnit in utf16 {
+@@ -247,6 +259,7 @@ extension Plist.Binary.Writer {
+         topObject: UInt64,
+         offsetTableOffset: UInt64
+     ) {
++
+         bytes.append(contentsOf: [0, 0, 0, 0, 0])
+ 
+         bytes.append(0)
+diff --git a/Sources/Plist/Plist.Parse.Accessor.swift b/Sources/Plist/Plist.Parse.Accessor.swift
+index 403a701..65234ec 100644
+--- a/Sources/Plist/Plist.Parse.Accessor.swift
++++ b/Sources/Plist/Plist.Parse.Accessor.swift
+@@ -71,6 +71,11 @@ extension Plist.Parse {
+ }
+ 
+ extension Plist {
++
++    public struct Prepared: Sendable {
++        @usableFromInline
++        internal init() {}
++    }
+ }
+ 
+ extension Plist.Prepared {
+@@ -106,6 +111,11 @@ extension Plist.Prepared {
+ }
+ 
+ extension Plist {
++
++    public struct Located: Sendable {
++        @usableFromInline
++        internal init() {}
++    }
+ }
+ 
+ extension Plist.Located {
+@@ -154,6 +164,19 @@ extension Plist.Located {
+ }
+ 
+ extension Plist {
++
++    public struct LocatedError: Swift.Error, Sendable, Hashable {
++
++        public let error: Plist.Error
++
++        public let offset: Int
++
++        @inlinable
++        public init(_ error: Plist.Error, at offset: Int) {
++            self.error = error
++            self.offset = offset
++        }
++    }
+ }
+ 
+ extension Plist.LocatedError: CustomStringConvertible {
+diff --git a/Sources/Plist/Plist.Stream.swift b/Sources/Plist/Plist.Stream.swift
+index a2c7b14..38de78f 100644
+--- a/Sources/Plist/Plist.Stream.swift
++++ b/Sources/Plist/Plist.Stream.swift
+@@ -64,6 +64,24 @@ extension Plist.ND {
+ }
+ 
+ extension Plist.ND {
++
++    @usableFromInline
++    internal final class State<I: AsyncIteratorProtocol>: @unchecked Sendable
++    where I.Element == UInt8 {
++        @usableFromInline
++        var iterator: I
++
++        @usableFromInline
++        var buffer: [UInt8] = []
++
++        @usableFromInline
++        var done = false
++
++        @usableFromInline
++        init(_ iterator: I) {
++            self.iterator = iterator
++        }
++    }
+ }
+ 
+ extension Plist.ND.State {
+-- 
+2.43.0
+

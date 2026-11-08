@@ -1,0 +1,488 @@
+From 695ee4712d35ba4d1ba57a25963c83a5c818f98a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Sun, 8 Nov 2026 04:03:59 +0000
+Subject: [PATCH 50/50] Revert files that raised `single type per file` over
+ its ratchet limit (coenttb/work#242)
+
+---
+ Sources/SQLite CloudKit/SyncEngine.swift    |  73 ++++++-------
+ Sources/SQLite SQL/JSONEach.swift           |  56 +++++-----
+ Sources/SQLite SQL/Triggers.swift           |  40 ++++---
+ Sources/SQLite/GRDB/SQLite.Connection.swift | 114 +++++++++-----------
+ 4 files changed, 126 insertions(+), 157 deletions(-)
+
+diff --git a/Sources/SQLite CloudKit/SyncEngine.swift b/Sources/SQLite CloudKit/SyncEngine.swift
+index ba4c3b1..6b8fb27 100644
+--- a/Sources/SQLite CloudKit/SyncEngine.swift	
++++ b/Sources/SQLite CloudKit/SyncEngine.swift	
+@@ -27,7 +27,7 @@
+             let tablesByName: [String: any SynchronizableTable]
+             package let tablesByOrder: [String: Int]
+             let foreignKeysByTableName: [String: [ForeignKey]]
+-            let syncEngines = Mutex<SyncEngines>(SyncEngines())
++            package let syncEngines = Mutex<SyncEngines>(SyncEngines())
+             package let defaultZone: CKRecordZone
+             let delegate: (any SyncEngineDelegate)?
+             let defaultSyncEngines:
+@@ -1050,7 +1050,7 @@
+                 )
+             }
+ 
+-            func nextRecordZoneChangeBatch(
++            package func nextRecordZoneChangeBatch(
+                 reason: CKSyncEngine.SyncReason = .scheduled,
+                 options: CKSyncEngine.SendChangesOptions = CKSyncEngine.SendChangesOptions(scope: .all),
+                 syncEngine: any SyncEngineProtocol
+@@ -1319,7 +1319,7 @@
+                 return changes
+             }
+ 
+-            func handleAccountChange(
++            package func handleAccountChange(
+                 changeType: CKSyncEngine.Event.AccountChange.ChangeType,
+                 syncEngine: any SyncEngineProtocol
+             ) async {
+@@ -1352,7 +1352,7 @@
+                 }
+             }
+ 
+-            func handleStateUpdate(
++            package func handleStateUpdate(
+                 stateSerialization: CKSyncEngine.State.Serialization,
+                 syncEngine: any SyncEngineProtocol
+             ) async {
+@@ -1371,7 +1371,7 @@
+                 }
+             }
+ 
+-            func handleFetchedDatabaseChanges(
++            package func handleFetchedDatabaseChanges(
+                 modifications: [CKRecordZone.ID],
+                 deletions: [(zoneID: CKRecordZone.ID, reason: CKDatabase.DatabaseChange.Deletion.Reason)],
+                 syncEngine: any SyncEngineProtocol
+@@ -1458,7 +1458,7 @@
+                 }
+             }
+ 
+-            func handleFetchedRecordZoneChanges(
++            package func handleFetchedRecordZoneChanges(
+                 modifications: [CKRecord] = [],
+                 deletions: [(recordID: CKRecord.ID, recordType: CKRecord.RecordType)] = [],
+                 syncEngine: any SyncEngineProtocol
+@@ -1656,7 +1656,7 @@
+                 }
+             }
+ 
+-            func handleSentRecordZoneChanges(
++            package func handleSentRecordZoneChanges(
+                 savedRecords: [CKRecord] = [],
+                 failedRecordSaves: [(record: CKRecord, error: CKError)] = [],
+                 deletedRecordIDs: [CKRecord.ID] = [],
+@@ -2149,7 +2149,7 @@
+ 
+         extension String {
+             package static let sqliteCloudKitSchemaName = "swiftsqlite_icloud"
+-            static let sqliteCloudKitFailure = "SQLite CloudKit Failure"
++            package static let sqliteCloudKitFailure = "SQLite CloudKit Failure"
+         }
+ 
+         private let inMemoryMetadatabaseOrdinal = Atomic<Int>(0)
+@@ -2230,13 +2230,9 @@
+             init(private: any SyncEngineProtocol, shared: any SyncEngineProtocol) {
+                 rawValue = (`private`, shared)
+             }
+-        }
+-
+-        extension SyncEngines {
+             var isRunning: Bool {
+                 rawValue != nil
+             }
+-
+             package var `private`: (any SyncEngineProtocol)? {
+                 guard let `private` = rawValue?.private
+                 else {
+@@ -2245,7 +2241,6 @@
+                 }
+                 return `private`
+             }
+-
+             package var `shared`: (any SyncEngineProtocol)? {
+                 guard let `shared` = rawValue?.shared
+                 else {
+@@ -2316,8 +2311,31 @@
+ 
+         extension SyncEngine {
+             public struct SchemaError: LocalizedError {
++                package enum Reason {
++                    case cycleDetected
++                    case invalidForeignKey(ForeignKey)
++                    case invalidForeignKeyAction(ForeignKey)
++                    case invalidTableName(String)
++                    case metadatabaseMismatch(attachedPath: String, syncEngineConfiguredPath: String)
++                    case noCloudKitContainer
++                    case nonNullColumnsWithoutDefault(tableName: String, columnNames: [String])
++                    case unknown
++                    case uniquenessConstraint
++                }
+                 package let reason: Reason
+                 public let debugDescription: String
++
++                public var errorDescription: String? {
++                    "Could not synchronize data with iCloud."
++                }
++
++                static let noCloudKitContainer = Self(
++                    reason: .noCloudKitContainer,
++                    debugDescription: """
++                        No default CloudKit container found. Make sure to enable iCloud entitlements in your \
++                        app's "Signing & Capabilities" and add a container identifier.
++                        """
++                )
+             }
+ 
+             fileprivate func validateSchema() throws {
+@@ -2381,32 +2399,6 @@
+             }
+         }
+ 
+-extension SyncEngine.SchemaError {
+-            package enum Reason {
+-                case cycleDetected
+-                case invalidForeignKey(ForeignKey)
+-                case invalidForeignKeyAction(ForeignKey)
+-                case invalidTableName(String)
+-                case metadatabaseMismatch(attachedPath: String, syncEngineConfiguredPath: String)
+-                case noCloudKitContainer
+-                case nonNullColumnsWithoutDefault(tableName: String, columnNames: [String])
+-                case unknown
+-                case uniquenessConstraint
+-            }
+-
+-            public var errorDescription: String? {
+-                "Could not synchronize data with iCloud."
+-            }
+-
+-            static let noCloudKitContainer = Self(
+-                reason: .noCloudKitContainer,
+-                debugDescription: """
+-                    No default CloudKit container found. Make sure to enable iCloud entitlements in your \
+-                    app's "Signing & Capabilities" and add a container identifier.
+-                    """
+-            )
+-}
+-
+         package protocol SynchronizableTable<Base>: Hashable, Sendable {
+             associatedtype Base: PrimaryKeyedTable & _SendableMetatype
+             where
+@@ -2423,9 +2415,6 @@ extension SyncEngine.SchemaError {
+             Base.TableColumns.PrimaryColumn: WritableTableColumnExpression
+         {
+             package init(for table: Base.Type = Base.self) {}
+-        }
+-
+-        extension SynchronizedTable {
+             package var base: Base.Type { Base.self }
+         }
+ 
+diff --git a/Sources/SQLite SQL/JSONEach.swift b/Sources/SQLite SQL/JSONEach.swift
+index 75db541..a4bdaa5 100644
+--- a/Sources/SQLite SQL/JSONEach.swift	
++++ b/Sources/SQLite SQL/JSONEach.swift	
+@@ -213,12 +213,22 @@ public struct JSONEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
++    public static var tableName: String { "json_each" }
++
++    public static var columns: TableColumns { TableColumns() }
++
++    public static var _columnWidth: Int { 2 }
++
+     public let key: Key.QueryOutput
+ 
+     public let value: Value.QueryOutput
+-}
+ 
+-extension JSONEach {
++    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONEach> {
++        var select = all.asSelect()
++        select.tableReference = tableReference
++        return select
++    }
++
+     public struct TableColumns: TableDefinition, Sendable {
+         public typealias QueryValue = JSONEach
+ 
+@@ -267,12 +277,22 @@ public struct JSONBEach<
+     Key: QueryRepresentable & QueryBindable,
+     Value: QueryRepresentable & QueryBindable
+ >: Table {
++    public static var tableName: String { "jsonb_each" }
++
++    public static var columns: TableColumns { TableColumns() }
++
++    public static var _columnWidth: Int { 2 }
++
+     public let key: Key.QueryOutput
+ 
+     public let value: Value.QueryOutput
+-}
+ 
+-extension JSONBEach {
++    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONBEach> {
++        var select = all.asSelect()
++        select.tableReference = tableReference
++        return select
++    }
++
+     public struct TableColumns: TableDefinition, Sendable {
+         public typealias QueryValue = JSONBEach
+ 
+@@ -346,31 +366,3 @@ extension QueryExpression {
+         """
+     }
+ }
+-
+-extension JSONEach {
+-    public static var tableName: String { "json_each" }
+-
+-    public static var columns: TableColumns { TableColumns() }
+-
+-    public static var _columnWidth: Int { 2 }
+-
+-    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONEach> {
+-        var select = all.asSelect()
+-        select.tableReference = tableReference
+-        return select
+-    }
+-}
+-
+-extension JSONBEach {
+-    public static var tableName: String { "jsonb_each" }
+-
+-    public static var columns: TableColumns { TableColumns() }
+-
+-    public static var _columnWidth: Int { 2 }
+-
+-    fileprivate static func select(from tableReference: ISO_9075.Fragment) -> SelectOf<JSONBEach> {
+-        var select = all.asSelect()
+-        select.tableReference = tableReference
+-        return select
+-    }
+-}
+diff --git a/Sources/SQLite SQL/Triggers.swift b/Sources/SQLite SQL/Triggers.swift
+index 8c264e5..df3de7f 100644
+--- a/Sources/SQLite SQL/Triggers.swift	
++++ b/Sources/SQLite SQL/Triggers.swift	
+@@ -62,16 +62,16 @@ extension Table {
+ }
+ 
+ public struct TemporaryTrigger<On: Table>: Sendable, Statement {
+-    fileprivate let name: String?
+-    fileprivate let ifNotExists: Bool
+-    fileprivate let operation: Operation
+-    fileprivate let when: When
+-    fileprivate let fileID: StaticString
+-    fileprivate let line: UInt
+-    fileprivate let column: UInt
+-}
++    public typealias From = Never
++    public typealias Joins = ()
++    public typealias QueryValue = ()
++
++    fileprivate enum When: ISO_9075.Fragment {
++        case before = "BEFORE"
++        case after = "AFTER"
++        case insteadOf = "INSTEAD OF"
++    }
+ 
+-extension TemporaryTrigger {
+     public struct Operation: Sendable, QueryExpression {
+         public typealias QueryValue = ()
+ 
+@@ -318,20 +318,14 @@ extension TemporaryTrigger {
+             }
+         }
+     }
+-}
+-
+-@TaskLocal public var _isCreatingTemporaryTrigger = false
+-
+-extension TemporaryTrigger {
+-    public typealias From = Never
+-    public typealias Joins = ()
+-    public typealias QueryValue = ()
+ 
+-    fileprivate enum When: ISO_9075.Fragment {
+-        case before = "BEFORE"
+-        case after = "AFTER"
+-        case insteadOf = "INSTEAD OF"
+-    }
++    fileprivate let name: String?
++    fileprivate let ifNotExists: Bool
++    fileprivate let operation: Operation
++    fileprivate let when: When
++    fileprivate let fileID: StaticString
++    fileprivate let line: UInt
++    fileprivate let column: UInt
+ 
+     public func drop(ifExists: Bool = false) -> some Statement<()> {
+         var query: ISO_9075.Fragment = "DROP TRIGGER"
+@@ -356,3 +350,5 @@ extension TemporaryTrigger {
+         "\(quote: name ?? "\(operation.description)_on_\(On.tableName)@\(fileID):\(line):\(column)")"
+     }
+ }
++
++@TaskLocal public var _isCreatingTemporaryTrigger = false
+diff --git a/Sources/SQLite/GRDB/SQLite.Connection.swift b/Sources/SQLite/GRDB/SQLite.Connection.swift
+index 67af046..8b02e49 100644
+--- a/Sources/SQLite/GRDB/SQLite.Connection.swift
++++ b/Sources/SQLite/GRDB/SQLite.Connection.swift
+@@ -9,6 +9,11 @@ public import SQLite_SQL
+         public struct Row: ISO_9075.Row {
+             public let columns: [String]
+             let values: [ISO_9075.Value]
++
++            public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
++                guard values.indices.contains(index) else { throw .decoding("no column \(index)") }
++                return values[index]
++            }
+         }
+ 
+         /// One open connection, for the duration of a ``SQLite/Database`` read or write: what its closure is given, and
+@@ -22,54 +27,45 @@ public import SQLite_SQL
+             package init(_ database: GRDB.Database) {
+                 self.database = database
+             }
+-        }
+-    }
+-
+-extension SQLite.Row {
+-        public func value(at index: Int) throws(ISO_9075.Error) -> ISO_9075.Value {
+-            guard values.indices.contains(index) else { throw .decoding("no column \(index)") }
+-            return values[index]
+-        }
+-}
+ 
+-extension SQLite.Connection {
+-        public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
+-            try step(statement) { _ in }
+-            return Int(unsafe sqlite3_changes(database.sqliteConnection))
+-        }
+-
+-        public func fetchAll<Value>(
+-            _ statement: ISO_9075.Rendering,
+-            decode: (SQLite.Row) throws(ISO_9075.Error) -> Value
+-        ) throws(ISO_9075.Error) -> [Value] {
+-            var values: [Value] = []
+-            try step(statement) { row throws(ISO_9075.Error) in values.append(try decode(row)) }
+-            return values
+-        }
++            public func execute(_ statement: ISO_9075.Rendering) throws(ISO_9075.Error) -> Int {
++                try step(statement) { _ in }
++                return Int(unsafe sqlite3_changes(database.sqliteConnection))
++            }
+ 
+-        private func step(
+-            _ rendering: ISO_9075.Rendering,
+-            _ body: (SQLite.Row) throws(ISO_9075.Error) -> Void
+-        ) throws(ISO_9075.Error) {
+-            let statement: GRDB.Statement
+-            do {
+-                (statement, _) = try database.prepare(rendering, cached: true)
+-            } catch let error as ISO_9075.Error {
+-                throw error
+-            } catch {
+-                throw .execution("\(SQLite.Error.translated(error))")
++            public func fetchAll<Value>(
++                _ statement: ISO_9075.Rendering,
++                decode: (SQLite.Row) throws(ISO_9075.Error) -> Value
++            ) throws(ISO_9075.Error) -> [Value] {
++                var values: [Value] = []
++                try step(statement) { row throws(ISO_9075.Error) in values.append(try decode(row)) }
++                return values
+             }
+-            defer { unsafe sqlite3_reset(statement.sqliteStatement) }
+-            let rows = Cursor(statement)
+-            do {
+-                while let row = try rows.next() { try body(row) }
+-            } catch let error as ISO_9075.Error {
+-                throw error
+-            } catch {
+-                throw .execution("\(SQLite.Error.translated(error))")
++
++            private func step(
++                _ rendering: ISO_9075.Rendering,
++                _ body: (SQLite.Row) throws(ISO_9075.Error) -> Void
++            ) throws(ISO_9075.Error) {
++                let statement: GRDB.Statement
++                do {
++                    (statement, _) = try database.prepare(rendering, cached: true)
++                } catch let error as ISO_9075.Error {
++                    throw error
++                } catch {
++                    throw .execution("\(SQLite.Error.translated(error))")
++                }
++                defer { unsafe sqlite3_reset(statement.sqliteStatement) }
++                let rows = Cursor(statement)
++                do {
++                    while let row = try rows.next() { try body(row) }
++                } catch let error as ISO_9075.Error {
++                    throw error
++                } catch {
++                    throw .execution("\(SQLite.Error.translated(error))")
++                }
+             }
+         }
+-}
++    }
+ 
+     extension SQLite.Connection {
+         /// Whether a transaction is open on this connection.
+@@ -144,6 +140,20 @@ extension SQLite.Connection {
+         public enum Trace: Sendable {
+             /// A statement about to run, as it was prepared.
+             case statement(Statement)
++
++            public struct Statement: Sendable {
++                /// The statement's text, with `?` where it binds values.
++                public let sql: String
++            }
++
++            /// Which events a trace reports.
++            public struct Options: OptionSet, Sendable {
++                public let rawValue: Int
++                public init(rawValue: Int) { self.rawValue = rawValue }
++
++                /// Every statement about to run.
++                public static let statement = Options(rawValue: 1 << 0)
++            }
+         }
+ 
+         /// Reports what `options` names to `body` for as long as the connection is open, until another trace replaces it.
+@@ -155,22 +165,4 @@ extension SQLite.Connection {
+             }
+         }
+     }
+-
+-extension SQLite.Connection.Trace {
+-        public struct Statement: Sendable {
+-            /// The statement's text, with `?` where it binds values.
+-            public let sql: String
+-        }
+-
+-        /// Which events a trace reports.
+-        public struct Options: OptionSet, Sendable {
+-            public let rawValue: Int
+-            public init(rawValue: Int) { self.rawValue = rawValue }
+-        }
+-}
+-
+-extension SQLite.Connection.Trace.Options {
+-        /// Every statement about to run.
+-        public static let statement = Options(rawValue: 1 << 0)
+-}
+ #endif
+-- 
+2.43.0
+
