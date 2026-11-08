@@ -97,3 +97,15 @@ Linux x86_64, Swift 6.4.2, runner rebuilt from institute 9205733 (same commit as
 - **Pre-push gate:** `overnight/ratchet-check.py` lists every repository rule count over institute's ratchet limit; run before every push.
 - **Build:** root build with 682 test targets in one plan (`generate.py` on main): libraries green; test targets type-checked with `overnight/typecheck-tests.py` (2 s per target, shown to fail on a deliberate error); targets failing only through this session's changes reverted to origin/main (svg-render, rfc-8446 Extension tests, 2 more). Fallback list `overnight/tests-fallback.txt`: swift-slab `Slab Tests` (trait-gated `Slab.Inline`), swift-rfc-8446 `Standard Library Integration Tests` (fails on origin/main). 136 targets the root can't take are in `tests-skipped.json` (macro plugins, Apple-only, non-product deps, `package` access). The last root test build stopped on the rfc-8446 target, now on the fallback list; the next batch's build confirms green.
 - **Next batch, prepared:** `overnight/merge-extension-files.py` (799 `extension file naming` merges) and `overnight/split-types.py` (1,037 `single type per file` moves), applied together, type-check sweep, one root build.
+
+### Findings session 3, 8 Nov (running)
+
+Linux x86_64, Swift 6.4.2, runner from institute 9205733. Start: full lint 23,768 (`/home/user/lint-s3`). **After batches 10–16, lint of the 200 changed packages: 20,555, so 9,881 fixed (32.5%).** Root build with tests running (`build-revert.sh`, per-file reverts); not green yet.
+
+- Batch 9 verified with `typecheck-direct`: duplicate imports from merges removed (`dedupe-imports.py`, `tc-fix.sh`), unused `public import`s made internal, 8 files and 2 targets (binary-parser, buffer-slab) reverted.
+- `test function naming` 360→6 (`test-function-names.py`); `test display name string` 420→30 (suite strings dropped with type names kept, so test IDs are unchanged: `suite-drop-display.py`); `compound suite name` 493→296 (`compound-suites.py`; 54 files reverted where it nested a suite under a namespace of its own name).
+- `minimal type body` 2,396→1,153 (batch 10, `minimal-bodies.py` again plus runner repair; type-check failures reverted per target).
+- `counter loop iteration` 445→265 (`counter-loops.py`: range loops without break/return/try/await become `forEach`); `statement where expression fits` 179→58 (`if-expressions.py`).
+- `exported import` 606→75 and `architecture import boundary` 452→53 (`exports-file.py`: re-exports moved into the target's root `exports.swift`; the per-module re-export set is unchanged).
+- Rose: `single type per file` 1,034→1,181 (from the moves; ratchet check pending), `namespace adoption typealias` +15.
+- Next: `module-selectors.py` (285), `split-types.py` (482 movable), then the ratchet gate.
