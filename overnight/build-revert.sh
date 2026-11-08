@@ -19,7 +19,7 @@ for round in $(seq 1 $N); do
     else
       # Unchanged by this session: a test target goes on the fallback list (built per package), and the root regenerates.
       tdir=$(echo "$rel" | cut -d/ -f1-2)
-      name=$(grep -o "testTarget(name: \"[^\"]*\", dependencies: [^\n]*path: \"$d/$tdir\"" Package.swift | head -1 | sed 's/testTarget(name: "\([^"]*\)".*/\1/')
+      name=$(grep -F "path: \"$d/$tdir\"" Package.swift | grep -o "testTarget(name: \"[^\"]*\"" | head -1 | sed "s/testTarget(name: \"\\(.*\\)\"/\\1/")
       if [ -n "$name" ]; then echo "$d|$name" >> overnight/tests-fallback.txt; ./generate.py > /dev/null 2>&1; echo "  fallback $d|$name"
       else echo "  unchanged, failing: $r"; fi
     fi
