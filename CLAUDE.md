@@ -20,3 +20,16 @@ State what each green covers: this is Linux only. Apple-specific and Windows cod
 ## Results
 
 Nobody can read a cloud session's transcript from outside, and it can't message back. Whatever matters goes in a file on main of this repository, or on the issue it belongs to. Never open personal data or `*.local.json`; test data is invented.
+
+## On the Mac
+
+The same build runs on Coen's Mac from a checkout of this repository, with `repos/` cloned from his real checkouts instead
+of GitHub, so unpushed work is built too. Everything is in `mac/`:
+
+    mac/sync.sh     # each clone = its checkout's HEAD plus uncommitted files; clones missing ones; localizes, generates
+    mac/build.sh    # swift build --build-tests over everything; writes build.log and errors.txt
+    mac/loop.sh     # build, apply the mechanical repairs in the real checkouts (mac/fix.sh), build again, until green
+
+While agents are editing checkouts, sync with `HEAD_ONLY=all mac/sync.sh` so only committed work is built, and don't run
+`mac/loop.sh` or `mac/fix.sh`: they edit the checkouts. Fix in the checkouts, never in `repos/`: a sync overwrites it.
+Build the whole ecosystem after every batch of changes, not only at the end: an incremental build takes minutes.
