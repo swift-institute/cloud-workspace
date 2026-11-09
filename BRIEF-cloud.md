@@ -29,7 +29,9 @@ This is Linux only. Apple-only code is checked by `ci.yml` after the push; say s
 
 ## Work, in order
 
-1. The CI reds from the last local push, from the Handover comment. Never leave a repository red that a push made red.
+1. The last local push (9 Nov) went out without a final combined build: commits after interim build 3 were never
+   built together. First run `./sync.sh` and the combined build with tests at the pushed SHAs, then read CI once, and
+   fix every red the push caused. Never leave a repository red that a push made red.
 2. The issue items the last fix run left open that don't need Coen. Fix them in the same batches, and close each issue
    with the fixing SHA after its push is green.
 3. Close #242 by its two open done criteria: (4) one fleet CI read, green on macOS, Linux and Windows, with SHAs;
