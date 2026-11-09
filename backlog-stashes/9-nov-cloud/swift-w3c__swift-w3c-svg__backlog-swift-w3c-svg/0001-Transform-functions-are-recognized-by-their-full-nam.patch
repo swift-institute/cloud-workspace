@@ -1,0 +1,161 @@
+From 565283902be7c334051e628125a3b6293697d059 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:50 +0000
+Subject: [PATCH 1/5] Transform functions are recognized by their full name, so
+ tomato(1) or sale(2) throws expectedFunction instead of parsing as translate
+ or scale (swift-w3c/swift-w3c-svg#11)
+
+---
+ .../W3C_SVG2.Types.Transform.Parse.swift      | 45 +++++++-------
+ ...W3C_SVG2.Types.Transform.Parse Tests.swift | 58 +++++++++++++++++++
+ 2 files changed, 79 insertions(+), 24 deletions(-)
+ create mode 100644 Tests/W3C SVG Tests/W3C_SVG2.Types.Transform.Parse Tests.swift
+
+diff --git a/Sources/W3C SVG/W3C_SVG2.Types.Transform.Parse.swift b/Sources/W3C SVG/W3C_SVG2.Types.Transform.Parse.swift
+index 2adb9c4..186ab0b 100644
+--- a/Sources/W3C SVG/W3C_SVG2.Types.Transform.Parse.swift	
++++ b/Sources/W3C SVG/W3C_SVG2.Types.Transform.Parse.swift	
+@@ -48,18 +48,19 @@ extension W3C_SVG2.Types.Transform.Parse: Parsing {
+     @inlinable
+     package static func _parseFunction(_ input: inout Input) throws(Failure) -> Function {
+ 
+-        var nameLen = 0
+-        var firstByte: UInt8 = 0
+-        var fifthByte: UInt8 = 0
++        var name: [UInt8] = []
+         while input.startIndex < input.endIndex {
+             let byte = input[input.startIndex] | 0x20
+             guard byte >= 0x61 && byte <= 0x7A else { break }
+-            if nameLen == 0 { firstByte = byte }
+-            if nameLen == 4 { fifthByte = byte }
++            if name.count <= 9 { name.append(byte) }
+             input = input[input.index(after: input.startIndex)...]
+-            nameLen += 1
+         }
+-        guard nameLen > 0 else { throw .expectedFunction }
++
++        let known: [[UInt8]] = [
++            [UInt8]("matrix".utf8), [UInt8]("translate".utf8), [UInt8]("scale".utf8),
++            [UInt8]("rotate".utf8), [UInt8]("skewx".utf8), [UInt8]("skewy".utf8),
++        ]
++        guard known.contains(name) else { throw .expectedFunction }
+ 
+         Self._skipWS(&input)
+ 
+@@ -72,12 +73,12 @@ extension W3C_SVG2.Types.Transform.Parse: Parsing {
+ 
+         let result: Function
+ 
+-        switch firstByte {
+-        case 0x74:
++        switch name {
++        case [UInt8]("translate".utf8):
+             let args = try Self._parseArgs(&input, min: 1, max: 2)
+             result = .translate(tx: args[0], ty: args.count > 1 ? args[1] : 0)
+ 
+-        case 0x72:
++        case [UInt8]("rotate".utf8):
+             let args = try Self._parseArgs(&input, min: 1, max: 3)
+             result = .rotate(
+                 angle: args[0],
+@@ -85,23 +86,19 @@ extension W3C_SVG2.Types.Transform.Parse: Parsing {
+                 cy: args.count > 2 ? args[2] : 0
+             )
+ 
+-        case 0x73:
+-            if nameLen == 5 {
++        case [UInt8]("scale".utf8):
++            let args = try Self._parseArgs(&input, min: 1, max: 2)
++            result = .scale(sx: args[0], sy: args.count > 1 ? args[1] : args[0])
+ 
+-                let args = try Self._parseArgs(&input, min: 1, max: 2)
+-                result = .scale(sx: args[0], sy: args.count > 1 ? args[1] : args[0])
+-            } else {
++        case [UInt8]("skewx".utf8):
++            let args = try Self._parseArgs(&input, min: 1, max: 1)
++            result = .skewX(angle: args[0])
+ 
+-                let args = try Self._parseArgs(&input, min: 1, max: 1)
+-                result =
+-                    if fifthByte == 0x78 {
+-                        .skewX(angle: args[0])
+-                    } else {
+-                        .skewY(angle: args[0])
+-                    }
+-            }
++        case [UInt8]("skewy".utf8):
++            let args = try Self._parseArgs(&input, min: 1, max: 1)
++            result = .skewY(angle: args[0])
+ 
+-        case 0x6D:
++        case [UInt8]("matrix".utf8):
+             let args = try Self._parseArgs(&input, min: 6, max: 6)
+             result = .matrix(
+                 a: args[0],
+diff --git a/Tests/W3C SVG Tests/W3C_SVG2.Types.Transform.Parse Tests.swift b/Tests/W3C SVG Tests/W3C_SVG2.Types.Transform.Parse Tests.swift
+new file mode 100644
+index 0000000..b6deef1
+--- /dev/null
++++ b/Tests/W3C SVG Tests/W3C_SVG2.Types.Transform.Parse Tests.swift	
+@@ -0,0 +1,58 @@
++import Testing
++
++@testable import W3C_SVG
++
++enum `W3C_SVG2.Types.Transform.Parse Tests` {}
++
++extension `W3C_SVG2.Types.Transform.Parse Tests` {
++    @Suite
++    struct `Function names` {
++        private static func parse(
++            _ text: String
++        ) throws(W3C_SVG2.Types.Transform.Parse<ByteSlice>.Failure) -> [W3C_SVG2.Types.Transform.Parse<ByteSlice>.Function] {
++            var input = ByteSlice(text)
++            return try W3C_SVG2.Types.Transform.Parse<ByteSlice>().parse(&input)
++        }
++
++        @Test
++        func `every function is recognized by its full name`() throws {
++            #expect(
++                try Self.parse("translate(1 2) scale(3) rotate(4 5 6) skewX(7) skewY(8) matrix(1 2 3 4 5 6)") == [
++                    .translate(tx: 1, ty: 2),
++                    .scale(sx: 3, sy: 3),
++                    .rotate(angle: 4, cx: 5, cy: 6),
++                    .skewX(angle: 7),
++                    .skewY(angle: 8),
++                    .matrix(a: 1, b: 2, c: 3, d: 4, e: 5, f: 6),
++                ]
++            )
++        }
++
++        @Test
++        func `a name that only shares the first letter is not translate`() {
++            #expect(throws: W3C_SVG2.Types.Transform.Parse<ByteSlice>.Error.expectedFunction) {
++                try Self.parse("tomato(1)")
++            }
++        }
++
++        @Test
++        func `a five letter name starting with s is not scale`() {
++            #expect(throws: W3C_SVG2.Types.Transform.Parse<ByteSlice>.Error.expectedFunction) {
++                try Self.parse("sale(2)")
++            }
++            #expect(throws: W3C_SVG2.Types.Transform.Parse<ByteSlice>.Error.expectedFunction) {
++                try Self.parse("sxxxx(2)")
++            }
++        }
++
++        @Test
++        func `a name with a matching prefix is refused`() {
++            #expect(throws: W3C_SVG2.Types.Transform.Parse<ByteSlice>.Error.expectedFunction) {
++                try Self.parse("skewXY(2)")
++            }
++            #expect(throws: W3C_SVG2.Types.Transform.Parse<ByteSlice>.Error.expectedFunction) {
++                try Self.parse("matrixmatrix(1 2 3 4 5 6)")
++            }
++        }
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,142 @@
+From b93e5737f24ff4bf09dce33dde873d711744f105 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:54 +0000
+Subject: [PATCH 2/2] The default block quote renderer takes its colours from
+ the configured Markdown.Configuration.Style.BlockQuoteStyle, passed in
+ BlockQuote.Input.style; the hard-coded duplicate style is removed
+ (swift-compositions/swift-markdown-html-render#12)
+
+---
+ .../Markdown.Rendering.BlockQuote.swift       |  9 ++-
+ .../Markdown.Rendering.Converter.swift        |  3 +-
+ .../Markdown.Test.Integration Tests.swift     | 59 +++++++++++++++++++
+ 3 files changed, 67 insertions(+), 4 deletions(-)
+
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift
+index 75f90fc..9769340 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.BlockQuote.swift	
+@@ -3,7 +3,6 @@ import CSS_HTML_Rendering
+ import CSS_Theming
+ import HTML_Rendering
+ @_spi(DynamicHTML) import HTML_Rendering_Core
+-import SwiftMarkdown
+ 
+ extension Markdown.Rendering {
+     public struct BlockQuote: Sendable {
+@@ -21,17 +20,21 @@ extension Markdown.Rendering.BlockQuote {
+         public let children: [Markdown.Rendering.Action]
+         public let isDiagnostic: Bool
+         public let diagnosticLevel: Markdown.Diagnostic.Level?
++        /// The configured colours for block quotes, looked up by `kind`.
++        public let style: Markdown.Configuration.Style.BlockQuoteStyle
+ 
+         public init(
+             kind: String,
+             children: [Markdown.Rendering.Action],
+             isDiagnostic: Bool,
+-            diagnosticLevel: Markdown.Diagnostic.Level?
++            diagnosticLevel: Markdown.Diagnostic.Level?,
++            style: Markdown.Configuration.Style.BlockQuoteStyle = .default
+         ) {
+             self.kind = kind
+             self.children = children
+             self.isDiagnostic = isDiagnostic
+             self.diagnosticLevel = diagnosticLevel
++            self.style = style
+         }
+     }
+ }
+@@ -40,7 +43,7 @@ extension Markdown.Rendering.BlockQuote {
+     public static var `default`: Self {
+         .init { input in
+             guard let level = input.diagnosticLevel else {
+-                let style = SwiftMarkdown.BlockQuote.Style(blockName: input.kind)
++                let style = input.style.style(input.kind)
+                 return Markdown.Rendering.capture {
+                     HTML.BlockQuote.Element {
+                         VStack(spacing: .rem(0.5)) {
+diff --git a/Sources/Markdown HTML Rendering/Markdown.Rendering.Converter.swift b/Sources/Markdown HTML Rendering/Markdown.Rendering.Converter.swift
+index 38c91d4..4885282 100644
+--- a/Sources/Markdown HTML Rendering/Markdown.Rendering.Converter.swift	
++++ b/Sources/Markdown HTML Rendering/Markdown.Rendering.Converter.swift	
+@@ -120,7 +120,8 @@ extension Markdown.Rendering.Converter {
+                 kind: kind,
+                 children: childActions,
+                 isDiagnostic: diagnosticLevel != nil,
+-                diagnosticLevel: diagnosticLevel
++                diagnosticLevel: diagnosticLevel,
++                style: configuration.style.blockQuote
+             )
+         )
+     }
+diff --git a/Tests/Markdown HTML Rendering Tests/Markdown.Test.Integration Tests.swift b/Tests/Markdown HTML Rendering Tests/Markdown.Test.Integration Tests.swift
+index e4ead87..4cf22e6 100644
+--- a/Tests/Markdown HTML Rendering Tests/Markdown.Test.Integration Tests.swift	
++++ b/Tests/Markdown HTML Rendering Tests/Markdown.Test.Integration Tests.swift	
+@@ -165,3 +165,62 @@ extension `Markdown Tests`.Test.Integration {
+         }
+     }
+ }
++
++extension `Markdown Tests`.Test.Integration {
++    @Suite
++    struct `Image Rendering` {
++        @Test
++        func `default image renderer takes alt from the Markdown alt text`() {
++            let actions = Markdown.Rendering.Image.default.render(
++                .init(source: "pipeline.png", alt: "A diagram of the pipeline", title: nil)
++            )
++            #expect(String(describing: actions).contains("A diagram of the pipeline"))
++        }
++
++        @Test
++        func `default image renderer does not use the title as alt`() {
++            let actions = Markdown.Rendering.Image.default.render(
++                .init(source: "pipeline.png", alt: nil, title: "Hover title")
++            )
++            #expect(!String(describing: actions).contains("Hover title"))
++        }
++    }
++
++    @Suite
++    struct `BlockQuote Rendering` {
++        @Test
++        func `default block quote renderer uses the configured style`() {
++            let configured = Markdown.Configuration.Style.BlockQuoteStyle.default
++                .adding("Custom", backgroundColor: .background.warning, borderColor: .border.warning)
++            let withDefault = Markdown.Rendering.BlockQuote.default.render(
++                .init(kind: "Custom", children: [], isDiagnostic: false, diagnosticLevel: nil)
++            )
++            let withConfigured = Markdown.Rendering.BlockQuote.default.render(
++                .init(
++                    kind: "Custom",
++                    children: [],
++                    isDiagnostic: false,
++                    diagnosticLevel: nil,
++                    style: configured
++                )
++            )
++            #expect(String(describing: withDefault) != String(describing: withConfigured))
++        }
++
++        @Test
++        func `default block quote renderer output is unchanged for the default style`() {
++            let input = Markdown.Rendering.BlockQuote.Input(
++                kind: "Tip",
++                children: [],
++                isDiagnostic: false,
++                diagnosticLevel: nil,
++                style: .default
++            )
++            let first = Markdown.Rendering.BlockQuote.default.render(input)
++            let second = Markdown.Rendering.BlockQuote.default.render(
++                .init(kind: "Tip", children: [], isDiagnostic: false, diagnosticLevel: nil)
++            )
++            #expect(String(describing: first) == String(describing: second))
++        }
++    }
++}
+-- 
+2.43.0
+

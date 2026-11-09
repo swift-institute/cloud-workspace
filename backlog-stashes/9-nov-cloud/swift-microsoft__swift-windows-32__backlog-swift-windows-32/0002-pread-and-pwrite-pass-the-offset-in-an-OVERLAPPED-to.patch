@@ -1,0 +1,236 @@
+From 622b228b5f980ba1a40dc7d5c549b61d58ec91a0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:36 +0000
+Subject: [PATCH 2/2] pread and pwrite pass the offset in an OVERLAPPED to
+ ReadFile and WriteFile instead of seeking there, and put the file position
+ back afterwards (swift-microsoft/swift-windows-32#38)
+
+---
+ .../Windows.Kernel.IO.Read.swift              | 19 ++---
+ .../Windows.Kernel.IO.Write.swift             | 19 ++---
+ .../Windows.Kernel.IO.Read Tests.swift        | 58 ++++++++++++++++
+ .../Windows.Kernel.IO.Write Tests.swift       | 69 +++++++++++++++++++
+ 4 files changed, 147 insertions(+), 18 deletions(-)
+
+diff --git a/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Read.swift b/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Read.swift
+index 7f77e29..4dc9c16 100644
+--- a/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Read.swift	
++++ b/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Read.swift	
+@@ -56,22 +56,23 @@
+                 throw .current()
+             }
+ 
+-            var targetPos: LARGE_INTEGER = LARGE_INTEGER()
+-            targetPos.QuadPart = offset.underlying
+-            guard SetFilePointerEx(pointer, targetPos, nil, DWORD(FILE_BEGIN)) else {
+-                throw .current()
+-            }
++            defer { _ = SetFilePointerEx(pointer, currentPos, nil, DWORD(FILE_BEGIN)) }
++
++            var overlapped = OVERLAPPED()
++            overlapped.Offset = DWORD(truncatingIfNeeded: offset.underlying)
++            overlapped.OffsetHigh = DWORD(truncatingIfNeeded: offset.underlying >> 32)
+ 
+             var bytesRead: DWORD = 0
+-            let readSuccess = ReadFile(
++            var readSuccess = ReadFile(
+                 pointer,
+                 baseAddress,
+                 DWORD(buffer.count),
+                 &bytesRead,
+-                nil
++                &overlapped
+             )
+-
+-            _ = SetFilePointerEx(pointer, currentPos, nil, DWORD(FILE_BEGIN))
++            if !readSuccess, GetLastError() == Error::Error.Code.IO.pending {
++                readSuccess = GetOverlappedResult(pointer, &overlapped, &bytesRead, true)
++            }
+ 
+             if !readSuccess {
+                 let error = GetLastError()
+diff --git a/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Write.swift b/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Write.swift
+index 66f048a..ef1068d 100644
+--- a/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Write.swift	
++++ b/Sources/Windows 32 Kernel IO/Windows.Kernel.IO.Write.swift	
+@@ -51,22 +51,23 @@
+                 throw .current()
+             }
+ 
+-            var targetPos: LARGE_INTEGER = LARGE_INTEGER()
+-            targetPos.QuadPart = offset.underlying
+-            guard SetFilePointerEx(pointer, targetPos, nil, DWORD(FILE_BEGIN)) else {
+-                throw .current()
+-            }
++            defer { _ = SetFilePointerEx(pointer, currentPos, nil, DWORD(FILE_BEGIN)) }
++
++            var overlapped = OVERLAPPED()
++            overlapped.Offset = DWORD(truncatingIfNeeded: offset.underlying)
++            overlapped.OffsetHigh = DWORD(truncatingIfNeeded: offset.underlying >> 32)
+ 
+             var bytesWritten: DWORD = 0
+-            let writeSuccess = WriteFile(
++            var writeSuccess = WriteFile(
+                 pointer,
+                 baseAddress,
+                 DWORD(buffer.count),
+                 &bytesWritten,
+-                nil
++                &overlapped
+             )
+-
+-            _ = SetFilePointerEx(pointer, currentPos, nil, DWORD(FILE_BEGIN))
++            if !writeSuccess, GetLastError() == Error::Error.Code.IO.pending {
++                writeSuccess = GetOverlappedResult(pointer, &overlapped, &bytesWritten, true)
++            }
+ 
+             guard writeSuccess else {
+                 throw .current()
+diff --git a/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Read Tests.swift b/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Read Tests.swift
+index f73745b..2d8c976 100644
+--- a/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Read Tests.swift	
++++ b/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Read Tests.swift	
+@@ -97,4 +97,62 @@
+         }
+     }
+ 
++    extension Windows.`32`.Kernel.IO.Read.Test.Integration {
++        @Test
++        func `pread reads at the offset and leaves the file position unchanged`() throws {
++            let tempPath = "test_pread_position_\(GetCurrentProcessId()).tmp"
++            defer { _ = tempPath.withCString(encodedAs: UTF16.self) { DeleteFileW($0) } }
++
++            var utf16Path = Array(tempPath.utf16) + [0]
++            let handle = utf16Path.withUnsafeMutableBufferPointer { pathPtr in
++                CreateFileW(
++                    pathPtr.baseAddress,
++                    DWORD(GENERIC_READ) | DWORD(GENERIC_WRITE),
++                    0,
++                    nil,
++                    DWORD(CREATE_ALWAYS),
++                    DWORD(FILE_ATTRIBUTE_NORMAL),
++                    nil
++                )
++            }
++            guard let handle, handle != INVALID_HANDLE_VALUE else {
++                Issue.record("Could not create file: \(GetLastError())")
++                return
++            }
++
++            let contents = Array("abcdefgh".utf8)
++            var written: DWORD = 0
++            let wrote = contents.withUnsafeBytes { bytes in
++                WriteFile(handle, bytes.baseAddress, DWORD(bytes.count), &written, nil)
++            }
++            var start = LARGE_INTEGER()
++            start.QuadPart = 2
++            guard wrote, SetFilePointerEx(handle, start, nil, DWORD(FILE_BEGIN)) else {
++                Issue.record("Could not prepare file: \(GetLastError())")
++                return
++            }
++
++            let descriptor = Kernel.Descriptor(_raw: UInt(bitPattern: handle))
++
++            var buffer = [UInt8](repeating: 0, count: 3)
++            let bytesRead = try buffer.withUnsafeMutableBytes { bufferPtr in
++                try Windows.`32`.Kernel.IO.Read.pread(
++                    descriptor,
++                    into: bufferPtr,
++                    at: Kernel.File.Offset(4)
++                )
++            }
++
++            var position = LARGE_INTEGER()
++            guard SetFilePointerEx(handle, LARGE_INTEGER(), &position, DWORD(FILE_CURRENT)) else {
++                Issue.record("Could not read file position: \(GetLastError())")
++                return
++            }
++
++            #expect(bytesRead == 3)
++            #expect(buffer == Array("efg".utf8))
++            #expect(position.QuadPart == 2)
++        }
++    }
++
+ #endif
+diff --git a/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Write Tests.swift b/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Write Tests.swift
+index 46d9be6..f57d52b 100644
+--- a/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Write Tests.swift	
++++ b/Tests/Windows 32 Kernel Tests/Windows.Kernel.IO.Write Tests.swift	
+@@ -95,4 +95,73 @@
+         }
+     }
+ 
++    extension Windows.`32`.Kernel.IO.Write.Test.Integration {
++        @Test
++        func `pwrite writes at the offset and leaves the file position unchanged`() throws {
++            let tempPath = "test_pwrite_position_\(GetCurrentProcessId()).tmp"
++            defer { _ = tempPath.withCString(encodedAs: UTF16.self) { DeleteFileW($0) } }
++
++            var utf16Path = Array(tempPath.utf16) + [0]
++            let handle = utf16Path.withUnsafeMutableBufferPointer { pathPtr in
++                CreateFileW(
++                    pathPtr.baseAddress,
++                    DWORD(GENERIC_READ) | DWORD(GENERIC_WRITE),
++                    0,
++                    nil,
++                    DWORD(CREATE_ALWAYS),
++                    DWORD(FILE_ATTRIBUTE_NORMAL),
++                    nil
++                )
++            }
++            guard let handle, handle != INVALID_HANDLE_VALUE else {
++                Issue.record("Could not create file: \(GetLastError())")
++                return
++            }
++
++            let contents = Array("abcdefgh".utf8)
++            var written: DWORD = 0
++            let wrote = contents.withUnsafeBytes { bytes in
++                WriteFile(handle, bytes.baseAddress, DWORD(bytes.count), &written, nil)
++            }
++            var start = LARGE_INTEGER()
++            start.QuadPart = 2
++            guard wrote, SetFilePointerEx(handle, start, nil, DWORD(FILE_BEGIN)) else {
++                Issue.record("Could not prepare file: \(GetLastError())")
++                return
++            }
++
++            let descriptor = Kernel.Descriptor(_raw: UInt(bitPattern: handle))
++
++            let patch = Array("XY".utf8)
++            let bytesWritten = try patch.withUnsafeBytes { bufferPtr in
++                try Windows.`32`.Kernel.IO.Write.pwrite(
++                    descriptor,
++                    from: bufferPtr,
++                    at: Kernel.File.Offset(5)
++                )
++            }
++
++            var position = LARGE_INTEGER()
++            guard SetFilePointerEx(handle, LARGE_INTEGER(), &position, DWORD(FILE_CURRENT)) else {
++                Issue.record("Could not read file position: \(GetLastError())")
++                return
++            }
++
++            var result = [UInt8](repeating: 0, count: 8)
++            var bytesRead: DWORD = 0
++            let rewound = SetFilePointerEx(handle, LARGE_INTEGER(), nil, DWORD(FILE_BEGIN))
++            let read = result.withUnsafeMutableBytes { bytes in
++                ReadFile(handle, bytes.baseAddress, DWORD(bytes.count), &bytesRead, nil)
++            }
++            guard rewound, read else {
++                Issue.record("Could not read file back: \(GetLastError())")
++                return
++            }
++
++            #expect(bytesWritten == 2)
++            #expect(position.QuadPart == 2)
++            #expect(result == Array("abcdeXYh".utf8))
++        }
++    }
++
+ #endif
+-- 
+2.43.0
+

@@ -1,0 +1,188 @@
+From 525c2abe7cb268e354f6fa90af285eaada5f9fe6 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:57 +0000
+Subject: [PATCH 2/3] Inline snapshots record and pass under each recording
+ mode as file-backed ones do, and the generic named snapshot overloads honour
+ the configured subdirectory (swift-compositions/swift-tests#19)
+
+---
+ Sources/Tests Inline Snapshot/snapshot.swift  | 22 +++--
+ .../Test.Snapshot.assert Tests.swift          | 82 +++++++++++++++++++
+ 2 files changed, 96 insertions(+), 8 deletions(-)
+
+diff --git a/Sources/Tests Inline Snapshot/snapshot.swift b/Sources/Tests Inline Snapshot/snapshot.swift
+index e7d8c09..40bb31e 100644
+--- a/Sources/Tests Inline Snapshot/snapshot.swift	
++++ b/Sources/Tests Inline Snapshot/snapshot.swift	
+@@ -219,7 +219,7 @@ public func snapshot<Value, Format: Sendable>(
+ 
+     let actual = syncSnapshot(value())
+     let mode = Test::Test.Snapshot.Configuration.resolve(recording: recording)
+-    let snapshotDir = Test::Test.Snapshot.Configuration.current?.snapshotDirectory
++    let config = Test::Test.Snapshot.Configuration.current
+ 
+     let failure = Test::Test.Snapshot.Storage.resolve(
+         actual: actual,
+@@ -228,7 +228,8 @@ public func snapshot<Value, Format: Sendable>(
+         mode: mode,
+         filePath: filePath,
+         function: function,
+-        snapshotDirectory: snapshotDir
++        snapshotDirectory: config?.snapshotDirectory,
++        subdirectory: config?.subdirectory
+     )
+ 
+     if let failure {
+@@ -265,7 +266,7 @@ public func snapshot<Value, Format: Sendable>(
+ 
+     let actual = await effective.capture(value())
+     let mode = Test::Test.Snapshot.Configuration.resolve(recording: recording)
+-    let snapshotDir = Test::Test.Snapshot.Configuration.current?.snapshotDirectory
++    let config = Test::Test.Snapshot.Configuration.current
+ 
+     let failure = Test::Test.Snapshot.Storage.resolve(
+         actual: actual,
+@@ -274,7 +275,8 @@ public func snapshot<Value, Format: Sendable>(
+         mode: mode,
+         filePath: filePath,
+         function: function,
+-        snapshotDirectory: snapshotDir
++        snapshotDirectory: config?.snapshotDirectory,
++        subdirectory: config?.subdirectory
+     )
+ 
+     if let failure {
+@@ -291,7 +293,11 @@ extension Test::Test.Snapshot.Inline {
+     // swiftlint:disable function_parameter_count
+     /// Resolves an inline snapshot against the closure-provided expected value.
+     ///
+-    /// Returns a failure message, or `nil` when the snapshot matches.
++    /// Each recording mode behaves as it does for a file-backed snapshot: recording a
++    /// value (`.all`, or a missing one under `.missing` and `.failed`) passes, and only a
++    /// mismatch, or a missing value under `.never`, fails.
++    ///
++    /// Returns a failure message, or `nil` when the snapshot matches or was recorded.
+     static func resolve<Value>(
+         actual: Swift.String,
+         strategy: Test::Test.Snapshot.Strategy<Value, Swift.String>,
+@@ -321,11 +327,11 @@ extension Test::Test.Snapshot.Inline {
+         switch mode {
+         case .all:
+             register()
+-            return "Recorded inline snapshot. Re-run to assert."
++            return nil
+ 
+         case .missing where expectedValue == nil:
+             register()
+-            return "Recorded inline snapshot. Re-run to assert."
++            return nil
+ 
+         case .missing, .never:
+             guard let expectedValue else {
+@@ -341,7 +347,7 @@ extension Test::Test.Snapshot.Inline {
+         case .failed:
+             guard let expectedValue else {
+                 register()
+-                return "Recorded inline snapshot. Re-run to assert."
++                return nil
+             }
+             if let diff = strategy.diffing.diff(expectedValue, actual) {
+                 register()
+diff --git a/Tests/Tests Tests/Test.Snapshot.assert Tests.swift b/Tests/Tests Tests/Test.Snapshot.assert Tests.swift
+index 8f72b8f..c3c2cdd 100644
+--- a/Tests/Tests Tests/Test.Snapshot.assert Tests.swift	
++++ b/Tests/Tests Tests/Test.Snapshot.assert Tests.swift	
+@@ -1,3 +1,4 @@
++import File_System
+ import Testing
+ import Tests_Inline_Snapshot
+ import Tests_Test_Support
+@@ -115,4 +116,85 @@ extension Test::Test.Snapshot.Test.Unit {
+             #expect(expectations[1].isFailing)
+         }
+     }
++
++    @Test
++    func `record all passes for an inline snapshot as it does for a file-backed one`() {
++        let collector = Test::Test.Expectation.Collector()
++        Test::Test.Expectation.Collector.with(collector) {
++            snapshot(
++                as: .lines,
++                record: .all,
++                { "hello" },
++                matches: { "world" },
++                filePath: "/tmp/swift-tests-unit/SnapshotInlineAll.swift",
++                function: "inlineAll()"
++            )
++            snapshot(
++                as: .lines,
++                named: "record-all",
++                record: .all,
++                { "hello" },
++                filePath: "/tmp/swift-tests-unit/SnapshotFileAll.swift",
++                function: "fileAll()"
++            )
++        }
++        let expectations = collector.drain()
++        #expect(expectations.count == 2)
++        if expectations.count == 2 {
++            #expect(expectations[0].isPassing)
++            #expect(expectations[1].isPassing)
++        }
++    }
++
++    @Test
++    func `a missing inline snapshot is recorded and passes as a missing file-backed one does`() {
++        let collector = Test::Test.Expectation.Collector()
++        Test::Test.Expectation.Collector.with(collector) {
++            snapshot(
++                as: .lines,
++                record: .missing,
++                { "hello" },
++                filePath: "/tmp/swift-tests-unit/SnapshotInlineMissing.swift",
++                function: "inlineMissing()"
++            )
++        }
++        let expectations = collector.drain()
++        #expect(expectations.count == 1)
++        if expectations.count == 1 {
++            #expect(expectations[0].isPassing)
++        }
++    }
++
++    @Test
++    func `a non-String file-backed snapshot is stored under the configured subdirectory`() {
++        let filePath = "/tmp/swift-tests-unit/SnapshotSubdirectory.swift"
++        let subdirectory = File.Path.Component("Configured")
++        let collector = Test::Test.Expectation.Collector()
++        Test::Test.Expectation.Collector.with(collector) {
++            _ = Test::Test.Snapshot.withConfiguration(.init(recording: .all, subdirectory: subdirectory)) {
++                snapshot(
++                    as: .data,
++                    named: "bytes",
++                    { [] },
++                    filePath: filePath,
++                    function: "subdirectory()"
++                )
++            }
++        }
++        let expectations = collector.drain()
++        #expect(expectations.count == 1)
++        if expectations.count == 1 {
++            #expect(expectations[0].isPassing)
++        }
++
++        let path = Test::Test.Snapshot.Storage.path(
++            testFilePath: filePath,
++            function: "subdirectory()",
++            name: "bytes",
++            counter: 0,
++            pathExtension: "bin",
++            subdirectory: subdirectory
++        )
++        #expect(Test::Test.Snapshot.Storage.exists(at: path))
++    }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,170 @@
+From 17156ec9db08a1f527eebcc131de4cd5217a91c6 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:34:57 +0000
+Subject: [PATCH 1/2] Manifest.Executable.Materializer throws
+ materializationFailed for a registry dependency pinned to a branch or
+ revision and for a range that is not inclusive-lower and exclusive-upper,
+ instead of rendering a comment (swift-compositions/swift-manifests#11)
+
+---
+ .../Manifest.Executable.Materializer.swift    | 28 +++++----
+ .../Manifest.Executable Tests.swift           | 62 +++++++++++++++++++
+ 2 files changed, 79 insertions(+), 11 deletions(-)
+
+diff --git a/Sources/Manifest Executable/Manifest.Executable.Materializer.swift b/Sources/Manifest Executable/Manifest.Executable.Materializer.swift
+index ba92d9c..de5ff71 100644
+--- a/Sources/Manifest Executable/Manifest.Executable.Materializer.swift	
++++ b/Sources/Manifest Executable/Manifest.Executable.Materializer.swift	
+@@ -84,10 +84,10 @@ extension Manifest.Executable.Materializer {
+                 lines.append("        .package(path: \"\(resolvedPath)\"),")
+ 
+             case .url(let url, let requirement):
+-                lines.append(Self.render(url: url.value, requirement: requirement))
++                lines.append(try Self.render(url: url.value, requirement: requirement))
+ 
+             case .registry(let identity, let requirement):
+-                lines.append(Self.render(registry: identity, requirement: requirement))
++                lines.append(try Self.render(registry: identity, requirement: requirement))
+             }
+         }
+ 
+@@ -138,7 +138,7 @@ extension Manifest.Executable.Materializer {
+     fileprivate static func render(
+         url: Swift.String,
+         requirement: Package.Requirement
+-    ) -> Swift.String {
++    ) throws(Manifest.Executable.Error) -> Swift.String {
+         switch requirement {
+         case .from(let version):
+             return "        .package(url: \"\(url)\", from: \"\(version)\"),"
+@@ -150,7 +150,8 @@ extension Manifest.Executable.Materializer {
+             return "        .package(url: \"\(url)\", .upToNextMinor(from: \"\(version)\")),"
+ 
+         case .range(let range):
+-            return "        .package(url: \"\(url)\", \(Self.rangeLiteral(range))),"
++            let bounds: Swift.String = try Self.rangeLiteral(range, of: url)
++            return "        .package(url: \"\(url)\", \(bounds)),"
+ 
+         case .exact(let version):
+             return "        .package(url: \"\(url)\", exact: \"\(version)\"),"
+@@ -166,7 +167,7 @@ extension Manifest.Executable.Materializer {
+     fileprivate static func render(
+         registry identity: Package.Identity,
+         requirement: Package.Requirement
+-    ) -> Swift.String {
++    ) throws(Manifest.Executable.Error) -> Swift.String {
+         let id: Swift.String = "\(identity.scope).\(identity.name)"
+         switch requirement {
+         case .from(let version):
+@@ -179,24 +180,29 @@ extension Manifest.Executable.Materializer {
+             return "        .package(id: \"\(id)\", .upToNextMinor(from: \"\(version)\")),"
+ 
+         case .range(let range):
+-            return "        .package(id: \"\(id)\", \(Self.rangeLiteral(range))),"
++            let bounds: Swift.String = try Self.rangeLiteral(range, of: id)
++            return "        .package(id: \"\(id)\", \(bounds)),"
+ 
+         case .exact(let version):
+             return "        .package(id: \"\(id)\", exact: \"\(version)\"),"
+ 
+         case .branch, .revision:
+-
+-            return "        // ERROR: registry deps do not support branch/revision: \(id)"
++            throw .materializationFailed(
++                reason: "registry dependency `\(id)` cannot be pinned to a branch or revision"
++            )
+         }
+     }
+ 
+     fileprivate static func rangeLiteral(
+-        _ range: Version.Range<Version.Semantic>
+-    ) -> Swift.String {
++        _ range: Version.Range<Version.Semantic>,
++        of package: Swift.String
++    ) throws(Manifest.Executable.Error) -> Swift.String {
+         guard case .inclusive(let lower) = range.lowerBound,
+             case .exclusive(let upper) = range.upperBound
+         else {
+-            return "/* ERROR: range deps require .inclusive lower / .exclusive upper */"
++            throw .materializationFailed(
++                reason: "dependency `\(package)` needs a range with an inclusive lower and an exclusive upper bound"
++            )
+         }
+         return "\"\(lower)\"..<\"\(upper)\""
+     }
+diff --git a/Tests/Manifest Executable Tests/Manifest.Executable Tests.swift b/Tests/Manifest Executable Tests/Manifest.Executable Tests.swift
+index ebd7f34..d1f449a 100644
+--- a/Tests/Manifest Executable Tests/Manifest.Executable Tests.swift	
++++ b/Tests/Manifest Executable Tests/Manifest.Executable Tests.swift	
+@@ -221,6 +221,68 @@ extension `Manifest.Executable Tests`.Test.`Render Package Swift` {
+     }
+ }
+ 
++extension `Manifest.Executable Tests`.Test.`Render Package Swift` {
++    @Test
++    func `registry dep pinned to a branch fails materialization`() {
++        let configuration = Self.makeConfiguration(
++            source: .registry(Package.Identity(scope: "example", name: "lib"), .branch("main"))
++        )
++        #expect {
++            try Manifest.Executable.Materializer.renderPackageSwift(configuration: configuration)
++        } throws: { error in
++            guard case Manifest.Executable.Error.materializationFailed = error else { return false }
++            return true
++        }
++    }
++
++    @Test
++    func `registry dep pinned to a revision fails materialization`() {
++        let configuration = Self.makeConfiguration(
++            source: .registry(Package.Identity(scope: "example", name: "lib"), .revision("abc123"))
++        )
++        #expect {
++            try Manifest.Executable.Materializer.renderPackageSwift(configuration: configuration)
++        } throws: { error in
++            guard case Manifest.Executable.Error.materializationFailed = error else { return false }
++            return true
++        }
++    }
++
++    @Test
++    func `closed range dep fails materialization`() {
++        let range = Version.Range<Version.Semantic>(
++            lowerBound: .inclusive(Version.Semantic(major: 602, minor: 0, patch: 0)),
++            upperBound: .inclusive(Version.Semantic(major: 603, minor: 0, patch: 0))
++        )
++        let configuration = Self.makeConfiguration(
++            source: .url("https://github.com/swiftlang/swift-syntax.git", .range(range))
++        )
++        #expect {
++            try Manifest.Executable.Materializer.renderPackageSwift(configuration: configuration)
++        } throws: { error in
++            guard case Manifest.Executable.Error.materializationFailed = error else { return false }
++            return true
++        }
++    }
++
++    fileprivate static func makeConfiguration(
++        source: Package.Dependency.Source
++    ) -> Manifest.Executable.Configuration {
++        Manifest.Executable.Configuration(
++            consumerPackageRoot: File.Path("/tmp/swift-foo"),
++            consumerSourcePath: File.Path("/tmp/swift-foo/Lint.swift"),
++            evalRoot: File.Path("/tmp/swift-foo/.swift-lint/eval"),
++            executableName: "Lint",
++            dependencies: [
++                Package.Dependency(source: source, name: "lib", products: ["Lib"])
++            ],
++            platforms: [".macOS(.v27)"],
++            swiftLanguageModes: [".v6"],
++            toolsVersion: Version.Tools(major: 6, minor: 4)
++        )
++    }
++}
++
+ extension `Manifest.Executable Tests`.Test.`Render Package Swift` {
+ 
+     fileprivate static func makeFixtureConfiguration() throws -> Manifest.Executable.Configuration {
+-- 
+2.43.0
+

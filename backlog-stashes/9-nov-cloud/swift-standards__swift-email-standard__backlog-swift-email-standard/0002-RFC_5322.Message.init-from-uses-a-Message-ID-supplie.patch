@@ -1,0 +1,131 @@
+From 661f573fa1b6a1b6775f6f2eb3d89ecbfcd3832c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:16 +0000
+Subject: [PATCH 2/2] RFC_5322.Message.init(from:) uses a Message-ID supplied
+ in the email's additional headers instead of silently replacing it, and
+ throws when it is invalid (swift-standards/swift-email-standard#10)
+
+---
+ README.md                                     |  4 +-
+ Sources/Email Standard/Email+RFC5322.swift    | 16 +++---
+ .../Email RFC 5322 Tests.swift                | 54 +++++++++++++++++++
+ 3 files changed, 66 insertions(+), 8 deletions(-)
+
+diff --git a/README.md b/README.md
+index 24b0074..ca29e40 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@ Use this package when you compose an email message and need it as an RFC 5322 me
+ 
+ ## Laws
+ 
+-- Text and HTML bodies default to UTF-8. Their content type is `text/plain` or `text/html` with that charset, and their transfer encoding is always declared as 7bit. The bytes are passed through as given and are never transfer-encoded.
++- Text and HTML bodies default to UTF-8. Their content type is `text/plain` or `text/html` with that charset, and their transfer encoding is declared as 7bit when every byte is ASCII and 8bit otherwise. The bytes are passed through as given and are never transfer-encoded.
+ - A text and HTML email becomes a `multipart/alternative` body with the plain text part first and the HTML part second. `RFC_2046.Multipart.alternative(textContent:htmlContent:)` and `RFC_2046.Multipart.mixed(parts:)` pick a new random boundary on every call.
+-- `RFC_5322.Message.init(from:)` generates a new random Message-ID on every conversion, using the domain of the sender's address. It also adds the body's Content-Type and Content-Transfer-Encoding headers.
++- `RFC_5322.Message.init(from:)` uses a Message-ID from the email's additional headers, and throws if it is invalid; without one it generates a new random Message-ID on every conversion, using the domain of the sender's address. It also adds the body's Content-Type and Content-Transfer-Encoding headers.
+ - With `Email Foundation Integration`, a body encodes with a `type` of `text`, `html` or `multipart`. Text and HTML content encodes as an array of byte values with its `charset`, not as a string.
+diff --git a/Sources/Email Standard/Email+RFC5322.swift b/Sources/Email Standard/Email+RFC5322.swift
+index 3aec700..efc8128 100644
+--- a/Sources/Email Standard/Email+RFC5322.swift	
++++ b/Sources/Email Standard/Email+RFC5322.swift	
+@@ -23,6 +23,8 @@ extension Email {
+ 
+ extension RFC_5322.Message {
+ 
++    /// Converts an email to a message. A `Message-ID` among the email's additional headers becomes
++    /// the message's ID; without one, a random ID at the sender's domain is generated.
+     public init(from email: Email) throws(Email.ConversionError) {
+ 
+         let from: RFC_5322.Mailbox
+@@ -62,14 +64,16 @@ extension RFC_5322.Message {
+             throw .address(error)
+         }
+ 
+-        let randomBytes = (0..<16).map { _ in Byte(bitPattern: UInt8.random(in: 0...255)) }
+-        let hexBytes: [ASCII.Code] = RFC_4648.Base16.encode(randomBytes, uppercase: false)
+-        let uniqueId = String(decoding: hexBytes.lazy.map(\.underlying), as: UTF8.self)
+-
+-        let domain = from.domain
+         let messageId: RFC_5322.Message.ID
+         do throws(RFC_5322.Message.ID.Error) {
+-            messageId = try RFC_5322.Message.ID(uniqueId: uniqueId, domain: domain)
++            if let supplied = email.additionalHeaders[.messageId] {
++                messageId = try RFC_5322.Message.ID(supplied.rawValue)
++            } else {
++                let randomBytes = (0..<16).map { _ in Byte(bitPattern: UInt8.random(in: 0...255)) }
++                let hexBytes: [ASCII.Code] = RFC_4648.Base16.encode(randomBytes, uppercase: false)
++                let uniqueId = String(decoding: hexBytes.lazy.map(\.underlying), as: UTF8.self)
++                messageId = try RFC_5322.Message.ID(uniqueId: uniqueId, domain: from.domain)
++            }
+         } catch {
+             throw .messageID(error)
+         }
+diff --git a/Tests/Email Standard Tests/Email RFC 5322 Tests.swift b/Tests/Email Standard Tests/Email RFC 5322 Tests.swift
+index 62a0230..9d608f4 100644
+--- a/Tests/Email Standard Tests/Email RFC 5322 Tests.swift	
++++ b/Tests/Email Standard Tests/Email RFC 5322 Tests.swift	
+@@ -141,6 +141,60 @@ struct `Email to RFC 5322 Message Conversion` {
+         #expect(message.messageId.description.contains("@"))
+     }
+ 
++    @Test
++    func `Message-ID from additional headers is kept`() throws {
++        let email = try Email(
++            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++            subject: "Test",
++            body: "Test",
++            additionalHeaders: [
++                .init(name: .messageId, value: try .init("<thread-42@example.org>"))
++            ]
++        )
++
++        let message = try RFC_5322.Message(from: email)
++
++        #expect(message.messageId.description == "<thread-42@example.org>")
++        let rendered = String(message)
++        #expect(rendered.split(separator: "\r\n").filter { $0.hasPrefix("Message-ID:") }.count == 1)
++    }
++
++    @Test
++    func `Invalid Message-ID in additional headers is refused`() throws {
++        let email = try Email(
++            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++            subject: "Test",
++            body: "Test",
++            additionalHeaders: [
++                .init(name: .messageId, value: try .init("no-at-sign"))
++            ]
++        )
++
++        #expect(throws: Email.ConversionError.self) {
++            try RFC_5322.Message(from: email)
++        }
++    }
++
++    @Test
++    func `Non-ASCII text body is declared 8bit in the rendered message`() throws {
++        let email = try Email(
++            to: [EmailAddress(rfc6531: try RFC_6531.Mailbox("recipient@example.com"))],
++            from: EmailAddress(rfc6531: try RFC_6531.Mailbox("sender@example.com")),
++            date: RFC_5322.DateTime(secondsSinceEpoch: 1_609_459_200),
++            subject: "Test",
++            body: .text("Grüße")
++        )
++
++        let rendered = String(try RFC_5322.Message(from: email))
++
++        #expect(rendered.contains("Content-Transfer-Encoding: 8bit"))
++        #expect(!rendered.contains("Content-Transfer-Encoding: 7bit"))
++    }
++
+     @Test
+     func `Rendered message carries the envelope headers and the header-body separator`() throws {
+         let email = try Email(
+-- 
+2.43.0
+

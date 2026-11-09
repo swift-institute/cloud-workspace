@@ -1,0 +1,94 @@
+From f9a32f17155b5630ee7002e9130b89f41e97caf8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:33:59 +0000
+Subject: [PATCH 1/3] Kernel.File.open throws ENOTSUP when the requested cache
+ mode can't be honoured instead of silently opening buffered
+ (swift-compositions/swift-kernel#29)
+
+---
+ README.md                                     |  2 +-
+ Sources/Kernel File/Kernel.File.swift         |  3 +-
+ .../Kernel Tests/Kernel.File.Open Tests.swift | 40 +++++++++++++++++++
+ 3 files changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index 93878a7..5135b37 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@ Use this package when you need operating system calls from Swift under one name
+ 
+ ## Laws
+ 
+-- `Kernel.File.open(_:configuration:)` never inspects the file system to choose a cache mode. The requirements are a fixed platform default: unknown on Darwin and Linux, a uniform 4096-byte alignment on Windows. When the requested `Kernel.File.Direct.Mode` can't be resolved against them, the file opens buffered instead of failing, and `Kernel.File.Handle.direct` says which mode it got. A created file gets the standard permissions.
++- `Kernel.File.open(_:configuration:)` never inspects the file system to choose a cache mode. The requirements are a fixed platform default: unknown on Darwin and Linux, a uniform 4096-byte alignment on Windows. When the requested `Kernel.File.Direct.Mode` can't be resolved against them (`direct` or `uncached` where the platform refuses it, or `auto(policy: .errorOnViolation)` with unknown requirements), opening throws `.platform` with `ENOTSUP`; `Kernel.File.Handle.direct` says which mode an open file got. A created file gets the standard permissions.
+ - `Kernel.File.Direct.Mode.resolve(given:)` on Darwin refuses `direct` and resolves `auto` to `uncached`. On Linux and Windows it refuses `uncached`, allows `direct` only with known requirements, and resolves `auto` to `direct` when they are known and otherwise to `buffered` or a refusal, as the policy says.
+ - `Kernel.File.Handle` reports an interrupted read or write as `Interrupt` instead of retrying it. `Kernel.File.Handle.writeAll(from:)` keeps writing until every byte is written, treats a write of zero bytes as an I/O error, and also stops at an interruption, even if part of the buffer is already written.
+ - `Kernel.File.Clone.clone(from:to:behavior:)` never replaces an existing destination, not even a dangling symbolic link. With `reflinkOrCopy` any reflink failure falls back to a plain copy. On Linux the destination is created first and removed again when the clone or copy fails. Windows never reflinks.
+diff --git a/Sources/Kernel File/Kernel.File.swift b/Sources/Kernel File/Kernel.File.swift
+index 27121e1..4c4c5fb 100644
+--- a/Sources/Kernel File/Kernel.File.swift	
++++ b/Sources/Kernel File/Kernel.File.swift	
+@@ -24,8 +24,7 @@ extension Kernel.File {
+         do throws(Kernel.File.Direct.Error) {
+             resolved = try configuration.cache.resolve(given: requirements)
+         } catch {
+-
+-            resolved = .buffered
++            throw .platform(Error::Error(code: .ENOTSUP))
+         }
+ 
+         var kernelOptions: Open.Options = []
+diff --git a/Tests/Kernel Tests/Kernel.File.Open Tests.swift b/Tests/Kernel Tests/Kernel.File.Open Tests.swift
+index f0163c9..f051b65 100644
+--- a/Tests/Kernel Tests/Kernel.File.Open Tests.swift	
++++ b/Tests/Kernel Tests/Kernel.File.Open Tests.swift	
+@@ -98,6 +98,46 @@ extension `Kernel.File.Open.Configuration Tests`.Test.Unit {
+             }
+         }
+ 
++        @Test
++        func `open with .direct the platform cannot honour throws ENOTSUP`() throws {
++            let pathString = makeTempFile(prefix: "handle-direct", content: "Direct test")
++            defer { removeTempFile(pathString) }
++
++            var config = Kernel.File.Open.Configuration(mode: .read)
++            config.cache = .direct
++
++            let failure = try Path.scope(pathString) { path -> Kernel.File.Open.Error? in
++                do throws(Kernel.File.Open.Error) {
++                    _ = try Kernel.File.open(path, configuration: config)
++                    return nil
++                } catch {
++                    return error
++                }
++            }
++            #expect(failure == .platform(Error::Error(code: .ENOTSUP)))
++        }
++
++        #if os(Linux)
++            @Test
++            func `open with .auto(.errorOnViolation) and unknown alignment throws ENOTSUP`() throws {
++                let pathString = makeTempFile(prefix: "handle-strict", content: "Strict test")
++                defer { removeTempFile(pathString) }
++
++                var config = Kernel.File.Open.Configuration(mode: .read)
++                config.cache = .auto(policy: .errorOnViolation)
++
++                let failure = try Path.scope(pathString) { path -> Kernel.File.Open.Error? in
++                    do throws(Kernel.File.Open.Error) {
++                        _ = try Kernel.File.open(path, configuration: config)
++                        return nil
++                    } catch {
++                        return error
++                    }
++                }
++                #expect(failure == .platform(Error::Error(code: .ENOTSUP)))
++            }
++        #endif
++
+         @Test
+         func `open with .auto(.fallbackToBuffered) succeeds`() throws {
+             let content = "Auto fallback test"
+-- 
+2.43.0
+

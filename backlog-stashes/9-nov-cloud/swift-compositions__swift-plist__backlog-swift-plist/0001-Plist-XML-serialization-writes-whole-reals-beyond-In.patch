@@ -1,0 +1,352 @@
+From 6c68f85b78fca8bc5e3d0653f4649e989e465470 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:52 +0000
+Subject: [PATCH 1/3] Plist XML serialization writes whole reals beyond Int
+ range without trapping and throws unrepresentableInXML for null and
+ unformattable dates instead of writing an empty string or the reference date
+ (swift-compositions/swift-plist#16)
+
+---
+ README.md                                    |  6 +-
+ Sources/Plist Core/Plist.Error.swift         |  7 ++
+ Sources/Plist XML/Plist.XML.Serializer.swift | 48 ++++++++------
+ Sources/Plist/Plist.Parse.swift              | 22 ++++---
+ Tests/Plist XML Tests/XMLParser Tests.swift  | 67 ++++++++++++++++----
+ 5 files changed, 106 insertions(+), 44 deletions(-)
+
+diff --git a/README.md b/README.md
+index 23f3b41..809cb11 100644
+--- a/README.md
++++ b/README.md
+@@ -7,10 +7,10 @@ Use this package when you read or write Apple property lists, in the XML or the
+ - `Plist.parse(_:)` picks the format from the first bytes. Input starting with `bplist` is binary. Otherwise, after any leading white space, input starting with an XML declaration, a `plist` tag or a `DOCTYPE` is XML. Anything else is an unknown format. The binary reader accepts versions `00` and `01`, and the writer emits `00`.
+ - Dictionaries keep their keys in order, whether parsed or built. Equality compares members in that order, so the same members in a different order are not equal. Duplicate keys are kept: a subscript returns the first, and `Plist.dictionaryValue` keeps the last.
+ - Reading a missing key, an index out of range, or either from a value of the wrong kind gives null, never a trap.
+-- XML has no null. A null value is written to XML as an empty string, so it reads back as a string. In the binary format it stays null. An optional that is nil serializes as null, and null deserializes as nil.
++- XML has no null. Writing a null to XML throws `Plist.Error.unrepresentableInXML`. In the binary format it stays null. An optional that is nil serializes as null, and null deserializes as nil.
+ - `Double` and `Float` read integers as well as reals. `Int` reads an integer only if it fits exactly. Integer readers never accept a real.
+-- A date is seconds since 2001-01-01 00:00:00 UTC. XML dates are read as ISO 8601 with any offset applied, and written in UTC. A date that can't be written is written as 2001-01-01 00:00:00 UTC.
+-- XML input is decoded as UTF-8. The `DOCTYPE` is dropped before parsing, white space inside data is ignored, and only the first element inside `plist` is read. XML output always starts with the XML declaration and Apple's `DOCTYPE`, and a whole real is written with `.0`.
++- A date is seconds since 2001-01-01 00:00:00 UTC. XML dates are read as ISO 8601 with any offset applied, and written in UTC. Writing a date that has no ISO 8601 form to XML throws `Plist.Error.unrepresentableInXML`.
++- XML input is decoded as UTF-8. The `DOCTYPE` is dropped before parsing, white space inside data is ignored, and only the first element inside `plist` is read. XML output always starts with the XML declaration and Apple's `DOCTYPE`, and a whole real within `Int` range is written with `.0`; any other real is written as Swift's shortest round-tripping form, such as `1e+300`.
+ - The binary writer stores each distinct value once and points every occurrence at it. Strings are written as ASCII when they can be and as big-endian UTF-16 otherwise. Reals are always written as 8 bytes. The binary reader rejects an object that contains itself.
+ - `Plist.parse(collecting:)` reads the whole sequence before parsing. A failing sequence is reported as a source failure, not as a parse error.
+ - `Plist.ND.stream(_:)` splits on line feeds, drops carriage returns and skips empty lines. Each line is parsed as XML on its own, and a line that fails, including a binary one, yields a failure and the stream continues. A last line without a line feed is still parsed.
+diff --git a/Sources/Plist Core/Plist.Error.swift b/Sources/Plist Core/Plist.Error.swift
+index 673b6b7..575dff4 100644
+--- a/Sources/Plist Core/Plist.Error.swift	
++++ b/Sources/Plist Core/Plist.Error.swift	
+@@ -35,6 +35,10 @@ extension Plist {
+         case typeMismatch(expected: String, got: String)
+ 
+         case missingKey(String)
++
++        /// A value the target format has no representation for, such as
++        /// null or an out-of-range date in XML.
++        case unrepresentableInXML(String)
+     }
+ }
+ 
+@@ -91,6 +95,9 @@ extension Plist.Error: CustomStringConvertible {
+ 
+         case .missingKey(let key):
+             return "Missing required key: \(key)"
++
++        case .unrepresentableInXML(let value):
++            return "Value has no XML plist representation: \(value)"
+         }
+     }
+ }
+diff --git a/Sources/Plist XML/Plist.XML.Serializer.swift b/Sources/Plist XML/Plist.XML.Serializer.swift
+index f3cbb7c..718d6d2 100644
+--- a/Sources/Plist XML/Plist.XML.Serializer.swift	
++++ b/Sources/Plist XML/Plist.XML.Serializer.swift	
+@@ -14,8 +14,11 @@ extension Plist.XML {
+ 
+ extension Plist.XML {
+ 
+-    public static func serialize(_ plist: Plist, pretty: Bool = false) -> [UInt8] {
+-        let rootElement = serializeValue(plist.value)
++    public static func serialize(
++        _ plist: Plist,
++        pretty: Bool = false
++    ) throws(Plist.Error) -> [UInt8] {
++        let rootElement = try serializeValue(plist.value)
+         let plistElement = XML.element(
+             "plist",
+             attributes: [XML.Attribute(name: "version", value: "1.0")],
+@@ -27,13 +30,16 @@ extension Plist.XML {
+         return bytes
+     }
+ 
+-    public static func serializeString(_ plist: Plist, pretty: Bool = false) -> String {
+-        String(decoding: serialize(plist, pretty: pretty), as: UTF8.self)
++    public static func serializeString(
++        _ plist: Plist,
++        pretty: Bool = false
++    ) throws(Plist.Error) -> String {
++        String(decoding: try serialize(plist, pretty: pretty), as: UTF8.self)
+     }
+ }
+ 
+ extension Plist.XML {
+-    private static func serializeValue(_ value: Plist.Value) -> XML {
++    private static func serializeValue(_ value: Plist.Value) throws(Plist.Error) -> XML {
+         switch value {
+         case .string(let text):
+             return XML.element("string", text: text)
+@@ -43,14 +49,7 @@ extension Plist.XML {
+ 
+         case .real(let number):
+ 
+-            let text: String
+-            if number.truncatingRemainder(dividingBy: 1) == 0 {
+-
+-                let intPart = Int(number)
+-                text = "\(intPart).0"
+-            } else {
+-                text = String(number)
+-            }
++            let text = Int(exactly: number).map { "\($0).0" } ?? String(number)
+             return XML.element("real", text: text)
+ 
+         case .bool(let flag):
+@@ -62,33 +61,40 @@ extension Plist.XML {
+             return XML.element("data", text: base64String)
+ 
+         case .date(let secondsSinceRef):
+-            let text = formatDate(secondsSinceRef)
++            guard let text = formatDate(secondsSinceRef) else {
++                throw .unrepresentableInXML("date \(secondsSinceRef) seconds since 2001-01-01")
++            }
+             return XML.element("date", text: text)
+ 
+         case .array(let elements):
+-            let children = elements.map { serializeValue($0) }
++            var children: [XML] = []
++            for element in elements {
++                children.append(try serializeValue(element))
++            }
+             return XML.element("array", children: children)
+ 
+         case .dictionary(let members):
+             var children: [XML] = []
+             for member in members {
+                 children.append(XML.element("key", text: member.key))
+-                children.append(serializeValue(member.value))
++                children.append(try serializeValue(member.value))
+             }
+             return XML.element("dict", children: children)
+ 
+         case .null:
+-
+-            return XML.element("string", text: "")
++            throw .unrepresentableInXML("null")
+         }
+     }
+ }
+ 
+ extension Plist.XML {
+-    private static func formatDate(_ secondsSinceRef: Double) -> String {
++    private static func formatDate(_ secondsSinceRef: Double) -> String? {
+ 
+         let wholeSeconds = secondsSinceRef.rounded(.down)
+-        let unixSeconds = Int(wholeSeconds) + appleReferenceEpochOffset
++        guard let whole = Int(exactly: wholeSeconds) else { return nil }
++        let shifted = whole.addingReportingOverflow(appleReferenceEpochOffset)
++        guard !shifted.overflow else { return nil }
++        let unixSeconds = shifted.partialValue
+         let nanoseconds = Int((secondsSinceRef - wholeSeconds) * 1_000_000_000)
+         let secondOfDay = (unixSeconds % 86_400 + 86_400) % 86_400
+ 
+@@ -102,7 +108,7 @@ extension Plist.XML {
+                 nanoseconds: nanoseconds
+             )
+         else {
+-            return "2001-01-01T00:00:00Z"
++            return nil
+         }
+ 
+         return ISO_8601.DateTime.Formatter.format(dateTime)
+diff --git a/Sources/Plist/Plist.Parse.swift b/Sources/Plist/Plist.Parse.swift
+index 84798b8..ab90693 100644
+--- a/Sources/Plist/Plist.Parse.swift
++++ b/Sources/Plist/Plist.Parse.swift
+@@ -38,10 +38,13 @@ extension Plist {
+ extension Plist {
+ 
+     @inlinable
+-    public func serialize(format: Format = .xml, pretty: Bool = false) -> [UInt8] {
++    public func serialize(
++        format: Format = .xml,
++        pretty: Bool = false
++    ) throws(Plist.Error) -> [UInt8] {
+         switch format {
+         case .xml:
+-            return XML.serialize(self, pretty: pretty)
++            return try XML.serialize(self, pretty: pretty)
+ 
+         case .binary:
+             return Binary.serialize(self)
+@@ -49,8 +52,8 @@ extension Plist {
+     }
+ 
+     @inlinable
+-    public func serializeXML(pretty: Bool = false) -> String {
+-        String(decoding: XML.serialize(self, pretty: pretty), as: UTF8.self)
++    public func serializeXML(pretty: Bool = false) throws(Plist.Error) -> String {
++        String(decoding: try XML.serialize(self, pretty: pretty), as: UTF8.self)
+     }
+ }
+ 
+@@ -66,12 +69,15 @@ extension Plist.Serializable {
+     }
+ 
+     @inlinable
+-    public func plistBytes(format: Plist.Format = .xml, pretty: Bool = false) -> [UInt8] {
+-        plist.serialize(format: format, pretty: pretty)
++    public func plistBytes(
++        format: Plist.Format = .xml,
++        pretty: Bool = false
++    ) throws(Plist.Error) -> [UInt8] {
++        try plist.serialize(format: format, pretty: pretty)
+     }
+ 
+     @inlinable
+-    public func plistString(pretty: Bool = false) -> String {
+-        plist.serializeXML(pretty: pretty)
++    public func plistString(pretty: Bool = false) throws(Plist.Error) -> String {
++        try plist.serializeXML(pretty: pretty)
+     }
+ }
+diff --git a/Tests/Plist XML Tests/XMLParser Tests.swift b/Tests/Plist XML Tests/XMLParser Tests.swift
+index cc419aa..1ee41de 100644
+--- a/Tests/Plist XML Tests/XMLParser Tests.swift	
++++ b/Tests/Plist XML Tests/XMLParser Tests.swift	
+@@ -186,18 +186,18 @@ extension `Plist.XML Tests` {
+     @Suite
+     struct Serializer {
+         @Test
+-        func `Serialize string`() {
++        func `Serialize string`() throws {
+             let plist = Plist.string("Hello")
+-            let bytes = Plist.XML.serialize(plist)
++            let bytes = try Plist.XML.serialize(plist)
+             let xml = String(decoding: bytes, as: UTF8.self)
+ 
+             #expect(xml.contains("<string>Hello</string>"))
+         }
+ 
+         @Test
+-        func `Serialize emits version attribute and DOCTYPE`() {
++        func `Serialize emits version attribute and DOCTYPE`() throws {
+             let plist = Plist.string("hello")
+-            let xml = String(decoding: Plist.XML.serialize(plist), as: UTF8.self)
++            let xml = String(decoding: try Plist.XML.serialize(plist), as: UTF8.self)
+ 
+             #expect(xml.contains("<plist version=\"1.0\">"))
+             #expect(
+@@ -216,34 +216,34 @@ extension `Plist.XML Tests` {
+         }
+ 
+         @Test
+-        func `Serialize integer`() {
++        func `Serialize integer`() throws {
+             let plist = Plist.integer(42)
+-            let bytes = Plist.XML.serialize(plist)
++            let bytes = try Plist.XML.serialize(plist)
+             let xml = String(decoding: bytes, as: UTF8.self)
+ 
+             #expect(xml.contains("<integer>42</integer>"))
+         }
+ 
+         @Test
+-        func `Serialize boolean`() {
++        func `Serialize boolean`() throws {
+             let trueValue = Plist.bool(true)
+             let falseValue = Plist.bool(false)
+ 
+-            let trueXml = String(decoding: Plist.XML.serialize(trueValue), as: UTF8.self)
+-            let falseXml = String(decoding: Plist.XML.serialize(falseValue), as: UTF8.self)
++            let trueXml = String(decoding: try Plist.XML.serialize(trueValue), as: UTF8.self)
++            let falseXml = String(decoding: try Plist.XML.serialize(falseValue), as: UTF8.self)
+ 
+             #expect(trueXml.contains("<true/>") || trueXml.contains("<true></true>"))
+             #expect(falseXml.contains("<false/>") || falseXml.contains("<false></false>"))
+         }
+ 
+         @Test
+-        func `Serialize dictionary`() {
++        func `Serialize dictionary`() throws {
+             let plist: Plist = [
+                 "name": "Bob",
+                 "age": 25,
+             ]
+ 
+-            let bytes = Plist.XML.serialize(plist)
++            let bytes = try Plist.XML.serialize(plist)
+             let xml = String(decoding: bytes, as: UTF8.self)
+ 
+             #expect(xml.contains("<dict>"))
+@@ -251,6 +251,49 @@ extension `Plist.XML Tests` {
+             #expect(xml.contains("<string>Bob</string>"))
+         }
+ 
++        @Test
++        func `Serialize a whole real beyond Int range`() throws {
++            let xml = String(decoding: try Plist.XML.serialize(Plist.real(1e300)), as: UTF8.self)
++            let parsed = try Plist.XML.parse(xml)
++
++            #expect(Double(parsed) == 1e300)
++        }
++
++        @Test
++        func `Serialize a whole real within Int range keeps the decimal point`() throws {
++            let xml = String(decoding: try Plist.XML.serialize(Plist.real(42)), as: UTF8.self)
++
++            #expect(xml.contains("<real>42.0</real>"))
++        }
++
++        @Test
++        func `Serialize null to XML throws`() {
++            #expect(throws: Plist.Error.unrepresentableInXML("null")) {
++                try Plist.XML.serialize(Plist.null)
++            }
++            #expect(throws: Plist.Error.self) {
++                try Plist.XML.serialize(["key": Plist.null])
++            }
++        }
++
++        @Test
++        func `Serialize a date beyond the calendar throws`() {
++            #expect(throws: Plist.Error.self) {
++                try Plist.XML.serialize(Plist.date(secondsSinceReferenceDate: 1e300))
++            }
++            #expect(throws: Plist.Error.self) {
++                try Plist.XML.serialize(Plist.date(secondsSinceReferenceDate: .nan))
++            }
++        }
++
++        @Test
++        func `Serialize the reference date`() throws {
++            let plist = Plist.date(secondsSinceReferenceDate: 0)
++            let xml = String(decoding: try Plist.XML.serialize(plist), as: UTF8.self)
++
++            #expect(xml.contains("<date>2001-01-01T00:00:00"))
++        }
++
+         @Test
+         func `Round-trip parsing and serialization`() throws {
+             let original: Plist = [
+@@ -261,7 +304,7 @@ extension `Plist.XML Tests` {
+                 "array": [1, 2, 3],
+             ]
+ 
+-            let bytes = Plist.XML.serialize(original)
++            let bytes = try Plist.XML.serialize(original)
+             let parsed = try Plist.XML.parse(bytes)
+ 
+             #expect(String(parsed["string"]) == "hello")
+-- 
+2.43.0
+

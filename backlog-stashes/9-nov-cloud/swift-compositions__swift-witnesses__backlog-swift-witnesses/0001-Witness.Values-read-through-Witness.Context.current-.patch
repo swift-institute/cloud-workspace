@@ -1,0 +1,106 @@
+From a24cfc22219e8b1641cb79ebfd3ad45da09b88b0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:42:34 +0000
+Subject: [PATCH 1/3] Witness.Values read through Witness.Context.current
+ resolve in the context's mode, so the Witness.Key subscript getter no longer
+ serves live values in test or preview mode
+ (swift-compositions/swift-witnesses#15)
+
+---
+ Sources/Witnesses/Witness.Context.swift           |  4 +++-
+ Sources/Witnesses/Witness.Values.swift            | 10 ++++++++--
+ Tests/Witnesses Tests/Witness.Context Tests.swift | 11 +++++++++++
+ 3 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/Witnesses/Witness.Context.swift b/Sources/Witnesses/Witness.Context.swift
+index f33c120..522b01d 100644
+--- a/Sources/Witnesses/Witness.Context.swift
++++ b/Sources/Witnesses/Witness.Context.swift
+@@ -23,7 +23,9 @@ extension Witness.Context {
+     internal enum _ContextKey: Dependency.Key {}
+ 
+     private static var _current: Witness.Context {
+-        Dependency.Scope.current[_ContextKey.self]
++        var context = Dependency.Scope.current[_ContextKey.self]
++        context.values._mode = context.mode
++        return context
+     }
+ }
+ 
+diff --git a/Sources/Witnesses/Witness.Values.swift b/Sources/Witnesses/Witness.Values.swift
+index 6907c08..844c513 100644
+--- a/Sources/Witnesses/Witness.Values.swift
++++ b/Sources/Witnesses/Witness.Values.swift
+@@ -12,16 +12,21 @@ extension Witness {
+         @usableFromInline
+         internal var _preparedRef: Witness.Preparation.Store?
+ 
++        @usableFromInline
++        internal var _mode: Witness.Context.Mode?
++
+         @inlinable
+         public init() {
+             self._storage = _Storage()
+             self._preparedRef = nil
++            self._mode = nil
+         }
+ 
+         @usableFromInline
+         internal init(preparedStore: Witness.Preparation.Store?) {
+             self._storage = _Storage()
+             self._preparedRef = preparedStore
++            self._mode = nil
+         }
+     }
+ }
+@@ -164,7 +169,7 @@ extension Witness.Values {
+     public subscript<K: Witness.Key>(key: K.Type) -> K.Value
+     where K.Value: Copyable & Escapable {
+         get {
+-            value(for: key, mode: .live)
++            value(for: key, mode: _mode ?? .live)
+         }
+         set {
+             _ensureUnique()
+@@ -184,7 +189,7 @@ extension Witness.Values {
+     public subscript<K: Witness.Key.Test>(key: K.Type) -> K.Value
+     where K.Value: Copyable & Escapable {
+         get {
+-            value(for: key, mode: .test)
++            value(for: key, mode: _mode == .preview ? .preview : .test)
+         }
+         set {
+             _ensureUnique()
+@@ -243,6 +248,7 @@ extension Witness.Values {
+         var result = Witness.Values()
+ 
+         result._preparedRef = other._preparedRef ?? self._preparedRef
++        result._mode = other._mode ?? self._mode
+ 
+         result._storage.copyFrom(_storage)
+ 
+diff --git a/Tests/Witnesses Tests/Witness.Context Tests.swift b/Tests/Witnesses Tests/Witness.Context Tests.swift
+index 44a43a8..49f4ad9 100644
+--- a/Tests/Witnesses Tests/Witness.Context Tests.swift	
++++ b/Tests/Witnesses Tests/Witness.Context Tests.swift	
+@@ -177,6 +177,17 @@ extension `Witness.Context Tests`.Test.EdgeCase {
+     }
+ }
+ 
++extension `Witness.Context Tests`.Test.Unit {
++    @Test
++    func `Values read through current respect test mode`() async throws {
++        try await Witness.Context.withTest {
++            let api = Witness.Context.current[TestAPI.self]
++            let result = try await api.fetch(id: 1)
++            #expect(result == "Test result for 1")
++        }
++    }
++}
++
+ extension `Witness.Context Tests`.Test.Integration {
+     @Test
+     func `Synchronous with operation works`() throws {
+-- 
+2.43.0
+

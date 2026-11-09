@@ -1,0 +1,197 @@
+From 86299206d67a13acc9eeb192de53a65f132c4f48 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:32:42 +0000
+Subject: [PATCH 4/5] Memory.Map.open(fileHandle:) on Windows acquires the
+ coordinated file lock it computes and holds it until unmap instead of storing
+ no lock (swift-compositions/swift-memory-mapping#14)
+
+---
+ .../Memory Mapping/Memory.Lock.Token.swift    | 78 +++++++++----------
+ Sources/Memory Mapping/Memory.Map.swift       | 27 ++++++-
+ .../Memory.Map Tests.swift                    | 44 +++++++++++
+ 3 files changed, 107 insertions(+), 42 deletions(-)
+
+diff --git a/Sources/Memory Mapping/Memory.Lock.Token.swift b/Sources/Memory Mapping/Memory.Lock.Token.swift
+index 63ddc18..5932d9d 100644
+--- a/Sources/Memory Mapping/Memory.Lock.Token.swift	
++++ b/Sources/Memory Mapping/Memory.Lock.Token.swift	
+@@ -1,49 +1,45 @@
+ public import Kernel
+ 
+-#if !os(Windows)
+-
+-    extension Memory.Lock.Token {
++extension Memory.Lock.Token {
++
++    public static func acquire(
++        descriptor: borrowing Kernel.Descriptor,
++        range: Kernel.Lock.Range,
++        kind: Memory.Lock.Kind
++    ) throws(Kernel.Lock.Error) -> Memory.Lock.Token {
++
++        let duped: Kernel.Descriptor
++        do throws(Kernel.Descriptor.Duplicate.Error) {
++            duped = try Kernel.Descriptor.Duplicate.duplicate(descriptor)
++        } catch {
++            throw .unavailable
++        }
+ 
+-        public static func acquire(
+-            descriptor: borrowing Kernel.Descriptor,
+-            range: Kernel.Lock.Range,
+-            kind: Memory.Lock.Kind
+-        ) throws(Kernel.Lock.Error) -> Memory.Lock.Token {
++        let kernelKind: Kernel.Lock.Kind
++        switch kind {
++        case .shared: kernelKind = .shared
++        case .exclusive: kernelKind = .exclusive
++        }
+ 
+-            let duped: Kernel.Descriptor
+-            do throws(Kernel.Descriptor.Duplicate.Error) {
+-                duped = try Kernel.Descriptor.Duplicate.duplicate(descriptor)
+-            } catch {
+-                throw .unavailable
+-            }
++        do throws(Kernel.Lock.Error) {
++            try Kernel.Lock.lock(duped, range: range, kind: kernelKind)
++        } catch {
+ 
+-            let kernelKind: Kernel.Lock.Kind
+-            switch kind {
+-            case .shared: kernelKind = .shared
+-            case .exclusive: kernelKind = .exclusive
+-            }
++            do throws(Kernel.Close.Error) {
++                try Kernel.Close.close(consume duped)
++            } catch {}
++            throw error
++        }
+ 
++        var ownedFd: Kernel.Descriptor? = consume duped
++        return Memory.Lock.Token(release: {
++            guard let fd = ownedFd.take() else { return }
+             do throws(Kernel.Lock.Error) {
+-                try Kernel.Lock.lock(duped, range: range, kind: kernelKind)
+-            } catch {
+-
+-                do throws(Kernel.Close.Error) {
+-                    try Kernel.Close.close(consume duped)
+-                } catch {}
+-                throw error
+-            }
+-
+-            var ownedFd: Kernel.Descriptor? = consume duped
+-            return Memory.Lock.Token(release: {
+-                guard let fd = ownedFd.take() else { return }
+-                do throws(Kernel.Lock.Error) {
+-                    try Kernel.Lock.unlock(fd, range: range)
+-                } catch {}
+-                do throws(Kernel.Close.Error) {
+-                    try Kernel.Close.close(consume fd)
+-                } catch {}
+-            })
+-        }
++                try Kernel.Lock.unlock(fd, range: range)
++            } catch {}
++            do throws(Kernel.Close.Error) {
++                try Kernel.Close.close(consume fd)
++            } catch {}
++        })
+     }
+-
+-#endif
++}
+diff --git a/Sources/Memory Mapping/Memory.Map.swift b/Sources/Memory Mapping/Memory.Map.swift
+index 12a5575..6dc0ed7 100644
+--- a/Sources/Memory Mapping/Memory.Map.swift	
++++ b/Sources/Memory Mapping/Memory.Map.swift	
+@@ -188,7 +188,32 @@ extension Memory.Map {
+ 
+             let region = Self.Region(base: baseAddress, length: mappingLenCount)
+ 
+-            let lockToken: Memory.Lock.Token? = nil
++            let lockToken: Memory.Lock.Token?
++            if case .coordinated(let kind, let scope) = effectiveSafety {
++                let lockRange = Self.computeLockRange(
++                    scope: scope,
++                    alignedOffset: alignedOffset,
++                    mappingLength: mappingLen
++                )
++                do throws(Kernel.Lock.Error) {
++                    lockToken = try Memory.Lock.Token.acquire(
++                        descriptor: fileHandle,
++                        range: lockRange,
++                        kind: kind
++                    )
++                } catch {
++                    do throws(Self.Error) {
++                        try Self.unmap(
++                            addr: region.base,
++                            length: region.length,
++                            isAnonymous: false
++                        )
++                    } catch {}
++                    throw .fileLock(error)
++                }
++            } else {
++                lockToken = nil
++            }
+ 
+             return Self(
+                 region: region,
+diff --git a/Tests/Memory Mapping Tests/Memory.Map Tests.swift b/Tests/Memory Mapping Tests/Memory.Map Tests.swift
+index 2d9c720..9fee295 100644
+--- a/Tests/Memory Mapping Tests/Memory.Map Tests.swift	
++++ b/Tests/Memory Mapping Tests/Memory.Map Tests.swift	
+@@ -733,3 +733,47 @@ extension Memory.Map.Test.Performance {
+         }
+     #endif
+ }
++
++extension Memory.Map.Test.Integration {
++    #if os(Windows)
++        @Test
++        func `coordinated file mapping holds its exclusive lock until unmap (Windows)`() throws {
++            let path = try Path(validating: Kernel.Temporary.filePath(prefix: "memory-map-lock"))
++            let owner = try Kernel.File.Open.open(
++                path: path,
++                mode: .readWrite,
++                options: [.create, .truncate],
++                permissions: .standard
++            )
++            let other = try Kernel.File.Open.open(
++                path: path,
++                mode: .readWrite,
++                options: [],
++                permissions: .standard
++            )
++            defer { try? Kernel.File.Delete.delete(path: path) }
++
++            let content = Array(repeating: UInt8(7), count: 4096)
++            _ = try unsafe content.withUnsafeBytes { buffer in
++                try unsafe Kernel.IO.Write.write(owner, from: buffer)
++            }
++
++            let map = try Memory.Map.open(
++                fileHandle: owner,
++                range: .whole,
++                access: [.read, .write],
++                sharing: .shared,
++                safety: .coordinated(.exclusive, scope: .file)
++            )
++
++            #expect(throws: Kernel.Lock.Error.self) {
++                try Kernel.Lock.Immediate.lock(other, range: .file, kind: .exclusive)
++            }
++
++            map.unmap()
++
++            try Kernel.Lock.Immediate.lock(other, range: .file, kind: .exclusive)
++            try Kernel.Lock.unlock(other, range: .file)
++        }
++    #endif
++}
+-- 
+2.43.0
+

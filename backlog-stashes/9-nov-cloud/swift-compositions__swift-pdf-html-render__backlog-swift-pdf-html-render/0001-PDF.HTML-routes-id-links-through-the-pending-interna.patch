@@ -1,0 +1,186 @@
+From fdb29cb7ff739d34bf0bb4354f61bc369eed91fb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:34:01 +0000
+Subject: [PATCH] PDF.HTML routes #id links through the pending internal-link
+ list and resolves them to page destinations in both render and pages, instead
+ of emitting a URI annotation with the fragment
+ (swift-compositions/swift-pdf-html-render#18)
+
+---
+ .../PDF HTML Rendering/PDF.HTML.Context.swift |  6 +-
+ .../PDF.HTML.Render.Result.swift              | 20 ++++--
+ Sources/PDF HTML Rendering/PDF.HTML.swift     |  5 +-
+ .../Internal Link Tests.swift                 | 68 +++++++++++++++++++
+ 4 files changed, 89 insertions(+), 10 deletions(-)
+ create mode 100644 Tests/PDF HTML Rendering Tests/Internal Link Tests.swift
+
+diff --git a/Sources/PDF HTML Rendering/PDF.HTML.Context.swift b/Sources/PDF HTML Rendering/PDF.HTML.Context.swift
+index a7190cc..b6ff83b 100644
+--- a/Sources/PDF HTML Rendering/PDF.HTML.Context.swift	
++++ b/Sources/PDF HTML Rendering/PDF.HTML.Context.swift	
+@@ -325,7 +325,6 @@ extension PDF.HTML.Context {
+         }
+         section.activeHeading?.text += copy
+ 
+-        let linkURL = link.currentURL ?? link.currentInternalId.map { "#\($0)" }
+         let runs = PDF.Context.Text.Run.runsWithSymbolSupport(
+             text: copy,
+             font: pdf.style.font,
+@@ -333,7 +332,8 @@ extension PDF.HTML.Context {
+             color: pdf.style.color,
+             textDecoration: pdf.style.textMarkup,
+             verticalOffset: pdf.style.verticalOffset,
+-            linkURL: linkURL
++            linkURL: link.currentURL,
++            internalLinkId: link.currentInternalId
+         )
+         for run in runs {
+             pdf.append(inline: run)
+@@ -799,8 +799,10 @@ extension PDF.HTML.Context {
+             if let href = context.attributes["href"] {
+                 if href.hasPrefix("#") {
+                     context.link.currentInternalId = String(href.dropFirst())
++                    context.link.currentURL = nil
+                 } else {
+                     context.link.currentURL = href
++                    context.link.currentInternalId = nil
+                 }
+             }
+         }
+diff --git a/Sources/PDF HTML Rendering/PDF.HTML.Render.Result.swift b/Sources/PDF HTML Rendering/PDF.HTML.Render.Result.swift
+index ac29322..0c930a0 100644
+--- a/Sources/PDF HTML Rendering/PDF.HTML.Render.Result.swift	
++++ b/Sources/PDF HTML Rendering/PDF.HTML.Render.Result.swift	
+@@ -31,18 +31,26 @@ extension PDF.HTML {
+     ) -> PDF.HTML.Render.Result {
+         context.pdf.flush.inline()
+ 
+-        let resolvedPages = PDF.Context.resolveInternalLinks(
++        return PDF.HTML.Render.Result(
++            pages: resolvedPages(context: context),
++            headings: context.section.headings,
++            namedDestinations: context.link.destinations
++        )
++    }
++}
++
++extension PDF.HTML {
++
++    static func resolvedPages(
++        context: PDF.HTML.Context
++    ) -> [PDF.Page] {
++        PDF.Context.resolveInternalLinks(
+             pages: context.pdf.pages,
+             pendingLinks: context.pdf.link.pending,
+             namedDestinations: context.link.destinations.mapValues { dest in
+                 (pageNumber: dest.pageNumber, yPosition: dest.yPosition)
+             }
+         )
+-        return PDF.HTML.Render.Result(
+-            pages: resolvedPages,
+-            headings: context.section.headings,
+-            namedDestinations: context.link.destinations
+-        )
+     }
+ }
+ 
+diff --git a/Sources/PDF HTML Rendering/PDF.HTML.swift b/Sources/PDF HTML Rendering/PDF.HTML.swift
+index 9545ab5..ee6f7d2 100644
+--- a/Sources/PDF HTML Rendering/PDF.HTML.swift	
++++ b/Sources/PDF HTML Rendering/PDF.HTML.swift	
+@@ -55,7 +55,8 @@ extension PDF.HTML {
+ 
+         pass1State.value.pdf.flush.inline()
+ 
+-        let totalPages = pass1State.value.pdf.pages.count
++        let contentPages = resolvedPages(context: pass1State.value)
++        let totalPages = contentPages.count
+         let pageSectionTitles = pass1State.value.section.pageTitles
+ 
+         var finalPages: [PDF.Page] = []
+@@ -107,7 +108,7 @@ extension PDF.HTML {
+             footerRenderCtx.render(footer(pageInfo))
+             footerState.value.pdf.flush.inline()
+ 
+-            let contentPage = pass1State.value.pdf.pages[pageNumber - 1]
++            let contentPage = contentPages[pageNumber - 1]
+ 
+             var mergedContents: [PDF.ContentStream] = []
+             if let headerPage = headerState.value.pdf.pages.first {
+diff --git a/Tests/PDF HTML Rendering Tests/Internal Link Tests.swift b/Tests/PDF HTML Rendering Tests/Internal Link Tests.swift
+new file mode 100644
+index 0000000..78cd258
+--- /dev/null
++++ b/Tests/PDF HTML Rendering Tests/Internal Link Tests.swift	
+@@ -0,0 +1,68 @@
++import HTML_Rendering
++import PDF_Rendering
++import Testing
++
++@testable import PDF_HTML_Rendering
++
++enum `Internal Link Tests` {}
++
++extension `Internal Link Tests` {
++    @Suite
++    struct `Fragment Links` {
++
++        @Test
++        func `render resolves a fragment link to a destination, not a URI`() {
++            let result = PDF.HTML.render {
++                HTML.Paragraph.Element {
++                    HTML.Anchor.Element(href: "#target") { "Jump" }
++                }
++                HTML.Paragraph.Element { "Target" }
++                    .attribute("id", "target")
++            }
++
++            let links = Self.links(in: result.pages)
++            #expect(links.count == 1)
++            #expect(links.allSatisfy(Self.isDestination))
++        }
++
++        @Test
++        func `pages resolves a fragment link to a destination, not a URI`() {
++            let pages = PDF.HTML.pages {
++                HTML.Paragraph.Element {
++                    HTML.Anchor.Element(href: "#target") { "Jump" }
++                }
++                HTML.Paragraph.Element { "Target" }
++                    .attribute("id", "target")
++            }
++
++            let links = Self.links(in: pages)
++            #expect(links.count == 1)
++            #expect(links.allSatisfy(Self.isDestination))
++        }
++
++        @Test
++        func `an external link stays a URI`() {
++            let result = PDF.HTML.render {
++                HTML.Paragraph.Element {
++                    HTML.Anchor.Element(href: "https://example.com") { "Example" }
++                }
++            }
++
++            let links = Self.links(in: result.pages)
++            #expect(links.count == 1)
++            #expect(!links.contains(where: Self.isDestination))
++        }
++
++        private static func links(in pages: [PDF.Page]) -> [PDF.Annotation.Link] {
++            pages.flatMap(\.annotations).compactMap { annotation in
++                guard case .link(let link) = annotation.content else { return nil }
++                return link
++            }
++        }
++
++        private static func isDestination(_ link: PDF.Annotation.Link) -> Bool {
++            guard case .destination = link.target else { return false }
++            return true
++        }
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,160 @@
+From 3c446c1993af1ef72141e5dd2a09157a6ff928da Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:50 +0000
+Subject: [PATCH 4/5] Color.Parse accepts only 3, 4, 6 or 8 hex digits and
+ clamps rgb() components to 0...255 and alpha to 0...1 as CSS Color 4 does
+ (swift-w3c/swift-w3c-svg#11)
+
+---
+ .../W3C SVG/W3C_SVG2.Types.Color.Parse.swift  | 12 ++--
+ .../Number Exponent Bound Tests.swift         |  4 +-
+ .../W3C_SVG2.Types.Color.Parse Tests.swift    | 60 +++++++++++++++++++
+ 3 files changed, 70 insertions(+), 6 deletions(-)
+ create mode 100644 Tests/W3C SVG Tests/W3C_SVG2.Types.Color.Parse Tests.swift
+
+diff --git a/Sources/W3C SVG/W3C_SVG2.Types.Color.Parse.swift b/Sources/W3C SVG/W3C_SVG2.Types.Color.Parse.swift
+index 34d4024..217d6a4 100644
+--- a/Sources/W3C SVG/W3C_SVG2.Types.Color.Parse.swift	
++++ b/Sources/W3C SVG/W3C_SVG2.Types.Color.Parse.swift	
+@@ -27,6 +27,7 @@ extension W3C_SVG2.Types.Color.Parse: Parsing {
+         if first == 0x23 {
+             input = input[input.index(after: input.startIndex)...]
+             let hexStart = input.startIndex
++            var count = 0
+             while input.startIndex < input.endIndex {
+                 let byte = input[input.startIndex]
+                 let isHex =
+@@ -35,8 +36,9 @@ extension W3C_SVG2.Types.Color.Parse: Parsing {
+                     || (byte >= 0x61 && byte <= 0x66)
+                 guard isHex else { break }
+                 input = input[input.index(after: input.startIndex)...]
++                count += 1
+             }
+-            guard hexStart < input.startIndex else { throw .invalidHex }
++            guard count == 3 || count == 4 || count == 6 || count == 8 else { throw .invalidHex }
+             return .hex(input[hexStart..<input.startIndex])
+         }
+ 
+@@ -138,12 +140,13 @@ extension W3C_SVG2.Types.Color.Parse: Parsing {
+             try Self._expectComma(&input)
+             Self._skipWS(&input)
+ 
+-            let a: Double
++            let alpha: Double
+             do throws(W3C_SVG2.Parse.Number<Input>.Failure) {
+-                a = try W3C_SVG2.Parse.Number<Input>().parse(&input)
++                alpha = try W3C_SVG2.Parse.Number<Input>().parse(&input)
+             } catch {
+                 throw .expectedNumber
+             }
++            let a = Swift.min(Swift.max(alpha, 0), 1)
+ 
+             Self._skipWS(&input)
+             guard input.startIndex < input.endIndex,
+@@ -167,6 +170,7 @@ extension W3C_SVG2.Types.Color.Parse: Parsing {
+         return .rgb(r: r, g: g, b: b)
+     }
+ 
++    /// Parses an `rgb()` component, clamped to 0...255 as CSS Color 4 clamps out-of-range values.
+     @inlinable
+     package static func _parseInt(_ input: inout Input) throws(Failure) -> Int {
+         var value = 0
+@@ -181,7 +185,7 @@ extension W3C_SVG2.Types.Color.Parse: Parsing {
+             digits += 1
+         }
+         guard digits > 0 else { throw .expectedNumber }
+-        return value
++        return Swift.min(value, 255)
+     }
+ 
+     @inlinable
+diff --git a/Tests/W3C SVG Tests/Number Exponent Bound Tests.swift b/Tests/W3C SVG Tests/Number Exponent Bound Tests.swift
+index 454798b..5d43511 100644
+--- a/Tests/W3C SVG Tests/Number Exponent Bound Tests.swift	
++++ b/Tests/W3C SVG Tests/Number Exponent Bound Tests.swift	
+@@ -87,14 +87,14 @@ extension `Number Exponent Bound Tests` {
+         }
+ 
+         @Test
+-        func `an rgb component longer than Int saturates instead of wrapping`() throws {
++        func `an rgb component longer than Int clamps to 255 instead of wrapping`() throws {
+             var input = ByteSlice("rgb(99999999999999999999999, 0, 0)")
+             let color = try W3C_SVG2.Types.Color.Parse<ByteSlice>().parse(&input)
+             guard case .rgb(let r, let g, let b) = color else {
+                 Issue.record("expected an rgb color, got \(color)")
+                 return
+             }
+-            #expect(r == Int.max)
++            #expect(r == 255)
+             #expect(g == 0 && b == 0)
+         }
+     }
+diff --git a/Tests/W3C SVG Tests/W3C_SVG2.Types.Color.Parse Tests.swift b/Tests/W3C SVG Tests/W3C_SVG2.Types.Color.Parse Tests.swift
+new file mode 100644
+index 0000000..50ef147
+--- /dev/null
++++ b/Tests/W3C SVG Tests/W3C_SVG2.Types.Color.Parse Tests.swift	
+@@ -0,0 +1,60 @@
++import Testing
++
++@testable import W3C_SVG
++
++enum `W3C_SVG2.Types.Color.Parse Tests` {}
++
++extension `W3C_SVG2.Types.Color.Parse Tests` {
++    @Suite
++    struct `Hex and rgb colors` {
++        private static func parse(
++            _ text: String
++        ) throws(W3C_SVG2.Types.Color.Parse<ByteSlice>.Failure) -> W3C_SVG2.Types.Color.Parse<ByteSlice>.Output {
++            var input = ByteSlice(text)
++            return try W3C_SVG2.Types.Color.Parse<ByteSlice>().parse(&input)
++        }
++
++        @Test
++        func `hex colors of 3, 4, 6 and 8 digits are accepted`() throws {
++            for text in ["#abc", "#abcd", "#aabbcc", "#aabbccdd"] {
++                guard case .hex(let digits) = try Self.parse(text) else {
++                    Issue.record("expected a hex color for \(text)")
++                    continue
++                }
++                #expect(digits.end - digits.start == text.utf8.count - 1)
++            }
++        }
++
++        @Test
++        func `hex colors of other lengths are refused`() {
++            for text in ["#", "#a", "#ab", "#abcde", "#abcdeff", "#aabbccddee"] {
++                #expect(throws: W3C_SVG2.Types.Color.Parse<ByteSlice>.Error.invalidHex) {
++                    try Self.parse(text)
++                }
++            }
++        }
++
++        @Test
++        func `out-of-range rgb components are clamped`() throws {
++            guard case .rgb(let r, let g, let b) = try Self.parse("rgb(300, 255, 0)") else {
++                Issue.record("expected an rgb color")
++                return
++            }
++            #expect(r == 255 && g == 255 && b == 0)
++        }
++
++        @Test
++        func `out-of-range alpha is clamped to 0 through 1`() throws {
++            guard case .rgba(_, _, _, let high) = try Self.parse("rgba(0, 0, 0, 2.5)") else {
++                Issue.record("expected an rgba color")
++                return
++            }
++            #expect(high == 1)
++            guard case .rgba(_, _, _, let low) = try Self.parse("rgba(0, 0, 0, -1)") else {
++                Issue.record("expected an rgba color")
++                return
++            }
++            #expect(low == 0)
++        }
++    }
++}
+-- 
+2.43.0
+

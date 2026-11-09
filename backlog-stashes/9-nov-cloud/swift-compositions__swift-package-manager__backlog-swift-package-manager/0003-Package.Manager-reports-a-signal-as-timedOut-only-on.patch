@@ -1,0 +1,121 @@
+From ebb2e8df564e1b8579c311fcb2d0ed08c82a050c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:21 +0000
+Subject: [PATCH 3/4] Package.Manager reports a signal as timedOut only once
+ the timeout has elapsed, and as command for a signal from elsewhere
+ (swift-compositions/swift-package-manager#15)
+
+---
+ Sources/Package Manager/Package.Manager.swift | 18 +++++++++++---
+ .../Package.Manager.Evaluation Tests.swift    | 24 +++++++++++++++++++
+ 2 files changed, 39 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/Package Manager/Package.Manager.swift b/Sources/Package Manager/Package.Manager.swift
+index eb30226..18e5459 100644
+--- a/Sources/Package Manager/Package.Manager.swift	
++++ b/Sources/Package Manager/Package.Manager.swift	
+@@ -90,6 +90,7 @@ extension Package.Manager {
+         }
+         arguments.append("dump-package")
+         let output: Process.Output
++        let started = ContinuousClock.now
+         do throws(Process.Error) {
+             output = try Process.Spawn.run(
+                 .init(
+@@ -105,7 +106,7 @@ extension Package.Manager {
+             throw .execution
+         }
+ 
+-        if case .signaled = output.status {
++        if Self.expired(output.status, since: started, timeout: timeout) {
+             throw .timedOut(directory: directory.path.string)
+         }
+         guard output.status == .exited(code: 0) else {
+@@ -125,6 +126,15 @@ extension Package.Manager {
+         }
+     }
+ 
++    internal static func expired(
++        _ status: Process.Status,
++        since started: ContinuousClock.Instant,
++        timeout: Swift.Duration
++    ) -> Swift.Bool {
++        guard case .signaled = status else { return false }
++        return started.duration(to: ContinuousClock.now) >= timeout
++    }
++
+     internal func termination(_ status: Process.Status) -> Termination {
+         switch status {
+         case .exited(let code): .exited(code: code)
+@@ -169,6 +179,7 @@ extension Package.Manager {
+         timeout: Swift.Duration
+     ) throws(Error) {
+         let output: Process.Output
++        let started = ContinuousClock.now
+         do throws(Process.Error) {
+             output = try Process.Spawn.run(
+                 .init(
+@@ -184,7 +195,7 @@ extension Package.Manager {
+             throw .execution
+         }
+ 
+-        if case .signaled = output.status {
++        if Self.expired(output.status, since: started, timeout: timeout) {
+             let stderr = output.stderr ?? []
+             throw Self.waiting(onLockIn: stderr)
+                 ? .locked(directory: directory.path.string)
+@@ -433,6 +444,7 @@ extension Package.Manager {
+         timeout: Swift.Duration
+     ) throws(Error) -> [Byte] {
+         let output: Process.Output
++        let started = ContinuousClock.now
+         do throws(Process.Error) {
+             output = try Process.Spawn.run(
+                 .init(
+@@ -446,7 +458,7 @@ extension Package.Manager {
+         } catch {
+             throw .execution
+         }
+-        if case .signaled = output.status {
++        if Self.expired(output.status, since: started, timeout: timeout) {
+             throw .timedOut(directory: executable)
+         }
+         guard output.status == .exited(code: 0) else {
+diff --git a/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift b/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift
+index e96f6aa..9dead17 100644
+--- a/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift	
++++ b/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift	
+@@ -209,6 +209,30 @@ extension `Package.Manager Tests` {
+                         )
+                     }
+                 }
++
++                @Test
++                func `a signal sent before the bound is a command failure, not a timeout`() throws {
++                    let fixture = try Self.fixture()
++                    defer { EvaluationFixture.remove(fixture.root) }
++                    let executable = fixture.root + "/terminate"
++                    try EvaluationFixture.executable(
++                        at: executable,
++                        script: "#!/bin/sh\nkill -TERM $$\n"
++                    )
++
++                    #expect(
++                        throws: Package.Manager.Error.command(
++                            termination: .signaled(signal: 15),
++                            stderr: []
++                        )
++                    ) {
++                        _ = try Package.Manager(executable: executable).evaluation(
++                            at: try File.Directory(validating: fixture.package),
++                            timeout: .seconds(120),
++                            scratch: fixture.scratch
++                        )
++                    }
++                }
+             #endif
+ 
+             @Test
+-- 
+2.43.0
+

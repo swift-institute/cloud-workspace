@@ -1,0 +1,140 @@
+From 8b0ea2d5b0cee9e71e4f025581b5579cfc9e81af Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:34 +0000
+Subject: [PATCH 4/4] Package.Manager.catalog digests and change-checks
+ version-specific manifests along with Package.swift
+ (swift-compositions/swift-package-manager#15)
+
+---
+ Sources/Package Manager/Package.Manager.swift | 37 +++++++++++++-
+ ....Manager.Evaluation Tests+Foundation.swift |  4 ++
+ .../Package.Manager.Evaluation Tests.swift    | 48 +++++++++++++++++++
+ 3 files changed, 88 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/Package Manager/Package.Manager.swift b/Sources/Package Manager/Package.Manager.swift
+index 18e5459..5c3c254 100644
+--- a/Sources/Package Manager/Package.Manager.swift	
++++ b/Sources/Package Manager/Package.Manager.swift	
+@@ -61,9 +61,44 @@ extension Package.Manager {
+ 
+     private func manifestSource(
+         at directory: File.Directory
++    ) throws(Error) -> [Byte] {
++        var source = try contents(of: directory[file: "Package.swift"], in: directory)
++        for manifest in try versionedManifests(in: directory) {
++            source.append(Byte(bitPattern: 0))
++            source.append(contentsOf: [Byte](utf8: manifest.name))
++            source.append(Byte(bitPattern: 0))
++            source.append(contentsOf: try contents(of: File(manifest.path), in: directory))
++        }
++        return source
++    }
++
++    private func versionedManifests(
++        in directory: File.Directory
++    ) throws(Error) -> [(name: Swift.String, path: File.Path)] {
++        let entries: [File.Directory.Entry]
++        do throws(File.Directory.Contents.Error) {
++            entries = try File.Directory.Contents.list(at: directory)
++        } catch {
++            throw .manifestUnavailable(directory: directory.path.string)
++        }
++        return
++            entries
++            .compactMap { entry -> (name: Swift.String, path: File.Path)? in
++                guard let name = Swift.String(entry.name), name != "Package.swift",
++                    Package.Manifest.Identity.Conflict.isRootManifest(name),
++                    let path = entry.pathIfValid
++                else { return nil }
++                return (name, path)
++            }
++            .sorted { $0.name < $1.name }
++    }
++
++    private func contents(
++        of file: File,
++        in directory: File.Directory
+     ) throws(Error) -> [Byte] {
+         do throws(Either<File.System.Read.Full.Error, Never>) {
+-            return try directory[file: "Package.swift"].read.full { bytes in
++            return try file.read.full { bytes in
+                 var source = [Byte]()
+                 source.reserveCapacity(bytes.count)
+                 for index in bytes.indices {
+diff --git a/Tests/Package Manager Tests/Package.Manager.Evaluation Tests+Foundation.swift b/Tests/Package Manager Tests/Package.Manager.Evaluation Tests+Foundation.swift
+index d5eb573..eaa963e 100644
+--- a/Tests/Package Manager Tests/Package.Manager.Evaluation Tests+Foundation.swift	
++++ b/Tests/Package Manager Tests/Package.Manager.Evaluation Tests+Foundation.swift	
+@@ -26,6 +26,10 @@ enum EvaluationFixture {
+         FileManager.default.fileExists(atPath: path)
+     }
+ 
++    static func write(_ text: Swift.String, to path: Swift.String) throws {
++        try Data(text.utf8).write(to: URL(fileURLWithPath: path))
++    }
++
+     static func executable(at path: Swift.String, script: Swift.String) throws {
+         try Data(script.utf8).write(to: URL(fileURLWithPath: path))
+         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+diff --git a/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift b/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift
+index 9dead17..73021bb 100644
+--- a/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift	
++++ b/Tests/Package Manager Tests/Package.Manager.Evaluation Tests.swift	
+@@ -249,6 +249,54 @@ extension `Package.Manager Tests` {
+                 #expect(catalog.toolchain.count == 64)
+                 #expect(catalog.evaluation.name == "fixture")
+             }
++
++            @Test
++            func `catalog digest covers version-specific manifests`() throws {
++                let fixture = try Self.fixture()
++                defer { EvaluationFixture.remove(fixture.root) }
++                let directory = try File.Directory(validating: fixture.package)
++
++                let bare = try Package.Manager().catalog(at: directory, scratch: fixture.scratch)
++                try EvaluationFixture.write(
++                    """
++                    // swift-tools-version: 6.4
++                    import PackageDescription
++
++                    let package = Package(name: "fixture")
++                    """,
++                    to: fixture.package + "/Package@swift-6.4.swift"
++                )
++                let versioned = try Package.Manager().catalog(at: directory, scratch: fixture.scratch)
++
++                #expect(bare.manifest != versioned.manifest)
++            }
++
++            #if !os(Windows)
++                @Test
++                func `catalog fails when the manifest changes during evaluation`() throws {
++                    let fixture = try Self.fixture()
++                    defer { EvaluationFixture.remove(fixture.root) }
++                    let executable = fixture.root + "/touching"
++                    try EvaluationFixture.executable(
++                        at: executable,
++                        script: """
++                            #!/bin/sh
++                            if [ "$1" = package ]; then echo "// changed" >> Package.swift; fi
++                            exec swift "$@"
++
++                            """
++                    )
++
++                    #expect(
++                        throws: Package.Manager.Error.manifestChanged(directory: fixture.package)
++                    ) {
++                        _ = try Package.Manager(executable: executable).catalog(
++                            at: try File.Directory(validating: fixture.package),
++                            scratch: fixture.scratch
++                        )
++                    }
++                }
++            #endif
+         }
+ 
+         @Suite(
+-- 
+2.43.0
+

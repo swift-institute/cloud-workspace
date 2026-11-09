@@ -1,0 +1,146 @@
+From bb86663c7c53f7f121df51533ffd929191d386ae Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:55 +0000
+Subject: [PATCH 2/4] An isolated spawn resets every signal disposition and
+ clears the signal mask on Linux too, as on Darwin, instead of being a plain
+ posix_spawn (swift-iso/swift-iso-9945#92)
+
+---
+ README.md                                     |  2 +-
+ Sources/ISO 9945 Process Shims/include/shim.h | 15 ++---
+ ...5.Kernel.Process.Spawn.Actions Tests.swift | 58 +++++++++++++++++++
+ 3 files changed, 64 insertions(+), 11 deletions(-)
+
+diff --git a/README.md b/README.md
+index ce26ddb..c5e2dde 100644
+--- a/README.md
++++ b/README.md
+@@ -19,7 +19,7 @@ Use this package when you need to make POSIX system calls from Swift on macOS or
+ - `ISO_9945.Kernel.Thread.Condition.wait(mutex:timeout:)` returns false only when the timeout passes. Any other wakeup, spurious ones included, returns true, so check your condition again. The timeout is measured as elapsed time on both platforms, so a wall clock change does not stretch or cut it.
+ - `ISO_9945.Kernel.Signal.Send.toGroup(_:pgid:)` refuses process group 1 with EINVAL, since that would signal every process. `ISO_9945.Kernel.Process.Wait.wait(_:options:)` returns nil only when you asked not to hang and no child has changed state.
+ - An `ISO_9945.Kernel.Signal.Action.Handler.customInfo` handler is always installed with SA_SIGINFO and an `ISO_9945.Kernel.Signal.Action.Handler.custom` handler never is, whatever flags you give `ISO_9945.Kernel.Signal.Action.Configuration`. `ISO_9945.Kernel.Signal.Information.sender` is nil unless the signal came from kill or sigqueue or is a SIGCHLD about a child. `ISO_9945.Kernel.Signal.Information.fault` is set only for SIGSEGV, SIGBUS, SIGILL and SIGFPE raised by a fault.
+-- Descriptor isolation for spawned processes differs by platform. On Linux, `ISO_9945.Kernel.Process.Spawn.Actions.isolate()` closes every descriptor from 3 up in the child, and spawning with `isolated: true` changes nothing. On Darwin, `isolated: true` passes the child only the descriptors the actions set up, resets every signal to its default and clears the signal mask, and `isolate()` adds standard input, output and error. With musl or glibc before 2.34, `isolate()` returns false.
++- Spawning with `isolated: true` resets every signal to its default and clears the signal mask on every platform. Descriptor isolation needs `ISO_9945.Kernel.Process.Spawn.Actions.isolate()` as well: together the child gets standard input, output and error and the descriptors the actions set up, and nothing else. On Darwin, `isolated: true` alone also withholds standard input, output and error; on Linux, `isolate()` alone closes every descriptor from 3 up. With musl or glibc before 2.34, `isolate()` returns false.
+ - `ISO_9945.Kernel.Environment.set(_:to:overwrite:)` and `ISO_9945.Kernel.Environment.unset(_:)` refuse an empty name or a name containing `=` before calling the C library. `ISO_9945.Kernel.Environment.entries()` skips entries that have no `=`.
+ - `ISO_9945.Kernel.User.Database` and `ISO_9945.Kernel.Group.Database` lookups return nil when there is no such entry and throw only when the lookup itself fails. `ISO_9945.Kernel.User.Login.name()` returns nil when the process has no controlling terminal.
+ - Reading a symbolic link's target starts with a 256-byte buffer and doubles it up to 64 KiB. A longer target fails as too long for the buffer. The working directory is read the same way, from 4 KiB up to 1 MiB.
+diff --git a/Sources/ISO 9945 Process Shims/include/shim.h b/Sources/ISO 9945 Process Shims/include/shim.h
+index 36443d6..fea48ee 100644
+--- a/Sources/ISO 9945 Process Shims/include/shim.h	
++++ b/Sources/ISO 9945 Process Shims/include/shim.h	
+@@ -265,7 +265,7 @@ static inline int swift_posix_spawn_isolated(
+     (void)argv;
+     (void)envp;
+     return ENOSYS;
+-#elif defined(__APPLE__)
++#else
+     posix_spawnattr_t attributes;
+     int rc = posix_spawnattr_init(&attributes);
+     if (rc != 0) {
+@@ -282,7 +282,11 @@ static inline int swift_posix_spawn_isolated(
+         rc = posix_spawnattr_setsigmask(&attributes, &mask);
+     }
+     if (rc == 0) {
++#if defined(__APPLE__)
+         rc = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
++#else
++        rc = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
++#endif
+     }
+     if (rc == 0) {
+         rc = posix_spawn(
+@@ -296,15 +300,6 @@ static inline int swift_posix_spawn_isolated(
+     }
+     int destroyed = posix_spawnattr_destroy(&attributes);
+     return rc != 0 ? rc : destroyed;
+-#else
+-    return posix_spawn(
+-        pid,
+-        path,
+-        (const posix_spawn_file_actions_t *)file_actions,
+-        NULL,
+-        (char *const *)argv,
+-        (char *const *)envp
+-    );
+ #endif
+ }
+ 
+diff --git a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift
+index bd6d274..39692b1 100644
+--- a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift	
++++ b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift	
+@@ -2,6 +2,12 @@
+ 
+     import Testing
+     import Path
++
++    #if canImport(Darwin)
++        import Darwin
++    #elseif canImport(Glibc)
++        import Glibc
++    #endif
+     @testable import ISO_9945_Kernel
+ 
+     @Suite
+@@ -144,6 +150,58 @@
+             let result = try ISO_9945.Kernel.Process.Wait.wait(.process(pid))
+             #expect(result?.status.exit.code == 0)
+         }
++
++        private func shellExitCode(
++            _ script: Swift::String,
++            actions: borrowing ISO_9945.Kernel.Process.Spawn.Actions,
++            isolated: Bool
++        ) throws -> Int32? {
++            let argv: [Swift::String] = ["/bin/sh", "-c", script]
++            let envp: [Swift::String] = []
++            let pid: ISO_9945.Kernel.Process.ID = try unsafe Path.scope.array(argv, envp) {
++                (
++                    argvPtr: UnsafePointer<UnsafePointer<Path.Char>?>,
++                    envpPtr: UnsafePointer<UnsafePointer<Path.Char>?>
++                ) throws(ISO_9945.Kernel.Process.Error) -> ISO_9945.Kernel.Process.ID in
++                try unsafe ISO_9945.Kernel.Process.Spawn.spawn(
++                    path: argvPtr[0]!,
++                    argv: argvPtr,
++                    envp: envpPtr,
++                    actions: actions,
++                    isolated: isolated
++                )
++            }
++            let result = try ISO_9945.Kernel.Process.Wait.wait(.process(pid))
++            return result?.status.exit.code
++        }
++
++        @Test
++        func `an isolated spawn keeps a stray descriptor from the child`() throws {
++            let pipe = try ISO_9945.Kernel.Pipe.pipe()
++            let script = "[ -e /dev/fd/\(pipe.read._raw) ]"
++
++            let plain = try ISO_9945.Kernel.Process.Spawn.Actions()
++            #expect(try shellExitCode(script, actions: plain, isolated: false) == 0)
++
++            var actions = try ISO_9945.Kernel.Process.Spawn.Actions()
++            guard try actions.isolate() else { return }
++            #expect(try shellExitCode(script, actions: actions, isolated: true) == 1)
++        }
++
++        @Test
++        func `an isolated spawn clears the signal mask`() throws {
++            var blocked = sigset_t()
++            var previous = sigset_t()
++            sigemptyset(&blocked)
++            sigaddset(&blocked, SIGUSR1)
++            pthread_sigmask(SIG_BLOCK, &blocked, &previous)
++            defer { pthread_sigmask(SIG_SETMASK, &previous, nil) }
++
++            let script = "kill -USR1 $$; exit 0"
++            let actions = try ISO_9945.Kernel.Process.Spawn.Actions()
++            #expect(try shellExitCode(script, actions: actions, isolated: false) == 0)
++            #expect(try shellExitCode(script, actions: actions, isolated: true) == nil)
++        }
+     }
+ 
+ #endif
+-- 
+2.43.0
+

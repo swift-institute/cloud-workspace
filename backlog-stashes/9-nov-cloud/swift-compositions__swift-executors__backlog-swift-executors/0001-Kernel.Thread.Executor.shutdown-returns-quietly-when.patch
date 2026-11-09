@@ -1,0 +1,85 @@
+From 18bca533612ad51e2f49a35d5ed38fae6157fcf4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:27 +0000
+Subject: [PATCH 1/3] Kernel.Thread.Executor.shutdown() returns quietly when
+ called again instead of trapping, like the other executors
+ (swift-compositions/swift-executors#15)
+
+---
+ README.md                                                 | 2 +-
+ Sources/Executors/Kernel.Thread.Executor.swift            | 6 +-----
+ Tests/Executor Tests/Kernel.Thread.Executor Tests.swift   | 8 ++++++++
+ .../Kernel.Thread.Executor.Sharded Tests.swift            | 8 ++++++++
+ 4 files changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/README.md b/README.md
+index 6bca540..2909ef0 100644
+--- a/README.md
++++ b/README.md
+@@ -7,7 +7,7 @@ Use this package when Swift concurrency work must run on threads you control: an
+ - Each `Kernel.Thread` executor starts its thread when it is created. `Executor.Cooperative` has no thread of its own and runs jobs only while some thread is inside `Executor.Cooperative.run()` or `Executor.Cooperative.runUntil(_:)`.
+ - `Kernel.Thread.Executor` runs jobs one at a time in the order they were enqueued.
+ - After `shutdown()` is called, an executor with its own thread still runs every job already queued, and jobs enqueued while it drains, before its thread exits. A job enqueued after the thread has exited runs at once on the caller's thread, so it never hangs.
+-- `shutdown()` waits for the executor's thread to finish, except when called from that thread, where it detaches instead. Calling `Kernel.Thread.Executor.shutdown()` a second time traps, and so does a second `Kernel.Thread.Executor.Sharded.shutdown()`.
++- `shutdown()` waits for the executor's thread to finish, except when called from that thread, where it detaches instead. Calling `shutdown()` again on any of these executors does nothing.
+ - `runtime` is `.running` until shutdown starts, `.draining` while queued jobs still run, and `.terminated` once the thread has exited. A sharded pool is `.running` while any shard is.
+ - `Kernel.Thread.Executor.Sharded` and `Kernel.Thread.Executor.Stealing` default to four threads, or fewer when the machine has fewer logical CPUs.
+ - `Kernel.Thread.Executor.Sharded.next()` hands out the shards in turn. `Kernel.Thread.Executor.Sharded.executor(at:)` wraps the index around the shard count.
+diff --git a/Sources/Executors/Kernel.Thread.Executor.swift b/Sources/Executors/Kernel.Thread.Executor.swift
+index 2b6aea7..363b139 100644
+--- a/Sources/Executors/Kernel.Thread.Executor.swift
++++ b/Sources/Executors/Kernel.Thread.Executor.swift
+@@ -135,11 +135,7 @@ extension Kernel.Thread.Executor {
+ extension Kernel.Thread.Executor {
+ 
+     public func shutdown() {
+-        guard let handle = threadHandle.take() else {
+-            preconditionFailure(
+-                "Kernel.Thread.Executor.shutdown() called on already-shutdown or never-started executor"
+-            )
+-        }
++        guard let handle = threadHandle.take() else { return }
+ 
+         wait.withLock {
+             _shutdown.set()
+diff --git a/Tests/Executor Tests/Kernel.Thread.Executor Tests.swift b/Tests/Executor Tests/Kernel.Thread.Executor Tests.swift
+index 1631141..04a2771 100644
+--- a/Tests/Executor Tests/Kernel.Thread.Executor Tests.swift	
++++ b/Tests/Executor Tests/Kernel.Thread.Executor Tests.swift	
+@@ -39,6 +39,14 @@ extension Kernel.Thread.Executor.Test.Unit {
+         executor.shutdown()
+ 
+     }
++
++    @Test
++    func `second shutdown does nothing`() {
++        let executor = Kernel.Thread.Executor()
++        executor.shutdown()
++        executor.shutdown()
++        #expect(executor.runtime == .terminated)
++    }
+ }
+ 
+ extension Kernel.Thread.Executor.Test.`Edge Case` {
+diff --git a/Tests/Executor Tests/Kernel.Thread.Executor.Sharded Tests.swift b/Tests/Executor Tests/Kernel.Thread.Executor.Sharded Tests.swift
+index cf5384f..05273f6 100644
+--- a/Tests/Executor Tests/Kernel.Thread.Executor.Sharded Tests.swift	
++++ b/Tests/Executor Tests/Kernel.Thread.Executor.Sharded Tests.swift	
+@@ -64,6 +64,14 @@ extension Kernel.Thread.Executor.Sharded.Test.Unit {
+ 
+     }
+ 
++    @Test
++    func `second shutdown does nothing`() {
++        let pool = Kernel.Thread.Executor.Sharded(.init(count: 2))
++        pool.shutdown()
++        pool.shutdown()
++        #expect(pool.runtime == .terminated)
++    }
++
+     @Test
+     func `priorityTracking defaults to false`() {
+         let options = Kernel.Thread.Executor.Sharded.Options(count: 2)
+-- 
+2.43.0
+

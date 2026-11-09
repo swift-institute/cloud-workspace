@@ -1,0 +1,74 @@
+From f45ab1c057122785d9eec3c5ca51fba95882aba3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:46 +0000
+Subject: [PATCH] EmailAddress.matches(_:) folds only the case of the domain
+ and compares the local part exactly, as RFC 5321 treats it as case-sensitive
+ (swift-standards/swift-emailaddress-standard#10)
+
+---
+ README.md                                     |  2 +-
+ .../EmailAddress Standard/EmailAddress.swift  |  5 ++++-
+ .../EmailAddress Tests.swift                  | 20 +++++++++++++++++++
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index aa25ece..4787867 100644
+--- a/README.md
++++ b/README.md
+@@ -6,6 +6,6 @@ Use this package when you need one email address type that accepts international
+ 
+ - An `EmailAddress` is stored as an RFC 6531 mailbox, so any address RFC 6531 accepts, including non-ASCII local parts, can be held.
+ - `EmailAddress.rfc5321` and `EmailAddress.rfc5322` are set only for ASCII addresses. For an internationalized address both are nil, and converting it to `RFC_5321.EmailAddress` or `RFC_5322.Mailbox` throws.
+-- Equality includes the display name. `EmailAddress.matches(_:)` compares only the addresses, ignoring the display name and the case of the whole address, local part included.
++- Equality includes the display name. `EmailAddress.matches(_:)` compares only the addresses, ignoring the display name and the case of the domain; the local part is compared exactly, as RFC 5321 leaves its case to the receiving host.
+ - An `RFC_2822.AddrSpec` has no display name, so converting through it drops the display name.
+ - With `EmailAddress Foundation Integration`, an address encodes as its mailbox text, such as `user@example.com`, or with the display name first and the address in angle brackets. Decoding reads the same forms.
+diff --git a/Sources/EmailAddress Standard/EmailAddress.swift b/Sources/EmailAddress Standard/EmailAddress.swift
+index dc2f19e..6ae362d 100644
+--- a/Sources/EmailAddress Standard/EmailAddress.swift	
++++ b/Sources/EmailAddress Standard/EmailAddress.swift	
+@@ -67,8 +67,11 @@ extension EmailAddress {
+ 
+ extension EmailAddress {
+ 
++    /// Whether both name the same mailbox, ignoring the display name. The domain is compared
++    /// case-insensitively; the local part exactly, as RFC 5321 section 2.4 leaves its case to the host.
+     public func matches(_ other: EmailAddress) -> Bool {
+-        canonical.address.lowercased() == other.canonical.address.lowercased()
++        canonical.localPart == other.canonical.localPart
++            && canonical.domain.name.lowercased() == other.canonical.domain.name.lowercased()
+     }
+ }
+ 
+diff --git a/Tests/EmailAddress Standard Tests/EmailAddress Tests.swift b/Tests/EmailAddress Standard Tests/EmailAddress Tests.swift
+index 1044443..a4807d1 100644
+--- a/Tests/EmailAddress Standard Tests/EmailAddress Tests.swift	
++++ b/Tests/EmailAddress Standard Tests/EmailAddress Tests.swift	
+@@ -113,4 +113,24 @@ struct `EmailAddress Tests` {
+         #expect(named.matches(plain))
+         #expect(named != plain)
+     }
++
++    @Test
++    func `email addresses match when only the case of the domain differs`() throws {
++        let localPart = try RFC_6531.Mailbox.LocalPart("john.doe")
++
++        let lower = EmailAddress(localPart: localPart, domain: try RFC_1123.Domain("example.com"))
++        let upper = EmailAddress(localPart: localPart, domain: try RFC_1123.Domain("EXAMPLE.COM"))
++
++        #expect(lower.matches(upper))
++    }
++
++    @Test
++    func `email addresses do not match when the case of the local part differs`() throws {
++        let domain = try RFC_1123.Domain("example.com")
++
++        let lower = EmailAddress(localPart: try RFC_6531.Mailbox.LocalPart("john.doe"), domain: domain)
++        let upper = EmailAddress(localPart: try RFC_6531.Mailbox.LocalPart("John.Doe"), domain: domain)
++
++        #expect(!lower.matches(upper))
++    }
+ }
+-- 
+2.43.0
+

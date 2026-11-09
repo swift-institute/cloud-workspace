@@ -1,0 +1,207 @@
+From d3125d7d1f873ec3abcf5c335ec446076395be4f Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:33:17 +0000
+Subject: [PATCH] YAML.Representation.Graph refuses a mapping whose keys repeat
+ a node or an equal node, as YAML 1.2 requires
+ (swift-standards/swift-yaml-standard#3)
+
+---
+ README.md                                     |  4 +-
+ .../YAML.Representation.Graph.Error.swift     |  2 +
+ .../YAML.Representation.Graph.swift           | 65 +++++++++++++++++
+ ....Representation.Graph Boundary Tests.swift | 73 +++++++++++++++++++
+ 4 files changed, 142 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 9a49c84..c5c693d 100644
+--- a/README.md
++++ b/README.md
+@@ -6,5 +6,5 @@ Use this package when you are writing a YAML 1.2 parser, composer or emitter and
+ 
+ - Nodes refer to each other by identifier, not by containment. A node can appear more than once in a collection and a collection can contain itself, and the graph keeps both as given.
+ - `YAML.Representation.Graph.Builder.reserve()` hands out an identifier before its node exists, so a node can refer to one defined later. Every reserved identifier must be defined exactly once: a second definition is refused, and `YAML.Representation.Graph.Builder.finalize(root:)` refuses a reserved identifier that was never defined.
+-- An identifier is only a position. Building a graph checks that the root and every sequence element, mapping key and mapping value is a position inside the graph, and nothing more. An identifier from another builder is refused only when its position is out of range.
+-- A mapping keeps its entries in the order given. It doesn't check that keys are unique, and the same node may be both key and value.
++- An identifier is only a position. Building a graph checks that the root and every sequence element, mapping key and mapping value is a position inside the graph, and that no mapping repeats a key. An identifier from another builder is refused only when its position is out of range.
++- A mapping keeps its entries in the order given. Its keys are unique, as YAML 1.2 requires: two keys that are the same node, or nodes with the same tag and equal content, throw `YAML.Representation.Graph.Error.duplicateKey(_:)`. Scalars are compared by their text, not by a schema's canonical form. The same node may be both key and value.
+diff --git a/Sources/YAML Standard/YAML.Representation.Graph.Error.swift b/Sources/YAML Standard/YAML.Representation.Graph.Error.swift
+index 2c25dfe..9a337cc 100644
+--- a/Sources/YAML Standard/YAML.Representation.Graph.Error.swift	
++++ b/Sources/YAML Standard/YAML.Representation.Graph.Error.swift	
+@@ -8,5 +8,7 @@ extension YAML.Representation.Graph {
+         case invalidReference
+         case incompleteNode(YAML.Representation.Node.Identifier)
+         case duplicateDefinition(YAML.Representation.Node.Identifier)
++        /// A mapping has two keys that are the same node, or equal nodes (YAML 1.2.2 §3.2.1.1).
++        case duplicateKey(YAML.Representation.Node.Identifier)
+     }
+ }
+diff --git a/Sources/YAML Standard/YAML.Representation.Graph.swift b/Sources/YAML Standard/YAML.Representation.Graph.swift
+index ea56462..57b0c8c 100644
+--- a/Sources/YAML Standard/YAML.Representation.Graph.swift	
++++ b/Sources/YAML Standard/YAML.Representation.Graph.swift	
+@@ -27,6 +27,15 @@ extension YAML.Representation {
+                     else { throw .invalidReference }
+                 }
+             }
++            for node in nodes {
++                guard case .mapping(let entries) = node.kind else { continue }
++                for (position, entry) in entries.enumerated() {
++                    for earlier in entries[..<position]
++                    where Self.equal(earlier.key, entry.key, in: nodes) {
++                        throw .duplicateKey(entry.key)
++                    }
++                }
++            }
+             var builder = Graph::Graph.Sequential<Node, Node>.Builder()
+             for node in nodes {
+                 _ = builder.allocate(node)
+@@ -37,6 +46,62 @@ extension YAML.Representation {
+     }
+ }
+ 
++extension YAML.Representation.Graph {
++    private static func equal(
++        _ left: Node.Identifier,
++        _ right: Node.Identifier,
++        in nodes: [Node]
++    ) -> Bool {
++        var assumed: [(Node.Identifier, Node.Identifier)] = []
++        return equal(left, right, in: nodes, assuming: &assumed)
++    }
++
++    private static func equal(
++        _ left: Node.Identifier,
++        _ right: Node.Identifier,
++        in nodes: [Node],
++        assuming assumed: inout [(Node.Identifier, Node.Identifier)]
++    ) -> Bool {
++        if left == right || assumed.contains(where: { $0.0 == left && $0.1 == right }) {
++            return true
++        }
++        guard let first = left.value(in: nodes), let second = right.value(in: nodes),
++            first.tag == second.tag
++        else {
++            return false
++        }
++        let mark = assumed.count
++        assumed.append((left, right))
++        let result: Bool
++        switch (first.kind, second.kind) {
++        case (.scalar(let a), .scalar(let b)):
++            result = a == b
++
++        case (.sequence(let a), .sequence(let b)):
++            result =
++                a.count == b.count
++                && zip(a, b).allSatisfy { equal($0, $1, in: nodes, assuming: &assumed) }
++
++        case (.mapping(let a), .mapping(let b)):
++            result =
++                a.count == b.count
++                && a.allSatisfy { x in
++                    b.contains { y in
++                        equal(x.key, y.key, in: nodes, assuming: &assumed)
++                            && equal(x.value, y.value, in: nodes, assuming: &assumed)
++                    }
++                }
++
++        default:
++            result = false
++        }
++        if !result {
++            assumed.removeSubrange(mark...)
++        }
++        return result
++    }
++}
++
+ extension YAML.Representation.Graph {
+     public subscript(
+         identifier: YAML.Representation.Node.Identifier
+diff --git a/Tests/YAML Standard Tests/YAML.Representation.Graph Boundary Tests.swift b/Tests/YAML Standard Tests/YAML.Representation.Graph Boundary Tests.swift
+index a10c905..745d1b1 100644
+--- a/Tests/YAML Standard Tests/YAML.Representation.Graph Boundary Tests.swift	
++++ b/Tests/YAML Standard Tests/YAML.Representation.Graph Boundary Tests.swift	
+@@ -84,5 +84,78 @@ extension `YAML.Representation.Graph Boundary Tests` {
+             let graph = try builder.finalize(root: root)
+             #expect(graph[root]?.kind == .mapping([.init(key: shared, value: shared)]))
+         }
++
++        @Test
++        func `a mapping with the same key node twice is refused`() throws {
++            var builder = YAML.Representation.Graph.Builder()
++            let root = builder.reserve()
++            let key = builder.reserve()
++            let first = builder.reserve()
++            let second = builder.reserve()
++            try builder.define(key, as: Self.scalar("k"))
++            try builder.define(first, as: Self.scalar("1"))
++            try builder.define(second, as: Self.scalar("2"))
++            try builder.define(
++                root,
++                as: .init(tag: .mapping, kind: .mapping([.init(key: key, value: first), .init(key: key, value: second)]))
++            )
++            #expect(throws: YAML.Representation.Graph.Error.duplicateKey(key)) {
++                _ = try builder.finalize(root: root)
++            }
++        }
++
++        @Test
++        func `a mapping with two equal scalar keys is refused`() throws {
++            var builder = YAML.Representation.Graph.Builder()
++            let root = builder.reserve()
++            let a = builder.reserve()
++            let b = builder.reserve()
++            let value = builder.reserve()
++            try builder.define(a, as: Self.scalar("k"))
++            try builder.define(b, as: Self.scalar("k"))
++            try builder.define(value, as: Self.scalar("v"))
++            try builder.define(
++                root,
++                as: .init(tag: .mapping, kind: .mapping([.init(key: a, value: value), .init(key: b, value: value)]))
++            )
++            #expect(throws: YAML.Representation.Graph.Error.duplicateKey(b)) {
++                _ = try builder.finalize(root: root)
++            }
++        }
++
++        @Test
++        func `a mapping with two equal sequence keys is refused`() throws {
++            var builder = YAML.Representation.Graph.Builder()
++            let root = builder.reserve()
++            let item = builder.reserve()
++            let a = builder.reserve()
++            let b = builder.reserve()
++            try builder.define(item, as: Self.scalar("x"))
++            try builder.define(a, as: .init(tag: .sequence, kind: .sequence([item])))
++            try builder.define(b, as: .init(tag: .sequence, kind: .sequence([item])))
++            try builder.define(
++                root,
++                as: .init(tag: .mapping, kind: .mapping([.init(key: a, value: item), .init(key: b, value: item)]))
++            )
++            #expect(throws: YAML.Representation.Graph.Error.duplicateKey(b)) {
++                _ = try builder.finalize(root: root)
++            }
++        }
++
++        @Test
++        func `keys with equal text but different tags are distinct`() throws {
++            var builder = YAML.Representation.Graph.Builder()
++            let root = builder.reserve()
++            let a = builder.reserve()
++            let b = builder.reserve()
++            try builder.define(a, as: .init(tag: .string, kind: .scalar("1")))
++            try builder.define(b, as: .init(tag: .integer, kind: .scalar("1")))
++            try builder.define(
++                root,
++                as: .init(tag: .mapping, kind: .mapping([.init(key: a, value: a), .init(key: b, value: b)]))
++            )
++            let graph = try builder.finalize(root: root)
++            #expect(graph[root]?.kind == .mapping([.init(key: a, value: a), .init(key: b, value: b)]))
++        }
+     }
+ }
+-- 
+2.43.0
+

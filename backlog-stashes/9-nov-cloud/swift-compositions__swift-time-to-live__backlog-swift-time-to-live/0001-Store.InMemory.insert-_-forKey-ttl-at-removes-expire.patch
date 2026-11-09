@@ -1,0 +1,104 @@
+From 692c832263f8bb02277ebee5816ccdcc6a4e4b8a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:49 +0000
+Subject: [PATCH] Store.InMemory.insert(_:forKey:ttl:at:) removes expired
+ entries before evicting a live one from a full store, and the clock-driven
+ insert uses it (swift-compositions/swift-time-to-live#4)
+
+---
+ .../Store.InMemory+Dependencies.swift         |  3 ++-
+ .../Time To Live Store/Store.InMemory.swift   | 14 ++++++++++
+ .../Store.InMemory Boundary Tests.swift       | 26 +++++++++++++++++++
+ 3 files changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/Time To Live Dependencies/Store.InMemory+Dependencies.swift b/Sources/Time To Live Dependencies/Store.InMemory+Dependencies.swift
+index 272d7c4..ad308e1 100644
+--- a/Sources/Time To Live Dependencies/Store.InMemory+Dependencies.swift	
++++ b/Sources/Time To Live Dependencies/Store.InMemory+Dependencies.swift	
+@@ -12,7 +12,8 @@ extension Store.InMemory where Instant == Clock.`Any`<Time::Duration>.Instant {
+         expiresIn duration: Time::Duration? = nil
+     ) {
+         @Dependency(\.clock) var clock
+-        insert(value, forKey: key, ttl: TTL(duration, from: clock.now))
++        let now = clock.now
++        insert(value, forKey: key, ttl: TTL(duration, from: now), at: now)
+     }
+ 
+     public func value(forKey key: Key) -> Value? {
+diff --git a/Sources/Time To Live Store/Store.InMemory.swift b/Sources/Time To Live Store/Store.InMemory.swift
+index f3e022b..e42e9c0 100644
+--- a/Sources/Time To Live Store/Store.InMemory.swift	
++++ b/Sources/Time To Live Store/Store.InMemory.swift	
+@@ -9,18 +9,32 @@ extension Store {
+         Instant: Swift.InstantProtocol
+     >: Sendable {
+         private let cache: Cache<Key, Entry>.Bounded
++        private let capacity: Int
+ 
+         public init(capacity: Int = 1000) {
+             self.cache = Cache<Key, Entry>.Bounded(capacity: capacity)
++            self.capacity = capacity
+         }
+     }
+ }
+ 
+ extension Store.InMemory {
+ 
++    /// Inserts a value without knowing the current instant: when the store is full, the oldest
++    /// entry is evicted even if it is live and an expired one still holds a slot. Prefer
++    /// ``insert(_:forKey:ttl:at:)``.
+     public func insert(_ value: Value, forKey key: Key, ttl: TTL<Instant>) {
+         cache.insert(Entry(value: value, ttl: ttl), forKey: key)
+     }
++
++    /// Inserts a value at `instant`: when the store is full, entries expired at `instant` are
++    /// removed first, so a live entry is evicted only when no expired one holds a slot.
++    public func insert(_ value: Value, forKey key: Key, ttl: TTL<Instant>, at instant: Instant) {
++        if cache.count >= capacity, cache.getValue(forKey: key) == nil {
++            prune(at: instant)
++        }
++        insert(value, forKey: key, ttl: ttl)
++    }
+ }
+ 
+ extension Store.InMemory {
+diff --git a/Tests/Time To Live Store Tests/Store.InMemory Boundary Tests.swift b/Tests/Time To Live Store Tests/Store.InMemory Boundary Tests.swift
+index 6658ecd..3549ed0 100644
+--- a/Tests/Time To Live Store Tests/Store.InMemory Boundary Tests.swift	
++++ b/Tests/Time To Live Store Tests/Store.InMemory Boundary Tests.swift	
+@@ -39,6 +39,32 @@ extension `Store.InMemory Boundary Tests` {
+             #expect(store.count == 2)
+         }
+ 
++        @Test
++        func `inserting into a full store evicts expired entries before a live one`() {
++            let store = Store.InMemory<String, Int, Time.Instant>(capacity: 2)
++            store.insert(1, forKey: "live", ttl: TTL(.seconds(100), from: Self.t0))
++            store.insert(2, forKey: "expired", ttl: TTL(.seconds(10), from: Self.t0))
++
++            let now = Self.t0.advanced(by: .seconds(50))
++            store.insert(3, forKey: "new", ttl: TTL(.seconds(100), from: now), at: now)
++
++            #expect(store.count == 2)
++            #expect(store.value(forKey: "live", at: now) == 1)
++            #expect(store.value(forKey: "new", at: now) == 3)
++        }
++
++        @Test
++        func `inserting into a full store with only live entries evicts the oldest`() {
++            let store = Store.InMemory<String, Int, Time.Instant>(capacity: 2)
++            store.insert(1, forKey: "first", ttl: TTL(.seconds(100), from: Self.t0), at: Self.t0)
++            store.insert(2, forKey: "second", ttl: TTL(.seconds(100), from: Self.t0), at: Self.t0)
++            store.insert(3, forKey: "third", ttl: TTL(.seconds(100), from: Self.t0), at: Self.t0)
++
++            #expect(store.count == 2)
++            #expect(store.value(forKey: "first", at: Self.t0) == nil)
++            #expect(store.value(forKey: "third", at: Self.t0) == 3)
++        }
++
+         @Test
+         func `pruning an empty store is a no-op`() {
+             let store = Store.InMemory<String, Int, Time.Instant>()
+-- 
+2.43.0
+

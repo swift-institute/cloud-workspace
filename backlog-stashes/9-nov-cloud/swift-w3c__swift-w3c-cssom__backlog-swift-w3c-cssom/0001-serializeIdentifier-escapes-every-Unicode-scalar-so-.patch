@@ -1,0 +1,84 @@
+From 317e5729468de77983d07a2579e189317df9bb50 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:27:54 +0000
+Subject: [PATCH 1/2] serializeIdentifier escapes every Unicode scalar, so
+ control characters inside one grapheme such as CR LF are all escaped
+ (swift-w3c/swift-w3c-cssom#10)
+
+---
+ .../IdentifierSerialization.swift             | 19 ++++++++-----------
+ .../Identifiers/Ident Tests.swift             |  5 +++++
+ 2 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/Sources/W3C CSSOM/Serialization/IdentifierSerialization.swift b/Sources/W3C CSSOM/Serialization/IdentifierSerialization.swift
+index be01219..069b9fe 100644
+--- a/Sources/W3C CSSOM/Serialization/IdentifierSerialization.swift	
++++ b/Sources/W3C CSSOM/Serialization/IdentifierSerialization.swift	
+@@ -4,16 +4,13 @@ func serializeIdentifier(_ identifier: String) -> String {
+     }
+ 
+     var result = ""
+-    let characters = Array(identifier)
++    let scalars = Array(identifier.unicodeScalars)
+ 
+-    for (index, char) in characters.enumerated() {
+-        guard let scalar = char.unicodeScalars.first else {
+-            preconditionFailure("A Character always contains at least one Unicode scalar")
+-        }
++    for (index, scalar) in scalars.enumerated() {
+         let value = scalar.value
+ 
+         if value == 0x0000 {
+-            result.append("\u{FFFD}")
++            result.unicodeScalars.append("\u{FFFD}")
+             continue
+         }
+ 
+@@ -27,23 +24,23 @@ func serializeIdentifier(_ identifier: String) -> String {
+             continue
+         }
+ 
+-        if index == 1 && characters[0] == "-" && value >= 0x0030 && value <= 0x0039 {
++        if index == 1 && scalars[0] == "-" && value >= 0x0030 && value <= 0x0039 {
+             result.append(escapeAsCodePoint(scalar))
+             continue
+         }
+ 
+-        if index == 0 && characters.count == 1 && char == "-" {
++        if index == 0 && scalars.count == 1 && scalar == "-" {
+             result.append("\\-")
+             continue
+         }
+ 
+         if isValidIdentifierCharacter(scalar) {
+-            result.append(char)
++            result.unicodeScalars.append(scalar)
+             continue
+         }
+ 
+-        result.append("\\")
+-        result.append(char)
++        result.unicodeScalars.append("\\")
++        result.unicodeScalars.append(scalar)
+     }
+ 
+     return result
+diff --git a/Tests/W3C CSSOM Tests/Identifiers/Ident Tests.swift b/Tests/W3C CSSOM Tests/Identifiers/Ident Tests.swift
+index 79a8784..30830f9 100644
+--- a/Tests/W3C CSSOM Tests/Identifiers/Ident Tests.swift	
++++ b/Tests/W3C CSSOM Tests/Identifiers/Ident Tests.swift	
+@@ -80,6 +80,11 @@ struct `Ident Tests` {
+             #expect(ident.description == "my_ident_value")
+         }
+ 
++        @Test func `carriage return and line feed in one grapheme are both escaped`() {
++            let ident = Ident("a\r\nb")
++            #expect(ident.description == "a\\d \\a b")
++        }
++
+         @Test func `case sensitive`() {
+             let lower = Ident("test")
+             let upper = Ident("TEST")
+-- 
+2.43.0
+

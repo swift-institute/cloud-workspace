@@ -1,0 +1,110 @@
+From ed06fe8153ff5e8b693ddd1c65afd93b7a6bceeb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:38:02 +0000
+Subject: [PATCH 4/7] File.System.Stat reports a file kind the platform does
+ not classify as File.System.Metadata.Kind.unknown instead of .regular
+ (swift-compositions/swift-file-system#22)
+
+---
+ .../File.System.Metadata.Type.swift           |  4 +++
+ .../File System Core/File.System.Stat.swift   |  2 +-
+ .../File.System.Metadata.Type Tests.swift     | 30 +++++++++++++++++--
+ 3 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/File System Core/File.System.Metadata.Type.swift b/Sources/File System Core/File.System.Metadata.Type.swift
+index ab4a970..19152b5 100644
+--- a/Sources/File System Core/File.System.Metadata.Type.swift	
++++ b/Sources/File System Core/File.System.Metadata.Type.swift	
+@@ -10,6 +10,8 @@ extension File.System.Metadata {
+         case characterDevice
+         case fifo
+         case socket
++        /// A kind the platform reported that none of the other cases describes.
++        case unknown
+     }
+ }
+ 
+@@ -23,6 +25,7 @@ extension File.System.Metadata.Kind: RawRepresentable {
+         case .characterDevice: return Byte(bitPattern: 4)
+         case .fifo: return Byte(bitPattern: 5)
+         case .socket: return Byte(bitPattern: 6)
++        case .unknown: return Byte(bitPattern: 7)
+         }
+     }
+ 
+@@ -35,6 +38,7 @@ extension File.System.Metadata.Kind: RawRepresentable {
+         case 4: self = .characterDevice
+         case 5: self = .fifo
+         case 6: self = .socket
++        case 7: self = .unknown
+         default: return nil
+         }
+     }
+diff --git a/Sources/File System Core/File.System.Stat.swift b/Sources/File System Core/File.System.Stat.swift
+index a223954..1589a8c 100644
+--- a/Sources/File System Core/File.System.Stat.swift	
++++ b/Sources/File System Core/File.System.Stat.swift	
+@@ -58,7 +58,7 @@ extension File.System.Stat {
+             fileType = .socket
+ 
+         case .unknown:
+-            fileType = .regular
++            fileType = .unknown
+         }
+ 
+         return File.System.Metadata.Info(
+diff --git a/Tests/File System Core Tests/File.System.Metadata.Type Tests.swift b/Tests/File System Core Tests/File.System.Metadata.Type Tests.swift
+index 285242d..524e60a 100644
+--- a/Tests/File System Core Tests/File.System.Metadata.Type Tests.swift	
++++ b/Tests/File System Core Tests/File.System.Metadata.Type Tests.swift	
+@@ -11,7 +11,7 @@ struct `File.System.Metadata.Kind Tests` {
+         func `all cases are distinct`() {
+             let allCases: [File.System.Metadata.Kind] = [
+                 .regular, .directory, .symbolicLink, .blockDevice,
+-                .characterDevice, .fifo, .socket,
++                .characterDevice, .fifo, .socket, .unknown,
+             ]
+             let rawValues = allCases.map(\.rawValue)
+             #expect(Set(rawValues).count == allCases.count)
+@@ -52,11 +52,37 @@ struct `File.System.Metadata.Kind Tests` {
+             #expect(File.System.Metadata.Kind.socket.rawValue.bitPattern == 6)
+         }
+ 
++        @Test
++        func `rawValue for .unknown`() {
++            #expect(File.System.Metadata.Kind.unknown.rawValue.bitPattern == 7)
++        }
++
++        #if !os(Windows)
++            @Test
++            func `an unknown stat kind is reported as unknown, not regular`() {
++                let time = Kernel.Time(secondsSinceUnixEpoch: 0)
++                let stats = Kernel.File.Stats(
++                    size: 0,
++                    type: .unknown,
++                    permissions: 0o644,
++                    uid: 0,
++                    gid: 0,
++                    inode: 1,
++                    device: 1,
++                    linkCount: 1,
++                    accessTime: time,
++                    modificationTime: time,
++                    changeTime: time
++                )
++                #expect(File.System.Stat.makeInfo(from: stats).type == .unknown)
++            }
++        #endif
++
+         @Test
+         func `rawValue round-trip for all cases`() {
+             let allCases: [File.System.Metadata.Kind] = [
+                 .regular, .directory, .symbolicLink, .blockDevice,
+-                .characterDevice, .fifo, .socket,
++                .characterDevice, .fifo, .socket, .unknown,
+             ]
+             for type in allCases {
+                 let restored = File.System.Metadata.Kind(rawValue: type.rawValue)
+-- 
+2.43.0
+

@@ -1,0 +1,95 @@
+From 16d3ba9b88dde3e6d268e3869e85ba3d1fdefc62 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:33:59 +0000
+Subject: [PATCH] The sRGB initializer from a CSS HexColor returns nil for hex
+ that isn't valid instead of black (swift-standards/swift-css-standard#8)
+
+---
+ README.md                                           |  2 +-
+ Sources/CSS Standard/Color+sRGB.swift               | 13 ++++++++-----
+ .../CSS Color Boundary Tests.swift                  | 11 ++++++++++-
+ 3 files changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/README.md b/README.md
+index 618529b..55e21c8 100644
+--- a/README.md
++++ b/README.md
+@@ -7,7 +7,7 @@ Use this package when you want the W3C CSS vocabulary behind one import, and nee
+ - Converting a CSS color to sRGB drops its alpha. rgba(), hsla() and four or eight digit hex give the same channels as their opaque forms.
+ - currentColor, transparent, system colors, color-mix() and named colors without a fixed sRGB value have no sRGB form, and the conversion returns nil.
+ - Hex may be written with or without the leading #. Three and four digit hex expand each digit, so #f80 is #ff8800.
+-- Hex that isn't valid becomes black. No error is reported.
++- Hex that isn't valid, anything but 3, 4, 6 or 8 hex digits, has no sRGB value: the initializer returns nil.
+ - HSL and HWB take their hue in degrees, normalized, and their other components as percentages.
+ - lab(), lch(), oklab() and oklch() colors are converted through swift-color-standard, so lightness is clamped to its range there.
+ - An sRGB color written back to CSS is always rgb(), with each channel rounded to the nearest of 0 through 255. A NaN channel becomes 0 and a channel above 1 becomes 255.
+diff --git a/Sources/CSS Standard/Color+sRGB.swift b/Sources/CSS Standard/Color+sRGB.swift
+index fcba33f..d37f30e 100644
+--- a/Sources/CSS Standard/Color+sRGB.swift	
++++ b/Sources/CSS Standard/Color+sRGB.swift	
+@@ -34,7 +34,10 @@ extension IEC_61966.`2`.`1`.SRGB {
+             self.init(hue: h.normalizedDegrees(), whiteness: w / 100.0, blackness: b / 100.0)
+ 
+         case .hex(let hex):
+-            self.init(hex)
++            guard let srgb = Self(hex) else {
++                return nil
++            }
++            self = srgb
+ 
+         case .named(let named):
+             guard let srgb = Self(named) else {
+@@ -68,7 +71,8 @@ extension IEC_61966.`2`.`1`.SRGB {
+         }
+     }
+ 
+-    public init(_ hex: W3C_CSS_Values::HexColor) {
++    /// The sRGB value of 3, 4, 6 or 8 hex digits, with or without a leading `#`; nil for anything else.
++    public init?(_ hex: W3C_CSS_Values::HexColor) {
+         let value =
+             hex.value.hasPrefix("#")
+             ? String(hex.value.dropFirst())
+@@ -89,9 +93,8 @@ extension IEC_61966.`2`.`1`.SRGB {
+             expanded = value
+         }
+ 
+-        guard let bytes = [Byte](hexEncoded: expanded), bytes.count >= 3 else {
+-            self.init(r: 0, g: 0, b: 0)
+-            return
++        guard let bytes = [Byte](hexEncoded: expanded), bytes.count == 3 || bytes.count == 4 else {
++            return nil
+         }
+ 
+         self.init(
+diff --git a/Tests/CSS Standard Tests/CSS Color Boundary Tests.swift b/Tests/CSS Standard Tests/CSS Color Boundary Tests.swift
+index a3457d6..53ccecc 100644
+--- a/Tests/CSS Standard Tests/CSS Color Boundary Tests.swift	
++++ b/Tests/CSS Standard Tests/CSS Color Boundary Tests.swift	
+@@ -10,7 +10,7 @@ extension `CSS Color Boundary Tests` {
+         private typealias SRGB = W3C_CSS_Values.Color.sRGB
+ 
+         private func channels(_ hex: String) -> [Int] {
+-            let color = SRGB(W3C_CSS_Values.HexColor(hex))
++            guard let color = SRGB(W3C_CSS_Values.HexColor(hex)) else { return [] }
+             return [color.r255, color.g255, color.b255]
+         }
+ 
+@@ -27,6 +27,15 @@ extension `CSS Color Boundary Tests` {
+             #expect(channels("00ff7f") == [0, 255, 127])
+         }
+ 
++        @Test
++        func `hex that is not valid has no sRGB value`() {
++            #expect(SRGB(W3C_CSS_Values.HexColor("#zzz")) == nil)
++            #expect(SRGB(W3C_CSS_Values.HexColor("#12345")) == nil)
++            #expect(SRGB(W3C_CSS_Values.HexColor("")) == nil)
++            #expect(SRGB(W3C_CSS_Values.HexColor("#1234567890")) == nil)
++            #expect(SRGB(W3C_CSS_Values.Color.hex(W3C_CSS_Values.HexColor("#zzz"))) == nil)
++        }
++
+         @Test
+         func `the hex extremes map to black and white`() {
+             #expect(channels("#000") == [0, 0, 0])
+-- 
+2.43.0
+

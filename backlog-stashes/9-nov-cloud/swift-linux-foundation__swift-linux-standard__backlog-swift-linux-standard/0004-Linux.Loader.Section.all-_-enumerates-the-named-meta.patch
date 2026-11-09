@@ -1,0 +1,175 @@
+From 185f45446a995541d0ad974a73e518254bda8605 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:19 +0000
+Subject: [PATCH 4/4] Linux.Loader.Section.all(_:) enumerates the named
+ metadata section of every loaded image through
+ swift_enumerateAllMetadataSections instead of always returning none
+ (swift-linux-foundation/swift-linux-standard#15)
+
+---
+ Package.swift                                 |  1 +
+ .../Linux.Loader.Section.swift                | 75 ++++++++++++++++++-
+ .../Linux.Loader.Section Tests.swift          | 37 +++++++++
+ 3 files changed, 112 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/Linux Kernel Standard Tests/Linux.Loader.Section Tests.swift
+
+diff --git a/Package.swift b/Package.swift
+index c5a4a71..d90bc95 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -302,6 +302,7 @@ let package = Package(
+                 .target(name: "Linux Kernel Timer Standard"),
+                 .target(name: "Linux Kernel Signal Standard"),
+                 .target(name: "Linux Kernel IO Uring Standard"),
++                .target(name: "Linux Loader Standard"),
+                 .product(name: "CPU", package: "swift-cpu"),
+                 .product(name: "Error", package: "swift-error"),
+                 .product(name: "Memory", package: "swift-memory"),
+diff --git a/Sources/Linux Loader Standard/Linux.Loader.Section.swift b/Sources/Linux Loader Standard/Linux.Loader.Section.swift
+index 24cb828..ed4b69a 100644
+--- a/Sources/Linux Loader Standard/Linux.Loader.Section.swift	
++++ b/Sources/Linux Loader Standard/Linux.Loader.Section.swift	
+@@ -3,6 +3,13 @@
+     public import Linux_Standard_Core
+     public import Loader_Vocabulary
+ 
++    @unsafe
++    @_silgen_name("swift_enumerateAllMetadataSections")
++    private func _swift_enumerateAllMetadataSections(
++        _ body: @convention(c) (UnsafeRawPointer, UnsafeMutableRawPointer) -> Bool,
++        _ context: UnsafeMutableRawPointer
++    )
++
+     extension Linux_Standard_Core::Linux.Loader {
+ 
+         public enum Section: Sendable {}
+@@ -17,6 +24,8 @@
+ 
+     extension Linux_Standard_Core::Linux.Loader.Section {
+ 
++        /// The bounds of the section `name` in every loaded image that has it, as the Swift runtime
++        /// records them. A name the runtime does not record, or one without an ELF spelling, has none.
+         public static func all(_ name: Name) -> [Bounds] {
+             guard let sectionName = name.elf else {
+ 
+@@ -26,9 +35,73 @@
+             return enumerateSections(named: sectionName)
+         }
+ 
++        /// The ranges of the runtime's `MetadataSections` record, in their order after its version,
++        /// base address and two reserved words, each with the record version that first carries it.
++        private static let metadataSections: [(name: StaticString, version: UInt)] = [
++            ("swift5_protocols", 1),
++            ("swift5_protocol_conformances", 1),
++            ("swift5_type_metadata", 1),
++            ("swift5_typeref", 1),
++            ("swift5_reflstr", 1),
++            ("swift5_fieldmd", 1),
++            ("swift5_assocty", 1),
++            ("swift5_replace", 1),
++            ("swift5_replac2", 1),
++            ("swift5_builtin", 1),
++            ("swift5_capture", 1),
++            ("swift5_mpenum", 1),
++            ("swift5_accessible_functions", 2),
++            ("swift5_runtime_attributes", 3),
++            ("swift5_tests", 4),
++        ]
++
++        private static func same(_ lhs: StaticString, _ rhs: StaticString) -> Bool {
++            lhs.withUTF8Buffer { lhsBytes in
++                rhs.withUTF8Buffer { rhsBytes in
++                    unsafe lhsBytes.elementsEqual(rhsBytes)
++                }
++            }
++        }
++
+         private static func enumerateSections(named sectionName: StaticString) -> [Bounds] {
++            guard let field = metadataSections.firstIndex(where: { same($0.name, sectionName) }) else {
++                return []
++            }
++
++            var state: (field: Int, version: UInt, bounds: [Bounds]) = (
++                field, metadataSections[field].version, []
++            )
++            unsafe withUnsafeMutablePointer(to: &state) { state in
++                unsafe _swift_enumerateAllMetadataSections(
++                    { sections, context in
++                        let state = unsafe context.assumingMemoryBound(
++                            to: (field: Int, version: UInt, bounds: [Bounds]).self
++                        )
++                        guard unsafe sections.load(as: UInt.self) >= state.pointee.version else {
++                            return true
++                        }
+ 
+-            return []
++                        let word = MemoryLayout<UInt>.stride
++                        let image = unsafe sections.load(fromByteOffset: word, as: UnsafeRawPointer?.self)
++                        let offset = word * (4 + 2 * state.pointee.field)
++                        let start = unsafe sections.load(fromByteOffset: offset, as: UInt.self)
++                        let length = unsafe sections.load(fromByteOffset: offset + word, as: UInt.self)
++
++                        if let base = UnsafeRawPointer(bitPattern: start), length > 0 {
++                            let buffer = unsafe UnsafeRawBufferPointer(
++                                start: base,
++                                count: Int(clamping: length)
++                            )
++                            unsafe state.pointee.bounds.append(
++                                Bounds(imageAddress: image, buffer: buffer)
++                            )
++                        }
++                        return true
++                    },
++                    UnsafeMutableRawPointer(state)
++                )
++            }
++            return state.bounds
+         }
+     }
+ 
+diff --git a/Tests/Linux Kernel Standard Tests/Linux.Loader.Section Tests.swift b/Tests/Linux Kernel Standard Tests/Linux.Loader.Section Tests.swift
+new file mode 100644
+index 0000000..689e48f
+--- /dev/null
++++ b/Tests/Linux Kernel Standard Tests/Linux.Loader.Section Tests.swift	
+@@ -0,0 +1,37 @@
++#if os(Linux)
++    import Testing
++
++    import Linux_Loader_Standard
++
++    extension Linux.Loader.Section {
++        @Suite
++        struct Test {
++            @Suite struct Unit {}
++            @Suite struct Integration {}
++        }
++    }
++
++    extension Linux.Loader.Section.Test.Unit {
++        @Test
++        func `a name without an ELF spelling has no sections`() {
++            #expect(Linux.Loader.Section.all(.swiftTestContentFallback).isEmpty)
++        }
++    }
++
++    extension Linux.Loader.Section.Test.Integration {
++        @Test
++        func `all finds the test content records of this test image`() {
++            let sections = Linux.Loader.Section.all(.swiftTestContent)
++            #expect(!sections.isEmpty)
++            #expect(sections.allSatisfy { unsafe $0.buffer.count > 0 })
++        }
++
++        @Test
++        func `all finds type metadata in the test image and the libraries it loads`() {
++            let sections = Linux.Loader.Section.all(.swiftTypeMetadata)
++            #expect(sections.count > 1)
++            #expect(sections.allSatisfy { unsafe $0.imageAddress != nil })
++        }
++    }
++
++#endif
+-- 
+2.43.0
+

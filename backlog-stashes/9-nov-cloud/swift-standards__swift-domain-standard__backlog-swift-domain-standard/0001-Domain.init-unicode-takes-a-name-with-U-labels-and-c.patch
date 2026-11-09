@@ -1,0 +1,148 @@
+From da0cb4d295b9120812b3d68246b65553ec1e62a3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:56 +0000
+Subject: [PATCH] Domain.init(unicode:) takes a name with U-labels and converts
+ it with IDNA, unicode() returns the U-label form, and the always-constant
+ isInternationalized and isASCII are removed
+ (swift-standards/swift-domain-standard#10)
+
+---
+ README.md                                     |  2 +-
+ Sources/Domain Standard/Domain+IDNA.swift     | 27 ++++++++++-------
+ .../Domain+IDNA Tests.swift                   | 30 ++++++++++++++-----
+ .../Domain Standard Tests/README Tests.swift  |  1 -
+ 4 files changed, 40 insertions(+), 20 deletions(-)
+
+diff --git a/README.md b/README.md
+index a003267..034b3fe 100644
+--- a/README.md
++++ b/README.md
+@@ -10,5 +10,5 @@ Use this package when you need a domain or host name that is valid under both DN
+ - `Domain.isSubdomain(of:)` is strict: a domain is not a subdomain of itself. It compares the RFC 1035 forms when both domains have one, and the RFC 1123 forms otherwise.
+ - `Domain.parent()` drops the leftmost label. `Domain.root()` keeps the last two labels, so the root of `example.com` is itself. A single-label name such as `localhost` has neither, and both return nil rather than throwing.
+ - `Domain.addingSubdomain(_:)` reports every refusal, whether from a bad label or a name that grows too long, as the same `Domain.Error.cannotCreateSubdomain`.
+-- A `Domain` only ever holds an ASCII host name. `Domain.init(ascii:)` returns an ASCII domain unchanged, and `Domain.init(unicode:)` throws, because the Unicode form of an A-label is not a valid host name.
++- A `Domain` only ever holds an ASCII host name. `Domain.init(unicode:)` converts each U-label of a name to its A-label, and `Domain.unicode()` returns the name with A-labels converted back to U-labels as a `String`.
+ - With `Domain Foundation Integration`, a domain encodes as its `name` string and decodes from one. Text that isn't a valid domain fails to decode with a data-corrupted `DecodingError`.
+diff --git a/Sources/Domain Standard/Domain+IDNA.swift b/Sources/Domain Standard/Domain+IDNA.swift
+index b46ae6d..0946db0 100644
+--- a/Sources/Domain Standard/Domain+IDNA.swift	
++++ b/Sources/Domain Standard/Domain+IDNA.swift	
+@@ -13,29 +13,34 @@ extension Domain {
+         }
+     }
+ 
+-    public init(unicode domain: Domain) throws(Error) {
+-        do {
+-            let unicodeString = try IDNA.toUnicode(domain.name)
+-            try self.init(unicodeString)
++    /// Creates a domain from a name that may hold U-labels, converting each to its A-label.
++    public init<S: StringProtocol>(unicode string: S) throws(Error) {
++        let asciiString: String
++        do throws(IDNA.Error) {
++            asciiString = try IDNA.toASCII(String(string))
+         } catch {
+             throw Error.idnaConversionFailure(
+-                "Failed to convert '\(domain.name)' to Unicode: \(error)"
++                "Failed to convert '\(string)' to ASCII: \(error)"
+             )
+         }
++        try self.init(asciiString)
+     }
+ }
+ 
+ extension Domain {
+ 
+-    public var isInternationalized: Bool {
+-        !name.allSatisfy({ $0.isASCII })
+-    }
+-
+     public var hasALabels: Bool {
+         name.split(separator: ".").contains { IDNA.isALabel(String($0)) }
+     }
+ 
+-    public var isASCII: Bool {
+-        name.allSatisfy({ $0.isASCII })
++    /// The name with each A-label converted to its U-label.
++    public func unicode() throws(Error) -> String {
++        do throws(IDNA.Error) {
++            return try IDNA.toUnicode(name)
++        } catch {
++            throw Error.idnaConversionFailure(
++                "Failed to convert '\(name)' to Unicode: \(error)"
++            )
++        }
+     }
+ }
+diff --git a/Tests/Domain Standard Tests/Domain+IDNA Tests.swift b/Tests/Domain Standard Tests/Domain+IDNA Tests.swift
+index 2a12ae9..cccdc61 100644
+--- a/Tests/Domain Standard Tests/Domain+IDNA Tests.swift	
++++ b/Tests/Domain Standard Tests/Domain+IDNA Tests.swift	
+@@ -12,8 +12,6 @@ struct `Domain+IDNA Tests` {
+         let ascii = try Domain(ascii: domain)
+ 
+         #expect(ascii == domain)
+-        #expect(ascii.isASCII)
+-        #expect(!ascii.isInternationalized)
+     }
+ 
+     @Test
+@@ -21,8 +19,6 @@ struct `Domain+IDNA Tests` {
+         let domain = try Domain("xn--bcher-kva.example")
+ 
+         #expect(domain.hasALabels)
+-        #expect(domain.isASCII)
+-        #expect(!domain.isInternationalized)
+     }
+ 
+     @Test
+@@ -33,11 +29,31 @@ struct `Domain+IDNA Tests` {
+     }
+ 
+     @Test
+-    func `a Unicode form is refused because domains are ASCII host names`() throws {
+-        let domain = try Domain("xn--bcher-kva.example")
++    func `a Unicode name converts its U-labels to A-labels`() throws {
++        let domain = try Domain(unicode: "münchen.de")
++
++        #expect(domain.name == "xn--mnchen-3ya.de")
++        #expect(domain.hasALabels)
++    }
+ 
++    @Test
++    func `an ASCII name passes through the Unicode initializer`() throws {
++        let domain = try Domain(unicode: "example.com")
++
++        #expect(domain == (try Domain("example.com")))
++    }
++
++    @Test
++    func `the Unicode form converts A-labels back to U-labels`() throws {
++        let domain = try Domain("xn--mnchen-3ya.de")
++
++        #expect(try domain.unicode() == "münchen.de")
++    }
++
++    @Test
++    func `a name IDNA refuses is an IDNA conversion failure`() {
+         #expect(throws: Domain.Error.self) {
+-            try Domain(unicode: domain)
++            try Domain(unicode: "a..b")
+         }
+     }
+ }
+diff --git a/Tests/Domain Standard Tests/README Tests.swift b/Tests/Domain Standard Tests/README Tests.swift
+index 9ac5c29..92eb85d 100644
+--- a/Tests/Domain Standard Tests/README Tests.swift	
++++ b/Tests/Domain Standard Tests/README Tests.swift	
+@@ -43,7 +43,6 @@ struct `README Tests` {
+     func `IDNA`() throws {
+         let domain = try Domain("xn--bcher-kva.example")
+         #expect(domain.hasALabels)
+-        #expect(domain.isASCII)
+ 
+         let ascii = try Domain(ascii: domain)
+         #expect(ascii == domain)
+-- 
+2.43.0
+

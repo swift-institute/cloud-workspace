@@ -1,0 +1,216 @@
+From 49ecf36e6f2986546dcf847ed15e1a355ebbc31e Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:32:29 +0000
+Subject: [PATCH] ITU_R_BS_1770.Programme.init throws on channels of different
+ lengths or a weight count that doesn't match the channels instead of trapping
+ or silently dropping channels, and Biquad stores its five coefficients as
+ fields so it can't trap on short arrays
+ (swift-standards/swift-itu-r-bs-1770#1)
+
+---
+ README.md                                     |  1 +
+ .../ITU-R BS 1770/ITU_R_BS_1770.Biquad.swift  | 29 ++++++++----
+ .../ITU_R_BS_1770.Programme.Error.swift       |  9 ++++
+ .../ITU_R_BS_1770.Programme.swift             | 11 ++++-
+ .../ITU-R BS 1770 Tests/Programme Tests.swift | 47 ++++++++++++++-----
+ 5 files changed, 73 insertions(+), 24 deletions(-)
+ create mode 100644 Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.Error.swift
+
+diff --git a/README.md b/README.md
+index 45605c1..1b7795a 100644
+--- a/README.md
++++ b/README.md
+@@ -9,6 +9,7 @@ Use this package when you need the integrated loudness of a piece of audio in LU
+ - Loudness is measured over 400 ms blocks that overlap by 75 %. A partial block at the end is not measured. Blocks below -70 LUFS are dropped, then blocks more than 10 LU below the loudness of the rest are dropped.
+ - Silence, and a programme shorter than one block, measure negative infinity.
+ - Every channel weighs 1.0 unless you pass weights. Surround channels need 1.41 from the caller.
++- `ITU_R_BS_1770.Programme.init(channels:rate:weights:)` throws unless every channel has the same length and, when you pass weights, there is exactly one per channel.
+ - True peak is the highest absolute value over all channels after four times oversampling. It is never below the highest sample, and silence measures negative infinity.
+ - `ITU_R_BS_1770.Programme.loudness` and `ITU_R_BS_1770.Programme.peak` are computed again on every access. Nothing is cached.
+ - `ITU_R_BS_1770.Biquad.filtered(_:)` starts from zero history on every call.
+diff --git a/Sources/ITU-R BS 1770/ITU_R_BS_1770.Biquad.swift b/Sources/ITU-R BS 1770/ITU_R_BS_1770.Biquad.swift
+index 7599437..2d666ff 100644
+--- a/Sources/ITU-R BS 1770/ITU_R_BS_1770.Biquad.swift	
++++ b/Sources/ITU-R BS 1770/ITU_R_BS_1770.Biquad.swift	
+@@ -1,14 +1,20 @@
+ import ISO_9899
+ 
+ extension ITU_R_BS_1770 {
+-    /// A second-order filter: `b` are the feed-forward and `a` the feedback coefficients, `a0` = 1.
++    /// A second-order filter: `b0`, `b1`, `b2` are the feed-forward and `a1`, `a2` the feedback coefficients, `a0` = 1.
+     public struct Biquad: Sendable, Hashable {
+-        public let b: [Double]
+-        public let a: [Double]
++        public let b0: Double
++        public let b1: Double
++        public let b2: Double
++        public let a1: Double
++        public let a2: Double
+ 
+-        public init(b: [Double], a: [Double]) {
+-            self.b = b
+-            self.a = a
++        public init(b0: Double, b1: Double, b2: Double, a1: Double, a2: Double) {
++            self.b0 = b0
++            self.b1 = b1
++            self.b2 = b2
++            self.a1 = a1
++            self.a2 = a2
+         }
+     }
+ }
+@@ -26,8 +32,11 @@ extension ITU_R_BS_1770.Biquad {
+         let band = ISO_9899.Math.pow(high, 0.4996667741545416)
+         let a0 = 1 + k / q + k * k
+         return Self(
+-            b: [(high + band * k / q + k * k) / a0, 2 * (k * k - high) / a0, (high - band * k / q + k * k) / a0],
+-            a: [2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0]
++            b0: (high + band * k / q + k * k) / a0,
++            b1: 2 * (k * k - high) / a0,
++            b2: (high - band * k / q + k * k) / a0,
++            a1: 2 * (k * k - 1) / a0,
++            a2: (1 - k / q + k * k) / a0
+         )
+     }
+ 
+@@ -36,13 +45,13 @@ extension ITU_R_BS_1770.Biquad {
+         let k = ISO_9899.Math.tan(Double.pi * 38.13547087602444 / rate)
+         let q = 0.5003270373238773
+         let a0 = 1 + k / q + k * k
+-        return Self(b: [1, -2, 1], a: [2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0])
++        return Self(b0: 1, b1: -2, b2: 1, a1: 2 * (k * k - 1) / a0, a2: (1 - k / q + k * k) / a0)
+     }
+ 
+     public func filtered(_ input: [Double]) -> [Double] {
+         var (x1, x2, y1, y2) = (0.0, 0.0, 0.0, 0.0)
+         return input.map { x in
+-            let y = b[0] * x + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2
++            let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+             (x2, x1, y2, y1) = (x1, x, y1, y)
+             return y
+         }
+diff --git a/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.Error.swift b/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.Error.swift
+new file mode 100644
+index 0000000..f449c8d
+--- /dev/null
++++ b/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.Error.swift	
+@@ -0,0 +1,9 @@
++extension ITU_R_BS_1770.Programme {
++    /// Why a programme can't be made from the given channels and weights.
++    public enum Error: Swift::Error, Sendable, Hashable {
++        /// The channels hold different numbers of samples; the payload lists each channel's count.
++        case lengths([Int])
++        /// The weights don't match the channels one to one.
++        case weights(channels: Int, weights: Int)
++    }
++}
+diff --git a/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.swift b/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.swift
+index 5d195f2..fc93058 100644
+--- a/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.swift	
++++ b/Sources/ITU-R BS 1770/ITU_R_BS_1770.Programme.swift	
+@@ -8,8 +8,15 @@ extension ITU_R_BS_1770 {
+         /// The channel weights G, 1.0 for left, right and centre and 1.41 for the surrounds.
+         public let weights: [Double]
+ 
+-        public init(channels: [[Float]], rate: Double, weights: [Double]? = nil) {
+-            precondition(Set(channels.map(\.count)).count <= 1, "every channel has the same length")
++        /// Throws ``Error/lengths(_:)`` unless every channel has the same length, and
++        /// ``Error/weights(channels:weights:)`` unless there is one weight per channel.
++        public init(channels: [[Float]], rate: Double, weights: [Double]? = nil) throws(Error) {
++            guard Set(channels.map(\.count)).count <= 1 else {
++                throw .lengths(channels.map(\.count))
++            }
++            if let weights, weights.count != channels.count {
++                throw .weights(channels: channels.count, weights: weights.count)
++            }
+             self.channels = channels
+             self.rate = rate
+             self.weights = weights ?? channels.map { _ in 1 }
+diff --git a/Tests/ITU-R BS 1770 Tests/Programme Tests.swift b/Tests/ITU-R BS 1770 Tests/Programme Tests.swift
+index 1603304..75d9e81 100644
+--- a/Tests/ITU-R BS 1770 Tests/Programme Tests.swift	
++++ b/Tests/ITU-R BS 1770 Tests/Programme Tests.swift	
+@@ -10,8 +10,8 @@ import Testing
+         }
+     }
+ 
+-    static func stereo(_ samples: [Float], rate: Double = 48_000) -> ITU_R_BS_1770.Programme {
+-        ITU_R_BS_1770.Programme(channels: [samples, samples], rate: rate)
++    static func stereo(_ samples: [Float], rate: Double = 48_000) throws -> ITU_R_BS_1770.Programme {
++        try ITU_R_BS_1770.Programme(channels: [samples, samples], rate: rate)
+     }
+ 
+     @Test func `the K-weighting reproduces the recommendation's 48 kHz coefficients`() {
+@@ -21,36 +21,59 @@ import Testing
+             shelf: (b: [1.53512485958697, -2.69169618940638, 1.19839281085285], a: [-1.69065929318241, 0.73248077421585]),
+             pass: (b: [1.0, -2.0, 1.0], a: [-1.99004745483398, 0.99007225036621])
+         )
+-        for (value, expected) in zip(shelf.b + shelf.a + pass.b + pass.a, table.shelf.b + table.shelf.a + table.pass.b + table.pass.a) {
++        let values = [shelf.b0, shelf.b1, shelf.b2, shelf.a1, shelf.a2, pass.b0, pass.b1, pass.b2, pass.a1, pass.a2]
++        for (value, expected) in zip(values, table.shelf.b + table.shelf.a + table.pass.b + table.pass.a) {
+             #expect(abs(value - expected) < 1e-7, "\(value) against \(expected)")
+         }
+     }
+ 
+-    @Test func `a stereo 997 Hz sine at -23 dBFS measures -23 LUFS, at 48 and at 44.1 kHz`() {
++    @Test func `a stereo 997 Hz sine at -23 dBFS measures -23 LUFS, at 48 and at 44.1 kHz`() throws {
+         for rate in [48_000.0, 44_100] {
+-            let loudness = Self.stereo(Self.sine(decibels: -23, seconds: 5, rate: rate), rate: rate).loudness
++            let loudness = try Self.stereo(Self.sine(decibels: -23, seconds: 5, rate: rate), rate: rate).loudness
+             #expect(abs(loudness - -23) < 0.05, "\(rate): \(loudness)")
+         }
+     }
+ 
+-    @Test func `silence and a tail 25 dB down are gated out, and silence alone measures minus infinity`() {
++    @Test func `silence and a tail 25 dB down are gated out, and silence alone measures minus infinity`() throws {
+         let tone = Self.sine(decibels: -20, seconds: 5)
+         let quiet = Self.sine(decibels: -45, seconds: 5)
+         let silence = [Float](repeating: 0, count: tone.count)
+-        let alone = Self.stereo(tone).loudness
++        let alone = try Self.stereo(tone).loudness
+         // 47 blocks lie wholly in the tone and three straddle its end, holding 3/4, 1/2 and 1/4 of
+         // its power; all 50 pass both gates, and every block after them fails one.
+         let straddled = alone + 10 * ISO_9899.Math.log10(48.5 / 50)
+-        #expect(abs(Self.stereo(tone + silence).loudness - straddled) < 0.001)
+-        #expect(abs(Self.stereo(tone + quiet).loudness - straddled) < 0.001)
+-        #expect(Self.stereo(silence).loudness == -.infinity)
++        let trailingSilence = try Self.stereo(tone + silence).loudness
++        let trailingQuiet = try Self.stereo(tone + quiet).loudness
++        let silent = try Self.stereo(silence).loudness
++        #expect(abs(trailingSilence - straddled) < 0.001)
++        #expect(abs(trailingQuiet - straddled) < 0.001)
++        #expect(silent == -.infinity)
+     }
+ 
+-    @Test func `a quarter-rate sine sampled 45 degrees off its crest reads 3 dB higher as a true peak`() {
++    @Test func `a quarter-rate sine sampled 45 degrees off its crest reads 3 dB higher as a true peak`() throws {
+         let samples = Self.sine(decibels: 0, hertz: 12_000, phase: Double.pi / 4, seconds: 1)
+-        let programme = ITU_R_BS_1770.Programme(channels: [samples], rate: 48_000)
++        let programme = try ITU_R_BS_1770.Programme(channels: [samples], rate: 48_000)
+         let sampled = 20 * ISO_9899.Math.log10(Double(samples.map { abs($0) }.max() ?? 0))
+         #expect(abs(sampled - -3.01) < 0.01, "\(sampled)")
+         #expect(abs(programme.peak) < 0.1, "\(programme.peak)")
+     }
++
++    @Test func `channels of different lengths are refused`() {
++        #expect(throws: ITU_R_BS_1770.Programme.Error.lengths([3, 2])) {
++            try ITU_R_BS_1770.Programme(channels: [[0, 0, 0], [0, 0]], rate: 48_000)
++        }
++    }
++
++    @Test func `weights that don't match the channels one to one are refused`() {
++        #expect(throws: ITU_R_BS_1770.Programme.Error.weights(channels: 3, weights: 2)) {
++            try ITU_R_BS_1770.Programme(channels: [[0], [0], [0]], rate: 48_000, weights: [1, 1])
++        }
++    }
++
++    @Test func `the filter computes the difference equation from its five coefficients`() {
++        let feedForward = ITU_R_BS_1770.Biquad(b0: 1, b1: 0.5, b2: 0.25, a1: 0, a2: 0)
++        let feedback = ITU_R_BS_1770.Biquad(b0: 1, b1: 0, b2: 0, a1: -0.5, a2: 0)
++        #expect(feedForward.filtered([1, 0, 0, 0]) == [1, 0.5, 0.25, 0])
++        #expect(feedback.filtered([1, 0, 0]) == [1, 0.5, 0.25])
++    }
+ }
+-- 
+2.43.0
+

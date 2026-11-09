@@ -1,0 +1,339 @@
+From 4665390da35bc9be96794d967d152e0d3f93fcd9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:45:36 +0000
+Subject: [PATCH 13/18] Feature and variation settings and keyword sets print
+ in a fixed order, and PaintOrder keeps its layers in the order given
+ (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Fonts/FontFeatureSettings.swift  |  4 ++--
+ Sources/W3C CSS Fonts/FontVariantEastAsian.swift |  2 +-
+ Sources/W3C CSS Fonts/FontVariantLigatures.swift |  2 +-
+ Sources/W3C CSS Fonts/FontVariantNumeric.swift   |  2 +-
+ .../W3C CSS Fonts/FontVariationSettings.swift    |  4 ++--
+ Sources/W3C CSS Images/PaintOrder.swift          | 10 +++++++---
+ Sources/W3C CSS Text/HangingPunctuation.swift    |  2 +-
+ Sources/W3C CSS Text/TextAutospace.swift         |  2 +-
+ Sources/W3C CSS Text/TextSpacing.swift           |  2 +-
+ Sources/W3C CSS Text/TextUnderlinePosition.swift |  3 ++-
+ .../FontFeatureSettings Tests.swift              | 15 +++++++++++++++
+ .../FontVariantEastAsian Tests.swift             | 14 ++++++++++++++
+ .../FontVariantLigatures Tests.swift             | 16 ++++++++++++++++
+ .../FontVariationSettings Tests.swift            | 15 +++++++++++++++
+ .../W3C CSS Images Tests/PaintOrder Tests.swift  | 15 +++++++++++++++
+ .../HangingPunctuation Tests.swift               | 14 ++++++++++++++
+ .../TextUnderlinePosition Tests.swift            | 14 ++++++++++++++
+ 17 files changed, 122 insertions(+), 14 deletions(-)
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontFeatureSettings Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontVariantEastAsian Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontVariantLigatures Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontVariationSettings Tests.swift
+ create mode 100644 Tests/W3C CSS Images Tests/PaintOrder Tests.swift
+ create mode 100644 Tests/W3C CSS Text Tests/HangingPunctuation Tests.swift
+ create mode 100644 Tests/W3C CSS Text Tests/TextUnderlinePosition Tests.swift
+
+diff --git a/Sources/W3C CSS Fonts/FontFeatureSettings.swift b/Sources/W3C CSS Fonts/FontFeatureSettings.swift
+index 3c43bd1..ef2c066 100644
+--- a/Sources/W3C CSS Fonts/FontFeatureSettings.swift	
++++ b/Sources/W3C CSS Fonts/FontFeatureSettings.swift	
+@@ -62,9 +62,9 @@ extension FontFeatureSettings: CustomStringConvertible {
+             return "normal"
+ 
+         case .features(let features):
+-            let featureStrings = features.map { tag, value -> String in
++            let featureStrings = features.sorted { $0.key < $1.key }.map { tag, value -> String in
+                 let valueStr = value.map { " \($0)" } ?? ""
+-                return "\"\(tag)\"\(valueStr)"
++                return "\(CSSString(tag))\(valueStr)"
+             }
+             return featureStrings.joined(separator: ", ")
+ 
+diff --git a/Sources/W3C CSS Fonts/FontVariantEastAsian.swift b/Sources/W3C CSS Fonts/FontVariantEastAsian.swift
+index 5388fda..bdc24e2 100644
+--- a/Sources/W3C CSS Fonts/FontVariantEastAsian.swift	
++++ b/Sources/W3C CSS Fonts/FontVariantEastAsian.swift	
+@@ -45,7 +45,7 @@ extension FontVariantEastAsian: CustomStringConvertible {
+             return value.rawValue
+ 
+         case .combined(let values):
+-            return values.map { $0.rawValue }.joined(separator: " ")
++            return EastAsianVariantValue.allCases.filter { values.contains($0) }.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Fonts/FontVariantLigatures.swift b/Sources/W3C CSS Fonts/FontVariantLigatures.swift
+index 93ab232..d86273e 100644
+--- a/Sources/W3C CSS Fonts/FontVariantLigatures.swift	
++++ b/Sources/W3C CSS Fonts/FontVariantLigatures.swift	
+@@ -43,7 +43,7 @@ extension FontVariantLigatures: CustomStringConvertible {
+             return "none"
+ 
+         case .options(let options):
+-            return options.map { $0.rawValue }.joined(separator: " ")
++            return LigatureOption.allCases.filter { options.contains($0) }.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Fonts/FontVariantNumeric.swift b/Sources/W3C CSS Fonts/FontVariantNumeric.swift
+index 5b9f746..a3294e9 100644
+--- a/Sources/W3C CSS Fonts/FontVariantNumeric.swift	
++++ b/Sources/W3C CSS Fonts/FontVariantNumeric.swift	
+@@ -38,7 +38,7 @@ extension FontVariantNumeric: CustomStringConvertible {
+             return "normal"
+ 
+         case .options(let options):
+-            return options.map { $0.rawValue }.joined(separator: " ")
++            return NumericOption.allCases.filter { options.contains($0) }.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Fonts/FontVariationSettings.swift b/Sources/W3C CSS Fonts/FontVariationSettings.swift
+index a8b6aeb..d688180 100644
+--- a/Sources/W3C CSS Fonts/FontVariationSettings.swift	
++++ b/Sources/W3C CSS Fonts/FontVariationSettings.swift	
+@@ -34,8 +34,8 @@ extension FontVariationSettings: CustomStringConvertible {
+             return "normal"
+ 
+         case .axes(let axes):
+-            let axisStrings = axes.map { axis, value -> String in
+-                return "\"\(axis)\" \(value)"
++            let axisStrings = axes.sorted { $0.key < $1.key }.map { axis, value -> String in
++                return "\(CSSString(axis)) \(value)"
+             }
+             return axisStrings.joined(separator: ", ")
+ 
+diff --git a/Sources/W3C CSS Images/PaintOrder.swift b/Sources/W3C CSS Images/PaintOrder.swift
+index 4814aa6..b8b63d9 100644
+--- a/Sources/W3C CSS Images/PaintOrder.swift	
++++ b/Sources/W3C CSS Images/PaintOrder.swift	
+@@ -4,7 +4,7 @@ public enum PaintOrder: Property {
+ 
+     case normal
+ 
+-    case custom(Set<PaintLayer>)
++    case custom([PaintLayer])
+ 
+     case global(Global)
+ }
+@@ -26,7 +26,7 @@ extension PaintOrder: CustomStringConvertible {
+                 return "normal"
+             }
+ 
+-            return layers.map { $0.rawValue }.sorted().joined(separator: " ")
++            return layers.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+@@ -47,6 +47,10 @@ extension PaintOrder {
+     public static let markers: PaintOrder = .first(.markers)
+ 
+     public static func order(_ layers: PaintLayer...) -> PaintOrder {
+-        .custom(Set(layers))
++        .custom(
++            layers.reduce(into: [PaintLayer]()) { result, layer in
++                if !result.contains(layer) { result.append(layer) }
++            }
++        )
+     }
+ }
+diff --git a/Sources/W3C CSS Text/HangingPunctuation.swift b/Sources/W3C CSS Text/HangingPunctuation.swift
+index 9fffe4d..de5ed5f 100644
+--- a/Sources/W3C CSS Text/HangingPunctuation.swift	
++++ b/Sources/W3C CSS Text/HangingPunctuation.swift	
+@@ -39,7 +39,7 @@ extension HangingPunctuation: CustomStringConvertible {
+             return "none"
+ 
+         case .options(let options):
+-            return options.map { $0.rawValue }.joined(separator: " ")
++            return HangingPunctuationOption.allCases.filter { options.contains($0) }.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Text/TextAutospace.swift b/Sources/W3C CSS Text/TextAutospace.swift
+index 69d2170..dffdb01 100644
+--- a/Sources/W3C CSS Text/TextAutospace.swift	
++++ b/Sources/W3C CSS Text/TextAutospace.swift	
+@@ -39,7 +39,7 @@ extension TextAutospace: CustomStringConvertible {
+             return "none"
+ 
+         case .options(let options):
+-            return options.map { $0.rawValue }.joined(separator: " ")
++            return TextAutospaceOption.allCases.filter { options.contains($0) }.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Text/TextSpacing.swift b/Sources/W3C CSS Text/TextSpacing.swift
+index 115f27d..d07f34e 100644
+--- a/Sources/W3C CSS Text/TextSpacing.swift	
++++ b/Sources/W3C CSS Text/TextSpacing.swift	
+@@ -44,7 +44,7 @@ extension TextSpacing: CustomStringConvertible {
+             return "auto"
+ 
+         case .custom(let options):
+-            return options.map { $0.rawValue }.joined(separator: " ")
++            return TextSpacingOption.allCases.filter { options.contains($0) }.map { $0.rawValue }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Text/TextUnderlinePosition.swift b/Sources/W3C CSS Text/TextUnderlinePosition.swift
+index a5f4412..7e373f8 100644
+--- a/Sources/W3C CSS Text/TextUnderlinePosition.swift	
++++ b/Sources/W3C CSS Text/TextUnderlinePosition.swift	
+@@ -91,7 +91,8 @@ extension TextUnderlinePosition: CustomStringConvertible {
+             return "right"
+ 
+         case .combined(let values):
+-            return values.map { $0.description }.joined(separator: " ")
++            let order: [TextUnderlinePositionValue] = [.auto, .fromFont, .under, .left, .right]
++            return order.filter { values.contains($0) }.map { $0.description }.joined(separator: " ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Tests/W3C CSS Fonts Tests/FontFeatureSettings Tests.swift b/Tests/W3C CSS Fonts Tests/FontFeatureSettings Tests.swift
+new file mode 100644
+index 0000000..495a1c9
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontFeatureSettings Tests.swift	
+@@ -0,0 +1,15 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontFeatureSettings Tests` {}
++
++extension `FontFeatureSettings Tests` {
++    @Suite
++    struct `FontFeatureSettings - Serialization` {
++        @Test func `features print in a stable order`() {
++            let settings = FontFeatureSettings.features(["liga": .on, "kern": .off, "smcp": nil])
++            #expect(settings.description == "\"kern\" off, \"liga\" on, \"smcp\"")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontVariantEastAsian Tests.swift b/Tests/W3C CSS Fonts Tests/FontVariantEastAsian Tests.swift
+new file mode 100644
+index 0000000..dc655d7
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontVariantEastAsian Tests.swift	
+@@ -0,0 +1,14 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontVariantEastAsian Tests` {}
++
++extension `FontVariantEastAsian Tests` {
++    @Suite
++    struct `FontVariantEastAsian - Serialization` {
++        @Test func `combined values print in a stable order`() {
++            #expect(FontVariantEastAsian(.fullWidth, .traditional, .ruby).description == "ruby traditional full-width")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontVariantLigatures Tests.swift b/Tests/W3C CSS Fonts Tests/FontVariantLigatures Tests.swift
+new file mode 100644
+index 0000000..fcd71d5
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontVariantLigatures Tests.swift	
+@@ -0,0 +1,16 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontVariantLigatures Tests` {}
++
++extension `FontVariantLigatures Tests` {
++    @Suite
++    struct `FontVariantLigatures - Serialization` {
++        @Test func `options print in a stable order`() {
++            #expect(
++                FontVariantLigatures(.noContextual, .commonLigatures).description == "common-ligatures no-contextual"
++            )
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontVariationSettings Tests.swift b/Tests/W3C CSS Fonts Tests/FontVariationSettings Tests.swift
+new file mode 100644
+index 0000000..879b964
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontVariationSettings Tests.swift	
+@@ -0,0 +1,15 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontVariationSettings Tests` {}
++
++extension `FontVariationSettings Tests` {
++    @Suite
++    struct `FontVariationSettings - Serialization` {
++        @Test func `axes print in a stable order`() {
++            let settings = FontVariationSettings(["wght": 400, "wdth": 100, "opsz": 12])
++            #expect(settings.description == "\"opsz\" 12.0, \"wdth\" 100.0, \"wght\" 400.0")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Images Tests/PaintOrder Tests.swift b/Tests/W3C CSS Images Tests/PaintOrder Tests.swift
+new file mode 100644
+index 0000000..55af972
+--- /dev/null
++++ b/Tests/W3C CSS Images Tests/PaintOrder Tests.swift	
+@@ -0,0 +1,15 @@
++import Testing
++
++@testable import W3C_CSS_Images
++
++enum `PaintOrder Tests` {}
++
++extension `PaintOrder Tests` {
++    @Suite
++    struct `PaintOrder - Serialization` {
++        @Test func `layers print in the order given`() {
++            #expect(PaintOrder.order(.stroke, .fill).description == "stroke fill")
++            #expect(PaintOrder.order(.markers, .stroke, .markers).description == "markers stroke")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Text Tests/HangingPunctuation Tests.swift b/Tests/W3C CSS Text Tests/HangingPunctuation Tests.swift
+new file mode 100644
+index 0000000..4161b3c
+--- /dev/null
++++ b/Tests/W3C CSS Text Tests/HangingPunctuation Tests.swift	
+@@ -0,0 +1,14 @@
++import Testing
++
++@testable import W3C_CSS_Text
++
++enum `HangingPunctuation Tests` {}
++
++extension `HangingPunctuation Tests` {
++    @Suite
++    struct `HangingPunctuation - Serialization` {
++        @Test func `options print in a stable order`() {
++            #expect(HangingPunctuation(.allowEnd, .first, .last).description == "first last allow-end")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Text Tests/TextUnderlinePosition Tests.swift b/Tests/W3C CSS Text Tests/TextUnderlinePosition Tests.swift
+new file mode 100644
+index 0000000..c2026ff
+--- /dev/null
++++ b/Tests/W3C CSS Text Tests/TextUnderlinePosition Tests.swift	
+@@ -0,0 +1,14 @@
++import Testing
++
++@testable import W3C_CSS_Text
++
++enum `TextUnderlinePosition Tests` {}
++
++extension `TextUnderlinePosition Tests` {
++    @Suite
++    struct `TextUnderlinePosition - Serialization` {
++        @Test func `combined values print in a stable order`() {
++            #expect(TextUnderlinePosition(.right, .under).description == "under right")
++        }
++    }
++}
+-- 
+2.43.0
+

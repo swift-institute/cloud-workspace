@@ -1,0 +1,52 @@
+From a8265ae57421eb3ed02cbaf6867aa8d3c32cd100 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:34:13 +0000
+Subject: [PATCH 2/3] Kernel.File.Handle.writeAll(from:) retries an
+ interruption once bytes are written and throws Interrupt only when nothing
+ was written (swift-compositions/swift-kernel#29)
+
+---
+ README.md                                    | 2 +-
+ Sources/Kernel File/Kernel.File.Handle.swift | 6 ++++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/README.md b/README.md
+index 5135b37..08f224a 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Use this package when you need operating system calls from Swift under one name
+ 
+ - `Kernel.File.open(_:configuration:)` never inspects the file system to choose a cache mode. The requirements are a fixed platform default: unknown on Darwin and Linux, a uniform 4096-byte alignment on Windows. When the requested `Kernel.File.Direct.Mode` can't be resolved against them (`direct` or `uncached` where the platform refuses it, or `auto(policy: .errorOnViolation)` with unknown requirements), opening throws `.platform` with `ENOTSUP`; `Kernel.File.Handle.direct` says which mode an open file got. A created file gets the standard permissions.
+ - `Kernel.File.Direct.Mode.resolve(given:)` on Darwin refuses `direct` and resolves `auto` to `uncached`. On Linux and Windows it refuses `uncached`, allows `direct` only with known requirements, and resolves `auto` to `direct` when they are known and otherwise to `buffered` or a refusal, as the policy says.
+-- `Kernel.File.Handle` reports an interrupted read or write as `Interrupt` instead of retrying it. `Kernel.File.Handle.writeAll(from:)` keeps writing until every byte is written, treats a write of zero bytes as an I/O error, and also stops at an interruption, even if part of the buffer is already written.
++- `Kernel.File.Handle` reports an interrupted read or write as `Interrupt` instead of retrying it. `Kernel.File.Handle.writeAll(from:)` keeps writing until every byte is written, treats a write of zero bytes as an I/O error. It reports an interruption as `Interrupt` only while nothing is written yet, and retries one that comes after part of the buffer is written.
+ - `Kernel.File.Clone.clone(from:to:behavior:)` never replaces an existing destination, not even a dangling symbolic link. With `reflinkOrCopy` any reflink failure falls back to a plain copy. On Linux the destination is created first and removed again when the clone or copy fails. Windows never reflinks.
+ - `Kernel.File.Copy.copy(from:to:options:)` by default refuses an existing destination, follows symbolic links, and copies permissions plus access and modification times. With `overwrite`, an existing file or link at the destination is deleted first, but a directory is refused. With `followSymlinks` off, a source link is recreated as a link.
+ - `Kernel.File.Move.exclusive(from:to:)` never replaces anything at the destination, not even a dangling symbolic link, and retries when interrupted.
+diff --git a/Sources/Kernel File/Kernel.File.Handle.swift b/Sources/Kernel File/Kernel.File.Handle.swift
+index c60e9d8..b90faf2 100644
+--- a/Sources/Kernel File/Kernel.File.Handle.swift	
++++ b/Sources/Kernel File/Kernel.File.Handle.swift	
+@@ -253,6 +253,11 @@
+ 
+     extension Kernel.File.Handle {
+ 
++        /// Writes every byte of `buffer`, retrying short writes.
++        ///
++        /// An interruption before any byte is written throws `.right(.occurred)`, so the whole
++        /// call can be repeated. Once some bytes are written, an interruption is retried instead,
++        /// because the caller could not tell how many bytes reached the file.
+         @inlinable
+         public borrowing func writeAll(
+             from buffer: UnsafeRawBufferPointer
+@@ -274,6 +279,7 @@
+                     n = try unsafe ISO_9945.Kernel.IO.Write.write(descriptor, from: remaining)
+                 } catch {
+                     if error.code.isInterrupted {
++                        if written > 0 { continue }
+                         throw .right(.occurred)
+                     }
+                     throw .left(Self.Error(from: error, operation: .write))
+-- 
+2.43.0
+

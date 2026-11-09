@@ -1,0 +1,85 @@
+From d9201c717c419306db4b51090e3981ddb118ea87 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:32:10 +0000
+Subject: [PATCH 1/2] VAT.Identification upper-cases the national number, so
+ the same number in either case is equal and hashes alike
+ (swift-standards/swift-vat-standard#1)
+
+---
+ README.md                                              |  6 +++---
+ .../VAT Standard/VAT.Identification+Validation.swift   |  4 +++-
+ Sources/VAT Standard/VAT.Identification.swift          |  1 +
+ .../VAT Standard Tests/VAT Identification Tests.swift  | 10 ++++++++++
+ 4 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 50f9d93..0b75cc0 100644
+--- a/README.md
++++ b/README.md
+@@ -4,8 +4,8 @@ Use this package when you need to check that a European Union VAT identification
+ 
+ ## Laws
+ 
+-- The prefix is one of the 27 member states or `XI` for Northern Ireland. Greece is `EL`, not its ISO code `GR`. Any other prefix, including `GB` and a lower-case prefix, throws `VAT.Identification.Error.invalidPrefix(_:)`.
++- The prefix is one of the 27 member states or `XI` for Northern Ireland. Greece is `EL`, not its ISO code `GR`, and `XI` is not an ISO 3166 code, so `VAT.Identification.Prefix` doesn't map onto ISO 3166. Any other prefix, including `GB` and a lower-case prefix, throws `VAT.Identification.Error.invalidPrefix(_:)`.
+ - The national number is 2 to 12 ASCII letters, digits, `+`, `*` or `.`. Spaces, hyphens and other separators are refused, and nothing is trimmed or stripped first.
+-- The number keeps the case it was given. It is not upper-cased.
++- The number is upper-cased, so `NL000099998b57` and `NL000099998B57` are the same identification.
+ - Checks run in order: the prefix, then each character of the number, then its length. A number that is too long and also has a bad character reports the bad character.
+-- The description joins prefix and number with nothing between them, so it gives back the text that was parsed.
++- The description joins prefix and number with nothing between them, so it gives back the text that was parsed, with the number upper-cased.
+diff --git a/Sources/VAT Standard/VAT.Identification+Validation.swift b/Sources/VAT Standard/VAT.Identification+Validation.swift
+index 89c0b76..abc41b9 100644
+--- a/Sources/VAT Standard/VAT.Identification+Validation.swift	
++++ b/Sources/VAT Standard/VAT.Identification+Validation.swift	
+@@ -1,4 +1,6 @@
+ extension VAT.Identification {
++    /// Parses a VAT identification number, upper-casing the national number so that
++    /// `NL000099998b57` and `NL000099998B57` are the same identification.
+     public init(_ text: some StringProtocol) throws(VAT.Identification.Error) {
+         let prefix = String(text.prefix(2))
+         guard prefix.utf8.count == 2, let member = VAT.Identification.Prefix(rawValue: prefix) else {
+@@ -21,6 +23,6 @@ extension VAT.Identification {
+             throw .invalidLength(number.count)
+         }
+         self.prefix = member
+-        self.number = String(text.dropFirst(2))
++        self.number = String(text.dropFirst(2)).uppercased()
+     }
+ }
+diff --git a/Sources/VAT Standard/VAT.Identification.swift b/Sources/VAT Standard/VAT.Identification.swift
+index 93def3d..f216486 100644
+--- a/Sources/VAT Standard/VAT.Identification.swift	
++++ b/Sources/VAT Standard/VAT.Identification.swift	
+@@ -2,6 +2,7 @@ extension VAT {
+     public struct Identification: Sendable, Hashable {
+         public let prefix: VAT.Identification.Prefix
+ 
++        /// The national number, upper-cased.
+         public let number: String
+     }
+ }
+diff --git a/Tests/VAT Standard Tests/VAT Identification Tests.swift b/Tests/VAT Standard Tests/VAT Identification Tests.swift
+index dba0214..21072dc 100644
+--- a/Tests/VAT Standard Tests/VAT Identification Tests.swift	
++++ b/Tests/VAT Standard Tests/VAT Identification Tests.swift	
+@@ -57,6 +57,16 @@ extension `VAT.Identification Tests`.Test.Unit {
+ 
+ extension `VAT.Identification Tests`.Test.`Edge Case` {
+ 
++    @Test
++    func `a lower-case number is upper-cased, so both cases are the same identification`() throws {
++        let lower = try VAT.Identification("NL000099998b57")
++        let upper = try VAT.Identification("NL000099998B57")
++        #expect(lower.number == "000099998B57")
++        #expect(lower.description == "NL000099998B57")
++        #expect(lower == upper)
++        #expect(lower.hashValue == upper.hashValue)
++    }
++
+     @Test
+     func `a lower-case prefix is refused`() {
+         #expect(throws: VAT.Identification.Error.invalidPrefix("nl")) {
+-- 
+2.43.0
+

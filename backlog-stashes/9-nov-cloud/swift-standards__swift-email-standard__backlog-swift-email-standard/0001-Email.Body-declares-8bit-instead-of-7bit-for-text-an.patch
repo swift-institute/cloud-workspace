@@ -1,0 +1,76 @@
+From e7d890a0b76e2ed32327031a9de02f285b739d84 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:16 +0000
+Subject: [PATCH 1/2] Email.Body declares 8bit instead of 7bit for text and
+ HTML bodies with bytes outside ASCII
+ (swift-standards/swift-email-standard#10)
+
+---
+ Sources/Email Standard/Email.swift            |  5 +--
+ .../Email.Body Tests.swift                    | 36 +++++++++++++++++++
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+ create mode 100644 Tests/Email Standard Tests/Email.Body Tests.swift
+
+diff --git a/Sources/Email Standard/Email.swift b/Sources/Email Standard/Email.swift
+index 35ddafb..53a69bb 100644
+--- a/Sources/Email Standard/Email.swift	
++++ b/Sources/Email Standard/Email.swift	
+@@ -115,10 +115,11 @@ extension Email {
+             }
+         }
+ 
++        /// `7bit` when every byte of a text or HTML body is ASCII, `8bit` otherwise.
+         public var transferEncoding: RFC_2045.ContentTransferEncoding? {
+             switch self {
+-            case .text, .html:
+-                return .sevenBit
++            case .text(let bytes, _), .html(let bytes, _):
++                return bytes.allSatisfy { $0.bitPattern < 0x80 } ? .sevenBit : .eightBit
+ 
+             case .multipart:
+                 return nil
+diff --git a/Tests/Email Standard Tests/Email.Body Tests.swift b/Tests/Email Standard Tests/Email.Body Tests.swift
+new file mode 100644
+index 0000000..915d4f0
+--- /dev/null
++++ b/Tests/Email Standard Tests/Email.Body Tests.swift	
+@@ -0,0 +1,36 @@
++import Byte
++import Email_Standard
++import RFC_2045
++import Testing
++
++@Suite
++struct `Email.Body transfer encoding` {
++
++    @Test
++    func `ASCII text declares 7bit`() {
++        let body: Email.Body = .text("Hello, World!")
++
++        #expect(body.transferEncoding == .sevenBit)
++    }
++
++    @Test
++    func `UTF-8 text outside ASCII declares 8bit`() {
++        let body: Email.Body = .text("Grüße")
++
++        #expect(body.transferEncoding == .eightBit)
++    }
++
++    @Test
++    func `ASCII HTML declares 7bit`() {
++        let body: Email.Body = .html("<p>Hello</p>")
++
++        #expect(body.transferEncoding == .sevenBit)
++    }
++
++    @Test
++    func `UTF-8 HTML outside ASCII declares 8bit`() {
++        let body: Email.Body = .html("<p>日本語</p>")
++
++        #expect(body.transferEncoding == .eightBit)
++    }
++}
+-- 
+2.43.0
+

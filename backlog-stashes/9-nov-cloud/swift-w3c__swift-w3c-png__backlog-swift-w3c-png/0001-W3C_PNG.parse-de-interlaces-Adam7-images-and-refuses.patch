@@ -1,0 +1,325 @@
+From 4ea21d16e7a65adc5351fefb02694b5b2fb49779 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:15 +0000
+Subject: [PATCH] W3C_PNG.parse de-interlaces Adam7 images and refuses IHDR
+ compression, filter or interlace methods it does not define
+ (swift-w3c/swift-w3c-png#7)
+
+---
+ README.md                                     |   2 +-
+ Sources/W3C PNG/W3C_PNG.parse.swift           | 161 +++++++++++++++++-
+ .../W3C PNG Boundary Tests.swift              |  80 ++++++++-
+ 3 files changed, 230 insertions(+), 13 deletions(-)
+
+diff --git a/README.md b/README.md
+index fa9bf42..c2375e0 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@ Use this package when you need the pixel data of a PNG file as bytes, for exampl
+ 
+ ## Laws
+ 
+-- `W3C_PNG.Image.rawPixels` holds the scanlines after decompression and unfiltering, one row after another with no filter bytes, packed at the file's bit depth and channel layout. Nothing is converted: indexed images keep their palette indices, and samples below 8 bits stay packed.
++- `W3C_PNG.Image.rawPixels` holds the scanlines after decompression and unfiltering, one row after another with no filter bytes, packed at the file's bit depth and channel layout. Nothing is converted: indexed images keep their palette indices, and samples below 8 bits stay packed. Adam7 interlaced files are de-interlaced into the same row order.
+ - Only the IHDR, PLTE, IDAT and IEND chunks are used. Every other chunk, including transparency, gamma and text chunks, is skipped.
+ - Every chunk's CRC is checked, including chunks that are skipped. One wrong byte in a chunk's type, data or CRC fails the whole file with `W3C_PNG.ParseError.crcMismatch`.
+ - Width and height must each be between 1 and 2^31 minus 1.
+diff --git a/Sources/W3C PNG/W3C_PNG.parse.swift b/Sources/W3C PNG/W3C_PNG.parse.swift
+index 44fa00a..91aceeb 100644
+--- a/Sources/W3C PNG/W3C_PNG.parse.swift	
++++ b/Sources/W3C PNG/W3C_PNG.parse.swift	
+@@ -70,13 +70,24 @@ extension W3C_PNG {
+             throw .decompressionFailed
+         }
+ 
+-        let rawPixels = try reverseFilters(
+-            decompressed,
+-            width: header.width,
+-            height: header.height,
+-            colorType: header.colorType,
+-            bitDepth: header.bitDepth
+-        )
++        let rawPixels =
++            if header.isInterlaced {
++                try deinterlace(
++                    decompressed,
++                    width: header.width,
++                    height: header.height,
++                    colorType: header.colorType,
++                    bitDepth: header.bitDepth
++                )
++            } else {
++                try reverseFilters(
++                    decompressed,
++                    width: header.width,
++                    height: header.height,
++                    colorType: header.colorType,
++                    bitDepth: header.bitDepth
++                )
++            }
+ 
+         return Image(
+             width: header.width,
+@@ -96,6 +107,7 @@ extension W3C_PNG {
+         let height: Int
+         let bitDepth: Int
+         let colorType: ColorType
++        let isInterlaced: Bool
+     }
+ 
+     private static func parseIHDR(_ data: [Byte]) throws(ParseError) -> IHDR {
+@@ -131,11 +143,28 @@ extension W3C_PNG {
+             throw .unsupportedBitDepth(bitDepth)
+         }
+ 
++        guard data[10].underlying == 0, data[11].underlying == 0 else {
++            throw .invalidIHDR
++        }
++
++        let isInterlaced: Bool
++        switch data[12].underlying {
++        case 0:
++            isInterlaced = false
++
++        case 1:
++            isInterlaced = true
++
++        default:
++            throw .invalidIHDR
++        }
++
+         return IHDR(
+             width: width,
+             height: height,
+             bitDepth: bitDepth,
+-            colorType: colorType
++            colorType: colorType,
++            isInterlaced: isInterlaced
+         )
+     }
+ }
+@@ -266,6 +295,122 @@ extension W3C_PNG {
+     }
+ }
+ 
++extension W3C_PNG {
++
++    private struct Adam7Pass {
++        let xStart: Int
++        let yStart: Int
++        let xStep: Int
++        let yStep: Int
++    }
++
++    private static let adam7Passes: [Adam7Pass] = [
++        Adam7Pass(xStart: 0, yStart: 0, xStep: 8, yStep: 8),
++        Adam7Pass(xStart: 4, yStart: 0, xStep: 8, yStep: 8),
++        Adam7Pass(xStart: 0, yStart: 4, xStep: 4, yStep: 8),
++        Adam7Pass(xStart: 2, yStart: 0, xStep: 4, yStep: 4),
++        Adam7Pass(xStart: 0, yStart: 2, xStep: 2, yStep: 4),
++        Adam7Pass(xStart: 1, yStart: 0, xStep: 2, yStep: 2),
++        Adam7Pass(xStart: 0, yStart: 1, xStep: 1, yStep: 2),
++    ]
++
++    private static func passExtent(_ size: Int, start: Int, step: Int) -> Int {
++        size > start ? (size - start + step - 1) / step : 0
++    }
++
++    private static func scanlineByteCount(width: Int, bitsPerPixel: Int) throws(ParseError) -> Int {
++        let bits = width.multipliedReportingOverflow(by: bitsPerPixel)
++        guard !bits.overflow else { throw .invalidDataSize }
++        return (bits.partialValue + 7) / 8
++    }
++
++    private static func deinterlace(
++        _ data: [Byte],
++        width: Int,
++        height: Int,
++        colorType: ColorType,
++        bitDepth: Int
++    ) throws(ParseError) -> [Byte] {
++        let bitsPerPixel = colorType.channels * bitDepth
++        let scanlineBytes = try scanlineByteCount(width: width, bitsPerPixel: bitsPerPixel)
++        let total = height.multipliedReportingOverflow(by: scanlineBytes)
++        guard !total.overflow else { throw .invalidDataSize }
++
++        var result: [Byte] = []
++        var offset = 0
++
++        for pass in adam7Passes {
++            let passWidth = passExtent(width, start: pass.xStart, step: pass.xStep)
++            let passHeight = passExtent(height, start: pass.yStart, step: pass.yStep)
++            guard passWidth > 0, passHeight > 0 else { continue }
++
++            let passScanlineBytes = try scanlineByteCount(width: passWidth, bitsPerPixel: bitsPerPixel)
++            let passSize = passHeight.multipliedReportingOverflow(by: passScanlineBytes + 1)
++            guard !passSize.overflow, data.count - offset >= passSize.partialValue else {
++                throw .invalidDataSize
++            }
++
++            if result.isEmpty {
++                result = [Byte](repeating: Byte(0), count: total.partialValue)
++            }
++
++            let passPixels = try reverseFilters(
++                Array(data[offset..<(offset + passSize.partialValue)]),
++                width: passWidth,
++                height: passHeight,
++                colorType: colorType,
++                bitDepth: bitDepth
++            )
++            offset += passSize.partialValue
++
++            for passY in 0..<passHeight {
++                let targetRow = (pass.yStart + passY * pass.yStep) * scanlineBytes
++                let sourceRow = passY * passScanlineBytes
++                for passX in 0..<passWidth {
++                    copyPixel(
++                        from: passPixels,
++                        at: sourceRow,
++                        index: passX,
++                        to: &result,
++                        at: targetRow,
++                        index: pass.xStart + passX * pass.xStep,
++                        bitsPerPixel: bitsPerPixel
++                    )
++                }
++            }
++        }
++
++        return result
++    }
++
++    private static func copyPixel(
++        from source: [Byte],
++        at sourceRow: Int,
++        index sourceIndex: Int,
++        to target: inout [Byte],
++        at targetRow: Int,
++        index targetIndex: Int,
++        bitsPerPixel: Int
++    ) {
++        if bitsPerPixel >= 8 {
++            let bytesPerPixel = bitsPerPixel / 8
++            let sourceStart = sourceRow + sourceIndex * bytesPerPixel
++            let targetStart = targetRow + targetIndex * bytesPerPixel
++            target[targetStart..<(targetStart + bytesPerPixel)] =
++                source[sourceStart..<(sourceStart + bytesPerPixel)]
++        } else {
++            let mask = UInt8((1 << bitsPerPixel) - 1)
++            let sourceBit = sourceIndex * bitsPerPixel
++            let sourceShift = 8 - bitsPerPixel - sourceBit % 8
++            let value = (source[sourceRow + sourceBit / 8].underlying >> sourceShift) & mask
++            let targetBit = targetIndex * bitsPerPixel
++            let targetShift = 8 - bitsPerPixel - targetBit % 8
++            let targetByte = targetRow + targetBit / 8
++            target[targetByte] = Byte(target[targetByte].underlying | (value << targetShift))
++        }
++    }
++}
++
+ extension W3C_PNG {
+ 
+     private static func readUInt32BE(_ data: [Byte], at offset: Int) -> UInt32 {
+diff --git a/Tests/W3C PNG Tests/W3C PNG Boundary Tests.swift b/Tests/W3C PNG Tests/W3C PNG Boundary Tests.swift
+index f59047c..e4f8115 100644
+--- a/Tests/W3C PNG Tests/W3C PNG Boundary Tests.swift	
++++ b/Tests/W3C PNG Tests/W3C PNG Boundary Tests.swift	
+@@ -17,11 +17,32 @@ extension `W3C PNG Boundary Tests` {
+             return be32(UInt32(data.count)) + body + be32(W3C_PNG.CRC.checksum(body.map(Byte.init(bitPattern:))))
+         }
+ 
+-        private static func png(width: UInt32, height: UInt32, bitDepth: UInt8 = 8, colorType: UInt8 = 0) -> [Byte] {
++        private static func zlibStored(_ data: [UInt8]) -> [UInt8] {
++            var a: UInt32 = 1
++            var b: UInt32 = 0
++            for byte in data {
++                a = (a + UInt32(byte)) % 65521
++                b = (b + a) % 65521
++            }
++            let length = UInt16(data.count)
++            return [0x78, 0x01, 0x01, UInt8(length & 0xFF), UInt8(length >> 8), UInt8(~length & 0xFF), UInt8(~length >> 8)]
++                + data + be32(b << 16 | a)
++        }
++
++        private static func png(
++            width: UInt32,
++            height: UInt32,
++            bitDepth: UInt8 = 8,
++            colorType: UInt8 = 0,
++            compressionMethod: UInt8 = 0,
++            filterMethod: UInt8 = 0,
++            interlaceMethod: UInt8 = 0,
++            scanlines: [UInt8] = [0x00, 0x7F]
++        ) -> [Byte] {
+             let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+-            let header = be32(width) + be32(height) + [bitDepth, colorType, 0, 0, 0]
+-            let idat: [UInt8] = [0x78, 0x01, 0x01, 0x02, 0x00, 0xFD, 0xFF, 0x00, 0x7F, 0x00, 0x81, 0x00, 0x80]
+-            return (signature + chunk("IHDR", header) + chunk("IDAT", idat) + chunk("IEND", []))
++            let header =
++                be32(width) + be32(height) + [bitDepth, colorType, compressionMethod, filterMethod, interlaceMethod]
++            return (signature + chunk("IHDR", header) + chunk("IDAT", zlibStored(scanlines)) + chunk("IEND", []))
+                 .map(Byte.init(bitPattern:))
+         }
+ 
+@@ -45,6 +66,57 @@ extension `W3C PNG Boundary Tests` {
+             #expect(throws: W3C_PNG.ParseError.invalidIHDR) { try W3C_PNG.parse(Self.png(width: 1, height: 0xFFFF_FFFF)) }
+         }
+ 
++        @Test
++        func `a compression or filter method other than zero is an invalid header`() {
++            #expect(throws: W3C_PNG.ParseError.invalidIHDR) {
++                try W3C_PNG.parse(Self.png(width: 1, height: 1, compressionMethod: 1))
++            }
++            #expect(throws: W3C_PNG.ParseError.invalidIHDR) {
++                try W3C_PNG.parse(Self.png(width: 1, height: 1, filterMethod: 1))
++            }
++        }
++
++        @Test
++        func `an interlace method other than none or Adam7 is an invalid header`() {
++            #expect(throws: W3C_PNG.ParseError.invalidIHDR) {
++                try W3C_PNG.parse(Self.png(width: 1, height: 1, interlaceMethod: 2))
++            }
++        }
++
++        @Test
++        func `an Adam7 interlaced image decodes to its pixels in row order`() throws {
++            let passes: [UInt8] = [
++                0x00, 1,
++                0x00, 3,
++                0x00, 7, 9,
++                0x00, 2,
++                0x00, 8,
++                0x00, 4, 5, 6,
++            ]
++            let image = try W3C_PNG.parse(Self.png(width: 3, height: 3, interlaceMethod: 1, scanlines: passes))
++            #expect(image.rawPixels == (1...9).map { Byte(bitPattern: $0) })
++        }
++
++        @Test
++        func `an Adam7 interlaced one bit image packs its pixels into rows`() throws {
++            let passes: [UInt8] = [
++                0x00, 0x80,
++                0x00, 0x00,
++                0x00, 0xC0,
++            ]
++            let image = try W3C_PNG.parse(
++                Self.png(width: 2, height: 2, bitDepth: 1, interlaceMethod: 1, scanlines: passes)
++            )
++            #expect(image.rawPixels == [Byte(bitPattern: 0x80), Byte(bitPattern: 0xC0)])
++        }
++
++        @Test
++        func `an Adam7 interlaced image with a missing pass is too short`() {
++            #expect(throws: W3C_PNG.ParseError.invalidDataSize) {
++                try W3C_PNG.parse(Self.png(width: 3, height: 3, interlaceMethod: 1, scanlines: [0x00, 1, 0x00, 3]))
++            }
++        }
++
+         @Test
+         func `the largest valid dimensions with too little data throw instead of trapping`() {
+             #expect(throws: W3C_PNG.ParseError.invalidDataSize) {
+-- 
+2.43.0
+

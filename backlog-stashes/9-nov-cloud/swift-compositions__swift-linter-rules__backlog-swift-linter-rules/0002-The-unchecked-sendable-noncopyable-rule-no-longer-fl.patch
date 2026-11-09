@@ -1,0 +1,162 @@
+From 32dcad8c46c382f9f5b031aeb24f3f07d97d8bde Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:34:13 +0000
+Subject: [PATCH 2/2] The unchecked sendable noncopyable rule no longer flags
+ structs storing an unsafe pointer, OpaquePointer, Unmanaged, AnyObject or
+ non-Sendable function, and its message says so
+ (swift-compositions/swift-linter-rules#12)
+
+---
+ ...ecessaryUncheckedSendableNoncopyable.swift | 23 ++++++++-
+ .../MemoryNonSendableStorageTypeFinder.swift  | 31 +++++++++++
+ ...ryUncheckedSendableNoncopyable Tests.swift | 51 +++++++++++++++++++
+ 3 files changed, 104 insertions(+), 1 deletion(-)
+ create mode 100644 Sources/Linter Rule Memory/MemoryNonSendableStorageTypeFinder.swift
+
+diff --git a/Sources/Linter Rule Memory/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable.swift b/Sources/Linter Rule Memory/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable.swift
+index 7d3704b..3d0bedd 100644
+--- a/Sources/Linter Rule Memory/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable.swift	
++++ b/Sources/Linter Rule Memory/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable.swift	
+@@ -33,7 +33,8 @@ internal let `unchecked sendable noncopyable message`: Swift::String =
+     + "The compiler synthesises and checks `Sendable` for `~Copyable` structs the "
+     + "same way as for `Copyable` ones — there is no inference gap. `@unchecked "
+     + "Sendable` here is a misleading safety claim. Drop `@unchecked` and let the "
+-    + "checker verify."
++    + "checker verify. (Structs storing an unsafe pointer, `OpaquePointer`, "
++    + "`Unmanaged`, `AnyObject` or a non-`@Sendable` function are not flagged.)"
+ 
+ internal final class MemoryUnnecessaryUncheckedSendableNoncopyableVisitor: SyntaxVisitor {
+     let source: Source.File
+@@ -88,6 +89,23 @@ internal final class MemoryUnnecessaryUncheckedSendableNoncopyableVisitor: Synta
+         return nil
+     }
+ 
++    private func storesNonSendable(_ memberBlock: MemberBlockSyntax) -> Bool {
++        for member in memberBlock.members {
++            guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
++            let isTypeLevel = variable.modifiers.contains { modifier in
++                modifier.name.tokenKind == .keyword(.static) || modifier.name.tokenKind == .keyword(.class)
++            }
++            guard !isTypeLevel, !memoryStructSendableClassMemberIsComputed(variable) else { continue }
++            for binding in variable.bindings {
++                guard let type = binding.typeAnnotation?.type else { continue }
++                let finder = MemoryNonSendableStorageTypeFinder(viewMode: .sourceAccurate)
++                finder.walk(type)
++                if finder.found { return true }
++            }
++        }
++        return false
++    }
++
+     override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
+         guard let inheritanceClause = node.inheritanceClause else {
+             return .visitChildren
+@@ -98,6 +116,9 @@ internal final class MemoryUnnecessaryUncheckedSendableNoncopyableVisitor: Synta
+         guard let position = uncheckedSendablePosition(inheritanceClause) else {
+             return .visitChildren
+         }
++        guard !storesNonSendable(node.memberBlock) else {
++            return .visitChildren
++        }
+         let location = converter.location(for: position)
+         matches.append(
+             Diagnostic.Record(
+diff --git a/Sources/Linter Rule Memory/MemoryNonSendableStorageTypeFinder.swift b/Sources/Linter Rule Memory/MemoryNonSendableStorageTypeFinder.swift
+new file mode 100644
+index 0000000..f33235a
+--- /dev/null
++++ b/Sources/Linter Rule Memory/MemoryNonSendableStorageTypeFinder.swift	
+@@ -0,0 +1,31 @@
++internal import SwiftSyntax
++
++internal final class MemoryNonSendableStorageTypeFinder: SyntaxVisitor {
++    static let names: Set<Swift::String> = [
++        "UnsafePointer", "UnsafeMutablePointer", "UnsafeRawPointer", "UnsafeMutableRawPointer",
++        "UnsafeBufferPointer", "UnsafeMutableBufferPointer", "UnsafeRawBufferPointer",
++        "UnsafeMutableRawBufferPointer", "OpaquePointer", "Unmanaged", "AnyObject",
++    ]
++
++    var found = false
++
++    override func visit(_ node: IdentifierTypeSyntax) -> SyntaxVisitorContinueKind {
++        if Self.names.contains(node.name.text) { found = true }
++        return .visitChildren
++    }
++
++    override func visit(_ node: MemberTypeSyntax) -> SyntaxVisitorContinueKind {
++        if Self.names.contains(node.name.text) { found = true }
++        return .visitChildren
++    }
++
++    override func visit(_ node: FunctionTypeSyntax) -> SyntaxVisitorContinueKind {
++        let isSendable =
++            node.parent?.as(AttributedTypeSyntax.self)?.attributes.contains { element in
++                guard case .attribute(let attribute) = element else { return false }
++                return attribute.attributeName.trimmedDescription == "Sendable"
++            } ?? false
++        if !isSendable { found = true }
++        return .visitChildren
++    }
++}
+diff --git a/Tests/Linter Rule Memory Tests/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable Tests.swift b/Tests/Linter Rule Memory Tests/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable Tests.swift
+index 10e67b2..8cba209 100644
+--- a/Tests/Linter Rule Memory Tests/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable Tests.swift	
++++ b/Tests/Linter Rule Memory Tests/Lint.Rule.Memory.UnnecessaryUncheckedSendableNoncopyable Tests.swift	
+@@ -80,3 +80,54 @@ extension `unchecked sendable noncopyable Tests`.Unit {
+         #expect(findings.isEmpty)
+     }
+ }
++
++extension `unchecked sendable noncopyable Tests`.`Edge Case` {
++    @Test
++    func `noncopyable struct storing only Sendable values is flagged`() {
++        let source = """
++            struct Reader: ~Copyable, @unchecked Sendable {
++                let count: Int
++                var name: String
++                var handler: @Sendable () -> Void
++            }
++            """
++        let findings = `unchecked sendable noncopyable Tests`.findings(in: source)
++        #expect(findings.count == 1)
++    }
++
++    @Test
++    func `noncopyable struct storing an unsafe pointer is not flagged`() {
++        let source = """
++            struct Arena: ~Copyable, @unchecked Sendable {
++                let base: UnsafeMutableRawPointer
++                let count: Int
++            }
++            """
++        let findings = `unchecked sendable noncopyable Tests`.findings(in: source)
++        #expect(findings.isEmpty)
++    }
++
++    @Test
++    func `noncopyable struct storing a non-Sendable closure is not flagged`() {
++        let source = """
++            struct Callback: ~Copyable, @unchecked Sendable {
++                let body: (() -> Void)?
++            }
++            """
++        let findings = `unchecked sendable noncopyable Tests`.findings(in: source)
++        #expect(findings.isEmpty)
++    }
++
++    @Test
++    func `static and computed pointer properties do not exempt the struct`() {
++        let source = """
++            struct Reader: ~Copyable, @unchecked Sendable {
++                static let shared: OpaquePointer? = nil
++                var address: UnsafeRawPointer? { nil }
++                let count: Int
++            }
++            """
++        let findings = `unchecked sendable noncopyable Tests`.findings(in: source)
++        #expect(findings.count == 1)
++    }
++}
+-- 
+2.43.0
+

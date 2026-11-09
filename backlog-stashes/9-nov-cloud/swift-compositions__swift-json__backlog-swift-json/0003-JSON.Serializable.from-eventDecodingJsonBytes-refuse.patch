@@ -1,0 +1,107 @@
+From be5e4c6039691c5cdac0b1b04e56847fc7dafc18 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:15 +0000
+Subject: [PATCH 3/3] JSON.Serializable.from(eventDecodingJsonBytes:) refuses
+ content after the value as trailing content, like the tree path
+ (swift-compositions/swift-json#15)
+
+---
+ Sources/JSON/JSON.Serializable.swift          |  8 +++--
+ Sources/JSON/JSON.Span.EventStream.swift      | 10 ++++++
+ .../Serializable.EventStream Tests.swift      | 33 +++++++++++++++++++
+ 3 files changed, 49 insertions(+), 2 deletions(-)
+
+diff --git a/Sources/JSON/JSON.Serializable.swift b/Sources/JSON/JSON.Serializable.swift
+index c3e8871..65942f0 100644
+--- a/Sources/JSON/JSON.Serializable.swift
++++ b/Sources/JSON/JSON.Serializable.swift
+@@ -55,7 +55,9 @@ extension JSON.Serializable {
+                 let span = unsafe buffer.span
+                 var stream = JSON.Span.EventStream(span)
+                 do {
+-                    return try Self.deserialize(events: &stream)
++                    let value = try Self.deserialize(events: &stream)
++                    try stream.expectEnd()
++                    return value
+                 } catch let error as JSON.Error {
+                     parserError = error
+                     return nil
+@@ -74,7 +76,9 @@ extension JSON.Serializable {
+             let span = unsafe buffer.span
+             var stream = JSON.Span.EventStream(span)
+             do {
+-                return try Self.deserialize(events: &stream)
++                let value = try Self.deserialize(events: &stream)
++                try stream.expectEnd()
++                return value
+             } catch let error as JSON.Error {
+                 slowError = error
+                 return nil
+diff --git a/Sources/JSON/JSON.Span.EventStream.swift b/Sources/JSON/JSON.Span.EventStream.swift
+index b5adbac..ec091e5 100644
+--- a/Sources/JSON/JSON.Span.EventStream.swift
++++ b/Sources/JSON/JSON.Span.EventStream.swift
+@@ -72,6 +72,16 @@ extension JSON.Span.EventStream {
+     public mutating func peekStructural() -> UInt8? {
+         inner.peek().map(\.underlying)
+     }
++
++    /// Throws when anything but whitespace follows the value already read (RFC 8259 §2: one value per text).
++    @inlinable
++    @_lifetime(self: copy self)
++    public mutating func expectEnd() throws(JSON.Error) {
++        guard !inner.isConsumed else { return }
++        guard inner.peek() == nil else {
++            throw JSON.Error(RFC_8259.Error.trailingContent(at: position()))
++        }
++    }
+ }
+ 
+ extension JSON.Span.EventStream {
+diff --git a/Tests/JSON Tests/Serializable.EventStream Tests.swift b/Tests/JSON Tests/Serializable.EventStream Tests.swift
+index 9d0fea6..0b0c5d0 100644
+--- a/Tests/JSON Tests/Serializable.EventStream Tests.swift	
++++ b/Tests/JSON Tests/Serializable.EventStream Tests.swift	
+@@ -114,6 +114,39 @@ struct `Serializable EventStream Tests` {
+         #expect(Int(result["number"]) == 42)
+     }
+ 
++    @Test
++    func `Event path refuses content after the value`() {
++        let bytes: [Byte] = "42 x".utf8.map(Byte.init(bitPattern:))
++        #expect {
++            try Int.from(eventDecodingJsonBytes: bytes)
++        } throws: { error in
++            guard case JSON.Error.invalidSyntax(let message, _) = error else { return false }
++            return message == "Trailing content after JSON value"
++        }
++    }
++
++    @Test
++    func `Event path refuses a second value`() {
++        let bytes: [Byte] = "42 43".utf8.map(Byte.init(bitPattern:))
++        #expect(throws: JSON.Error.self) {
++            try Int.from(eventDecodingJsonBytes: bytes)
++        }
++    }
++
++    @Test
++    func `Event path accepts trailing whitespace`() throws {
++        let bytes: [Byte] = "[1, 2] \n\t".utf8.map(Byte.init(bitPattern:))
++        #expect(try [Int].from(eventDecodingJsonBytes: bytes) == [1, 2])
++    }
++
++    @Test
++    func `Event path default fallback refuses content after the value`() {
++        let bytes: [Byte] = #"{"name":"Alice","age":30} x"#.utf8.map(Byte.init(bitPattern:))
++        #expect(throws: JSON.Error.self) {
++            try FooDefault.from(eventDecodingJsonBytes: bytes)
++        }
++    }
++
+     fileprivate struct FooDefault: JSON.Serializable {
+         let name: String
+         let age: Int
+-- 
+2.43.0
+

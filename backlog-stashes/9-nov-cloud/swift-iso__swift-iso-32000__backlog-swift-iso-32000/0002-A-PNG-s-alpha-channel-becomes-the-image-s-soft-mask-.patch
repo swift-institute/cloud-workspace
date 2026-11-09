@@ -1,0 +1,276 @@
+From 39721898ae2b3712a3e8edb39c214c15560321bf Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:40:39 +0000
+Subject: [PATCH 2/3] A PNG's alpha channel becomes the image's soft mask,
+ which the writer emits as an /SMask DeviceGray image, instead of being
+ dropped (swift-iso/swift-iso-32000#14)
+
+---
+ Package.swift                                 |  1 +
+ Sources/ISO 32000 7 Syntax/7.3 Objects.swift  |  1 +
+ Sources/ISO 32000 8 Graphics/8.9 Images.swift |  9 ++-
+ .../ISO 32000 Flate/ISO_32000.Image+PNG.swift | 27 ++++---
+ Sources/ISO 32000/ISO_32000.Writer.swift      | 18 +++++
+ .../ISO_32000.Image Tests.swift               | 70 +++++++++++++++++++
+ 6 files changed, 114 insertions(+), 12 deletions(-)
+ create mode 100644 Tests/ISO 32000 Tests/ISO_32000.Image Tests.swift
+
+diff --git a/Package.swift b/Package.swift
+index 1f2cfea..2d3fefb 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -264,6 +264,7 @@ let package = Package(
+                 .target(name: "ISO 32000 Flate"),
+                 .product(name: "Byte", package: "swift-byte"),
+                 .product(name: "Binary", package: "swift-binary"),
++                .product(name: "RFC 1950", package: "swift-rfc-1950"),
+                 .product(name: "Formatter", package: "swift-formatter"),
+                 .product(name: "ISO 14496-22", package: "swift-iso-14496-22"),
+                 .product(name: "RFC 3986", package: "swift-rfc-3986"),
+diff --git a/Sources/ISO 32000 7 Syntax/7.3 Objects.swift b/Sources/ISO 32000 7 Syntax/7.3 Objects.swift
+index 2fd0190..94ee3e0 100644
+--- a/Sources/ISO 32000 7 Syntax/7.3 Objects.swift	
++++ b/Sources/ISO 32000 7 Syntax/7.3 Objects.swift	
+@@ -457,6 +457,7 @@ extension ISO_32000.`7`.`3`.`5`.Name {
+     public static let bleedBox = Self(__unchecked: (), rawValue: "BleedBox")
+     public static let trimBox = Self(__unchecked: (), rawValue: "TrimBox")
+     public static let artBox = Self(__unchecked: (), rawValue: "ArtBox")
++    public static let sMask = Self(__unchecked: (), rawValue: "SMask")
+     public static let viewerPreferences = Self(__unchecked: (), rawValue: "ViewerPreferences")
+     public static let hideToolbar = Self(__unchecked: (), rawValue: "HideToolbar")
+     public static let hideMenubar = Self(__unchecked: (), rawValue: "HideMenubar")
+diff --git a/Sources/ISO 32000 8 Graphics/8.9 Images.swift b/Sources/ISO 32000 8 Graphics/8.9 Images.swift
+index f5df31a..9af17f9 100644
+--- a/Sources/ISO 32000 8 Graphics/8.9 Images.swift	
++++ b/Sources/ISO 32000 8 Graphics/8.9 Images.swift	
+@@ -25,6 +25,10 @@ extension ISO_32000.`8`.`9` {
+ 
+         public let data: [Byte]
+ 
++        /// The image's opacity as a soft mask (ISO 32000-2 §11.6.5.3): one 8-bit DeviceGray sample
++        /// per pixel, FlateDecode-compressed, or nil for an opaque image.
++        public let softMask: [Byte]?
++
+         public let id: UInt64
+ 
+         public init(
+@@ -33,7 +37,8 @@ extension ISO_32000.`8`.`9` {
+             colorSpace: Color.Space,
+             bitsPerComponent: Int,
+             filter: Filter,
+-            data: [Byte]
++            data: [Byte],
++            softMask: [Byte]? = nil
+         ) {
+             self.pixelWidth = pixelWidth
+             self.pixelHeight = pixelHeight
+@@ -41,6 +46,7 @@ extension ISO_32000.`8`.`9` {
+             self.bitsPerComponent = bitsPerComponent
+             self.filter = filter
+             self.data = data
++            self.softMask = softMask
+             self.id = Self.nextID()
+         }
+     }
+@@ -143,6 +149,7 @@ extension ISO_32000.`8`.`9`.Image {
+         self.bitsPerComponent = 8
+         self.filter = .dctDecode
+         self.data = jpegData
++        self.softMask = nil
+         self.id = Self.nextID()
+ 
+         switch components {
+diff --git a/Sources/ISO 32000 Flate/ISO_32000.Image+PNG.swift b/Sources/ISO 32000 Flate/ISO_32000.Image+PNG.swift
+index dfe07fb..8a1c9ef 100644
+--- a/Sources/ISO 32000 Flate/ISO_32000.Image+PNG.swift	
++++ b/Sources/ISO 32000 Flate/ISO_32000.Image+PNG.swift	
+@@ -17,7 +17,7 @@ extension ISO_32000.Image {
+             throw .invalidHeader
+         }
+ 
+-        let (rawPixels, colorSpace) = Self.convertToRawPixels(image)
++        let (rawPixels, colorSpace, alpha) = Self.convertToRawPixels(image)
+ 
+         var compressedData: [Byte] = []
+         RFC_1950.compress(rawPixels, into: &compressedData, level: compressionLevel)
+@@ -28,49 +28,54 @@ extension ISO_32000.Image {
+             colorSpace: colorSpace,
+             bitsPerComponent: 8,
+             filter: .flateDecode,
+-            data: compressedData
++            data: compressedData,
++            softMask: alpha.map { RFC_1950.compress($0, level: compressionLevel) }
+         )
+     }
+ 
+     private static func convertToRawPixels(
+         _ image: W3C_PNG::W3C_PNG.Image
+-    ) -> (pixels: [Byte], colorSpace: Color.Space) {
++    ) -> (pixels: [Byte], colorSpace: Color.Space, alpha: [Byte]?) {
+         switch image.colorType {
+         case .grayscale:
+ 
+-            return (image.rawPixels, .deviceGray)
++            return (image.rawPixels, .deviceGray, nil)
+ 
+         case .rgb:
+ 
+-            return (image.rawPixels, .deviceRGB)
++            return (image.rawPixels, .deviceRGB, nil)
+ 
+         case .rgba:
+ 
+             var rgb: [Byte] = []
++            var alpha: [Byte] = []
+             rgb.reserveCapacity(image.width * image.height * 3)
++            alpha.reserveCapacity(image.width * image.height)
+             for i in stride(from: 0, to: image.rawPixels.count, by: 4) {
+                 rgb.append(image.rawPixels[i])
+                 rgb.append(image.rawPixels[i + 1])
+                 rgb.append(image.rawPixels[i + 2])
+-
++                alpha.append(image.rawPixels[i + 3])
+             }
+-            return (rgb, .deviceRGB)
++            return (rgb, .deviceRGB, alpha)
+ 
+         case .grayscaleAlpha:
+ 
+             var gray: [Byte] = []
++            var alpha: [Byte] = []
+             gray.reserveCapacity(image.width * image.height)
++            alpha.reserveCapacity(image.width * image.height)
+             for i in stride(from: 0, to: image.rawPixels.count, by: 2) {
+                 gray.append(image.rawPixels[i])
+-
++                alpha.append(image.rawPixels[i + 1])
+             }
+-            return (gray, .deviceGray)
++            return (gray, .deviceGray, alpha)
+ 
+         case .indexed:
+ 
+             guard let palette = image.palette else {
+ 
+-                return (image.rawPixels, .deviceGray)
++                return (image.rawPixels, .deviceGray, nil)
+             }
+             var rgb: [Byte] = []
+             rgb.reserveCapacity(image.width * image.height * 3)
+@@ -88,7 +93,7 @@ extension ISO_32000.Image {
+                     rgb.append(Byte(bitPattern: 0))
+                 }
+             }
+-            return (rgb, .deviceRGB)
++            return (rgb, .deviceRGB, nil)
+         }
+     }
+ }
+diff --git a/Sources/ISO 32000/ISO_32000.Writer.swift b/Sources/ISO 32000/ISO_32000.Writer.swift
+index fc24a3a..56eb961 100644
+--- a/Sources/ISO 32000/ISO_32000.Writer.swift	
++++ b/Sources/ISO 32000/ISO_32000.Writer.swift	
+@@ -108,6 +108,24 @@ extension ISO_32000.Writer {
+                 imageDict[.filter] = .name(.flateDecode)
+             }
+ 
++            if let softMask = image.softMask {
++                let maskNum = state.nextObjectNumber()
++                imageDict[.sMask] = .reference(ISO_32000.COS.IndirectReference(objectNumber: maskNum))
++
++                var maskDict = ISO_32000.COS.Dictionary()
++                maskDict[.type] = .name(.xObject)
++                maskDict[.subtype] = .name(.image)
++                maskDict[.width] = .integer(Int64(image.pixelWidth))
++                maskDict[.height] = .integer(Int64(image.pixelHeight))
++                maskDict[.colorSpace] = .name(.deviceGray)
++                maskDict[.bitsPerComponent] = .integer(8)
++                maskDict[.filter] = .name(.flateDecode)
++
++                let maskStream = ISO_32000.COS.Stream(dictionary: maskDict, data: softMask)
++                state.objectOffsets[maskNum] = buffer.count - state.origin
++                writeIndirectObject(maskNum, object: .stream(maskStream), into: &buffer)
++            }
++
+             let stream = ISO_32000.COS.Stream(dictionary: imageDict, data: image.data)
+             state.objectOffsets[objNum] = buffer.count - state.origin
+             writeIndirectObject(objNum, object: .stream(stream), into: &buffer)
+diff --git a/Tests/ISO 32000 Tests/ISO_32000.Image Tests.swift b/Tests/ISO 32000 Tests/ISO_32000.Image Tests.swift
+new file mode 100644
+index 0000000..6e64bcb
+--- /dev/null
++++ b/Tests/ISO 32000 Tests/ISO_32000.Image Tests.swift	
+@@ -0,0 +1,70 @@
++import Byte
++import ISO_32000_Flate
++import RFC_1950
++import Testing
++
++@testable import ISO_32000
++
++@Suite
++struct `ISO_32000.Image Tests` {
++
++    static let rgba: [Byte] = [
++        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
++        0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xF4, 0x22, 0x7F,
++        0x8A, 0x00, 0x00, 0x00, 0x11, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xD0,
++        0xC0, 0xF0, 0x9F, 0xE1, 0x3F, 0x00, 0x0E, 0x7D, 0x03, 0x7E, 0xEA, 0xF6, 0x93, 0xC0, 0x00, 0x00,
++        0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
++    ].map(Byte.init(bitPattern:))
++
++    static let grayscaleAlpha: [Byte] = [
++        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
++        0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0x5E, 0x2B, 0xB7,
++        0x01, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xE0, 0x12, 0x91, 0xD3,
++        0x00, 0x00, 0x00, 0xCD, 0x00, 0x65, 0x6A, 0x99, 0x84, 0x42, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
++        0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
++    ].map(Byte.init(bitPattern:))
++
++    @Test
++    func `an RGBA PNG keeps its alpha channel as a soft mask`() throws {
++        let image = try ISO_32000.Image(png: Self.rgba)
++        let softMask = try #require(image.softMask)
++
++        #expect(try RFC_1950.decompress(image.data) == [255, 0, 0, 0, 255, 0].map(Byte.init(bitPattern:)))
++        #expect(try RFC_1950.decompress(softMask) == [128, 255].map(Byte.init(bitPattern:)))
++    }
++
++    @Test
++    func `a grayscale PNG with alpha keeps its alpha channel as a soft mask`() throws {
++        let image = try ISO_32000.Image(png: Self.grayscaleAlpha)
++        let softMask = try #require(image.softMask)
++
++        #expect(image.colorSpace == .deviceGray)
++        #expect(try RFC_1950.decompress(image.data) == [10, 30].map(Byte.init(bitPattern:)))
++        #expect(try RFC_1950.decompress(softMask) == [20, 40].map(Byte.init(bitPattern:)))
++    }
++
++    @Test
++    func `an image with a soft mask is written with an SMask image`() throws {
++        let image = try ISO_32000.Image(png: Self.rgba)
++        let page = ISO_32000.Page(
++            mediaBox: .letter,
++            content: ISO_32000.ContentStream { _ in },
++            resources: ISO_32000.Resources(fonts: [:], xObjects: [image.resourceName: image])
++        )
++        var writer = ISO_32000.Writer()
++        let str = try String(decoding: writer.write(ISO_32000.Document(pages: [page])), as: UTF8.self)
++
++        #expect(str.contains("/SMask "))
++        #expect(str.ranges(of: "/Subtype /Image").count == 2)
++        #expect(str.contains("/ColorSpace /DeviceGray"))
++    }
++
++    @Test
++    func `a JPEG image has no soft mask`() throws {
++        let jpeg: [Byte] = [
++            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
++        ].map(Byte.init(bitPattern:))
++        let image = try ISO_32000.Image(jpeg: jpeg)
++        #expect(image.softMask == nil)
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,187 @@
+From a701a1436eb7ead0bf35b346c122f3523fb9de77 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:34:31 +0000
+Subject: [PATCH] JSONFeed.Item codes date_published and date_modified as RFC
+ 3339 dates, as JSON Feed requires, instead of RFC 5322 dates
+ (swift-standards/swift-json-feed-standard#9)
+
+---
+ Package.swift                                 |  2 +
+ .../JSONFeed.Item+Codable.swift               | 60 +++++++++++++++----
+ .../JSONFeed+Codable Tests.swift              | 56 +++++++++++++++++
+ 3 files changed, 108 insertions(+), 10 deletions(-)
+
+diff --git a/Package.swift b/Package.swift
+index 41812d9..6e96b62 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -23,6 +23,7 @@ let package = Package(
+     dependencies: [
+         .package(url: "https://github.com/swift-standards/swift-uri-standard.git", branch: "main"),
+         .package(url: "https://github.com/swift-ietf/swift-rfc-3986.git", branch: "main"),
++        .package(url: "https://github.com/swift-ietf/swift-rfc-3339.git", branch: "main"),
+         .package(url: "https://github.com/swift-ietf/swift-rfc-5322.git", branch: "main"),
+         .package(url: "https://github.com/swift-ietf/swift-rfc-5646.git", branch: "main"),
+         .package(url: "https://github.com/swift-ietf/swift-rfc-9110.git", branch: "main"),
+@@ -42,6 +43,7 @@ let package = Package(
+             dependencies: [
+                 .target(name: "JSON Feed Standard"),
+                 .product(name: "URI Standard", package: "swift-uri-standard"),
++                .product(name: "RFC 3339", package: "swift-rfc-3339"),
+                 .product(name: "RFC 5322", package: "swift-rfc-5322"),
+                 .product(name: "RFC 5646", package: "swift-rfc-5646"),
+                 .product(name: "RFC 9110", package: "swift-rfc-9110"),
+diff --git a/Sources/JSON Feed Foundation Integration/JSONFeed.Item+Codable.swift b/Sources/JSON Feed Foundation Integration/JSONFeed.Item+Codable.swift
+index 2d1318c..7ae01ca 100644
+--- a/Sources/JSON Feed Foundation Integration/JSONFeed.Item+Codable.swift	
++++ b/Sources/JSON Feed Foundation Integration/JSONFeed.Item+Codable.swift	
+@@ -1,4 +1,5 @@
+ public import JSON_Feed_Standard
++import RFC_3339
+ import RFC_3986_Foundation_Integration
+ import RFC_5322
+ import RFC_5322_Foundation_Integration
+@@ -38,14 +39,8 @@ extension JSONFeed.Item: Encodable, Decodable {
+             summary: try container.decodeIfPresent(String.self, forKey: .summary),
+             image: try container.decodeIfPresent(URI.self, forKey: .image),
+             bannerImage: try container.decodeIfPresent(URI.self, forKey: .bannerImage),
+-            datePublished: try container.decodeIfPresent(
+-                RFC_5322.Date.self,
+-                forKey: .datePublished
+-            ),
+-            dateModified: try container.decodeIfPresent(
+-                RFC_5322.Date.self,
+-                forKey: .dateModified
+-            ),
++            datePublished: try Self.decodeDate(from: container, forKey: .datePublished),
++            dateModified: try Self.decodeDate(from: container, forKey: .dateModified),
+             authors: try container.decodeIfPresent([JSONFeed.Author].self, forKey: .authors),
+             tags: try container.decodeIfPresent([String].self, forKey: .tags),
+             language: try? container.decodeIfPresent(RFC_5646.LanguageTag.self, forKey: .language),
+@@ -68,11 +63,56 @@ extension JSONFeed.Item: Encodable, Decodable {
+         try container.encodeIfPresent(summary, forKey: .summary)
+         try container.encodeIfPresent(image, forKey: .image)
+         try container.encodeIfPresent(bannerImage, forKey: .bannerImage)
+-        try container.encodeIfPresent(datePublished, forKey: .datePublished)
+-        try container.encodeIfPresent(dateModified, forKey: .dateModified)
++        try container.encodeIfPresent(datePublished?.rfc3339.description, forKey: .datePublished)
++        try container.encodeIfPresent(dateModified?.rfc3339.description, forKey: .dateModified)
+         try container.encodeIfPresent(authors, forKey: .authors)
+         try container.encodeIfPresent(tags, forKey: .tags)
+         try container.encodeIfPresent(language, forKey: .language)
+         try container.encodeIfPresent(attachments, forKey: .attachments)
+     }
+ }
++
++extension JSONFeed.Item {
++
++    fileprivate static func decodeDate(
++        from container: KeyedDecodingContainer<CodingKeys>,
++        forKey key: CodingKeys
++    ) throws -> RFC_5322.Date? {
++        guard let string = try container.decodeIfPresent(String.self, forKey: key) else {
++            return nil
++        }
++        do throws(RFC_3339.DateTime.Error) {
++            return RFC_5322.Date(rfc3339: try RFC_3339.DateTime(string))
++        } catch {
++            throw DecodingError.dataCorruptedError(
++                forKey: key,
++                in: container,
++                debugDescription: "Expected an RFC 3339 date, got: \(string)"
++            )
++        }
++    }
++}
++
++extension RFC_5322.DateTime {
++
++    fileprivate init(rfc3339 dateTime: RFC_3339.DateTime) {
++        let offset = dateTime.offset.seconds
++        self.init(
++            secondsSinceEpoch: Int(dateTime.time.secondsSinceEpoch) - offset,
++            timezoneOffsetSeconds: offset
++        )
++    }
++
++    fileprivate var rfc3339: RFC_3339.DateTime {
++        let offsetSeconds = timezoneOffsetSeconds
++        do throws(RFC_3339.Offset.Error) {
++            let offset = try RFC_3339.Offset(seconds: offsetSeconds)
++            return RFC_3339.DateTime(
++                time: Gregorian.DateTime(secondsSinceEpoch: secondsSinceEpoch + offsetSeconds),
++                offset: offset
++            )
++        } catch {
++            return RFC_3339.DateTime(time: time, offset: .utc)
++        }
++    }
++}
+diff --git a/Tests/JSON Feed Foundation Integration Tests/JSONFeed+Codable Tests.swift b/Tests/JSON Feed Foundation Integration Tests/JSONFeed+Codable Tests.swift
+index f59a278..0fa0ddd 100644
+--- a/Tests/JSON Feed Foundation Integration Tests/JSONFeed+Codable Tests.swift	
++++ b/Tests/JSON Feed Foundation Integration Tests/JSONFeed+Codable Tests.swift	
+@@ -107,4 +107,60 @@ struct `JSONFeed+Codable Tests` {
+         #expect(decoded == attachment)
+         #expect(decoded.durationInSeconds == 180)
+     }
++
++    @Test
++    func `an item decodes RFC 3339 dates as the specification writes them`() throws {
++        let document = """
++            {
++              "id": "2347259",
++              "url": "https://example.org/2347259",
++              "content_text": "Cats are neat.",
++              "date_published": "2010-02-07T14:04:00-05:00",
++              "date_modified": "2010-02-07T19:04:00.5Z"
++            }
++            """
++
++        let item = try JSONDecoder().decode(JSONFeed.Item.self, from: Data(document.utf8))
++
++        #expect(item.datePublished?.secondsSinceEpoch == 1_265_569_440)
++        #expect(item.datePublished?.timezoneOffsetSeconds == -18_000)
++        #expect(item.dateModified?.secondsSinceEpoch == 1_265_569_440)
++    }
++
++    @Test
++    func `an item encodes its dates in RFC 3339`() throws {
++        let item = try JSONFeed.Item(
++            id: "1",
++            contentText: "Hello",
++            datePublished: try RFC_5322.Date(year: 2025, month: 1, day: 1),
++            dateModified: try RFC_5322.Date(
++                year: 2025,
++                month: 1,
++                day: 2,
++                hour: 9,
++                minute: 30,
++                timezoneOffsetSeconds: 3_600
++            )
++        )
++
++        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as? [String: Any]
++
++        #expect(object?["date_published"] as? String == "2025-01-01T00:00:00Z")
++        #expect(object?["date_modified"] as? String == "2025-01-02T09:30:00+01:00")
++    }
++
++    @Test
++    func `an item with an RFC 5322 date is rejected while decoding`() throws {
++        let document = """
++            {
++              "id": "1",
++              "content_text": "Hello",
++              "date_published": "Wed, 01 Jan 2025 00:00:00 +0000"
++            }
++            """
++
++        #expect(throws: DecodingError.self) {
++            _ = try JSONDecoder().decode(JSONFeed.Item.self, from: Data(document.utf8))
++        }
++    }
+ }
+-- 
+2.43.0
+

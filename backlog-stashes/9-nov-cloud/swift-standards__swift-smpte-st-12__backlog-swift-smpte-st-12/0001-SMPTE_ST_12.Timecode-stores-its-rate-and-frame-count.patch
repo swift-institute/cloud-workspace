@@ -1,0 +1,82 @@
+From b5cc40ca67acca47a9847ad75d1ea12e7eb96df8 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:52 +0000
+Subject: [PATCH] SMPTE_ST_12.Timecode stores its rate and frame counts back at
+ that rate, replacing frame(at:) (swift-standards/swift-smpte-st-12#1)
+
+---
+ README.md                                      |  2 +-
+ Sources/SMPTE ST 12/SMPTE_ST_12.Timecode.swift |  8 ++++++--
+ Tests/SMPTE ST 12 Tests/Timecode Tests.swift   | 11 ++++++++++-
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index f74d82e..10634b0 100644
+--- a/README.md
++++ b/README.md
+@@ -9,5 +9,5 @@ Use this package when you need to turn a frame count into an SMPTE timecode addr
+ - Drop-frame counting exists only at `SMPTE_ST_12.Timecode.Rate.thirty` and `SMPTE_ST_12.Timecode.Rate.sixty`. Any other rate throws `SMPTE_ST_12.Timecode.Error.drop(_:)`.
+ - Non-drop counting is plain arithmetic on the nominal rate.
+ - Hours wrap at 24, so a frame count of a day or more maps to the same address as its remainder.
+-- An address doesn't remember its rate. `SMPTE_ST_12.Timecode.frame(at:)` inverts `SMPTE_ST_12.Timecode.init(frame:rate:counting:)` only when given the same rate, for any frame within a day.
++- An address stores its rate. `SMPTE_ST_12.Timecode.frame` inverts `SMPTE_ST_12.Timecode.init(frame:rate:counting:)` for any frame within a day.
+ - The description writes each field as two digits separated by colons. The separator before the frames is a semicolon when counting drops frames.
+diff --git a/Sources/SMPTE ST 12/SMPTE_ST_12.Timecode.swift b/Sources/SMPTE ST 12/SMPTE_ST_12.Timecode.swift
+index ad4cb38..78f6988 100644
+--- a/Sources/SMPTE ST 12/SMPTE_ST_12.Timecode.swift	
++++ b/Sources/SMPTE ST 12/SMPTE_ST_12.Timecode.swift	
+@@ -12,6 +12,8 @@ extension SMPTE_ST_12 {
+         public let minutes: Int
+         public let seconds: Int
+         public let frames: Int
++        /// The nominal rate the address is counted at.
++        public let rate: Rate
+         public let counting: Counting
+     }
+ }
+@@ -35,12 +37,14 @@ extension SMPTE_ST_12.Timecode {
+             minutes: label / (nominal * 60) % 60,
+             seconds: label / nominal % 60,
+             frames: label % nominal,
++            rate: rate,
+             counting: counting
+         )
+     }
+ 
+-    /// How many frames this address lies after 00:00:00:00, the inverse of `init(frame:rate:counting:)`.
+-    public func frame(at rate: Rate) -> Cardinal {
++    /// How many frames this address lies after 00:00:00:00 at its own rate, the inverse of
++    /// `init(frame:rate:counting:)` for any frame within a day.
++    public var frame: Cardinal {
+         let nominal = rate.nominal
+         let minutes = 60 * hours + self.minutes
+         let label = ((minutes * 60) + seconds) * nominal + frames
+diff --git a/Tests/SMPTE ST 12 Tests/Timecode Tests.swift b/Tests/SMPTE ST 12 Tests/Timecode Tests.swift
+index e188be1..d113ac7 100644
+--- a/Tests/SMPTE ST 12 Tests/Timecode Tests.swift	
++++ b/Tests/SMPTE ST 12 Tests/Timecode Tests.swift	
+@@ -30,11 +30,20 @@ import Testing
+         for (rate, counting) in [(SMPTE_ST_12.Timecode.Rate.thirty, SMPTE_ST_12.Timecode.Counting.drop), (.sixty, .drop), (.twentyFive, .nonDrop)] {
+             for frame in stride(from: 0, to: UInt(rate.nominal) * 86_000, by: 7) {
+                 let address = try SMPTE_ST_12.Timecode(frame: Cardinal(frame), rate: rate, counting: counting)
+-                #expect(address.frame(at: rate) == Cardinal(frame))
++                #expect(address.frame == Cardinal(frame))
+             }
+         }
+     }
+ 
++    @Test func `an address counts back at the rate it was made with`() throws {
++        let address = try SMPTE_ST_12.Timecode(frame: Cardinal(1800 as UInt), rate: .thirty, counting: .drop)
++        #expect(address.rate == .thirty)
++        #expect(address.frame == Cardinal(1800 as UInt))
++        let twentyFive = try SMPTE_ST_12.Timecode(frame: Cardinal(1800 as UInt), rate: .twentyFive, counting: .nonDrop)
++        #expect(twentyFive.description == "00:01:12:00")
++        #expect(twentyFive.frame == Cardinal(1800 as UInt))
++    }
++
+     @Test func `drop-frame is refused where it is undefined`() {
+         #expect(throws: SMPTE_ST_12.Timecode.Error.drop(.twentyFive)) {
+             try SMPTE_ST_12.Timecode(frame: Cardinal(0 as UInt), rate: .twentyFive, counting: .drop)
+-- 
+2.43.0
+

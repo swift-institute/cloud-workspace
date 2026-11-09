@@ -1,0 +1,102 @@
+From fa8c283199f34804948a9c7b8f8812c23f6712eb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:55 +0000
+Subject: [PATCH 1/4] Condition.wait(mutex:timeout:) waits with
+ pthread_cond_timedwait_relative_np on Darwin, so the timeout is elapsed time
+ there as on Linux instead of following the wall clock
+ (swift-iso/swift-iso-9945#92)
+
+---
+ README.md                                     |  2 +-
+ .../ISO_9945.Kernel.Thread.Condition.swift    | 19 +++++-------------
+ ...O 9945.Kernel.Thread.Condition Tests.swift | 20 +++++++++++++++++++
+ 3 files changed, 26 insertions(+), 15 deletions(-)
+
+diff --git a/README.md b/README.md
+index f49eab2..ce26ddb 100644
+--- a/README.md
++++ b/README.md
+@@ -16,7 +16,7 @@ Use this package when you need to make POSIX system calls from Swift on macOS or
+ - Waiting with a deadline polls with non-blocking attempts, sleeping 1 ms between them and doubling up to 100 ms. The deadline is measured on `Clock.Continuous`. A lock obtained after the deadline has passed is released again and reported as timed out.
+ - `Clock.Continuous` keeps counting while the machine sleeps: CLOCK_MONOTONIC_RAW on Darwin, CLOCK_BOOTTIME on Linux. `Clock.Suspending` stops: CLOCK_UPTIME_RAW on Darwin, CLOCK_MONOTONIC on Linux. The CPU clocks report zero if the clock can't be read.
+ - `Time.Zone.Rule.local` reads `TZ` again for every instant, so a change takes effect at once. If the local time can't be computed, it gives UTC. Its offsets are east of UTC, so `TZ=XXX-2` gives +2 hours.
+-- `ISO_9945.Kernel.Thread.Condition.wait(mutex:timeout:)` returns false only when the timeout passes. Any other wakeup, spurious ones included, returns true, so check your condition again. The timeout runs on the monotonic clock on Linux and on the wall clock on Darwin.
++- `ISO_9945.Kernel.Thread.Condition.wait(mutex:timeout:)` returns false only when the timeout passes. Any other wakeup, spurious ones included, returns true, so check your condition again. The timeout is measured as elapsed time on both platforms, so a wall clock change does not stretch or cut it.
+ - `ISO_9945.Kernel.Signal.Send.toGroup(_:pgid:)` refuses process group 1 with EINVAL, since that would signal every process. `ISO_9945.Kernel.Process.Wait.wait(_:options:)` returns nil only when you asked not to hang and no child has changed state.
+ - An `ISO_9945.Kernel.Signal.Action.Handler.customInfo` handler is always installed with SA_SIGINFO and an `ISO_9945.Kernel.Signal.Action.Handler.custom` handler never is, whatever flags you give `ISO_9945.Kernel.Signal.Action.Configuration`. `ISO_9945.Kernel.Signal.Information.sender` is nil unless the signal came from kill or sigqueue or is a SIGCHLD about a child. `ISO_9945.Kernel.Signal.Information.fault` is set only for SIGSEGV, SIGBUS, SIGILL and SIGFPE raised by a fault.
+ - Descriptor isolation for spawned processes differs by platform. On Linux, `ISO_9945.Kernel.Process.Spawn.Actions.isolate()` closes every descriptor from 3 up in the child, and spawning with `isolated: true` changes nothing. On Darwin, `isolated: true` passes the child only the descriptors the actions set up, resets every signal to its default and clears the signal mask, and `isolate()` adds standard input, output and error. With musl or glibc before 2.34, `isolate()` returns false.
+diff --git a/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift b/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift
+index c1fc9a7..11fdb58 100644
+--- a/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift	
++++ b/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift	
+@@ -39,31 +39,22 @@ extension ISO_9945.Kernel.Thread.Condition {
+ 
+     public func wait(mutex: ISO_9945.Kernel.Thread.Mutex, timeout: Duration) -> Bool {
+         unsafe mutex.withUnsafeMutablePointer { mutexPtr in
++            let (seconds, attoseconds) = timeout.components
+             var ts = timespec()
+-
+             #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+-
+-                var tv = timeval()
+-                unsafe gettimeofday(&tv, nil)
+-                let (seconds, attoseconds) = timeout.components
+-                ts.tv_sec = tv.tv_sec + Int(seconds)
+-                ts.tv_nsec = Int(tv.tv_usec) * 1000 + Int(attoseconds / 1_000_000_000)
+-                if ts.tv_nsec >= 1_000_000_000 {
+-                    ts.tv_sec += 1
+-                    ts.tv_nsec -= 1_000_000_000
+-                }
++                ts.tv_sec = Int(seconds)
++                ts.tv_nsec = Int(attoseconds / 1_000_000_000)
++                let result = unsafe pthread_cond_timedwait_relative_np(&cond, mutexPtr, &ts)
+             #else
+-
+                 clock_gettime(CLOCK_MONOTONIC, &ts)
+-                let (seconds, attoseconds) = timeout.components
+                 ts.tv_sec += Int(seconds)
+                 ts.tv_nsec += Int(attoseconds / 1_000_000_000)
+                 if ts.tv_nsec >= 1_000_000_000 {
+                     ts.tv_sec += 1
+                     ts.tv_nsec -= 1_000_000_000
+                 }
++                let result = unsafe pthread_cond_timedwait(&cond, mutexPtr, &ts)
+             #endif
+-            let result = unsafe pthread_cond_timedwait(&cond, mutexPtr, &ts)
+             return result == 0
+         }
+     }
+diff --git a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift
+index 00bcf3c..7171bdc 100644
+--- a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift	
++++ b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift	
+@@ -69,6 +69,26 @@ extension `ISO_9945.Kernel.Thread.Condition Tests`.Test.Unit {
+         )
+     }
+ 
++    @Test
++    func `timed wait lasts at least its timeout`() {
++        let mutex = ISO_9945.Kernel.Thread.Mutex()
++        let condition = ISO_9945.Kernel.Thread.Condition()
++        let clock = ContinuousClock()
++
++        mutex.lock()
++        var elapsed = Duration.zero
++        for _ in 0..<10 {
++            let start = clock.now
++            let wasSignaled = condition.wait(mutex: mutex, timeout: .milliseconds(50))
++            elapsed = clock.now - start
++            if !wasSignaled { break }
++        }
++        mutex.unlock()
++
++        #expect(elapsed >= .milliseconds(45))
++        #expect(elapsed < .seconds(5))
++    }
++
+     @Test
+     func `multiple conditions are independent`() {
+ 
+-- 
+2.43.0
+

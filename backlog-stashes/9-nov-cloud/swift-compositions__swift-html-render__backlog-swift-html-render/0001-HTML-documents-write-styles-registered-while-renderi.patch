@@ -1,0 +1,85 @@
+From 6efdbeec021c35e5c8930815ba2dc1091346546c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:39:26 +0000
+Subject: [PATCH] HTML documents write styles registered while rendering the
+ head into the stylesheet, with class names shared with the body's so they
+ cannot collide (swift-compositions/swift-html-render#12)
+
+---
+ .../HTML.Document.Protocol.swift              | 14 ++++-------
+ .../HTML.Document.Protocol Tests.swift        | 25 +++++++++++++++++++
+ 2 files changed, 30 insertions(+), 9 deletions(-)
+
+diff --git a/Sources/HTML Rendering Core/HTML.Document.Protocol.swift b/Sources/HTML Rendering Core/HTML.Document.Protocol.swift
+index e054476..a9712a3 100644
+--- a/Sources/HTML Rendering Core/HTML.Document.Protocol.swift	
++++ b/Sources/HTML Rendering Core/HTML.Document.Protocol.swift	
+@@ -37,10 +37,6 @@ extension HTML.__DocumentProtocol {
+         bodyRenderCtx.render(html.body)
+         let bodyBytes = bodyState.value.bytes
+ 
+-        bodyState.value.styles.forEach { key, value in
+-            context.styles[key] = value
+-        }
+-
+         let newline = configuration.newline
+ 
+         let contentIndent = indent + indent
+@@ -54,16 +50,16 @@ extension HTML.__DocumentProtocol {
+         context.bytes.append(contentsOf: indent)
+         context.bytes.append(contentsOf: [Byte].html.tag.headOpen)
+ 
+-        let headState = Ownership.Mutable(HTML.Context(configuration))
+-        headState.value.currentIndentation = indent + indent
+-        var headRenderCtx = Renderer.Document.Context.html(state: headState)
++        bodyState.value.bytes = ContiguousArray<Byte>()
++        bodyState.value.currentIndentation = indent + indent
++        var headRenderCtx = Renderer.Document.Context.html(state: bodyState)
+         headRenderCtx.render(html.head)
+-        let headBytes = headState.value.bytes
++        let headBytes = bodyState.value.bytes
+         if headBytes.starts(with: contentIndent) {
+             context.bytes.append(contentsOf: newline)
+         }
+         context.bytes.append(contentsOf: headBytes)
+-        headState.value.styles.forEach { key, value in
++        bodyState.value.styles.forEach { key, value in
+             context.styles[key] = value
+         }
+ 
+diff --git a/Tests/HTML Rendering Core Tests/HTML.Document.Protocol Tests.swift b/Tests/HTML Rendering Core Tests/HTML.Document.Protocol Tests.swift
+index 3ee8674..a75e79b 100644
+--- a/Tests/HTML Rendering Core Tests/HTML.Document.Protocol Tests.swift	
++++ b/Tests/HTML Rendering Core Tests/HTML.Document.Protocol Tests.swift	
+@@ -36,3 +36,28 @@ struct `HTML.__DocumentProtocol._render Tests` {
+         }
+     }
+ }
++
++extension `HTML.__DocumentProtocol._render Tests` {
++
++    @Test
++    func `styles registered while rendering the head are written to the stylesheet`() throws {
++        let document = HTML.Document {
++            tag("div") {
++                HTML.Text("BODY_MARKER")
++            }
++            .inlineStyle("color", "red")
++        } head: {
++            tag("title") {
++                HTML.Text("HEAD_MARKER")
++            }
++            .inlineStyle("color", "blue")
++        }
++
++        let rendered = try String(document)
++
++        #expect(rendered.contains("color:red"), "\(rendered)")
++        #expect(rendered.contains("color:blue"), "\(rendered)")
++        #expect(rendered.contains("color-0"), "\(rendered)")
++        #expect(rendered.contains("color-1"), "\(rendered)")
++    }
++}
+-- 
+2.43.0
+

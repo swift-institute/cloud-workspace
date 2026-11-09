@@ -1,0 +1,187 @@
+From 080b3ccf8f2fc5d656febc68fdb7a10598da4470 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:04 +0000
+Subject: [PATCH 3/4] The submission thread's cpu is a CPU.Logical.ID and its
+ idle time a whole-millisecond Idle value; setup throws EINVAL for a cpu the
+ kernel field can't hold instead of trapping
+ (swift-linux-foundation/swift-linux-standard#18)
+
+---
+ Package.swift                                 |  1 +
+ ....Uring.Params.Submission.Thread.Idle.swift | 22 +++++++++++++++
+ ...el.IO.Uring.Params.Submission.Thread.swift | 27 +++++++------------
+ .../Linux.Kernel.IO.Uring.Params.swift        | 15 +++++++----
+ .../Linux.Kernel.IO.Uring.Params Tests.swift  | 27 +++++++++++++++++++
+ 5 files changed, 70 insertions(+), 22 deletions(-)
+ create mode 100644 Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.Idle.swift
+
+diff --git a/Package.swift b/Package.swift
+index c6d8be7..c5a4a71 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -302,6 +302,7 @@ let package = Package(
+                 .target(name: "Linux Kernel Timer Standard"),
+                 .target(name: "Linux Kernel Signal Standard"),
+                 .target(name: "Linux Kernel IO Uring Standard"),
++                .product(name: "CPU", package: "swift-cpu"),
+                 .product(name: "Error", package: "swift-error"),
+                 .product(name: "Memory", package: "swift-memory"),
+                 .product(name: "ISO 9945 Kernel System", package: "swift-iso-9945"),
+diff --git a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.Idle.swift b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.Idle.swift
+new file mode 100644
+index 0000000..c3009ce
+--- /dev/null
++++ b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.Idle.swift	
+@@ -0,0 +1,22 @@
++#if os(Linux)
++
++    public import ISO_9945_Core
++
++    extension ISO_9945.Kernel.IO.Uring.Params.Submission.Thread {
++
++        public struct Idle: Sendable, Equatable, Hashable {
++
++            public var milliseconds: UInt32
++
++            public init(milliseconds: UInt32) {
++                self.milliseconds = milliseconds
++            }
++        }
++    }
++
++    extension ISO_9945.Kernel.IO.Uring.Params.Submission.Thread.Idle {
++
++        public static var zero: Self { Self(milliseconds: 0) }
++    }
++
++#endif
+diff --git a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.swift b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.swift
+index 3629186..98638c1 100644
+--- a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.swift	
++++ b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.Submission.Thread.swift	
+@@ -1,18 +1,19 @@
+ #if os(Linux)
+ 
+     public import ISO_9945_Core
++    public import CPU
+ 
+     extension ISO_9945.Kernel.IO.Uring.Params.Submission {
+ 
+         public struct Thread: Sendable, Equatable {
+ 
+-            public var cpu: Int
++            public var cpu: CPU.Logical.ID
+ 
+-            public var idle: Duration
++            public var idle: Idle
+ 
+             public init(
+-                cpu: Int = 0,
+-                idle: Duration = .zero
++                cpu: CPU.Logical.ID = CPU.Logical.ID(_unchecked: Ordinal(UInt.zero)),
++                idle: Idle = .zero
+             ) {
+                 self.cpu = cpu
+                 self.idle = idle
+@@ -23,24 +24,16 @@
+     extension ISO_9945.Kernel.IO.Uring.Params.Submission.Thread {
+ 
+         internal init(cCpu: UInt32, cIdle: UInt32) {
+-            guard let cpu = Int(exactly: cCpu) else {
+-                preconditionFailure("CPU identifier is not representable as Int")
+-            }
+-            self.cpu = cpu
+-            self.idle = .milliseconds(Int(cIdle))
++            self.cpu = CPU.Logical.ID(_unchecked: Ordinal(UInt(cCpu)))
++            self.idle = Idle(milliseconds: cIdle)
+         }
+ 
+-        internal var cCpu: UInt32 {
+-            guard let value = UInt32(exactly: cpu) else {
+-                preconditionFailure("CPU identifier must be representable as UInt32")
+-            }
+-            return value
++        internal var cCpu: UInt32? {
++            UInt32(exactly: cpu.underlying.rawValue)
+         }
+ 
+         internal var cIdle: UInt32 {
+-            let (seconds, attoseconds) = idle.components
+-            let ms = seconds * 1000 + attoseconds / 1_000_000_000_000_000
+-            return UInt32(clamping: ms)
++            idle.milliseconds
+         }
+     }
+ 
+diff --git a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.swift b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.swift
+index fc7e215..2992e8a 100644
+--- a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.swift	
++++ b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.Params.swift	
+@@ -67,11 +67,16 @@
+     extension ISO_9945.Kernel.IO.Uring.Params {
+ 
+         internal var cValue: io_uring_params {
+-            var params = io_uring_params()
+-            params.flags = flags.rawValue
+-            params.sq_thread_cpu = submission.thread.cCpu
+-            params.sq_thread_idle = submission.thread.cIdle
+-            return params
++            get throws(ISO_9945.Kernel.IO.Uring.Error) {
++                guard let cpu = submission.thread.cCpu else {
++                    throw .setup(.posix(EINVAL))
++                }
++                var params = io_uring_params()
++                params.flags = flags.rawValue
++                params.sq_thread_cpu = cpu
++                params.sq_thread_idle = submission.thread.cIdle
++                return params
++            }
+         }
+     }
+ 
+diff --git a/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring.Params Tests.swift b/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring.Params Tests.swift
+index fdb6d7a..b1ffc32 100644
+--- a/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring.Params Tests.swift	
++++ b/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring.Params Tests.swift	
+@@ -2,6 +2,7 @@
+     import Testing
+     import Error
+     import Memory
++    import CPU
+     @testable import Linux_Kernel_IO_Uring_Standard
+ 
+     import ISO_9945_Core
+@@ -67,4 +68,30 @@
+             #expect(params.flags.contains(.sqAff))
+         }
+     }
++
++    extension Kernel.IO.Uring.Params.Test.`Edge Case` {
++        @Test
++        func `submission thread carries the kernel cpu and idle exactly`() throws {
++            let thread = Kernel.IO.Uring.Params.Submission.Thread(cCpu: UInt32.max, cIdle: 1_500)
++            #expect(thread.cpu == CPU.Logical.ID(_unchecked: Ordinal(UInt(UInt32.max))))
++            #expect(thread.idle == Kernel.IO.Uring.Params.Submission.Thread.Idle(milliseconds: 1_500))
++            #expect(thread.cCpu == UInt32.max)
++            #expect(thread.cIdle == 1_500)
++            #expect(try Kernel.IO.Uring.Params(submission: .init(thread: thread)).cValue.sq_thread_idle == 1_500)
++        }
++
++        @Test
++        func `a cpu beyond the kernel field fails setup instead of trapping`() {
++            let thread = Kernel.IO.Uring.Params.Submission.Thread(
++                cpu: CPU.Logical.ID(_unchecked: Ordinal(UInt(UInt32.max) + 1))
++            )
++            var params = Kernel.IO.Uring.Params(flags: .sqPoll, submission: .init(thread: thread))
++            #expect(throws: Kernel.IO.Uring.Error.setup(.posix(EINVAL))) {
++                _ = try Kernel.IO.Uring.setup(
++                    entries: Kernel.IO.Uring.Submission.Count(_unchecked: Cardinal(1)),
++                    params: &params
++                )
++            }
++        }
++    }
+ #endif
+-- 
+2.43.0
+

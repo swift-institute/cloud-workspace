@@ -1,0 +1,91 @@
+From c63eaa7ee4e88806e2acfc277caa3dd62368a748 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:46:19 +0000
+Subject: [PATCH 15/18] Transform + treats none as the identity and lets a
+ CSS-wide keyword replace the value, instead of printing nothing or dropping
+ the keyword (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Transforms/Transform.swift    | 28 +++++++++----------
+ .../Transform Tests.swift                     | 25 +++++++++++++++++
+ 2 files changed, 39 insertions(+), 14 deletions(-)
+ create mode 100644 Tests/W3C CSS Transforms Tests/Transform Tests.swift
+
+diff --git a/Sources/W3C CSS Transforms/Transform.swift b/Sources/W3C CSS Transforms/Transform.swift
+index d41fcfd..0572e37 100644
+--- a/Sources/W3C CSS Transforms/Transform.swift	
++++ b/Sources/W3C CSS Transforms/Transform.swift	
+@@ -131,25 +131,25 @@ extension Transform: CustomStringConvertible {
+ 
+ extension Transform {
+ 
++    /// Applies `rhs` after `lhs`: `none` is the identity, and a CSS-wide keyword replaces the whole value,
++    /// so `x + .global(.inherit)` is `.global(.inherit)` and `.global(.inherit) + x` stays `.global(.inherit)`.
+     public static func + (lhs: Transform, rhs: Transform) -> Transform {
+-        let functions: [TransformFunction] = {
+-            switch (lhs, rhs) {
+-            case (.none, _):
+-                return transformFunctions(from: rhs)
++        switch (lhs, rhs) {
++        case (_, .global):
++            return rhs
+ 
+-            case (_, .none):
+-                return transformFunctions(from: lhs)
++        case (.global, _):
++            return lhs
+ 
+-            case (.global, _), (_, .global):
++        case (.none, _):
++            return rhs
+ 
+-                return transformFunctions(from: lhs)
++        case (_, .none):
++            return lhs
+ 
+-            default:
+-                return transformFunctions(from: lhs) + transformFunctions(from: rhs)
+-            }
+-        }()
+-
+-        return .compound(functions)
++        default:
++            return .compound(transformFunctions(from: lhs) + transformFunctions(from: rhs))
++        }
+     }
+ 
+     private static func transformFunctions(from transform: Transform) -> [TransformFunction] {
+diff --git a/Tests/W3C CSS Transforms Tests/Transform Tests.swift b/Tests/W3C CSS Transforms Tests/Transform Tests.swift
+new file mode 100644
+index 0000000..c99f361
+--- /dev/null
++++ b/Tests/W3C CSS Transforms Tests/Transform Tests.swift	
+@@ -0,0 +1,25 @@
++import Testing
++
++@testable import W3C_CSS_Transforms
++
++enum `Transform Tests` {}
++
++extension `Transform Tests` {
++    @Suite
++    struct `Transform - Addition` {
++        @Test func `none is the identity`() {
++            #expect((Transform.none + Transform.none).description == "none")
++            #expect((Transform.none + .rotate(.deg(45))).description == "rotate(45deg)")
++            #expect((Transform.rotate(.deg(45)) + .none).description == "rotate(45deg)")
++        }
++
++        @Test func `a css-wide keyword replaces the value`() {
++            #expect((Transform.rotate(.deg(45)) + .global(.inherit)).description == "inherit")
++            #expect((Transform.global(.inherit) + .rotate(.deg(45))).description == "inherit")
++        }
++
++        @Test func `functions are applied in order`() {
++            #expect((Transform.rotate(.deg(45)) + .rotate(.deg(90))).description == "rotate(45deg) rotate(90deg)")
++        }
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,106 @@
+From 26cb8a2643dc6f01a10c694e56aa5a56ee1f8ae4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:01 +0000
+Subject: [PATCH 2/2] Parse errors carry the argv index of the offending token,
+ and a missing positional reports the position after the last argv element
+ (swift-compositions/swift-arguments#16)
+
+---
+ .../Command.Schema.ParseVisitor.swift         | 30 +++++++++++++++++--
+ .../Repeat.Parse Tests.swift                  | 28 +++++++++++++++++
+ 2 files changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/Sources/Command Schema/Command.Schema.ParseVisitor.swift b/Sources/Command Schema/Command.Schema.ParseVisitor.swift
+index f84dba4..4e3bc3c 100644
+--- a/Sources/Command Schema/Command.Schema.ParseVisitor.swift	
++++ b/Sources/Command Schema/Command.Schema.ParseVisitor.swift	
+@@ -460,7 +460,7 @@ extension Command.Schema.ParseVisitor {
+             let missing = positionals[positionalCursor]
+             throw .missingPositional(
+                 name: missing.name,
+-                position: .init(argvIndex: .zero, byteOffset: .zero)
++                position: endPosition()
+             )
+         }
+ 
+@@ -851,11 +851,37 @@ extension Command.Schema.ParseVisitor {
+     @usableFromInline
+     internal func position(from token: Argument.Token) -> Argument.Position {
+         Argument.Position(
+-            argvIndex: .zero,
++            argvIndex: Index<String>(Ordinal(UInt(argvIndex(of: token)))),
+             byteOffset: .init(fromZero: token.range.start.retag(Byte.self))
+         )
+     }
+ 
++    @usableFromInline
++    internal func endPosition() -> Argument.Position {
++        let byteCount = argv.reduce(0) { $0 + $1.utf8.count }
++        return Argument.Position(
++            argvIndex: Index<String>(Ordinal(UInt(argv.count))),
++            byteOffset: .init(fromZero: Index<Byte>(Ordinal(UInt(byteCount))))
++        )
++    }
++
++    @usableFromInline
++    internal func argvIndex(of token: Argument.Token) -> Int {
++        var elementStart = 0
++        for (index, element) in argv.enumerated() {
++            let elementEnd = elementStart + element.utf8.count
++            let start = Text.Position(_unchecked: Ordinal(UInt(elementStart)))
++            let end = Text.Position(_unchecked: Ordinal(UInt(elementEnd)))
++            if token.range.isEmpty {
++                if element.isEmpty, token.range.start == start { return index }
++            } else if start <= token.range.start, token.range.start < end {
++                return index
++            }
++            elementStart = elementEnd
++        }
++        return 0
++    }
++
+     @usableFromInline
+     internal func hasShortBinding(for character: Character) -> Bool {
+         if options.contains(where: { $0.name.short?.character == character }) { return true }
+diff --git a/Tests/Command Integration Tests/Repeat.Parse Tests.swift b/Tests/Command Integration Tests/Repeat.Parse Tests.swift
+index 063ccdc..1231a29 100644
+--- a/Tests/Command Integration Tests/Repeat.Parse Tests.swift	
++++ b/Tests/Command Integration Tests/Repeat.Parse Tests.swift	
+@@ -108,6 +108,34 @@ extension Repeat {
+             }
+         }
+ 
++        @Test
++        func `Unexpected positional reports its argv index`() {
++            #expect(
++                throws: Command.Error.unexpectedPositional(
++                    value: "extra",
++                    position: .init(argvIndex: 2, byteOffset: 11)
++                )
++            ) {
++                _ = try Command.parse(
++                    Repeat.self,
++                    from: ["--counter", "hi", "extra"],
++                    initial: Repeat()
++                )
++            }
++        }
++
++        @Test
++        func `Missing positional reports the position after the last argv element`() {
++            #expect(
++                throws: Command.Error.missingPositional(
++                    name: "phrase",
++                    position: .init(argvIndex: 1, byteOffset: 9)
++                )
++            ) {
++                _ = try Command.parse(Repeat.self, from: ["--counter"], initial: Repeat())
++            }
++        }
++
+         @Test
+         func `--help triggers .helpRequested`() {
+             do throws(Command.Error) {
+-- 
+2.43.0
+

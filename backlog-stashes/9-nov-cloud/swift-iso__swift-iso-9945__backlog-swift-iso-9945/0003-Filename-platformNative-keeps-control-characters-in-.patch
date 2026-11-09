@@ -1,0 +1,65 @@
+From af27847f81a0173769362894529748f14b9cad3c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:32:11 +0000
+Subject: [PATCH 3/4] Filename(platformNative:) keeps control characters in a
+ name the system hands back, refusing only empty, slash, NUL and invalid
+ UTF-8, as its documentation says (swift-iso/swift-iso-9945#92)
+
+---
+ .../ISO 9945 Kernel File/ISO_9945.Filename.swift | 11 +++++++----
+ .../ISO 9945 Kernel Tests/Path+POSIX Tests.swift | 16 ++++++++++++++++
+ 2 files changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift b/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift
+index 52e1540..fc8f3d7 100644
+--- a/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift	
++++ b/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift	
+@@ -64,14 +64,17 @@ extension ISO_9945.Filename {
+         }
+     }
+ 
+-    /// The filename a directory entry names, from its code units. The units must be valid UTF-8 and
+-    /// hold to the rules for text.
++    /// The filename a directory entry names, from its code units. The units must be valid UTF-8,
++    /// non-empty and free of `/` and NUL; control characters are kept.
+     @inlinable
+     public init(platformNative codeUnits: [Path.Char]) throws(Error) {
+-        guard let string = Swift::String(validating: codeUnits, as: UTF8.self) else {
++        guard !codeUnits.isEmpty else { throw .empty }
++        if codeUnits.contains(0) { throw .containsInteriorNUL }
++        if codeUnits.contains(Self.separator) { throw .containsPathSeparator }
++        guard Swift::String(validating: codeUnits, as: UTF8.self) != nil else {
+             throw .invalidUTF8
+         }
+-        try self.init(string)
++        self.init(unchecked: codeUnits.span)
+     }
+ 
+     /// Code units already known to form a filename: non-empty, no `/`, no NUL.
+diff --git a/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift b/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift
+index c91962a..71f3019 100644
+--- a/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift	
++++ b/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift	
+@@ -115,3 +115,19 @@ extension `Path+POSIX Tests` {
+         }
+     }
+ }
++
++        @Test
++        func `a platform-native filename keeps control characters`() throws {
++            let name = try ISO_9945.Filename(platformNative: Array("a\nb".utf8))
++            #expect(name.string == "a\nb")
++            #expect(name.count == 3)
++            let units: [([Path.Char], ISO_9945.Filename.Error)] = [
++                ([], .empty),
++                (Array("a/b".utf8), .containsPathSeparator),
++                ([0x61, 0x00, 0x62], .containsInteriorNUL),
++                ([0x61, 0xFF], .invalidUTF8),
++            ]
++            for (codeUnits, error) in units {
++                #expect(throws: error) { _ = try ISO_9945.Filename(platformNative: codeUnits) }
++            }
++        }
+-- 
+2.43.0
+

@@ -1,0 +1,351 @@
+From ab80370a6a84dcf521c4087723e3aee7b7e2aee1 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:52 +0000
+Subject: [PATCH] Package.Manifest refuses to encode a range the SwiftPM wire
+ format can't hold and decodes dependencies with the strict
+ Package.Manifest.Evaluation decoder, naming a local sourceControl location it
+ can't hold (swift-standards/swift-spm-standard#9)
+
+---
+ .../Package.Manifest+Codable.swift            |  40 +++++-
+ .../Package.Manifest._DependencyWire.swift    |  55 +-------
+ .../Package.Manifest._RequirementWire.swift   |  26 ++--
+ .../Package.Manifest.Codable Tests.swift      | 130 ++++++++++++++++++
+ 4 files changed, 184 insertions(+), 67 deletions(-)
+
+diff --git a/Sources/SPM Standard/Package.Manifest+Codable.swift b/Sources/SPM Standard/Package.Manifest+Codable.swift
+index fb39792..fafefdc 100644
+--- a/Sources/SPM Standard/Package.Manifest+Codable.swift	
++++ b/Sources/SPM Standard/Package.Manifest+Codable.swift	
+@@ -33,11 +33,13 @@
+             }
+             toolsVersion = parsedTools
+             let wireDependencies = try container.decode(
+-                [_DependencyWire].self,
++                [Package.Manifest.Evaluation._DependencyWire].self,
+                 forKey: .dependencies
+             )
+-            let baseDependencies = try wireDependencies.map { wire in
+-                try wire.toDependency()
++            var baseDependencies: [Package.Dependency] = []
++            baseDependencies.reserveCapacity(wireDependencies.count)
++            for wire in wireDependencies {
++                baseDependencies.append(try Self._dependency(Package.Dependency.Evaluation(wire)))
+             }
+             let products =
+                 try container.decodeIfPresent(
+@@ -76,7 +78,11 @@
+                 _ToolsVersionWire(_version: self.toolsVersion.description),
+                 forKey: .toolsVersion
+             )
+-            let wireDependencies = self.dependencies.map { _DependencyWire(from: $0) }
++            var wireDependencies: [_DependencyWire] = []
++            wireDependencies.reserveCapacity(self.dependencies.count)
++            for dependency in self.dependencies {
++                wireDependencies.append(try _DependencyWire(from: dependency))
++            }
+             try container.encode(wireDependencies, forKey: .dependencies)
+             try container.encode(self.products, forKey: .products)
+             try container.encode(self.targets, forKey: .targets)
+@@ -130,6 +136,32 @@
+             return Package.Identity(scope: scope, name: name)
+         }
+ 
++        internal static func _dependency(
++            _ evaluation: Package.Dependency.Evaluation
++        ) throws(DecodingError) -> Package.Dependency {
++            let source: Package.Dependency.Source
++            switch evaluation.source {
++            case .fileSystem(_, let path):
++                source = .path(path)
++
++            case .sourceControl(_, .remote(let url), let requirement):
++                source = .url(url, requirement)
++
++            case .sourceControl(_, .local(let path), _):
++                throw Package.Manifest.Evaluation._corrupt(
++                    "sourceControl.location.local '\(path)' has no Package.Dependency.Source; decode Package.Manifest.Evaluation to read a local source-control dependency"
++                )
++
++            case .registry(let identity, let requirement):
++                source = .registry(identity, requirement)
++            }
++            return Package.Dependency(
++                source: source,
++                name: Package.Name(_unchecked: evaluation.identity.underlying),
++                products: []
++            )
++        }
++
+         internal static func _backfillProducts(
+             dependencies: [Package.Dependency],
+             targets: [Self.Target]
+diff --git a/Sources/SPM Standard/Package.Manifest._DependencyWire.swift b/Sources/SPM Standard/Package.Manifest._DependencyWire.swift
+index bf2f121..a59d52c 100644
+--- a/Sources/SPM Standard/Package.Manifest._DependencyWire.swift	
++++ b/Sources/SPM Standard/Package.Manifest._DependencyWire.swift	
+@@ -15,7 +15,7 @@ extension Package.Manifest {
+             self.registry = registry
+         }
+ 
+-        init(from dependency: Package.Dependency) {
++        init(from dependency: Package.Dependency) throws(EncodingError) {
+             switch dependency.source {
+             case .path(let path):
+                 self.init(fileSystem: [
+@@ -27,7 +27,7 @@ extension Package.Manifest {
+                     _SourceControlRecord(
+                         identity: dependency.name.underlying,
+                         location: .init(remote: [.init(urlString: url.value)]),
+-                        requirement: _RequirementWire(from: requirement)
++                        requirement: try _RequirementWire(from: requirement)
+                     )
+                 ])
+ 
+@@ -36,60 +36,11 @@ extension Package.Manifest {
+                 self.init(registry: [
+                     _RegistryRecord(
+                         identity: "\(identity.scope).\(identity.name)",
+-                        requirement: _RequirementWire(from: requirement)
++                        requirement: try _RequirementWire(from: requirement)
+                     )
+                 ])
+             }
+         }
+ 
+-        func toDependency() throws -> Package.Dependency {
+-            if let record = fileSystem?.first {
+-                return Package.Dependency(
+-                    source: .path(record.path),
+-                    name: Package.Name(_unchecked: record.identity),
+-                    products: []
+-                )
+-            }
+-            if let record = sourceControl?.first {
+-                let urlString = record.location.remote.first?.urlString ?? ""
+-                let url: URI
+-                do {
+-                    url = try URI(urlString)
+-                } catch {
+-                    throw DecodingError.dataCorrupted(
+-                        DecodingError.Context(
+-                            codingPath: [],
+-                            debugDescription:
+-                                "Invalid URI '\(urlString)' in sourceControl dependency: \(error)"
+-                        )
+-                    )
+-                }
+-                let requirement = try record.requirement.toRequirement()
+-                return Package.Dependency(
+-                    source: .url(url, requirement),
+-                    name: Package.Name(_unchecked: record.identity),
+-                    products: []
+-                )
+-            }
+-            if let record = registry?.first {
+-                let requirement = try record.requirement.toRequirement()
+-                return Package.Dependency(
+-                    source: .registry(
+-                        try _parseIdentity(record.identity),
+-                        requirement
+-                    ),
+-                    name: Package.Name(_unchecked: record.identity),
+-                    products: []
+-                )
+-            }
+-            throw DecodingError.dataCorrupted(
+-                DecodingError.Context(
+-                    codingPath: [],
+-                    debugDescription:
+-                        "Dependency record matched none of fileSystem/sourceControl/registry"
+-                )
+-            )
+-        }
+-
+     }
+ }
+diff --git a/Sources/SPM Standard/Package.Manifest._RequirementWire.swift b/Sources/SPM Standard/Package.Manifest._RequirementWire.swift
+index 52ced7b..8808040 100644
+--- a/Sources/SPM Standard/Package.Manifest._RequirementWire.swift	
++++ b/Sources/SPM Standard/Package.Manifest._RequirementWire.swift	
+@@ -18,23 +18,27 @@ extension Package.Manifest {
+             self.revision = revision
+         }
+ 
+-        init(from requirement: Package.Requirement) {
++        init(from requirement: Package.Requirement) throws(EncodingError) {
+             switch requirement {
+             case .exact(let version):
+                 self.init(exact: [version.description])
+ 
+             case .range(let r):
+-                let lower: Swift::String
+-                let upper: Swift::String
+-                switch r.lowerBound {
+-                case .inclusive(let v), .exclusive(let v): lower = v.description
+-                case .unbounded: lower = ""
++                guard case .inclusive(let lower) = r.lowerBound,
++                    case .exclusive(let upper) = r.upperBound
++                else {
++                    throw EncodingError.invalidValue(
++                        requirement,
++                        EncodingError.Context(
++                            codingPath: [],
++                            debugDescription:
++                                "a manifest range is lower-inclusive and upper-exclusive; unbounded, exclusive lower and inclusive upper bounds are not part of the SwiftPM wire format"
++                        )
++                    )
+                 }
+-                switch r.upperBound {
+-                case .inclusive(let v), .exclusive(let v): upper = v.description
+-                case .unbounded: upper = ""
+-                }
+-                self.init(range: [_RangeBounds(lowerBound: lower, upperBound: upper)])
++                self.init(
++                    range: [_RangeBounds(lowerBound: lower.description, upperBound: upper.description)]
++                )
+ 
+             case .branch(let name):
+                 self.init(branch: [name])
+diff --git a/Tests/SPM Standard Tests/Package.Manifest.Codable Tests.swift b/Tests/SPM Standard Tests/Package.Manifest.Codable Tests.swift
+index e50581c..ab9601d 100644
+--- a/Tests/SPM Standard Tests/Package.Manifest.Codable Tests.swift	
++++ b/Tests/SPM Standard Tests/Package.Manifest.Codable Tests.swift	
+@@ -346,4 +346,134 @@ extension `SPM.Standard Tests`.`SPM Standard Tests`.`Codable Round-Trip` {
+         let decoded = try JSONDecoder().decode(Package.Manifest.self, from: encoded)
+         #expect(decoded == manifest)
+     }
++
++    static func manifest(_ requirement: Package.Requirement) -> Package.Manifest {
++        Package.Manifest(
++            name: "swift-foo",
++            toolsVersion: Version.Tools(major: 6, minor: 3, patch: 1),
++            dependencies: [
++                Package.Dependency(
++                    source: .url("https://example.com/swift-bar.git", requirement),
++                    name: "swift-bar",
++                    products: []
++                )
++            ]
++        )
++    }
++
++    @Test(arguments: [
++        (
++            Package.Requirement.from(Version.Semantic(major: 1, minor: 2, patch: 3)),
++            Version.Semantic(major: 1, minor: 2, patch: 3), Version.Semantic(major: 2, minor: 0, patch: 0)
++        ),
++        (
++            .upToNextMajor(from: Version.Semantic(major: 1, minor: 2, patch: 3)),
++            Version.Semantic(major: 1, minor: 2, patch: 3), Version.Semantic(major: 2, minor: 0, patch: 0)
++        ),
++        (
++            .upToNextMinor(from: Version.Semantic(major: 1, minor: 2, patch: 3)),
++            Version.Semantic(major: 1, minor: 2, patch: 3), Version.Semantic(major: 1, minor: 3, patch: 0)
++        ),
++    ])
++    func `a manifest round trip turns from and upToNext requirements into a lower-inclusive upper-exclusive range`(
++        requirement: Package.Requirement,
++        lower: Version.Semantic,
++        upper: Version.Semantic
++    ) throws {
++        let encoded = try JSONEncoder().encode(Self.manifest(requirement))
++        let decoded = try JSONDecoder().decode(Package.Manifest.self, from: encoded)
++        guard case .url(_, let decodedRequirement) = decoded.dependencies[0].source else {
++            Issue.record("expected .url source")
++            return
++        }
++        #expect(
++            decodedRequirement
++                == .range(Version.Range(lowerBound: .inclusive(lower), upperBound: .exclusive(upper)))
++        )
++    }
++
++    @Test(arguments: [
++        Version.Range<Version.Semantic>(
++            lowerBound: .unbounded,
++            upperBound: .exclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
++        ),
++        Version.Range<Version.Semantic>(
++            lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++            upperBound: .unbounded
++        ),
++        Version.Range<Version.Semantic>(
++            lowerBound: .exclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++            upperBound: .exclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
++        ),
++        Version.Range<Version.Semantic>(
++            lowerBound: .inclusive(Version.Semantic(major: 1, minor: 0, patch: 0)),
++            upperBound: .inclusive(Version.Semantic(major: 2, minor: 0, patch: 0))
++        ),
++    ])
++    func `encoding a manifest range the wire format cannot hold throws`(range: Version.Range<Version.Semantic>) {
++        #expect(throws: EncodingError.self) {
++            try JSONEncoder().encode(Self.manifest(.range(range)))
++        }
++    }
++
++    @Test
++    func `a manifest refuses a local sourceControl location it cannot hold, which the evaluation keeps`() throws {
++        let json = """
++            {
++              "name": "swift-foo",
++              "toolsVersion": {"_version": "6.3.1"},
++              "dependencies": [
++                {
++                  "sourceControl": [
++                    {
++                      "identity": "swift-bar",
++                      "location": {"local": ["/fixture/swift-bar"]},
++                      "requirement": {"branch": ["main"]}
++                    }
++                  ]
++                }
++              ]
++            }
++            """
++        let data = try #require(json.data(using: .utf8))
++        #expect(throws: DecodingError.self) {
++            try JSONDecoder().decode(Package.Manifest.self, from: data)
++        }
++        let evaluation = try JSONDecoder().decode(Package.Manifest.Evaluation.self, from: data)
++        guard case .sourceControl(_, .local(let path), _) = evaluation.dependencies[0].source else {
++            Issue.record("expected a local sourceControl source")
++            return
++        }
++        #expect(path == "/fixture/swift-bar")
++    }
++
++    @Test
++    func `a manifest refuses a dependency with two sourceControl records`() throws {
++        let json = """
++            {
++              "name": "swift-foo",
++              "toolsVersion": {"_version": "6.3.1"},
++              "dependencies": [
++                {
++                  "sourceControl": [
++                    {
++                      "identity": "swift-bar",
++                      "location": {"remote": [{"urlString": "https://example.com/swift-bar.git"}]},
++                      "requirement": {"branch": ["main"]}
++                    },
++                    {
++                      "identity": "swift-baz",
++                      "location": {"remote": [{"urlString": "https://example.com/swift-baz.git"}]},
++                      "requirement": {"branch": ["main"]}
++                    }
++                  ]
++                }
++              ]
++            }
++            """
++        let data = try #require(json.data(using: .utf8))
++        #expect(throws: DecodingError.self) {
++            try JSONDecoder().decode(Package.Manifest.self, from: data)
++        }
++    }
+ }
+-- 
+2.43.0
+

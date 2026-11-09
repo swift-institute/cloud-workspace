@@ -1,0 +1,322 @@
+From 44e4b141c21ff84de90f621528b801bf02b41020 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:42:05 +0000
+Subject: [PATCH 11/18] Gradient writes conic geometry as from X at Y and puts
+ the color interpolation method in the same item as the direction, as CSS
+ Images 4 requires (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Images/Gradient.swift         | 214 +++++-------------
+ .../W3C CSS Images Tests/Gradient Tests.swift |  21 +-
+ 2 files changed, 73 insertions(+), 162 deletions(-)
+
+diff --git a/Sources/W3C CSS Images/Gradient.swift b/Sources/W3C CSS Images/Gradient.swift
+index c8d5b7b..713d3e9 100644
+--- a/Sources/W3C CSS Images/Gradient.swift	
++++ b/Sources/W3C CSS Images/Gradient.swift	
+@@ -147,186 +147,84 @@ extension Gradient: CustomStringConvertible {
+     public var description: String {
+         switch self {
+         case .linear(let direction, let colorStops, let interpolation):
+-            var result = "linear-gradient("
+-
+-            if let interpolation {
+-                result += "\(interpolation), "
+-            }
+-
+-            if let direction {
+-                switch direction {
+-                case .angle(let angle):
+-                    result += "\(angle), "
+-
+-                case .to(let side):
+-                    result += "to \(side.rawValue), "
+-                }
+-            }
+-
+-            result += formatColorStops(colorStops)
+-            result += ")"
+-            return result
++            return Self.function("linear-gradient", Self.direction(direction), interpolation, colorStops)
+ 
+         case .repeatingLinear(let direction, let colorStops, let interpolation):
+-            var result = "repeating-linear-gradient("
+-
+-            if let interpolation {
+-                result += "\(interpolation), "
+-            }
+-
+-            if let direction {
+-                switch direction {
+-                case .angle(let angle):
+-                    result += "\(angle), "
+-
+-                case .to(let side):
+-                    result += "to \(side.rawValue), "
+-                }
+-            }
+-
+-            result += formatColorStops(colorStops)
+-            result += ")"
+-            return result
++            return Self.function("repeating-linear-gradient", Self.direction(direction), interpolation, colorStops)
+ 
+         case .radial(let options, let colorStops, let interpolation):
+-            var result = "radial-gradient("
+-
+-            if let interpolation {
+-                result += "\(interpolation), "
+-            }
+-
+-            if let options {
+-                var optionsString = ""
+-
+-                if let shape = options.shape {
+-                    optionsString += shape.rawValue
+-                    if options.size != nil {
+-                        optionsString += " "
+-                    }
+-                }
+-
+-                if let size = options.size {
+-                    switch size {
+-                    case .keyword(let keyword):
+-                        optionsString += keyword.rawValue
+-
+-                    case .explicit(let radius):
+-                        optionsString += "\(radius)"
+-
+-                    case .elliptical(let radiusX, let radiusY):
+-                        optionsString += "\(radiusX) \(radiusY)"
+-                    }
+-                }
+-
+-                if let position = options.position {
+-                    if !optionsString.isEmpty {
+-                        optionsString += " "
+-                    }
+-                    optionsString += "at \(position)"
+-                }
+-
+-                if !optionsString.isEmpty {
+-                    result += optionsString + ", "
+-                }
+-            }
+-
+-            result += formatColorStops(colorStops)
+-            result += ")"
+-            return result
++            return Self.function("radial-gradient", Self.radial(options), interpolation, colorStops)
+ 
+         case .repeatingRadial(let options, let colorStops, let interpolation):
+-            var result = "repeating-radial-gradient("
++            return Self.function("repeating-radial-gradient", Self.radial(options), interpolation, colorStops)
+ 
+-            if let interpolation {
+-                result += "\(interpolation), "
+-            }
++        case .conic(let angle, let position, let colorStops, let interpolation):
++            return Self.function("conic-gradient", Self.conic(angle, position), interpolation, colorStops)
+ 
+-            if let options {
+-                var optionsString = ""
+-
+-                if let shape = options.shape {
+-                    optionsString += shape.rawValue
+-                    if options.size != nil {
+-                        optionsString += " "
+-                    }
+-                }
+-
+-                if let size = options.size {
+-                    switch size {
+-                    case .keyword(let keyword):
+-                        optionsString += keyword.rawValue
+-
+-                    case .explicit(let radius):
+-                        optionsString += "\(radius)"
+-
+-                    case .elliptical(let radiusX, let radiusY):
+-                        optionsString += "\(radiusX) \(radiusY)"
+-                    }
+-                }
+-
+-                if let position = options.position {
+-                    if !optionsString.isEmpty {
+-                        optionsString += " "
+-                    }
+-                    optionsString += "at \(position)"
+-                }
+-
+-                if !optionsString.isEmpty {
+-                    result += optionsString + ", "
+-                }
+-            }
++        case .repeatingConic(let angle, let position, let colorStops, let interpolation):
++            return Self.function("repeating-conic-gradient", Self.conic(angle, position), interpolation, colorStops)
++        }
++    }
+ 
+-            result += formatColorStops(colorStops)
+-            result += ")"
+-            return result
++    private static func function(
++        _ name: String,
++        _ geometry: [String],
++        _ interpolation: ColorInterpolationMethod?,
++        _ colorStops: [ColorStop]
++    ) -> String {
++        let prelude = (geometry + (interpolation.map { ["\($0)"] } ?? [])).joined(separator: " ")
++        let stops = colorStops.map { stop in
++            guard let position = stop.position else {
++                return stop.color.description
++            }
++            return "\(stop.color) \(position)"
++        }.joined(separator: ", ")
++        return prelude.isEmpty ? "\(name)(\(stops))" : "\(name)(\(prelude), \(stops))"
++    }
+ 
+-        case .conic(let angle, let position, let colorStops, let interpolation):
+-            var result = "conic-gradient("
++    private static func direction(_ direction: Direction?) -> [String] {
++        switch direction {
++        case .angle(let angle):
++            return ["\(angle)"]
+ 
+-            if let interpolation {
+-                result += "\(interpolation), "
+-            }
++        case .to(let side):
++            return ["to \(side.rawValue)"]
+ 
+-            if let angle {
+-                result += "from \(angle), "
+-            }
++        case nil:
++            return []
++        }
++    }
+ 
+-            if let position {
+-                result += "at \(position), "
+-            }
++    private static func radial(_ options: RadialOptions?) -> [String] {
++        guard let options else { return [] }
++        var parts: [String] = []
+ 
+-            result += formatColorStops(colorStops)
+-            result += ")"
+-            return result
++        if let shape = options.shape {
++            parts.append(shape.rawValue)
++        }
+ 
+-        case .repeatingConic(let angle, let position, let colorStops, let interpolation):
+-            var result = "repeating-conic-gradient("
++        switch options.size {
++        case .keyword(let keyword):
++            parts.append(keyword.rawValue)
+ 
+-            if let interpolation {
+-                result += "\(interpolation), "
+-            }
++        case .explicit(let radius):
++            parts.append("\(radius)")
+ 
+-            if let angle {
+-                result += "from \(angle), "
+-            }
++        case .elliptical(let radiusX, let radiusY):
++            parts.append("\(radiusX) \(radiusY)")
+ 
+-            if let position {
+-                result += "at \(position), "
+-            }
++        case nil:
++            break
++        }
+ 
+-            result += formatColorStops(colorStops)
+-            result += ")"
+-            return result
++        if let position = options.position {
++            parts.append("at \(position)")
+         }
++        return parts
+     }
+ 
+-    private func formatColorStops(_ stops: [ColorStop]) -> String {
+-        return stops.map { stop in
+-            guard let position = stop.position else {
+-                return stop.color.description
+-            }
+-            return "\(stop.color) \(position)"
+-        }.joined(separator: ", ")
++    private static func conic(_ angle: Angle?, _ position: Position?) -> [String] {
++        (angle.map { ["from \($0)"] } ?? []) + (position.map { ["at \($0)"] } ?? [])
+     }
+ }
+ 
+diff --git a/Tests/W3C CSS Images Tests/Gradient Tests.swift b/Tests/W3C CSS Images Tests/Gradient Tests.swift
+index 8c566b5..160654a 100644
+--- a/Tests/W3C CSS Images Tests/Gradient Tests.swift	
++++ b/Tests/W3C CSS Images Tests/Gradient Tests.swift	
+@@ -300,7 +300,7 @@ extension `Gradient Tests` {
+             )
+             #expect(
+                 gradientWithOptions.description
+-                    == "conic-gradient(from 45deg, at center, red, yellow, blue)"
++                    == "conic-gradient(from 45deg at center, red, yellow, blue)"
+             )
+         }
+ 
+@@ -324,7 +324,7 @@ extension `Gradient Tests` {
+             )
+             #expect(
+                 conicWithOptions.description
+-                    == "conic-gradient(from 45deg, at center, red, yellow, blue)"
++                    == "conic-gradient(from 45deg at center, red, yellow, blue)"
+             )
+         }
+     }
+@@ -344,7 +344,7 @@ extension `Gradient Tests` {
+             )
+             #expect(
+                 gradient.description
+-                    == "repeating-conic-gradient(from 0deg, at center, red 0%, blue 25%)"
++                    == "repeating-conic-gradient(from 0deg at center, red 0%, blue 25%)"
+             )
+         }
+ 
+@@ -374,7 +374,7 @@ extension `Gradient Tests` {
+                 ],
+                 interpolation: .rectangular(.srgb)
+             )
+-            #expect(gradient.description == "linear-gradient(in srgb, to right, red, blue)")
++            #expect(gradient.description == "linear-gradient(to right in srgb, red, blue)")
+         }
+ 
+         @Test func `radial gradient with polar color space`() {
+@@ -401,6 +401,19 @@ extension `Gradient Tests` {
+             )
+             #expect(gradient.description == "conic-gradient(in lab, red, blue)")
+         }
++
++        @Test func `conic gradient with angle, position and color interpolation`() {
++            let gradient = Gradient.conic(
++                angle: .deg(45),
++                at: .center,
++                colorStops: [
++                    Gradient.ColorStop(.named(.red)),
++                    Gradient.ColorStop(.named(.blue)),
++                ],
++                interpolation: .rectangular(.lab)
++            )
++            #expect(gradient.description == "conic-gradient(from 45deg at center in lab, red, blue)")
++        }
+     }
+ }
+ 
+-- 
+2.43.0
+

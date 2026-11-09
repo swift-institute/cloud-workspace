@@ -1,0 +1,94 @@
+From aa928c99b232e1d902d361f5d16dffb6a249ddf7 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:12 +0000
+Subject: [PATCH] Splat keeps the declaration order of mixed direct and
+ flattened nested Arguments fields when building the arguments call
+ (swift-compositions/swift-splat#12)
+
+---
+ Sources/SplatPlugin/SplatMacro.swift | 16 +++++++----
+ Tests/SplatTests/Splat Tests.swift   | 42 ++++++++++++++++++++++++++++
+ 2 files changed, 52 insertions(+), 6 deletions(-)
+
+diff --git a/Sources/SplatPlugin/SplatMacro.swift b/Sources/SplatPlugin/SplatMacro.swift
+index 8fba95a..13238d3 100644
+--- a/Sources/SplatPlugin/SplatMacro.swift
++++ b/Sources/SplatPlugin/SplatMacro.swift
+@@ -297,13 +297,17 @@ public struct SplatMacro: MemberMacro {
+                 )
+             }
+ 
+-            let grouped = Dictionary(grouping: properties) { $0.path.first }
++            var groups: [(key: String?, props: [PropertyInfo])] = []
++            for property in properties {
++                let key = property.path.first
++                if let last = groups.last, last.key == key {
++                    groups[groups.count - 1].props.append(property)
++                } else {
++                    groups.append((key: key, props: [property]))
++                }
++            }
+ 
+-            return grouped.sorted { a, b in
+-                guard let aKey = a.key else { return true }
+-                guard let bKey = b.key else { return false }
+-                return aKey < bKey
+-            }.map { key, props -> String in
++            return groups.map { key, props -> String in
+                 guard let pathComponent = key else {
+                     return props.map { "\(splatArgumentLabel($0.name)): `\($0.name)`" }.joined(
+                         separator: ", "
+diff --git a/Tests/SplatTests/Splat Tests.swift b/Tests/SplatTests/Splat Tests.swift
+index db9e4df..6830539 100644
+--- a/Tests/SplatTests/Splat Tests.swift	
++++ b/Tests/SplatTests/Splat Tests.swift	
+@@ -430,4 +430,46 @@ struct SplatTests {
+         #expect(article.arguments.lid2.exception1 == false)
+         #expect(article.arguments.lid2.exception2 == true)
+     }
++
++    @Test func `splat with mixed direct and nested Arguments keeps declaration order`() {
++        @Splat
++        struct Report: Sendable {
++            let arguments: Arguments
++
++            init(_ arguments: Arguments) {
++                self.arguments = arguments
++            }
++
++            struct Arguments: Sendable {
++                let zulu: Zulu.Arguments
++                let title: String
++                let alpha: Alpha.Arguments
++                let count: Int
++            }
++
++            struct Zulu {
++                struct Arguments: Sendable {
++                    let condition: Bool
++                }
++            }
++
++            struct Alpha {
++                struct Arguments: Sendable {
++                    let exception: Bool
++                }
++            }
++        }
++
++        let report = Report(
++            condition: true,
++            title: "Mixed",
++            exception: false,
++            count: 3
++        )
++
++        #expect(report.arguments.zulu.condition == true)
++        #expect(report.arguments.title == "Mixed")
++        #expect(report.arguments.alpha.exception == false)
++        #expect(report.arguments.count == 3)
++    }
+ }
+-- 
+2.43.0
+

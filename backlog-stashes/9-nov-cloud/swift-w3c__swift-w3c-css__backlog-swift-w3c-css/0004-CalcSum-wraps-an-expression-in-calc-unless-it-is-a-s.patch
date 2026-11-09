@@ -1,0 +1,116 @@
+From 240c43bb196765af3f27f5ebbffa544f69ffabbf Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:54 +0000
+Subject: [PATCH 04/18] CalcSum wraps an expression in calc() unless it is a
+ single min, max, clamp or calc call, so min(a) + max(b) is no longer left
+ bare (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Values/CalcSum.swift          | 53 ++++++++++++++-----
+ .../W3C CSS Values Tests/CalcSum Tests.swift  |  5 ++
+ 2 files changed, 46 insertions(+), 12 deletions(-)
+
+diff --git a/Sources/W3C CSS Values/CalcSum.swift b/Sources/W3C CSS Values/CalcSum.swift
+index 44cb4c3..11ee285 100644
+--- a/Sources/W3C CSS Values/CalcSum.swift	
++++ b/Sources/W3C CSS Values/CalcSum.swift	
+@@ -2,8 +2,15 @@ public struct CalcSum: Sendable, Hashable {
+ 
+     private let expression: String
+ 
++    private let isFunctionCall: Bool
++
+     public init(_ expression: String) {
++        self.init(expression, isFunctionCall: Self.isSingleFunctionCall(expression))
++    }
++
++    private init(_ expression: String, isFunctionCall: Bool) {
+         self.expression = expression
++        self.isFunctionCall = isFunctionCall
+     }
+ }
+ 
+@@ -14,30 +21,52 @@ extension CalcSum {
+     }
+ 
+     public static func min(_ expressions: String) -> CalcSum {
+-        return CalcSum("min(\(expressions))")
++        return CalcSum("min(\(expressions))", isFunctionCall: true)
+     }
+ 
+     public static func max(_ expressions: String) -> CalcSum {
+-        return CalcSum("max(\(expressions))")
++        return CalcSum("max(\(expressions))", isFunctionCall: true)
+     }
+ 
+     public static func clamp(min: String, preferred: String, max: String) -> CalcSum {
+-        return CalcSum("clamp(\(min), \(preferred), \(max))")
++        return CalcSum("clamp(\(min), \(preferred), \(max))", isFunctionCall: true)
+     }
+ }
+ 
+-extension CalcSum: CustomStringConvertible {
++extension CalcSum {
+ 
+-    public var description: String {
++    private static let functionPrefixes = ["min(", "max(", "clamp(", "calc("]
+ 
+-        if (expression.hasPrefix("min(") && expression.hasSuffix(")"))
+-            || (expression.hasPrefix("max(") && expression.hasSuffix(")"))
+-            || (expression.hasPrefix("clamp(") && expression.hasSuffix(")"))
+-            || (expression.hasPrefix("calc(") && expression.hasSuffix(")"))
+-        {
+-            return expression
++    private static func isSingleFunctionCall(_ expression: String) -> Bool {
++        guard functionPrefixes.contains(where: { expression.hasPrefix($0) }),
++            let open = expression.firstIndex(of: "(")
++        else {
++            return false
+         }
+ 
+-        return "calc(\(expression))"
++        var depth = 0
++        for index in expression[open...].indices {
++            switch expression[index] {
++            case "(":
++                depth += 1
++
++            case ")":
++                depth -= 1
++                if depth == 0 {
++                    return expression.index(after: index) == expression.endIndex
++                }
++
++            default:
++                break
++            }
++        }
++        return false
++    }
++}
++
++extension CalcSum: CustomStringConvertible {
++
++    public var description: String {
++        isFunctionCall ? expression : "calc(\(expression))"
+     }
+ }
+diff --git a/Tests/W3C CSS Values Tests/CalcSum Tests.swift b/Tests/W3C CSS Values Tests/CalcSum Tests.swift
+index db91216..69938dd 100644
+--- a/Tests/W3C CSS Values Tests/CalcSum Tests.swift	
++++ b/Tests/W3C CSS Values Tests/CalcSum Tests.swift	
+@@ -116,6 +116,11 @@ extension `CalcSum Tests` {
+             #expect(clampFunction.description == "clamp(10px, 5vw, 50px)")
+         }
+ 
++        @Test func `two function calls joined by an operator are wrapped in calc`() {
++            #expect(CalcSum("min(10px, 1em) + max(2px, 1%)").description == "calc(min(10px, 1em) + max(2px, 1%))")
++            #expect(CalcSum("calc(1px) * calc(2)").description == "calc(calc(1px) * calc(2))")
++        }
++
+         @Test func `min nested in an expression`() {
+             let nestedMin = CalcSum("min(10%, 20px) + 1rem")
+             #expect(nestedMin.description == "calc(min(10%, 20px) + 1rem)")
+-- 
+2.43.0
+

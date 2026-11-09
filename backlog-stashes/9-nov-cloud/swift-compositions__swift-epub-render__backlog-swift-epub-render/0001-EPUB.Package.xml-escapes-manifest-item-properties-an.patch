@@ -1,0 +1,154 @@
+From 8479bea20e80ccc41a7c73ef592457cdcdc46f65 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:38:05 +0000
+Subject: [PATCH 1/2] EPUB.Package.xml escapes manifest item properties and
+ throws EPUB.Package.Error.unknownSpineItem for a spine idref that names no
+ manifest item (swift-compositions/swift-epub-render#5)
+
+---
+ Package.swift                                 |  3 +
+ .../EPUB Rendering/EPUB.Package.Error.swift   |  9 +++
+ Sources/EPUB Rendering/EPUB.Package.swift     | 11 ++-
+ .../EPUB.Package Tests.swift                  | 67 +++++++++++++++++++
+ 4 files changed, 88 insertions(+), 2 deletions(-)
+ create mode 100644 Sources/EPUB Rendering/EPUB.Package.Error.swift
+ create mode 100644 Tests/EPUB Rendering Tests/EPUB.Package Tests.swift
+
+diff --git a/Package.swift b/Package.swift
+index 1a728d0..d536719 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -44,6 +44,9 @@ let package = Package(
+             dependencies: [
+                 .target(name: "EPUB Rendering"),
+                 .product(name: "Byte", package: "swift-byte"),
++                .product(name: "BCP 47", package: "swift-bcp-47"),
++                .product(name: "RFC 3987", package: "swift-rfc-3987"),
++                .product(name: "ISO 8601", package: "swift-iso-8601"),
+                 .product(name: "InlineSnapshotTesting", package: "swift-snapshot-testing"),
+             ]
+         ),
+diff --git a/Sources/EPUB Rendering/EPUB.Package.Error.swift b/Sources/EPUB Rendering/EPUB.Package.Error.swift
+new file mode 100644
+index 0000000..033a66f
+--- /dev/null
++++ b/Sources/EPUB Rendering/EPUB.Package.Error.swift	
+@@ -0,0 +1,9 @@
++extension EPUB.Package {
++
++    /// A package document that EPUB forbids.
++    public enum Error: Swift.Error, Sendable, Hashable {
++
++        /// A spine `itemref` whose `idref` names no manifest item.
++        case unknownSpineItem(idref: String)
++    }
++}
+diff --git a/Sources/EPUB Rendering/EPUB.Package.swift b/Sources/EPUB Rendering/EPUB.Package.swift
+index a05f5a3..0c72d62 100644
+--- a/Sources/EPUB Rendering/EPUB.Package.swift	
++++ b/Sources/EPUB Rendering/EPUB.Package.swift	
+@@ -82,11 +82,18 @@ extension EPUB.Package {
+         return String(text[..<fraction]) + "Z"
+     }
+ 
++    /// Throws ``Error/unknownSpineItem(idref:)`` when a spine item names no
++    /// manifest item.
+     public static func xml(
+         metadata: Metadata,
+         manifest: [Item],
+         spine: [Spine.Item]
+-    ) -> String {
++    ) throws(EPUB.Package.Error) -> String {
++        let manifestIDs = Set(manifest.map(\.id))
++        if let unknown = spine.first(where: { !manifestIDs.contains($0.idref) }) {
++            throw .unknownSpineItem(idref: unknown.idref)
++        }
++
+         var xml = """
+             <?xml version="1.0" encoding="UTF-8"?>
+             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
+@@ -124,7 +131,7 @@ extension EPUB.Package {
+         for item in manifest {
+             var props = ""
+             if !item.properties.isEmpty {
+-                props = " properties=\"\(item.properties.joined(separator: " "))\""
++                props = " properties=\"\(escapeXML(item.properties.joined(separator: " ")))\""
+             }
+             xml +=
+                 "    <item id=\"\(escapeXML(item.id))\" href=\"\(escapeXML(item.href.value))\" media-type=\"\(escapeXML(item.media))\"\(props)/>\n"
+diff --git a/Tests/EPUB Rendering Tests/EPUB.Package Tests.swift b/Tests/EPUB Rendering Tests/EPUB.Package Tests.swift
+new file mode 100644
+index 0000000..a160879
+--- /dev/null
++++ b/Tests/EPUB Rendering Tests/EPUB.Package Tests.swift	
+@@ -0,0 +1,67 @@
++import BCP_47
++import ISO_8601
++import RFC_3987
++import Testing
++
++@testable import EPUB_Rendering
++
++enum `EPUB.Package Tests` {}
++
++extension `EPUB.Package Tests` {
++    @Suite
++    struct `Package document` {
++
++        static func metadata() throws -> EPUB.Package.Metadata {
++            EPUB.Package.Metadata(
++                identifier: "urn:uuid:example",
++                title: "Example",
++                language: try BCP47.LanguageTag("en"),
++                modified: try ISO_8601.DateTime(year: 2025, month: 1, day: 2)
++            )
++        }
++
++        @Test
++        func `manifest properties are escaped`() throws {
++            let item = EPUB.Package.Item(
++                id: "nav",
++                href: try RFC_3987.IRI.Reference("nav.xhtml"),
++                media: "application/xhtml+xml",
++                properties: ["nav", "a\"b<c"]
++            )
++            let xml = try EPUB.Package.xml(metadata: try Self.metadata(), manifest: [item], spine: [])
++            #expect(xml.contains("properties=\"nav a&quot;b&lt;c\""))
++        }
++
++        @Test
++        func `a spine idref without a manifest item is rejected`() throws {
++            let item = EPUB.Package.Item(
++                id: "chapter1",
++                href: try RFC_3987.IRI.Reference("chapter1.xhtml"),
++                media: "application/xhtml+xml"
++            )
++            let metadata = try Self.metadata()
++            #expect(throws: EPUB.Package.Error.unknownSpineItem(idref: "chapter2")) {
++                try EPUB.Package.xml(
++                    metadata: metadata,
++                    manifest: [item],
++                    spine: [.init(idref: "chapter1"), .init(idref: "chapter2")]
++                )
++            }
++        }
++
++        @Test
++        func `a spine idref naming a manifest item is written`() throws {
++            let item = EPUB.Package.Item(
++                id: "chapter1",
++                href: try RFC_3987.IRI.Reference("chapter1.xhtml"),
++                media: "application/xhtml+xml"
++            )
++            let xml = try EPUB.Package.xml(
++                metadata: try Self.metadata(),
++                manifest: [item],
++                spine: [.init(idref: "chapter1")]
++            )
++            #expect(xml.contains("<itemref idref=\"chapter1\"/>"))
++        }
++    }
++}
+-- 
+2.43.0
+

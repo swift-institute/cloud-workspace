@@ -1,0 +1,184 @@
+From 0b546200a30c41522da7888bd082cd36799e5349 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:44 +0000
+Subject: [PATCH 2/2] YAML.Compose resolves plain scalars by the YAML 1.2 JSON
+ schema for .json and the core schema for .core, accepting only the specified
+ spellings of null, true and false (swift-compositions/swift-yaml#4)
+
+---
+ .../YAML/YAML.Compose.Implementation.swift    | 112 ++++++++++++++++--
+ Tests/YAML Tests/YAML Tests.swift             |  33 ++++++
+ 2 files changed, 137 insertions(+), 8 deletions(-)
+
+diff --git a/Sources/YAML/YAML.Compose.Implementation.swift b/Sources/YAML/YAML.Compose.Implementation.swift
+index 6f377e2..51b8cbe 100644
+--- a/Sources/YAML/YAML.Compose.Implementation.swift
++++ b/Sources/YAML/YAML.Compose.Implementation.swift
+@@ -146,17 +146,113 @@ extension YAML.Compose.Implementation {
+         case .failsafe:
+             return (.string, content)
+ 
+-        case .json, .core:
+-            let lower = content.lowercased()
+-            if lower == "null" || content == "~" { return (.null, "null") }
+-            if lower == "true" { return (.boolean, "true") }
+-            if lower == "false" { return (.boolean, "false") }
+-            if let integer = Int(content) { return (.integer, String(integer)) }
+-            if let floating = Double(content), content.contains(".") || lower.contains("e") {
+-                return (.floating, String(floating))
++        case .json:
++            return json(content)
++
++        case .core:
++            return core(content)
++        }
++    }
++
++    private func json(_ content: String) -> (tag: YAML.Tag, content: String) {
++        switch content {
++        case "null": return (.null, "null")
++        case "true", "false": return (.boolean, content)
++        default: break
++        }
++        var rest = Array(content.utf8)[...]
++        if rest.first == UInt8(ascii: "-") { rest = rest.dropFirst() }
++        guard let first = rest.first, Self.isDigit(first) else { return (.string, content) }
++        if first == UInt8(ascii: "0") {
++            rest = rest.dropFirst()
++        } else {
++            _ = Self.digits(&rest)
++        }
++        if rest.isEmpty, let integer = Int(content) { return (.integer, String(integer)) }
++        if rest.first == UInt8(ascii: ".") {
++            rest = rest.dropFirst()
++            _ = Self.digits(&rest)
++        }
++        guard Self.exponent(&rest), rest.isEmpty, let floating = Double(content) else {
++            return (.string, content)
++        }
++        return (.floating, String(floating))
++    }
++
++    private func core(_ content: String) -> (tag: YAML.Tag, content: String) {
++        switch content {
++        case "null", "Null", "NULL", "~": return (.null, "null")
++        case "true", "True", "TRUE": return (.boolean, "true")
++        case "false", "False", "FALSE": return (.boolean, "false")
++        case ".inf", ".Inf", ".INF", "+.inf", "+.Inf", "+.INF":
++            return (.floating, String(Double.infinity))
++        case "-.inf", "-.Inf", "-.INF": return (.floating, String(-Double.infinity))
++        case ".nan", ".NaN", ".NAN": return (.floating, String(Double.nan))
++        default: break
++        }
++        if let integer = Int(content) { return (.integer, String(integer)) }
++        if let integer = Self.radix(content, prefix: "0o", digits: "01234567", radix: 8) {
++            return (.integer, String(integer))
++        }
++        if let integer = Self.radix(
++            content,
++            prefix: "0x",
++            digits: "0123456789abcdefABCDEF",
++            radix: 16
++        ) {
++            return (.integer, String(integer))
++        }
++        var rest = Array(content.utf8)[...]
++        if rest.first == UInt8(ascii: "-") || rest.first == UInt8(ascii: "+") {
++            rest = rest.dropFirst()
++        }
++        if rest.first == UInt8(ascii: ".") {
++            rest = rest.dropFirst()
++            guard Self.digits(&rest) > 0 else { return (.string, content) }
++        } else {
++            guard Self.digits(&rest) > 0 else { return (.string, content) }
++            if rest.first == UInt8(ascii: ".") {
++                rest = rest.dropFirst()
++                _ = Self.digits(&rest)
+             }
++        }
++        guard Self.exponent(&rest), rest.isEmpty, let floating = Double(content) else {
+             return (.string, content)
+         }
++        return (.floating, String(floating))
++    }
++
++    private static func isDigit(_ byte: UInt8) -> Bool {
++        (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte)
++    }
++
++    private static func digits(_ rest: inout ArraySlice<UInt8>) -> Int {
++        let count = rest.prefix(while: isDigit).count
++        rest = rest.dropFirst(count)
++        return count
++    }
++
++    private static func exponent(_ rest: inout ArraySlice<UInt8>) -> Bool {
++        guard rest.first == UInt8(ascii: "e") || rest.first == UInt8(ascii: "E") else {
++            return true
++        }
++        rest = rest.dropFirst()
++        if rest.first == UInt8(ascii: "-") || rest.first == UInt8(ascii: "+") {
++            rest = rest.dropFirst()
++        }
++        return digits(&rest) > 0
++    }
++
++    private static func radix(
++        _ content: String,
++        prefix: String,
++        digits: String,
++        radix: Int
++    ) -> Int? {
++        guard content.hasPrefix(prefix) else { return nil }
++        let body = content.dropFirst(prefix.count)
++        guard !body.isEmpty, body.allSatisfy({ digits.contains($0) }) else { return nil }
++        return Int(body, radix: radix)
+     }
+ 
+     private mutating func consumeStreamStart() -> Bool {
+diff --git a/Tests/YAML Tests/YAML Tests.swift b/Tests/YAML Tests/YAML Tests.swift
+index 5ca2ee7..7f8175d 100644
+--- a/Tests/YAML Tests/YAML Tests.swift	
++++ b/Tests/YAML Tests/YAML Tests.swift	
+@@ -54,5 +54,38 @@ extension `YAML Tests` {
+             let stream = try YAML.Parse.events("[1, 2, 3]", limits: YAML.Limits(events: 9))
+             #expect(stream.events.count == 9)
+         }
++
++        @Test func `core schema accepts only the YAML 1.2 spellings of null and booleans`() throws {
++            let stream = try YAML.Parse.events("[tRUE, True, FALSE, nULL, Null, ~]")
++            let graph = try YAML.Compose.graph(from: stream, schema: .core)
++            guard case .sequence(let children) = graph[graph.root]?.kind else {
++                Issue.record("Expected sequence root")
++                return
++            }
++            #expect(graph[children[0]]?.tag == .string)
++            #expect(graph[children[1]]?.tag == .boolean)
++            #expect(graph[children[2]]?.tag == .boolean)
++            #expect(graph[children[3]]?.tag == .string)
++            #expect(graph[children[4]]?.tag == .null)
++            #expect(graph[children[5]]?.tag == .null)
++        }
++
++        @Test func `json schema resolves only JSON spellings while core resolves more`() throws {
++            let stream = try YAML.Parse.events("[True, ~, 0x1f, 0o17, +5, 012, .inf, 1.5e3]")
++            let json = try YAML.Compose.graph(from: stream, schema: .json)
++            let core = try YAML.Compose.graph(from: stream, schema: .core)
++            guard case .sequence(let jsonChildren) = json[json.root]?.kind,
++                case .sequence(let coreChildren) = core[core.root]?.kind
++            else {
++                Issue.record("Expected sequence roots")
++                return
++            }
++            let jsonTags: [YAML.Tag?] = jsonChildren.map { json[$0]?.tag }
++            let coreTags: [YAML.Tag?] = coreChildren.map { core[$0]?.tag }
++            #expect(jsonTags == [.string, .string, .string, .string, .string, .string, .string, .floating])
++            #expect(coreTags == [.boolean, .null, .integer, .integer, .integer, .integer, .floating, .floating])
++            #expect(core[coreChildren[2]]?.kind == .scalar("31"))
++            #expect(core[coreChildren[3]]?.kind == .scalar("15"))
++        }
+     }
+ }
+-- 
+2.43.0
+

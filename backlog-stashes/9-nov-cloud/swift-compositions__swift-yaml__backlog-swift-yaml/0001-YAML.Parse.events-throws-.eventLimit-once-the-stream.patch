@@ -1,0 +1,140 @@
+From 3d5023a6f82036a92ed5cc26c1fbb1efdff2a33f Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:44 +0000
+Subject: [PATCH 1/2] YAML.Parse.events throws .eventLimit once the stream
+ would exceed YAML.Limits.events (swift-compositions/swift-yaml#4)
+
+---
+ Sources/YAML/YAML.Parse.Implementation.swift | 29 ++++++++++----------
+ Tests/YAML Tests/YAML Tests.swift            |  8 ++++++
+ 2 files changed, 23 insertions(+), 14 deletions(-)
+
+diff --git a/Sources/YAML/YAML.Parse.Implementation.swift b/Sources/YAML/YAML.Parse.Implementation.swift
+index fbb4bbd..2f7ff10 100644
+--- a/Sources/YAML/YAML.Parse.Implementation.swift
++++ b/Sources/YAML/YAML.Parse.Implementation.swift
+@@ -26,11 +26,11 @@ extension YAML.Parse {
+ 
+ extension YAML.Parse.Implementation {
+     mutating func parse() throws(YAML.Parse.Error) -> YAML.Serialization.Stream {
+-        append(.streamStart(mark()))
++        try append(.streamStart(mark()))
+         skipSpaceAndComments()
+         let documentMark = mark()
+         if consume("---") { skipSpaceAndComments() }
+-        append(
++        try append(
+             .documentStart(
+                 explicit: mark().offset > documentMark.offset,
+                 directives: [],
+@@ -42,8 +42,8 @@ extension YAML.Parse.Implementation {
+         let explicitEnd = consume("...")
+         skipSpaceAndComments()
+         guard isAtEnd else { throw .trailingContent(mark()) }
+-        append(.documentEnd(explicit: explicitEnd, mark: mark()))
+-        append(.streamEnd(mark()))
++        try append(.documentEnd(explicit: explicitEnd, mark: mark()))
++        try append(.streamEnd(mark()))
+         return .init(events: output)
+     }
+ 
+@@ -64,10 +64,10 @@ extension YAML.Parse.Implementation {
+     private mutating func parseSequence(depth: Int) throws(YAML.Parse.Error) {
+         let start = mark()
+         advance()
+-        append(.sequenceStart(anchor: nil, tag: .nonSpecific, style: .flow, mark: start))
++        try append(.sequenceStart(anchor: nil, tag: .nonSpecific, style: .flow, mark: start))
+         skipSpaceAndComments()
+         if consume("]") {
+-            append(.sequenceEnd(mark()))
++            try append(.sequenceEnd(mark()))
+             return
+         }
+         while true {
+@@ -77,16 +77,16 @@ extension YAML.Parse.Implementation {
+             guard consume(",") else { throw unexpected() }
+             skipSpaceAndComments()
+         }
+-        append(.sequenceEnd(mark()))
++        try append(.sequenceEnd(mark()))
+     }
+ 
+     private mutating func parseMapping(depth: Int) throws(YAML.Parse.Error) {
+         let start = mark()
+         advance()
+-        append(.mappingStart(anchor: nil, tag: .nonSpecific, style: .flow, mark: start))
++        try append(.mappingStart(anchor: nil, tag: .nonSpecific, style: .flow, mark: start))
+         skipSpaceAndComments()
+         if consume("}") {
+-            append(.mappingEnd(mark()))
++            try append(.mappingEnd(mark()))
+             return
+         }
+         while true {
+@@ -99,7 +99,7 @@ extension YAML.Parse.Implementation {
+             guard consume(",") else { throw unexpected() }
+             skipSpaceAndComments()
+         }
+-        append(.mappingEnd(mark()))
++        try append(.mappingEnd(mark()))
+     }
+ 
+     private mutating func parseQuoted() throws(YAML.Parse.Error) {
+@@ -120,7 +120,7 @@ extension YAML.Parse.Implementation {
+             guard UInt(content.count) <= limits.scalarLength else { throw .scalarLimit }
+         }
+         guard consume(String(quote)) else { throw .unexpectedEnd(mark()) }
+-        append(
++        try append(
+             .scalar(
+                 content: content,
+                 anchor: nil,
+@@ -150,7 +150,7 @@ extension YAML.Parse.Implementation {
+             guard UInt(content.count) <= limits.scalarLength else { throw .scalarLimit }
+         }
+         guard !content.isEmpty else { throw unexpected() }
+-        append(
++        try append(
+             .scalar(content: content, anchor: nil, tag: .nonSpecific, style: .plain, mark: start)
+         )
+     }
+@@ -159,7 +159,7 @@ extension YAML.Parse.Implementation {
+         let start = mark()
+         advance()
+         let name = try parseName()
+-        append(.alias(.init(name), start))
++        try append(.alias(.init(name), start))
+     }
+ 
+     private mutating func parseAnchored(depth: Int) throws(YAML.Parse.Error) {
+@@ -212,7 +212,8 @@ extension YAML.Parse.Implementation {
+         return name
+     }
+ 
+-    private mutating func append(_ event: YAML.Serialization.Event) {
++    private mutating func append(_ event: YAML.Serialization.Event) throws(YAML.Parse.Error) {
++        guard UInt(output.count) < limits.events else { throw .eventLimit }
+         output.append(event)
+     }
+ 
+diff --git a/Tests/YAML Tests/YAML Tests.swift b/Tests/YAML Tests/YAML Tests.swift
+index 85ea234..5ca2ee7 100644
+--- a/Tests/YAML Tests/YAML Tests.swift	
++++ b/Tests/YAML Tests/YAML Tests.swift	
+@@ -46,5 +46,13 @@ extension `YAML Tests` {
+             let graph = try YAML.Compose.graph(from: stream, schema: .failsafe)
+             #expect(graph[graph.root]?.tag == .string)
+         }
++
++        @Test func `parse rejects input with more events than the event limit`() throws {
++            #expect(throws: YAML.Parse.Error.eventLimit) {
++                _ = try YAML.Parse.events("[1, 2, 3]", limits: YAML.Limits(events: 8))
++            }
++            let stream = try YAML.Parse.events("[1, 2, 3]", limits: YAML.Limits(events: 9))
++            #expect(stream.events.count == 9)
++        }
+     }
+ }
+-- 
+2.43.0
+

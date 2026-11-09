@@ -1,0 +1,71 @@
+From 43235232591abca2788c92a528161d057fff6f51 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:38:38 +0000
+Subject: [PATCH] Git.Client.probe maps ls-remote exit code 2 (the remote lacks
+ the ref) to .missing instead of .command (swift-compositions/swift-git#10)
+
+---
+ Sources/Git/Git.Client.swift           | 19 ++++++++++++++++++-
+ Tests/Git Tests/Git.Client Tests.swift | 16 ++++++++++++++++
+ 2 files changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/Git/Git.Client.swift b/Sources/Git/Git.Client.swift
+index a6add87..9584239 100644
+--- a/Sources/Git/Git.Client.swift
++++ b/Sources/Git/Git.Client.swift
+@@ -319,7 +319,24 @@ extension Git.Client {
+         _ remote: Swift.String,
+         ref: Git.Ref.Name
+     ) throws(Error) -> Git.Ref.Advertisement {
+-        let output = try bytes(["ls-remote", "--refs", "--exit-code", remote, ref.rawValue])
++        let arguments = ["ls-remote", "--refs", "--exit-code", remote, ref.rawValue]
++        let result = try result(arguments)
++        switch result.termination {
++        case .exited(code: 0):
++            break
++
++        case .exited(code: 2):
++            throw .missing(ref)
++
++        default:
++            throw .command(
++                arguments: arguments,
++                termination: result.termination,
++                stdout: result.stdout,
++                stderr: result.stderr
++            )
++        }
++        let output = result.stdout
+         let records: [Git.Ref.Advertisement]
+         do throws(Git.Ref.Advertisement.Error) {
+             records = try Git.Ref.Advertisement.parse(output)
+diff --git a/Tests/Git Tests/Git.Client Tests.swift b/Tests/Git Tests/Git.Client Tests.swift
+index c146835..e55d12a 100644
+--- a/Tests/Git Tests/Git.Client Tests.swift	
++++ b/Tests/Git Tests/Git.Client Tests.swift	
+@@ -62,6 +62,22 @@ extension `Git.Client Tests` {
+             )
+         }
+ 
++        @Test
++        func `probing a ref the remote lacks throws missing`() throws {
++            let root = try GitFixture.makeRoot()
++            let source = try GitFixture.path(root, "source.git")
++
++            defer { GitFixture.remove(root) }
++
++            let client = Git.Client()
++            try client.initialize(at: source, bare: true)
++
++            let ref = try Git.Ref.Name("refs/heads/main")
++            #expect(throws: Git.Client.Error.missing(ref)) {
++                try client.probe(source.string, ref: ref)
++            }
++        }
++
+         @Test
+         func `isolated clone proves ancestry and exact object fetch`() throws {
+             let root = try GitFixture.makeRoot()
+-- 
+2.43.0
+

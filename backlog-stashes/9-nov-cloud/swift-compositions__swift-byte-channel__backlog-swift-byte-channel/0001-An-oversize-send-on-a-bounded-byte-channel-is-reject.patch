@@ -1,0 +1,81 @@
+From 47657e7c8a6e2462f650184938b6fa3143a91330 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:42 +0000
+Subject: [PATCH] An oversize send on a bounded byte channel is rejected with
+ .full and its chunk handed back instead of trapping
+ (swift-compositions/swift-byte-channel#3)
+
+---
+ Sources/Byte Channel/Byte.Channel.Gate.swift  |  7 +++++-
+ .../Byte Channel/Byte.Channel.Writer.swift    |  3 +++
+ .../Byte.Channel Tests.swift                  | 22 +++++++++++++++++++
+ 3 files changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/Byte Channel/Byte.Channel.Gate.swift b/Sources/Byte Channel/Byte.Channel.Gate.swift
+index f57cf50..8c42021 100644
+--- a/Sources/Byte Channel/Byte.Channel.Gate.swift	
++++ b/Sources/Byte Channel/Byte.Channel.Gate.swift	
+@@ -32,7 +32,12 @@ extension Byte.Channel {
+         }
+ 
+         func reserve(_ count: Index<Byte>.Count) async throws(Error) -> Reservation {
+-            precondition(count <= capacity, "chunk exceeds channel byte capacity")
++            guard count <= capacity else {
++                if let terminal = state.withLock({ $0.terminal }) {
++                    throw Self.error(terminal)
++                }
++                throw .full
++            }
+             do {
+                 try await turn.wait()
+             } catch {
+diff --git a/Sources/Byte Channel/Byte.Channel.Writer.swift b/Sources/Byte Channel/Byte.Channel.Writer.swift
+index 52784ef..52bcc52 100644
+--- a/Sources/Byte Channel/Byte.Channel.Writer.swift	
++++ b/Sources/Byte Channel/Byte.Channel.Writer.swift	
+@@ -21,6 +21,9 @@ extension Byte.Channel {
+ 
+ extension Byte.Channel.Writer {
+     /// Sends one whole chunk while preserving ownership on rejection.
++    ///
++    /// A chunk larger than the channel's byte capacity can never fit and is
++    /// rejected with ``Byte/Channel/Error/full`` and handed back.
+     public func send(_ chunk: consuming sending Byte.Chunk) async -> Send.Outcome {
+         switch backend {
+         case .rendezvous(let sender):
+diff --git a/Tests/Byte Channel Tests/Byte.Channel Tests.swift b/Tests/Byte Channel Tests/Byte.Channel Tests.swift
+index 1906599..15e9c42 100644
+--- a/Tests/Byte Channel Tests/Byte.Channel Tests.swift	
++++ b/Tests/Byte Channel Tests/Byte.Channel Tests.swift	
+@@ -134,6 +134,28 @@ extension `Byte.Channel Tests`.`Byte Channel Tests`.`Edge Case` {
+         // by the gate rather than bypassing the declared byte capacity.
+     }
+ 
++    @Test
++    func `an oversize send is rejected with the chunk handed back`() async {
++        let channels = Byte.Channel<Never>.pair(capacity: .one)
++        var input = Byte.Chunk.Input(capacity: 2)
++        input.edit { output in
++            output.append(Byte(bitPattern: 0x01))
++            output.append(Byte(bitPattern: 0x02))
++        }
++        switch await channels.first.writer.send(input.finish()) {
++        case .sent:
++            Issue.record("Expected an oversize chunk to be rejected")
++
++        case .rejected(let chunk, let error):
++            #expect(chunk.count == 2)
++            #expect(chunk.span[1] == Byte(bitPattern: 0x02))
++            guard case .full = error else {
++                Issue.record("Expected .full, got \(error)")
++                return
++            }
++        }
++    }
++
+     @Test
+     func `reader never needs a cross chunk buffer`() async {
+         // The Reader declaration holds one `Byte.Chunk?`, not a Ring, actor
+-- 
+2.43.0
+

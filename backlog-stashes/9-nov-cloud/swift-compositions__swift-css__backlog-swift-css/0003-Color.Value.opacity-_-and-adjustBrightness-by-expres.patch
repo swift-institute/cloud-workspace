@@ -1,0 +1,157 @@
+From 22be0d4c12374cc1a88e931a7f1008ca76687fc9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:57 +0000
+Subject: [PATCH 3/3] Color.Value.opacity(_:) and adjustBrightness(by:) express
+ forms without known channels as color-mix() and clamp the brightness fraction
+ to -1...1 instead of returning the color unchanged
+ (swift-compositions/swift-css#18)
+
+---
+ Sources/CSS/Dark Mode Color/Color.Value.swift | 39 +++++++++++++----
+ Tests/CSS Tests/Color.Value Tests.swift       | 42 +++++++++++++++++++
+ 2 files changed, 74 insertions(+), 7 deletions(-)
+ create mode 100644 Tests/CSS Tests/Color.Value Tests.swift
+
+diff --git a/Sources/CSS/Dark Mode Color/Color.Value.swift b/Sources/CSS/Dark Mode Color/Color.Value.swift
+index d87e249..b425126 100644
+--- a/Sources/CSS/Dark Mode Color/Color.Value.swift	
++++ b/Sources/CSS/Dark Mode Color/Color.Value.swift	
+@@ -249,8 +249,20 @@ extension CSS_Standard::Color.Value {
+         return adjustBrightness(by: percent)
+     }
+ 
++    /// This color with alpha `alpha`, clamped to 0...1.
++    ///
++    /// Forms without known channels (named colors outside the basic 16, `hwb`,
++    /// `lab`, `color-mix()` and the like) become
++    /// `color-mix(in srgb, <color>, transparent <100 - alpha>%)`, which the
++    /// browser resolves to the same color at that alpha.
+     public func opacity(_ alpha: Double) -> CSS_Standard::Color.Value {
+         let clampedAlpha = min(1.0, max(0.0, alpha))
++        let transparentMix = CSS_Standard::Color.Value.mix(
++            .rectangular(.srgb),
++            self,
++            .transparent,
++            (1 - clampedAlpha) * 100
++        )
+ 
+         switch self {
+         case .rgb(let r, let g, let b):
+@@ -270,18 +282,18 @@ extension CSS_Standard::Color.Value {
+             if let rgb = namedColorToRgb(name) {
+                 return .rgba(rgb.r, rgb.g, rgb.b, clampedAlpha)
+             }
+-            return self
++            return transparentMix
+ 
+         case .hex(let hex):
+ 
+             if let rgb = hexToRgb(hex.value) {
+                 return .rgba(rgb.r, rgb.g, rgb.b, clampedAlpha)
+             }
+-            return self
++            return transparentMix
+ 
+         default:
+ 
+-            return self
++            return transparentMix
+         }
+     }
+ 
+@@ -331,8 +343,21 @@ extension CSS_Standard::Color.Value {
+         }
+     }
+ 
++    /// This color moved toward white (`percent > 0`) or black (`percent < 0`)
++    /// by `percent`, clamped to -1...1: 1 is white, -1 is black.
++    ///
++    /// Forms without known channels (named colors outside the basic 16, `hwb`,
++    /// `lab`, `color-mix()` and the like) become
++    /// `color-mix(in srgb, <color>, white|black <percent>%)`, the same mix the
++    /// channel arithmetic performs.
+     public func adjustBrightness(by percent: Double) -> CSS_Standard::Color.Value {
+-        guard percent >= -1, percent <= 1 else { return self }
++        let percent = min(1, max(-1, percent))
++        let towardMix = CSS_Standard::Color.Value.mix(
++            .rectangular(.srgb),
++            self,
++            percent > 0 ? .named(.white) : .named(.black),
++            abs(percent) * 100
++        )
+ 
+         func adjustComponent(_ value: Int) -> Int {
+             guard percent > 0 else {
+@@ -368,7 +393,7 @@ extension CSS_Standard::Color.Value {
+                 let adjustedB = adjustComponent(rgb.b)
+                 return .rgb(adjustedR, adjustedG, adjustedB)
+             }
+-            return self
++            return towardMix
+ 
+         case .named(let name):
+             if let rgb = namedColorToRgb(name) {
+@@ -377,10 +402,10 @@ extension CSS_Standard::Color.Value {
+                 let adjustedB = adjustComponent(rgb.b)
+                 return .rgb(adjustedR, adjustedG, adjustedB)
+             }
+-            return self
++            return towardMix
+ 
+         default:
+-            return self
++            return towardMix
+         }
+     }
+ }
+diff --git a/Tests/CSS Tests/Color.Value Tests.swift b/Tests/CSS Tests/Color.Value Tests.swift
+new file mode 100644
+index 0000000..9456e09
+--- /dev/null
++++ b/Tests/CSS Tests/Color.Value Tests.swift	
+@@ -0,0 +1,42 @@
++import CSS
++import Testing
++
++enum `Color.Value Tests` {}
++
++extension `Color.Value Tests` {
++    @Suite
++    struct `Manipulation Of Forms Without Known Channels` {
++
++        @Test
++        func `opacity of a lab color becomes a mix with transparent`() {
++            let color = CSS_Standard::Color.Value.lab(50, 20, 30)
++            #expect(color.opacity(0.25) == .mix(.rectangular(.srgb), color, .transparent, 75))
++        }
++
++        @Test
++        func `lighter of a lab color becomes a mix with white`() {
++            let color = CSS_Standard::Color.Value.lab(50, 20, 30)
++            #expect(color.lighter(by: 0.25) == .mix(.rectangular(.srgb), color, .named(.white), 25))
++        }
++
++        @Test
++        func `darker of a lab color becomes a mix with black`() {
++            let color = CSS_Standard::Color.Value.lab(50, 20, 30)
++            #expect(color.darker(by: 0.5) == .mix(.rectangular(.srgb), color, .named(.black), 50))
++        }
++    }
++
++    @Suite
++    struct `Out Of Range Fractions` {
++
++        @Test
++        func `a brightness fraction above one clamps to white`() {
++            #expect(CSS_Standard::Color.Value.rgb(100, 100, 100).lighter(by: 2) == .rgb(255, 255, 255))
++        }
++
++        @Test
++        func `a brightness fraction below minus one clamps to black`() {
++            #expect(CSS_Standard::Color.Value.rgb(100, 100, 100).darker(by: 2) == .rgb(0, 0, 0))
++        }
++    }
++}
+-- 
+2.43.0
+

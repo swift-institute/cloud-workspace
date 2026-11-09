@@ -1,0 +1,79 @@
+From d89f5395db214c5ccc1151e9bb5df57e91afebb7 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:14 +0000
+Subject: [PATCH 2/3] Plist.ND.stream yields sourceSequenceFailure and ends
+ when the source sequence throws, instead of parsing the unfinished line and
+ ending silently (swift-compositions/swift-plist#16)
+
+---
+ README.md                            |  2 +-
+ Sources/Plist/Plist.Stream.swift     |  5 ++---
+ Tests/Plist Tests/Stream Tests.swift | 26 ++++++++++++++++++++++++++
+ 3 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 809cb11..a127aad 100644
+--- a/README.md
++++ b/README.md
+@@ -13,4 +13,4 @@ Use this package when you read or write Apple property lists, in the XML or the
+ - XML input is decoded as UTF-8. The `DOCTYPE` is dropped before parsing, white space inside data is ignored, and only the first element inside `plist` is read. XML output always starts with the XML declaration and Apple's `DOCTYPE`, and a whole real within `Int` range is written with `.0`; any other real is written as Swift's shortest round-tripping form, such as `1e+300`.
+ - The binary writer stores each distinct value once and points every occurrence at it. Strings are written as ASCII when they can be and as big-endian UTF-16 otherwise. Reals are always written as 8 bytes. The binary reader rejects an object that contains itself.
+ - `Plist.parse(collecting:)` reads the whole sequence before parsing. A failing sequence is reported as a source failure, not as a parse error.
+-- `Plist.ND.stream(_:)` splits on line feeds, drops carriage returns and skips empty lines. Each line is parsed as XML on its own, and a line that fails, including a binary one, yields a failure and the stream continues. A last line without a line feed is still parsed.
++- `Plist.ND.stream(_:)` splits on line feeds, drops carriage returns and skips empty lines. Each line is parsed as XML on its own, and a line that fails, including a binary one, yields a failure and the stream continues. A last line without a line feed is still parsed. When the source sequence throws, the unfinished line is dropped, the stream yields a source failure and ends.
+diff --git a/Sources/Plist/Plist.Stream.swift b/Sources/Plist/Plist.Stream.swift
+index 38de78f..ff4ef76 100644
+--- a/Sources/Plist/Plist.Stream.swift
++++ b/Sources/Plist/Plist.Stream.swift
+@@ -95,9 +95,8 @@ extension Plist.ND.State {
+                 byte = try await iterator.next()
+             } catch {
+                 done = true
+-                if buffer.isEmpty { return nil }
+-                defer { buffer.removeAll() }
+-                return parseLine()
++                buffer.removeAll()
++                return .failure(.sourceSequenceFailure("\(error)"))
+             }
+ 
+             guard let byte else {
+diff --git a/Tests/Plist Tests/Stream Tests.swift b/Tests/Plist Tests/Stream Tests.swift
+index 5a0847d..3c410b2 100644
+--- a/Tests/Plist Tests/Stream Tests.swift	
++++ b/Tests/Plist Tests/Stream Tests.swift	
+@@ -257,6 +257,32 @@ struct Test {
+         }
+     }
+ 
++    @Test
++    func `ND stream yields sourceSequenceFailure when the source throws`() async throws {
++        struct SourceFailure: Swift.Error {}
++
++        let line = "<?xml version=\"1.0\"?><plist version=\"1.0\"><integer>1</integer></plist>\n<?xml"
++        let bytes = AsyncThrowingStream<UInt8, any Swift.Error> { continuation in
++            for byte in line.utf8 {
++                continuation.yield(byte)
++            }
++            continuation.finish(throwing: SourceFailure())
++        }
++
++        let results = try await collect(Plist.ND.stream(bytes))
++
++        #expect(results.count == 2)
++        if case .some(.success(let plist)) = results.first {
++            #expect(plist.value == .integer(1))
++        } else {
++            Issue.record("Expected the complete first line to parse")
++        }
++        guard case .some(.failure(.sourceSequenceFailure)) = results.last else {
++            Issue.record("Expected .sourceSequenceFailure, got \(String(describing: results.last))")
++            return
++        }
++    }
++
+     @Test
+     func `Deserialize from async bytes`() async throws {
+         let input = """
+-- 
+2.43.0
+

@@ -1,0 +1,200 @@
+From cd071e99edd6219ea6a27574ae62cab1390acb88 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:42 +0000
+Subject: [PATCH] Store.Runtime starts each run effect nested in a merge or
+ sequence as its own in-flight work, so its cancellation ID is listed in
+ inFlight and cancels it (swift-compositions/swift-stores#4)
+
+---
+ Sources/Stores/Store.Runtime.swift           | 78 +++++++++++++++-----
+ Tests/Stores Tests/Store.Feature Tests.swift | 65 ++++++++++++++++
+ 2 files changed, 125 insertions(+), 18 deletions(-)
+
+diff --git a/Sources/Stores/Store.Runtime.swift b/Sources/Stores/Store.Runtime.swift
+index cba7493..8a74932 100644
+--- a/Sources/Stores/Store.Runtime.swift
++++ b/Sources/Stores/Store.Runtime.swift
+@@ -229,23 +229,36 @@ extension Store.Runtime {
+         }
+     }
+ 
+-    private func start(_ effect: Store.Effect<Action, Store.Work<Action>>) {
+-        let ticket = mintTicket()
+-        let send = sender()
+-        let cancellation = Self.cancellation(of: effect)
++    @discardableResult
++    private func start(_ effect: Store.Effect<Action, Store.Work<Action>>) -> [Task<Void, Never>] {
++        switch effect {
++        case .none:
++            return []
+ 
+-        let task = Task { [weak self] in
+-            await Self.execute(effect, send: send)
+-            guard let self else { return }
+-            await retire(ticket, isolation: isolation)
+-        }
++        case .merge(let effects):
++            return effects.flatMap { start($0) }
++
++        case .send, .run, .sequence:
++            let ticket = mintTicket()
++            let send = sender()
++            let launch = launcher()
++            let cancellation = Self.cancellation(of: effect)
++
++            let task = Task { [weak self] in
++                await Self.execute(effect, send: send, launch: launch)
++                guard let self else { return }
++                await retire(ticket, isolation: isolation)
++            }
+ 
+-        _inFlight.record(.init(cancellation: cancellation, task: task), as: ticket)
++            _inFlight.record(.init(cancellation: cancellation, task: task), as: ticket)
++            return [task]
++        }
+     }
+ 
+     private static func execute(
+         _ effect: Store.Effect<Action, Store.Work<Action>>,
+-        send: Store.Send<Action>
++        send: Store.Send<Action>,
++        launch: @escaping @Sendable (Store.Effect<Action, Store.Work<Action>>) async -> [Task<Void, Never>]
+     ) async {
+         switch effect {
+         case .none:
+@@ -259,16 +272,31 @@ extension Store.Runtime {
+ 
+             await Effects.Effect.perform(Store.Job { await body(send) })
+ 
+-        case .merge(let effects):
+-            await withTaskGroup(of: Void.self) { group in
+-                for effect in effects {
+-                    group.addTask { await Self.execute(effect, send: send) }
++        case .merge:
++            await join(await launch(effect))
++
++        case .sequence(let effects):
++            for step in effects {
++                guard !Task.isCancelled else { return }
++                switch step {
++                case .none, .send:
++                    await execute(step, send: send, launch: launch)
++
++                case .run, .merge, .sequence:
++                    await join(await launch(step))
+                 }
+             }
++        }
++    }
+ 
+-        case .sequence(let effects):
+-            for effect in effects {
+-                await Self.execute(effect, send: send)
++    private static func join(_ tasks: [Task<Void, Never>]) async {
++        await withTaskCancellationHandler {
++            for task in tasks {
++                await task.value
++            }
++        } onCancel: {
++            for task in tasks {
++                task.cancel()
+             }
+         }
+     }
+@@ -294,6 +322,20 @@ extension Store.Runtime {
+         send(action)
+     }
+ 
++    func launcher() -> @Sendable (Store.Effect<Action, Store.Work<Action>>) async -> [Task<Void, Never>] {
++        { [weak self] effect in
++            guard let self else { return [] }
++            return await launch(effect, isolation: isolation)
++        }
++    }
++
++    private func launch(
++        _ effect: Store.Effect<Action, Store.Work<Action>>,
++        isolation: isolated (any Actor)?
++    ) async -> [Task<Void, Never>] {
++        start(effect)
++    }
++
+     private func retire(_ ticket: UInt64, isolation: isolated (any Actor)?) async {
+         _inFlight.discard(ticket)
+     }
+diff --git a/Tests/Stores Tests/Store.Feature Tests.swift b/Tests/Stores Tests/Store.Feature Tests.swift
+index 640cbb9..f6bd89e 100644
+--- a/Tests/Stores Tests/Store.Feature Tests.swift	
++++ b/Tests/Stores Tests/Store.Feature Tests.swift	
+@@ -393,3 +393,68 @@ extension `Store.Feature Tests`.Test.`Edge Case` {
+         #expect(runtime.value(`Store.Feature Tests`.Test.Theme.self, at: second) == "system")
+     }
+ }
++
++extension `Store.Feature Tests`.Test.Integration {
++    @Test func `runs nested in a merge keep their cancellation ids`() {
++        let update = Store.Update<
++            Int, `Store.Feature Tests`.Test.Action, Store.Work<`Store.Feature Tests`.Test.Action>
++        > { _, _ in
++            .merge([
++                .run(Store.Work(cancellation: "first") { _ in try? await Task.sleep(for: .seconds(60)) }),
++                .run(Store.Work(cancellation: "second") { _ in try? await Task.sleep(for: .seconds(60)) }),
++            ])
++        }
++
++        let runtime = Store.Runtime(state: 0, update: update)
++        runtime.send(.load)
++        #expect(Set(runtime.inFlight) == ["first", "second"])
++
++        runtime.cancel("first")
++        #expect(runtime.inFlight == ["second"])
++
++        runtime.cancelAll()
++        #expect(runtime.isSettled)
++    }
++
++    @MainActor
++    @Test func `a run nested in a sequence is listed and cancelled by its id, and the sequence goes on`() async {
++        let update = Store.Update<
++            Int, `Store.Feature Tests`.Test.Action, Store.Work<`Store.Feature Tests`.Test.Action>
++        > { count, action in
++            switch action {
++            case .load:
++                return .sequence([
++                    .run(Store.Work(cancellation: "slow") { _ in try? await Task.sleep(for: .seconds(60)) }),
++                    .send(.set(7)),
++                ])
++
++            case .set(let value):
++                count = value
++                return .none
++
++            case .increment, .loadSlowly:
++                return .none
++            }
++        }
++
++        let runtime = Store.Runtime(state: 0, update: update)
++        runtime.send(.load)
++
++        var attempts = 0
++        while !runtime.inFlight.contains("slow"), attempts < 10_000 {
++            attempts += 1
++            await Task.yield()
++        }
++        #expect(runtime.inFlight == ["slow"])
++
++        runtime.cancel("slow")
++
++        attempts = 0
++        while !runtime.isSettled, attempts < 10_000 {
++            attempts += 1
++            await Task.yield()
++        }
++        #expect(runtime.state == 7)
++        #expect(runtime.isSettled)
++    }
++}
+-- 
+2.43.0
+

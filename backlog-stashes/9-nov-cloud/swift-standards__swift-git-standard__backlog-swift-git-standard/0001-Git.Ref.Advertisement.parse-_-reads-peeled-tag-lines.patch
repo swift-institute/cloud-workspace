@@ -1,0 +1,102 @@
+From e8d7a5f5d28b582ddd0f9ae58014263b2b4d5789 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:30 +0000
+Subject: [PATCH] Git.Ref.Advertisement.parse(_:) reads peeled tag lines ending
+ in ^{} as records with isPeeled set instead of failing the whole
+ advertisement (swift-standards/swift-git-standard#3)
+
+---
+ README.md                                     |  2 +-
+ .../Git Standard/Git.Ref.Advertisement.swift  | 15 +++++++++---
+ .../Git.Ref.Advertisement Tests.swift         | 23 +++++++++++++++++++
+ 3 files changed, 36 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 1989174..0a7e3bf 100644
+--- a/README.md
++++ b/README.md
+@@ -10,4 +10,4 @@ Use this package when you already have bytes that Git printed and need them as v
+ - Every parse error carries the byte offset where the problem starts.
+ - `Git.Object.ID` is 40 or 64 hexadecimal digits, so both SHA-1 and SHA-256 IDs are accepted. Upper and lower case are both accepted and kept as given.
+ - `Git.Ref.Name` follows the rules of `git check-ref-format` and also needs at least one slash, so a short name such as `main` is refused while `refs/heads/main` is accepted. Non-ASCII names are accepted.
+-- Because `^` can't appear in a reference name, a peeled tag line from a remote, whose name ends in ^{}, makes `Git.Ref.Advertisement.parse(_:)` fail.
++- A peeled tag line from a remote, whose name ends in `^{}`, parses as a record under the tag's name with `isPeeled` set; its object is what the annotated tag points to.
+diff --git a/Sources/Git Standard/Git.Ref.Advertisement.swift b/Sources/Git Standard/Git.Ref.Advertisement.swift
+index 8b0f1da..85aab6f 100644
+--- a/Sources/Git Standard/Git.Ref.Advertisement.swift	
++++ b/Sources/Git Standard/Git.Ref.Advertisement.swift	
+@@ -4,14 +4,21 @@ extension Git.Ref {
+         public let object: Git.Object.ID
+         public let name: Git.Ref.Name
+ 
+-        public init(object: Git.Object.ID, name: Git.Ref.Name) {
++        /// Whether this record is a peeled tag line, `<name>^{}` in `git ls-remote` output:
++        /// `object` is then what the annotated tag `name` points to, not the tag itself.
++        public let isPeeled: Bool
++
++        public init(object: Git.Object.ID, name: Git.Ref.Name, isPeeled: Bool = false) {
+             self.object = object
+             self.name = name
++            self.isPeeled = isPeeled
+         }
+     }
+ }
+ 
+ extension Git.Ref.Advertisement {
++    static let peeledSuffix = "^{}"
++
+     public static func parse(_ bytes: [UInt8]) throws(Error) -> [Self] {
+         var records: [Self] = []
+         var start = bytes.startIndex
+@@ -30,10 +37,12 @@ extension Git.Ref.Advertisement {
+                 guard let object = Git.Object.ID(rawValue: objectText) else {
+                     throw .object(objectText)
+                 }
+-                guard let name = Git.Ref.Name(rawValue: nameText) else {
++                let isPeeled = nameText.hasSuffix(Self.peeledSuffix)
++                let refText = isPeeled ? String(nameText.dropLast(Self.peeledSuffix.count)) : nameText
++                guard let name = Git.Ref.Name(rawValue: refText) else {
+                     throw .name(nameText)
+                 }
+-                records.append(.init(object: object, name: name))
++                records.append(.init(object: object, name: name, isPeeled: isPeeled))
+             }
+             start = end == bytes.endIndex ? end : bytes.index(after: end)
+         }
+diff --git a/Tests/Git Standard Tests/Git.Ref.Advertisement Tests.swift b/Tests/Git Standard Tests/Git.Ref.Advertisement Tests.swift
+index 5fed5c3..b899377 100644
+--- a/Tests/Git Standard Tests/Git.Ref.Advertisement Tests.swift	
++++ b/Tests/Git Standard Tests/Git.Ref.Advertisement Tests.swift	
+@@ -17,6 +17,29 @@ extension `Git.Ref.Advertisement Tests` {
+             #expect(records.first?.name.rawValue == "refs/heads/main")
+         }
+ 
++        @Test
++        func `peeled tag record is parsed under the tag name`() throws {
++            let bytes = Array(
++                ("0123456789012345678901234567890123456789\trefs/tags/v1.0.0\n"
++                    + "abcdefabcdefabcdefabcdefabcdefabcdefabcd\trefs/tags/v1.0.0^{}\n").utf8
++            )
++            let records = try Git.Ref.Advertisement.parse(bytes)
++
++            #expect(records.count == 2)
++            #expect(records.map(\.name.rawValue) == ["refs/tags/v1.0.0", "refs/tags/v1.0.0"])
++            #expect(records.map(\.isPeeled) == [false, true])
++            #expect(records.last?.object.rawValue == "abcdefabcdefabcdefabcdefabcdefabcdefabcd")
++        }
++
++        @Test
++        func `a caret elsewhere in the name is still rejected`() {
++            #expect(throws: Git.Ref.Advertisement.Error.name("refs/tags/v^1")) {
++                try Git.Ref.Advertisement.parse(
++                    Array("0123456789012345678901234567890123456789\trefs/tags/v^1\n".utf8)
++                )
++            }
++        }
++
+         @Test
+         func `malformed record is rejected`() {
+             #expect(throws: Git.Ref.Advertisement.Error.self) {
+-- 
+2.43.0
+

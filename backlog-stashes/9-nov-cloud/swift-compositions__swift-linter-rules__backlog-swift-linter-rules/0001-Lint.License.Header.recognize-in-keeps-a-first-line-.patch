@@ -1,0 +1,72 @@
+From 45842201a1e436278f59abdcc8e64ada0c6dfd6b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:33:17 +0000
+Subject: [PATCH 1/2] Lint.License.Header.recognize(in:) keeps a first-line
+ swift-tools-version directive out of the license block, so removal preserves
+ it (swift-compositions/swift-linter-rules#12)
+
+---
+ .../Lint.License.Header+recognize.swift       | 11 +++++++++++
+ .../Lint.License.Header Tests.swift           | 19 +++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift b/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift
+index 07e630f..83b75d3 100644
+--- a/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift	
++++ b/Sources/Linter Rule Structure/Lint.License.Header+recognize.swift	
+@@ -12,6 +12,10 @@ extension Lint.License.Header {
+ 
+         for (index, line) in lines.enumerated() {
+             let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
++            if index == 0, Self.isToolsDirective(trimmed) {
++                blocks.append((index, [line]))
++                continue
++            }
+             if !reachedCode, trimmed.hasPrefix("//") {
+                 if current == nil { current = (index, []) }
+                 current?.lines.append(line)
+@@ -59,4 +63,11 @@ extension Lint.License.Header {
+         if let recognized { return .complete(recognized) }
+         return .absent
+     }
++
++    /// Whether `line` is a SwiftPM `// swift-tools-version:` directive, which is never part of a license block.
++    fileprivate static func isToolsDirective(_ line: Swift::Substring) -> Swift::Bool {
++        guard line.hasPrefix("//") else { return false }
++        let rest = line.dropFirst(2).drop(while: { $0 == " " || $0 == "\t" })
++        return rest.lowercased().hasPrefix("swift-tools-version:")
++    }
+ }
+diff --git a/Tests/Linter Rule Structure Tests/Lint.License.Header Tests.swift b/Tests/Linter Rule Structure Tests/Lint.License.Header Tests.swift
+index 8abd635..32422fe 100644
+--- a/Tests/Linter Rule Structure Tests/Lint.License.Header Tests.swift	
++++ b/Tests/Linter Rule Structure Tests/Lint.License.Header Tests.swift	
+@@ -60,6 +60,25 @@ struct `License header` {
+         )
+     }
+ 
++    @Test
++    func `manifest tools directive directly above the header is preserved on removal`() {
++        let source = """
++            // swift-tools-version: 6.4
++            // Copyright (c) 2026 Example
++            // Licensed under Apache License v2.0
++
++            import PackageDescription
++            """
++        guard case .complete(let header) = Lint.License.Header.recognize(in: source) else {
++            Issue.record("expected a complete header after the tools directive")
++            return
++        }
++        #expect(
++            header.removing(from: source)
++                == "// swift-tools-version: 6.4\n\nimport PackageDescription"
++        )
++    }
++
+     @Test
+     func `partial leading license block refuses removal`() {
+         #expect(
+-- 
+2.43.0
+

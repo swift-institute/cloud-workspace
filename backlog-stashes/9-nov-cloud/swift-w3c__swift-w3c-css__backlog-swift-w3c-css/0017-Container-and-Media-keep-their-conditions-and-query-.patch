@@ -1,0 +1,515 @@
+From 2e4d09e1801dea723005a1f8b3e6613268ba665c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:49:03 +0000
+Subject: [PATCH 17/18] Container and Media keep their conditions and query
+ lists apart from rawValue, so and, or, not and their operators combine with
+ parentheses, ! negates a whole condition list and a size range is written as
+ min <= feature <= max (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Cascade/Supports.swift        |   8 +-
+ .../Container.SizeComparison.swift            |  15 ++
+ Sources/W3C CSS Containment/Container.swift   | 102 +++++++++---
+ Sources/W3C CSS MediaQueries/Media.swift      | 148 +++++++++++++++---
+ .../Container Tests.swift                     |  42 +++++
+ .../Media Tests.swift                         |  24 +++
+ 6 files changed, 296 insertions(+), 43 deletions(-)
+ create mode 100644 Tests/W3C CSS Containment Tests/Container Tests.swift
+
+diff --git a/Sources/W3C CSS Cascade/Supports.swift b/Sources/W3C CSS Cascade/Supports.swift
+index 1554f24..87a3c9f 100644
+--- a/Sources/W3C CSS Cascade/Supports.swift	
++++ b/Sources/W3C CSS Cascade/Supports.swift	
+@@ -4,7 +4,9 @@ public import W3C_CSS_Syntax
+ public struct Supports: AtRule {
+     public var rawValue: String {
+         didSet {
+-            (condition, rules) = Self.parse(rawValue)
++            let parsed = Self.parse(rawValue)
++            condition = parsed.condition
++            rules = parsed.rules
+         }
+     }
+ 
+@@ -14,7 +16,9 @@ public struct Supports: AtRule {
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
+-        (self.condition, self.rules) = Self.parse(rawValue)
++        let parsed = Self.parse(rawValue)
++        self.condition = parsed.condition
++        self.rules = parsed.rules
+     }
+ 
+     private init(condition: String, rules: [String] = []) {
+diff --git a/Sources/W3C CSS Containment/Container.SizeComparison.swift b/Sources/W3C CSS Containment/Container.SizeComparison.swift
+index 275a94d..6ee9a9d 100644
+--- a/Sources/W3C CSS Containment/Container.SizeComparison.swift	
++++ b/Sources/W3C CSS Containment/Container.SizeComparison.swift	
+@@ -6,8 +6,23 @@ extension Container {
+     public struct SizeComparison: RawRepresentable, Hashable, Sendable {
+         public var rawValue: String
+ 
++        let lowerBound: String?
++
+         public init(rawValue: String) {
+             self.rawValue = rawValue
++            self.lowerBound = nil
++        }
++
++        init(lowerBound: String, rawValue: String) {
++            self.rawValue = rawValue
++            self.lowerBound = lowerBound
+         }
+     }
+ }
++
++extension Container.SizeComparison {
++
++    func query(_ feature: String) -> String {
++        [lowerBound, feature, rawValue].compactMap { $0 }.joined(separator: " ")
++    }
++}
+diff --git a/Sources/W3C CSS Containment/Container.swift b/Sources/W3C CSS Containment/Container.swift
+index fc0fe0e..fc2c2e1 100644
+--- a/Sources/W3C CSS Containment/Container.swift	
++++ b/Sources/W3C CSS Containment/Container.swift	
+@@ -3,13 +3,28 @@ public import W3C_CSS_Syntax
+ public import W3C_CSS_Values
+ 
+ public struct Container: AtRule {
+-    public var rawValue: String
++    public var rawValue: String {
++        didSet {
++            let parsed = Self.parse(rawValue)
++            name = parsed.name
++            condition = parsed.condition
++        }
++    }
++
++    private var name: String?
++
++    private var condition: Condition
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
++        let parsed = Self.parse(rawValue)
++        self.name = parsed.name
++        self.condition = parsed.condition
+     }
+ 
+     public init(_ name: String? = nil, _ condition: Condition) {
++        self.name = name
++        self.condition = condition
+         if let name {
+             self.rawValue = "@container \(name) \(condition.rawValue)"
+         } else {
+@@ -58,15 +73,11 @@ extension Container {
+     }
+ 
+     public func and(_ condition: Condition) -> Container {
+-
+-        let existingCondition = String(rawValue.dropFirst(11))
+-        return Container(rawValue: "@container \(existingCondition) and \(condition.rawValue)")
++        Container(name, self.condition.and(condition))
+     }
+ 
+     public func or(_ condition: Condition) -> Container {
+-
+-        let existingCondition = String(rawValue.dropFirst(11))
+-        return Container(rawValue: "@container \(existingCondition) or \(condition.rawValue)")
++        Container(name, self.condition.or(condition))
+     }
+ }
+ 
+@@ -76,19 +87,19 @@ extension Container {
+ extension Container.Condition {
+ 
+     public static func width(_ comparison: Container.SizeComparison) -> Container.Condition {
+-        Container.Condition(rawValue: "(width \(comparison.rawValue))")
++        Container.Condition(rawValue: "(\(comparison.query("width")))")
+     }
+ 
+     public static func height(_ comparison: Container.SizeComparison) -> Container.Condition {
+-        Container.Condition(rawValue: "(height \(comparison.rawValue))")
++        Container.Condition(rawValue: "(\(comparison.query("height")))")
+     }
+ 
+     public static func inlineSize(_ comparison: Container.SizeComparison) -> Container.Condition {
+-        Container.Condition(rawValue: "(inline-size \(comparison.rawValue))")
++        Container.Condition(rawValue: "(\(comparison.query("inline-size")))")
+     }
+ 
+     public static func blockSize(_ comparison: Container.SizeComparison) -> Container.Condition {
+-        Container.Condition(rawValue: "(block-size \(comparison.rawValue))")
++        Container.Condition(rawValue: "(\(comparison.query("block-size")))")
+     }
+ 
+     public static func aspectRatio(_ comparison: Container.RatioComparison) -> Container.Condition {
+@@ -108,7 +119,41 @@ extension Container.Condition {
+     }
+ 
+     public static func not(_ condition: Container.Condition) -> Container.Condition {
+-        Container.Condition(rawValue: "not \(condition.rawValue)")
++        Container.Condition(rawValue: "not \(condition.inParens)")
++    }
++
++    public func and(_ other: Container.Condition) -> Container.Condition {
++        Container.Condition(rawValue: "\(inParens) and \(other.inParens)")
++    }
++
++    public func or(_ other: Container.Condition) -> Container.Condition {
++        Container.Condition(rawValue: "\(inParens) or \(other.inParens)")
++    }
++
++    var inParens: String {
++        guard let open = rawValue.firstIndex(of: "("),
++            rawValue[..<open].allSatisfy({ $0.isLetter || $0 == "-" })
++        else {
++            return "(\(rawValue))"
++        }
++
++        var depth = 0
++        for index in rawValue[open...].indices {
++            switch rawValue[index] {
++            case "(":
++                depth += 1
++
++            case ")":
++                depth -= 1
++                if depth == 0 {
++                    return rawValue.index(after: index) == rawValue.endIndex ? rawValue : "(\(rawValue))"
++                }
++
++            default:
++                break
++            }
++        }
++        return "(\(rawValue))"
+     }
+ }
+ 
+@@ -138,7 +183,7 @@ extension Container.SizeComparison {
+         min: LengthPercentage,
+         max: LengthPercentage
+     ) -> Container.SizeComparison {
+-        Container.SizeComparison(rawValue: "\(min) <= && <= \(max)")
++        Container.SizeComparison(lowerBound: "\(min) <=", rawValue: "<= \(max)")
+     }
+ }
+ 
+@@ -182,15 +227,36 @@ extension Container.ScrollState {
+ 
+ extension Container {
+ 
++    /// Joins the conditions with `and`, keeping the container name of `lhs`.
+     public static func && (lhs: Container, rhs: Container) -> Container {
+-
+-        let rhsCondition = String(rhs.rawValue.dropFirst(11))
+-        return lhs.and(Condition(rawValue: rhsCondition))
++        lhs.and(rhs.condition)
+     }
+ 
++    /// Joins the conditions with `or`, keeping the container name of `lhs`.
+     public static func || (lhs: Container, rhs: Container) -> Container {
++        lhs.or(rhs.condition)
++    }
++}
+ 
+-        let rhsCondition = String(rhs.rawValue.dropFirst(11))
+-        return lhs.or(Condition(rawValue: rhsCondition))
++extension Container {
++
++    private static func parse(_ rawValue: String) -> (name: String?, condition: Condition) {
++        var text = Substring(rawValue)
++        if text.hasPrefix("@container") {
++            text = text.dropFirst(10)
++        }
++        if let brace = text.firstIndex(of: "{") {
++            text = text[..<brace]
++        }
++        text = text.drop(while: \.isWhitespace)
++        while text.last?.isWhitespace == true { text.removeLast() }
++
++        guard let first = text.first, first != "(",
++            !text.hasPrefix("not "), !text.hasPrefix("style("), !text.hasPrefix("scroll-state(")
++        else {
++            return (nil, Condition(rawValue: String(text)))
++        }
++        let nameEnd = text.firstIndex(where: \.isWhitespace) ?? text.endIndex
++        return (String(text[..<nameEnd]), Condition(rawValue: String(text[nameEnd...].drop(while: \.isWhitespace))))
+     }
+ }
+diff --git a/Sources/W3C CSS MediaQueries/Media.swift b/Sources/W3C CSS MediaQueries/Media.swift
+index f0728f0..df82a0e 100644
+--- a/Sources/W3C CSS MediaQueries/Media.swift	
++++ b/Sources/W3C CSS MediaQueries/Media.swift	
+@@ -3,14 +3,26 @@ public import W3C_CSS_Syntax
+ public import W3C_CSS_Values
+ 
+ public struct Media: AtRule {
+-    public var rawValue: String
++    public var rawValue: String {
++        didSet {
++            queries = Self.parse(rawValue)
++        }
++    }
++
++    private var queries: [String]
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
++        self.queries = Self.parse(rawValue)
+     }
+ 
+     public init(_ type: MediaType) {
+-        self.rawValue = "@media \(type.rawValue)"
++        self.init(queries: [type.rawValue])
++    }
++
++    private init(queries: [String]) {
++        self.queries = queries
++        self.rawValue = "@media \(queries.joined(separator: ", "))"
+     }
+ }
+ 
+@@ -18,41 +30,49 @@ extension Media {
+     public static let identifier: String = "media"
+ 
+     private static func feature(_ name: String, _ value: any CustomStringConvertible) -> Media {
+-        Media(rawValue: "@media (\(name): \(value))")
+-    }
+-
+-    private var isFeatureQuery: Bool {
+-        rawValue.starts(with: "@media (") && rawValue.hasSuffix(")")
+-    }
+-
+-    private var featureString: String? {
+-        guard isFeatureQuery else { return nil }
+-        return String(rawValue.dropFirst(8).dropLast(1))
++        Media(queries: ["(\(name): \(value))"])
+     }
+ 
++    /// Combines every query of `self` with every query of `other`, so a comma list distributes over `and`.
+     public func and(_ other: Media?) -> Media {
+         guard let other else { return self }
+-
+-        let selfContent = String(rawValue.dropFirst(7))
+-        let otherContent = String(other.rawValue.dropFirst(7))
+-
+-        return Media(rawValue: "@media \(selfContent) and \(otherContent)")
++        return Media(
++            queries: queries.flatMap { lhs in
++                other.queries.map { rhs in "\(Self.operand(lhs)) and \(Self.operand(rhs))" }
++            }
++        )
+     }
+ 
++    /// Negates the whole query list. A list of media conditions becomes `not (a or b)`; a single query with a
++    /// media type becomes `not type ...`. Media Queries 4 has no syntax for negating a list that contains media
++    /// types, so such a list keeps its first query negated as before.
+     public func not() -> Media {
+-        Media(rawValue: "@media not \(rawValue.dropFirst(7))")
++        guard queries.count > 1 else {
++            guard let query = queries.first else { return self }
++            if Self.hasMediaType(query) {
++                return Media(queries: [query.hasPrefix("only ") ? "not \(query.dropFirst(5))" : "not \(query)"])
++            }
++            return Media(queries: ["not \(Self.inParens(query))"])
++        }
++
++        guard !queries.contains(where: Self.hasMediaType) else {
++            return Media(queries: ["not \(queries[0])"] + queries.dropFirst())
++        }
++        return Media(queries: ["not (\(queries.map(Self.inParens).joined(separator: " or ")))"])
+     }
+ 
+     public func only() -> Media {
+-        if rawValue.starts(with: "@media ") {
+-            return Media(rawValue: "@media only \(rawValue.dropFirst(7))")
+-        }
+-        return self
++        Media(
++            queries: queries.map { query in
++                Self.hasMediaType(query) && !query.hasPrefix("not ") && !query.hasPrefix("only ")
++                    ? "only \(query)" : query
++            }
++        )
+     }
+ 
+     public func or(_ other: Media?) -> Media {
+         guard let other else { return self }
+-        return Media(rawValue: "\(rawValue), \(other.rawValue.dropFirst(7))")
++        return Media(queries: queries + other.queries)
+     }
+ 
+     public static let all = Media(.all)
+@@ -276,3 +296,85 @@ extension Media {
+         query.not()
+     }
+ }
++
++extension Media {
++
++    private static func parse(_ rawValue: String) -> [String] {
++        var text = Substring(rawValue)
++        if text.hasPrefix("@media") {
++            text = text.dropFirst(6)
++        }
++        if let brace = text.firstIndex(of: "{") {
++            text = text[..<brace]
++        }
++        return topLevel(String(text), separatedBy: ",").map(trimmed).filter { !$0.isEmpty }
++    }
++
++    private static func hasMediaType(_ query: String) -> Bool {
++        var text = Substring(query)
++        for prefix in ["not ", "only "] where text.hasPrefix(prefix) {
++            text = text.dropFirst(prefix.count)
++        }
++        return text.first.map { $0 != "(" } ?? false
++    }
++
++    private static func operand(_ query: String) -> String {
++        let isCompound = !hasMediaType(query) && (query.hasPrefix("not ") || topLevel(query, separatedBy: " or ").count > 1)
++        return isCompound ? "(\(query))" : query
++    }
++
++    private static func inParens(_ query: String) -> String {
++        guard query.first == "(", let close = closingParenthesis(of: query), query.index(after: close) == query.endIndex
++        else {
++            return "(\(query))"
++        }
++        return query
++    }
++
++    private static func closingParenthesis(of text: String) -> String.Index? {
++        var depth = 0
++        for index in text.indices {
++            switch text[index] {
++            case "(":
++                depth += 1
++
++            case ")":
++                depth -= 1
++                if depth == 0 { return index }
++
++            default:
++                break
++            }
++        }
++        return nil
++    }
++
++    private static func topLevel(_ text: String, separatedBy separator: String) -> [String] {
++        var parts: [String] = []
++        var current = ""
++        var depth = 0
++        var index = text.startIndex
++        while index < text.endIndex {
++            let character = text[index]
++            if depth == 0, text[index...].hasPrefix(separator) {
++                parts.append(current)
++                current = ""
++                index = text.index(index, offsetBy: separator.count)
++                continue
++            }
++            if character == "(" { depth += 1 }
++            if character == ")" { depth -= 1 }
++            current.append(character)
++            index = text.index(after: index)
++        }
++        parts.append(current)
++        return parts
++    }
++
++    private static func trimmed(_ text: String) -> String {
++        var result = Substring(text)
++        while result.first?.isWhitespace == true { result.removeFirst() }
++        while result.last?.isWhitespace == true { result.removeLast() }
++        return String(result)
++    }
++}
+diff --git a/Tests/W3C CSS Containment Tests/Container Tests.swift b/Tests/W3C CSS Containment Tests/Container Tests.swift
+new file mode 100644
+index 0000000..c7bc253
+--- /dev/null
++++ b/Tests/W3C CSS Containment Tests/Container Tests.swift	
+@@ -0,0 +1,42 @@
++import Testing
++
++@testable import W3C_CSS_Containment
++
++enum `Container Tests` {}
++
++extension `Container Tests` {
++    @Suite
++    struct `Container - Conditions` {
++        @Test func `a size range puts the feature between its bounds`() {
++            #expect(
++                Container.width(.range(min: .px(100), max: .px(400))).rawValue == "@container (100px <= width <= 400px)"
++            )
++        }
++
++        @Test func `and and or parenthesize compound operands`() {
++            let wide = Container.width(.greaterThan(.px(400))).and(.orientation(.landscape))
++            #expect(wide.rawValue == "@container (width > 400px) and (orientation: landscape)")
++            #expect(
++                wide.or(.height(.lessThan(.px(200)))).rawValue
++                    == "@container ((width > 400px) and (orientation: landscape)) or (height < 200px)"
++            )
++        }
++
++        @Test func `operators keep the name of the left container`() {
++            let container =
++                Container.width(name: "sidebar", .greaterThan(.px(400)))
++                && Container.height(name: "main", .lessThan(.px(200)))
++            #expect(container.rawValue == "@container sidebar (width > 400px) and (height < 200px)")
++        }
++
++        @Test func `a container read from text keeps its name and condition`() {
++            let container = Container(rawValue: "@container sidebar (width > 400px)").and(.height(.lessThan(.px(200))))
++            #expect(container.rawValue == "@container sidebar (width > 400px) and (height < 200px)")
++        }
++
++        @Test func `not negates a compound condition as a whole`() {
++            let condition = Container.Condition.not(.width(.greaterThan(.px(1))).and(.height(.lessThan(.px(2)))))
++            #expect(condition.rawValue == "not ((width > 1px) and (height < 2px))")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS MediaQueries Tests/Media Tests.swift b/Tests/W3C CSS MediaQueries Tests/Media Tests.swift
+index d28cc8c..3cf5541 100644
+--- a/Tests/W3C CSS MediaQueries Tests/Media Tests.swift	
++++ b/Tests/W3C CSS MediaQueries Tests/Media Tests.swift	
+@@ -414,3 +414,27 @@ extension `Performance Tests` {
+         }
+     }
+ }
++
++extension `Media Tests` {
++    @Suite
++    struct `Media - Query Lists` {
++        @Test func `negating a list of conditions negates the whole list`() {
++            let media = !(Media.minWidth(.px(300)) || Media.prefersColorScheme(.dark))
++            #expect(media.rawValue == "@media not ((min-width: 300px) or (prefers-color-scheme: dark))")
++        }
++
++        @Test func `negating a single condition wraps it`() {
++            #expect(Media.maxWidth(.px(500)).not().rawValue == "@media not (max-width: 500px)")
++        }
++
++        @Test func `and distributes over a comma list`() {
++            let media = (Media.screen || Media.print) && Media.maxWidth(.px(500))
++            #expect(media.rawValue == "@media screen and (max-width: 500px), print and (max-width: 500px)")
++        }
++
++        @Test func `a query read from text combines by its queries`() {
++            let media = Media(rawValue: "@media screen, print").and(Media.maxWidth(.px(500)))
++            #expect(media.rawValue == "@media screen and (max-width: 500px), print and (max-width: 500px)")
++        }
++    }
++}
+-- 
+2.43.0
+

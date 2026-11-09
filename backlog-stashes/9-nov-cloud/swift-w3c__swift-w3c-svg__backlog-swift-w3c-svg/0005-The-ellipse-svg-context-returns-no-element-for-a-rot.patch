@@ -1,0 +1,94 @@
+From 69b1f4b68339172470238b16d8533086ff0ef472 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:50 +0000
+Subject: [PATCH 5/5] The ellipse svg context returns no element for a rotated
+ ellipse instead of dropping the rotation, and the svg contexts have tests
+ (swift-w3c/swift-w3c-svg#11)
+
+---
+ Sources/W3C SVG/SVG.Context.swift           |  3 ++
+ Tests/W3C SVG Tests/SVG.Context Tests.swift | 54 +++++++++++++++++++++
+ 2 files changed, 57 insertions(+)
+ create mode 100644 Tests/W3C SVG Tests/SVG.Context Tests.swift
+
+diff --git a/Sources/W3C SVG/SVG.Context.swift b/Sources/W3C SVG/SVG.Context.swift
+index f9c37a8..da14cb3 100644
+--- a/Sources/W3C SVG/SVG.Context.swift	
++++ b/Sources/W3C SVG/SVG.Context.swift	
+@@ -57,10 +57,13 @@ extension Geometry.Ellipse where Scalar == Double, Space == W3C_SVG.Space {
+ 
+ extension Geometry.Ellipse.SVGContext where Scalar == Double, Space == W3C_SVG.Space {
+ 
++    /// The `<ellipse>` element, or `nil` when the ellipse has a negative axis or is rotated:
++    /// `<ellipse>` has no rotation, so `rx` and `ry` lie along the x and y axes.
+     public var element: W3C_SVG2.Shapes.Ellipse? {
+         guard ellipse.semiMajor.underlying >= 0, ellipse.semiMinor.underlying >= 0 else {
+             return nil
+         }
++        guard ellipse.rotation.underlying == 0 else { return nil }
+         return W3C_SVG2.Shapes.Ellipse(
+             cx: ellipse.center.x,
+             cy: ellipse.center.y,
+diff --git a/Tests/W3C SVG Tests/SVG.Context Tests.swift b/Tests/W3C SVG Tests/SVG.Context Tests.swift
+new file mode 100644
+index 0000000..3be488e
+--- /dev/null
++++ b/Tests/W3C SVG Tests/SVG.Context Tests.swift	
+@@ -0,0 +1,54 @@
++import Angle
++import Testing
++import W3C_SVG
++
++enum `SVG.Context Tests` {}
++
++extension `SVG.Context Tests` {
++    @Suite
++    struct `Shape contexts` {
++        @Test
++        func `a circle becomes a circle element`() {
++            let circle = W3C_SVG2.Shapes.Circle(cx: 10, cy: 20, r: 5)
++            #expect(circle.svg.element == circle)
++        }
++
++        @Test
++        func `a rectangle becomes a rect element`() {
++            let rectangle = W3C_SVG2.Shapes.Rectangle(x: 1, y: 2, width: 30, height: 40)
++            let element = rectangle.svg.element
++            #expect(element?.x == 1)
++            #expect(element?.y == 2)
++            #expect(element?.width == 30)
++            #expect(element?.height == 40)
++        }
++
++        @Test
++        func `an unrotated ellipse maps the semi-major axis to rx`() {
++            let ellipse = W3C_SVG2.Shapes.Ellipse(cx: 100, cy: 50, rx: 80, ry: 40)
++            let element = ellipse.svg.element
++            #expect(element?.cx == 100)
++            #expect(element?.cy == 50)
++            #expect(element?.rx == 80)
++            #expect(element?.ry == 40)
++        }
++
++        @Test
++        func `a rotated ellipse has no ellipse element`() {
++            var ellipse = W3C_SVG2.Shapes.Ellipse(cx: 100, cy: 50, rx: 80, ry: 40)
++            ellipse.rotation = Radian<Double>(_unchecked: 0.5)
++            #expect(ellipse.svg.element == nil)
++        }
++
++        @Test
++        func `a polygon becomes a polygon element`() {
++            let polygon = W3C_SVG2.Polygon(vertices: [
++                W3C_SVG2.Point(x: 0, y: 0),
++                W3C_SVG2.Point(x: 10, y: 0),
++                W3C_SVG2.Point(x: 0, y: 10),
++            ])
++            let element = polygon.svg.element
++            #expect(element.points == W3C_SVG2.Shapes.Polygon(coordinates: [(0, 0), (10, 0), (0, 10)]).points)
++        }
++    }
++}
+-- 
+2.43.0
+

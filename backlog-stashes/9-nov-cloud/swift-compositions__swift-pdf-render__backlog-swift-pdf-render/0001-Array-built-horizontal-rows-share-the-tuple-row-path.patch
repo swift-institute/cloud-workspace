@@ -1,0 +1,252 @@
+From 8ca9a288e3130894f2e6e1abc5146d06c8a7a018 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:22 +0000
+Subject: [PATCH] Array-built horizontal rows share the tuple row path, so they
+ are measured and moved to a new page as a whole like tuple rows
+ (swift-compositions/swift-pdf-render#11)
+
+---
+ Sources/PDF Rendering/PDF.Context.swift       | 54 ++++++++++++++++
+ .../Rendering/Array+PDF.View.swift            | 23 ++-----
+ .../Renderer.Document._Tuple+PDF.View.swift   | 46 ++-----------
+ .../PDF.Context Edge Case Tests.swift         | 64 +++++++++++++++++++
+ 4 files changed, 127 insertions(+), 60 deletions(-)
+
+diff --git a/Sources/PDF Rendering/PDF.Context.swift b/Sources/PDF Rendering/PDF.Context.swift
+index bf41e46..e5d132c 100644
+--- a/Sources/PDF Rendering/PDF.Context.swift	
++++ b/Sources/PDF Rendering/PDF.Context.swift	
+@@ -160,6 +160,60 @@ extension PDF.Context {
+     }
+ }
+ 
++extension PDF.Context {
++
++    internal mutating func beginRow(
++        measuring body: (inout PDF.Context) -> Void
++    ) -> PDF.UserSpace.Y {
++        if !mode.measurement {
++            let rowHeight = measure(body)
++            if page.ensure(height: rowHeight) {
++                row.startY = layout.box.lly
++                row.maxY = layout.box.lly
++            }
++        }
++
++        let rowStartY = row.startY ?? layout.box.lly
++        row.startY = rowStartY
++        return rowStartY
++    }
++
++    internal mutating func renderRowCell(
++        startY rowStartY: inout PDF.UserSpace.Y,
++        _ cell: (inout PDF.Context) -> Void
++    ) {
++        if let spacing = self.spacing.horizontal,
++            let lastX = row.lastX,
++            layout.box.llx > lastX
++        {
++            advance.x(spacing)
++        }
++
++        let xBefore = layout.box.llx
++
++        let pagesBefore = completedPages.count
++        let virtualBreaksBefore = mode.pageBreaks
++
++        layout.box.lly = rowStartY
++
++        cell(&self)
++
++        if completedPages.count > pagesBefore
++            || mode.pageBreaks > virtualBreaksBefore
++        {
++            rowStartY = layout.initial.lly
++            row.startY = rowStartY
++            row.maxY = layout.box.lly
++        }
++
++        updateRowMaxY()
++
++        if layout.box.llx > xBefore {
++            row.lastX = xBefore
++        }
++    }
++}
++
+ extension PDF.Context {
+ 
+     public mutating func append(inline run: PDF.Context.Text.Run) {
+diff --git a/Sources/PDF Rendering/Rendering/Array+PDF.View.swift b/Sources/PDF Rendering/Rendering/Array+PDF.View.swift
+index e0f5e1a..a0e7534 100644
+--- a/Sources/PDF Rendering/Rendering/Array+PDF.View.swift	
++++ b/Sources/PDF Rendering/Rendering/Array+PDF.View.swift	
+@@ -33,26 +33,13 @@ extension Array: PDF.View where Element: PDF.View {
+     }
+ 
+     private static func _renderHorizontal(_ view: Self, context: inout PDF.Context) {
+-        let rowStartY = context.row.startY ?? context.layout.box.lly
++        var rowStartY = context.beginRow { context in
++            _renderHorizontal(view, context: &context)
++        }
+ 
+         for element in view {
+-            if let spacing = context.spacing.horizontal,
+-                let lastX = context.row.lastX,
+-                context.layout.box.llx > lastX
+-            {
+-                context.advance.x(spacing)
+-            }
+-
+-            let xBefore = context.layout.box.llx
+-
+-            context.layout.box.lly = rowStartY
+-
+-            Element._render(element, context: &context)
+-
+-            context.updateRowMaxY()
+-
+-            if context.layout.box.llx > xBefore {
+-                context.row.lastX = xBefore
++            context.renderRowCell(startY: &rowStartY) { context in
++                Element._render(element, context: &context)
+             }
+         }
+     }
+diff --git a/Sources/PDF Rendering/Rendering/Renderer.Document._Tuple+PDF.View.swift b/Sources/PDF Rendering/Rendering/Renderer.Document._Tuple+PDF.View.swift
+index 820a933..35b48af 100644
+--- a/Sources/PDF Rendering/Rendering/Renderer.Document._Tuple+PDF.View.swift	
++++ b/Sources/PDF Rendering/Rendering/Renderer.Document._Tuple+PDF.View.swift	
+@@ -38,51 +38,13 @@ extension Renderer.Document._Tuple: PDF.View where repeat each Content: PDF.View
+     }
+ 
+     private static func _renderHorizontal(_ view: Self, context: inout PDF.Context) {
+-
+-        if !context.mode.measurement {
+-            let rowHeight = context.measure { context in
+-                _renderHorizontal(view, context: &context)
+-            }
+-            if context.page.ensure(height: rowHeight) {
+-
+-                context.row.startY = context.layout.box.lly
+-                context.row.maxY = context.layout.box.lly
+-            }
++        var rowStartY = context.beginRow { context in
++            _renderHorizontal(view, context: &context)
+         }
+ 
+-        var rowStartY = context.row.startY ?? context.layout.box.lly
+-        context.row.startY = rowStartY
+-
+         func render<T: PDF.View>(_ element: T) {
+-
+-            if let spacing = context.spacing.horizontal,
+-                let lastX = context.row.lastX,
+-                context.layout.box.llx > lastX
+-            {
+-                context.advance.x(spacing)
+-            }
+-
+-            let xBefore = context.layout.box.llx
+-
+-            let pagesBefore = context.completedPages.count
+-            let virtualBreaksBefore = context.mode.pageBreaks
+-
+-            context.layout.box.lly = rowStartY
+-
+-            T._render(element, context: &context)
+-
+-            if context.completedPages.count > pagesBefore
+-                || context.mode.pageBreaks > virtualBreaksBefore
+-            {
+-                rowStartY = context.layout.initial.lly
+-                context.row.startY = rowStartY
+-                context.row.maxY = context.layout.box.lly
+-            }
+-
+-            context.updateRowMaxY()
+-
+-            if context.layout.box.llx > xBefore {
+-                context.row.lastX = xBefore
++            context.renderRowCell(startY: &rowStartY) { context in
++                T._render(element, context: &context)
+             }
+         }
+         repeat render(each view.content)
+diff --git a/Tests/PDF Rendering Tests/PDF.Context Edge Case Tests.swift b/Tests/PDF Rendering Tests/PDF.Context Edge Case Tests.swift
+index 67dc1bf..5688c4d 100644
+--- a/Tests/PDF Rendering Tests/PDF.Context Edge Case Tests.swift	
++++ b/Tests/PDF Rendering Tests/PDF.Context Edge Case Tests.swift	
+@@ -76,5 +76,69 @@ extension `PDF.Context Tests` {
+ 
+             #expect(context.completedPages.count == 1)
+         }
++
++        @Test
++        func `Array-built horizontal row moves to the next page as a whole`() {
++            var context = PDF.Context(
++                x: 72,
++                y: 72,
++                availableWidth: 400,
++                availableHeight: 700,
++                mediaBox: .letter,
++                fontSize: 12,
++                lineHeight: 1.0
++            )
++
++            context.advance(693)
++
++            let labels = ["Cell 1", "Cell 2", "Cell 3"]
++            let row = PDF.Stack(.horizontal, spacing: 10) {
++                for label in labels {
++                    PDF.Text(label)
++                }
++            }
++            PDF.Stack._render(row, context: &context)
++
++            #expect(context.completedPages.count == 1)
++        }
++
++        @Test
++        func `Array-built and tuple-built rows end at the same position`() {
++            func render(_ body: (inout PDF.Context) -> Void) -> PDF.Context {
++                var context = PDF.Context(
++                    x: 72,
++                    y: 72,
++                    availableWidth: 400,
++                    availableHeight: 700,
++                    mediaBox: .letter,
++                    fontSize: 12,
++                    lineHeight: 1.0
++                )
++                context.advance(693)
++                body(&context)
++                return context
++            }
++
++            let labels = ["Cell 1", "Cell 2", "Cell 3"]
++            let array = render { context in
++                let row = PDF.Stack(.horizontal, spacing: 10) {
++                    for label in labels {
++                        PDF.Text(label)
++                    }
++                }
++                PDF.Stack._render(row, context: &context)
++            }
++            let tuple = render { context in
++                let row = PDF.Stack(.horizontal, spacing: 10) {
++                    PDF.Text("Cell 1")
++                    PDF.Text("Cell 2")
++                    PDF.Text("Cell 3")
++                }
++                PDF.Stack._render(row, context: &context)
++            }
++
++            #expect(array.completedPages.count == tuple.completedPages.count)
++            #expect(array.layout.box.lly == tuple.layout.box.lly)
++        }
+     }
+ }
+-- 
+2.43.0
+

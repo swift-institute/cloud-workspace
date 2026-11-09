@@ -1,0 +1,127 @@
+From b431e96af936f24bc1c9f9d91719b65a53bfe022 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:19 +0000
+Subject: [PATCH 3/7] Atomic streaming writes keep the replaced file's
+ permissions, as File.System.Write.Atomic does, and report a failed fchmod as
+ metadataPreservationFailed (swift-compositions/swift-file-system#22)
+
+---
+ .../File.System.Write.Streaming+API.swift     | 29 +++++++++++++++++++
+ .../File.System.Write.Streaming.Error.swift   | 12 +++++++-
+ .../File.System.Write.Streaming Tests.swift   | 16 ++++++++++
+ 3 files changed, 56 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/File System Core/File.System.Write.Streaming+API.swift b/Sources/File System Core/File.System.Write.Streaming+API.swift
+index c264bb8..5f24ea0 100644
+--- a/Sources/File System Core/File.System.Write.Streaming+API.swift	
++++ b/Sources/File System Core/File.System.Write.Streaming+API.swift	
+@@ -263,6 +263,7 @@ extension File.System.Write.Streaming {
+         if context.isAtomic, let tempPath = context.tempPath {
+             switch context.strategy {
+             case .replaceExisting, .none:
++                try preservePermissions(of: context.resolvedPath, on: context.descriptor)
+                 do throws(File.System.Write.Error) {
+                     try File.System.Write.atomicRename(
+                         from: tempPath,
+@@ -296,6 +297,34 @@ extension File.System.Write.Streaming {
+         }
+     }
+ 
++    private static func preservePermissions(
++        of destination: File.Path,
++        on descriptor: borrowing Kernel.Descriptor
++    ) throws(Error) {
++        let stats: Kernel.File.Stats
++        do throws(Kernel.File.Stats.Error) {
++            stats = try Kernel.File.Stats.lget(path: destination.view)
++        } catch {
++            return
++        }
++        do throws(Kernel.File.Attributes.Error) {
++            try Kernel.File.Attributes.set(stats.permissions, on: descriptor)
++        } catch {
++            let code: Error::Error.Code
++            switch error {
++            case .platform(let e): code = e.code
++            case .permission: code = ._accessDenied
++            case .path: code = ._notFound
++            case .io: code = ._io
++            }
++            throw .metadataPreservationFailed(
++                operation: "fchmod",
++                code: code,
++                message: "\(error)"
++            )
++        }
++    }
++
+     public static func cleanup(_ context: borrowing Context) {
+         if let tempPath = context.tempPath {
+             do throws(Kernel.File.Delete.Error) {
+diff --git a/Sources/File System Core/File.System.Write.Streaming.Error.swift b/Sources/File System Core/File.System.Write.Streaming.Error.swift
+index 7c10ed7..5674271 100644
+--- a/Sources/File System Core/File.System.Write.Streaming.Error.swift	
++++ b/Sources/File System Core/File.System.Write.Streaming.Error.swift	
+@@ -26,6 +26,12 @@ extension File.System.Write.Streaming {
+ 
+         case closeFailed(code: Error::Error.Code, message: Swift.String)
+ 
++        case metadataPreservationFailed(
++            operation: Swift.String,
++            code: Error::Error.Code,
++            message: Swift.String
++        )
++
+         case renameFailed(
+             from: File.Path,
+             to: File.Path,
+@@ -77,7 +83,8 @@ extension File.System.Write.Streaming.Error {
+     public var isPermissionDenied: Bool {
+         switch self {
+         case .parentVerificationFailed(_, let code, _),
+-            .fileCreationFailed(_, let code, _):
++            .fileCreationFailed(_, let code, _),
++            .metadataPreservationFailed(_, let code, _):
+             return code.isPermissionDenied
+ 
+         default:
+@@ -147,6 +154,9 @@ extension File.System.Write.Streaming.Error: CustomStringConvertible {
+         case .closeFailed(let code, let message):
+             return "Close failed: \(message) (\(code))"
+ 
++        case .metadataPreservationFailed(let operation, let code, let message):
++            return "Metadata preservation failed (\(operation)): \(message) (\(code))"
++
+         case .renameFailed(let from, let to, let code, let message):
+             return "Rename failed '\(from)' → '\(to)': \(message) (\(code))"
+ 
+diff --git a/Tests/File System Core Tests/File.System.Write.Streaming Tests.swift b/Tests/File System Core Tests/File.System.Write.Streaming Tests.swift
+index 7ae0a1e..365d31f 100644
+--- a/Tests/File System Core Tests/File.System.Write.Streaming Tests.swift	
++++ b/Tests/File System Core Tests/File.System.Write.Streaming Tests.swift	
+@@ -350,6 +350,22 @@ extension `File.System.Write.Streaming Tests`.Test.Unit {
+ 
+ extension `File.System.Write.Streaming Tests`.Test.Integration {
+ 
++    #if !os(Windows)
++        @Test
++        func `Atomic streaming write keeps the replaced file's permissions`() throws {
++            try File.Directory.temporary { dir in
++                let filePath = dir.path / "kept.txt"
++                try File.System.Write.Streaming.write(byteChunks([1, 2, 3]), to: filePath)
++                let restricted: File.System.Metadata.Permissions = [.ownerRead, .ownerWrite]
++                try File.System.Metadata.Permissions.set(restricted, at: filePath)
++
++                try File.System.Write.Streaming.write(byteChunks([4, 5, 6]), to: filePath)
++
++                #expect(try File.System.Metadata.Permissions(at: filePath) == restricted)
++            }
++        }
++    #endif
++
+     @Test
+     func `createIntermediates creates directories with execute bit`() throws {
+         try File.Directory.temporary { dir in
+-- 
+2.43.0
+

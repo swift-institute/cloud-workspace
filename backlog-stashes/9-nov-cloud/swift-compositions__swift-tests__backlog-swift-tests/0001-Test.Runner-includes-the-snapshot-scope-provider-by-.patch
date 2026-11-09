@@ -1,0 +1,164 @@
+From 6c3558f0af5fab58b15914a24d9be39a6b57fee4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:57 +0000
+Subject: [PATCH 1/3] Test.Runner includes the snapshot scope provider by
+ default, and the snapshots modifier carries its whole configuration into that
+ scope (swift-compositions/swift-tests#19)
+
+---
+ Package.swift                                 |  1 +
+ Sources/Tests Performance/Test.Runner.swift   |  5 +++-
+ .../Test.Trait.Collection.Modifier.swift      |  2 +-
+ .../Test.Trait.Key.Snapshot.swift             | 22 ++++++++++----
+ .../Test.Trait.Scope.Provider.swift           |  3 +-
+ Tests/Tests Tests/Test.Runner Tests.swift     | 29 +++++++++++++++++++
+ 6 files changed, 53 insertions(+), 9 deletions(-)
+
+diff --git a/Package.swift b/Package.swift
+index a565dbe..8c6c19c 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -200,6 +200,7 @@ let package = Package(
+             name: "Tests Performance",
+             dependencies: [
+                 .target(name: "Tests Core"),
++                .target(name: "Tests Snapshot"),
+                 .product(name: "Sample", package: "swift-sample"),
+                 .product(name: "Time", package: "swift-time"),
+                 .product(name: "Console", package: "swift-console"),
+diff --git a/Sources/Tests Performance/Test.Runner.swift b/Sources/Tests Performance/Test.Runner.swift
+index 365ca77..04c1378 100644
+--- a/Sources/Tests Performance/Test.Runner.swift	
++++ b/Sources/Tests Performance/Test.Runner.swift	
+@@ -3,6 +3,7 @@ import JSON
+ import Kernel_Clock
+ import Standard_Library_Extensions
+ public import Tests_Core
++import Tests_Snapshot
+ import Tree_Keyed
+ 
+ extension Test {
+@@ -39,7 +40,9 @@ extension Test {
+         public let reporter: Reporter
+ 
+         /// Scope providers that wrap test execution.
+-        public var scopeProviders: [Test.Trait.Scope.Provider] = [.timed, .timeLimit, .exclusive]
++        ///
++        /// Includes `.snapshot`, so a `.snapshots(...)` modifier takes effect under this runner.
++        public var scopeProviders: [Test.Trait.Scope.Provider] = [.timed, .timeLimit, .exclusive, .snapshot]
+ 
+         /// Actions to execute after all tests complete but before the reporter finishes.
+         ///
+diff --git a/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift b/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift
+index eeed7db..cbf4e73 100644
+--- a/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift	
++++ b/Sources/Tests Snapshot/Test.Trait.Collection.Modifier.swift	
+@@ -15,7 +15,7 @@ extension Test.Trait.Collection.Modifier {
+         Self(
+             apply: { collection in
+                 collection[Test.Trait.Snapshot.self] = Test.Trait.Snapshot(
+-                    recording: configuration.recording
++                    configuration: configuration
+                 )
+             },
+             provideScope: { function in
+diff --git a/Sources/Tests Snapshot/Test.Trait.Key.Snapshot.swift b/Sources/Tests Snapshot/Test.Trait.Key.Snapshot.swift
+index e71ff71..e9d5ed3 100644
+--- a/Sources/Tests Snapshot/Test.Trait.Key.Snapshot.swift	
++++ b/Sources/Tests Snapshot/Test.Trait.Key.Snapshot.swift	
+@@ -1,12 +1,17 @@
+ extension Test.Trait {
+-    /// Witness key for snapshot recording mode.
++    /// Witness key for snapshot configuration.
+     public struct Snapshot: Sendable {
+-        /// The recording mode for snapshots.
+-        public let recording: Test.Snapshot.Recording
++        /// The snapshot configuration the scope installs.
++        public let configuration: Test.Snapshot.Configuration
+ 
+-        /// Creates a snapshot value.
++        /// Creates a snapshot value carrying a whole configuration.
++        public init(configuration: Test.Snapshot.Configuration) {
++            self.configuration = configuration
++        }
++
++        /// Creates a snapshot value that sets only the recording mode.
+         public init(recording: Test.Snapshot.Recording) {
+-            self.recording = recording
++            self.init(configuration: .init(recording: recording))
+         }
+     }
+ }
+@@ -31,3 +36,10 @@ extension Test.Trait.Collection {
+         }
+     }
+ }
++
++extension Test.Trait.Snapshot {
++    /// The recording mode for snapshots.
++    public var recording: Test.Snapshot.Recording {
++        configuration.recording
++    }
++}
+diff --git a/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift b/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift
+index 519005b..3a17dec 100644
+--- a/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift	
++++ b/Sources/Tests Snapshot/Test.Trait.Scope.Provider.swift	
+@@ -20,9 +20,8 @@ extension Test.Trait.Scope.Provider {
+         guard let snapshot = traits[Test.Trait.Snapshot.self] else {
+             preconditionFailure("the snapshot scope runs only for entries carrying the trait")
+         }
+-        let config = Test.Snapshot.Configuration(recording: snapshot.recording)
+         try await Dependency.Scope.with(
+-            { $0[Test.Snapshot.Configuration.Key.self] = config },
++            { $0[Test.Snapshot.Configuration.Key.self] = snapshot.configuration },
+             operation: operation
+         )
+     }
+diff --git a/Tests/Tests Tests/Test.Runner Tests.swift b/Tests/Tests Tests/Test.Runner Tests.swift
+index f176acc..54c2f8d 100644
+--- a/Tests/Tests Tests/Test.Runner Tests.swift	
++++ b/Tests/Tests Tests/Test.Runner Tests.swift	
+@@ -1,3 +1,4 @@
++import File_System
+ import Testing
+ import Tests_Test_Support
+ 
+@@ -83,6 +84,34 @@ extension Test::Test.Runner.Test.Expectations {
+     }
+ }
+ 
++extension Test::Test.Runner.Test.Expectations {
++
++    @Test
++    func `snapshots modifier installs its configuration under the default runner`() async {
++        var registry = Test::Test.Plan.Registry()
++        registry.add(
++            id: .stub("snapshotScope"),
++            modifiers: [
++                .snapshots(
++                    configuration: .init(recording: .all, subdirectory: File.Path.Component("Sub"))
++                )
++            ]
++        ) {
++            let current = Test::Test.Snapshot.Configuration.current
++            expect(current?.recording == .all)
++            expect(current?.subdirectory != nil)
++        }
++        let plan = registry.finalize()
++
++        let (reporter, _) = SpyReporter.make()
++        let runner = Test::Test.Runner(reporter: reporter)
++        let result = await runner.run(plan)
++
++        #expect(result.allPassed)
++        #expect(result.passed == 1)
++    }
++}
++
+ // MARK: - Events
+ 
+ extension Test::Test.Runner.Test.Events {
+-- 
+2.43.0
+

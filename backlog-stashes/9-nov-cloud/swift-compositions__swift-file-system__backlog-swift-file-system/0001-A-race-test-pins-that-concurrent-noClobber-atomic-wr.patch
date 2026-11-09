@@ -1,0 +1,60 @@
+From e175d6d9ff8fe62797188c1ce89b5c088d36e097 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:34:50 +0000
+Subject: [PATCH 1/7] A race test pins that concurrent noClobber atomic writes
+ never overwrite an existing destination: exactly one writer wins
+ (swift-compositions/swift-file-system#20)
+
+---
+ .../File.System.Write.Atomic Tests.swift      | 35 +++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/Tests/File System Core Tests/File.System.Write.Atomic Tests.swift b/Tests/File System Core Tests/File.System.Write.Atomic Tests.swift
+index e42efef..e30b41a 100644
+--- a/Tests/File System Core Tests/File.System.Write.Atomic Tests.swift	
++++ b/Tests/File System Core Tests/File.System.Write.Atomic Tests.swift	
+@@ -332,6 +332,41 @@ extension `File.System.Write.Atomic Tests`.Test.Unit {
+ 
+ extension `File.System.Write.Atomic Tests`.Test.Integration {
+ 
++    @Test
++    func `Racing noClobber writers never overwrite the destination`() async throws {
++        let temporary = File.temporary(extension: "bin", prefix: "noclobber-race")
++        try await temporary { path in
++            let markers: [UInt8] = Array(1...16)
++            let winners = await withTaskGroup(of: UInt8?.self) { group in
++                for marker in markers {
++                    group.addTask {
++                        do {
++                            try File.System.Write.Atomic.write(
++                                [Byte(bitPattern: marker)],
++                                to: path,
++                                options: .init(strategy: .noClobber)
++                            )
++                            return marker
++                        } catch {
++                            return nil
++                        }
++                    }
++                }
++                var winners: [UInt8] = []
++                for await winner in group {
++                    if let winner { winners.append(winner) }
++                }
++                return winners
++            }
++
++            #expect(winners.count == 1)
++            let readData = try File.System.Read.Full.read(from: path) {
++                $0.withUnsafeBytes { unsafe $0.map(Byte.init(bitPattern:)) }
++            }
++            #expect(readData == winners.map(Byte.init(bitPattern:)))
++        }
++    }
++
+     @Test
+     func `createIntermediates creates directories with execute bit`() throws {
+         try File.Directory.temporary { dir in
+-- 
+2.43.0
+

@@ -1,0 +1,79 @@
+From d52d2d8f533cc2a48754c25eba1e67bc47f05065 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:01 +0000
+Subject: [PATCH 1/2] Command.main routes a Command.Error thrown from run()
+ through Command.Diagnostic, so its exit code and message reach the caller
+ (swift-compositions/swift-arguments#16)
+
+---
+ Sources/Command Runner/Command.swift             |  8 +++++++-
+ .../Command.Main.Redirection Tests.swift         | 16 ++++++++++++++++
+ .../Runner Helper/Command.Runner.Helper.swift    |  6 ++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/Command Runner/Command.swift b/Sources/Command Runner/Command.swift
+index 42274e8..8a7a142 100644
+--- a/Sources/Command Runner/Command.swift	
++++ b/Sources/Command Runner/Command.swift	
+@@ -25,7 +25,13 @@ extension Command {
+             do throws(C.Failure) {
+                 try await root.run()
+             } catch {
+-
++                if let commandError = error as? Command.Error {
++                    let message = Self.Diagnostic.message(for: commandError)
++                    if !message.isEmpty {
++                        print(message)
++                    }
++                    Process.Exit.normal(Self.Diagnostic.exitCode(for: commandError))
++                }
+                 print("Error: \(Swift.String(describing: error))")
+                 Process.Exit.normal(1)
+             }
+diff --git a/Tests/Command Integration Tests/Command.Main.Redirection Tests.swift b/Tests/Command Integration Tests/Command.Main.Redirection Tests.swift
+index f5a9e84..d91020a 100644
+--- a/Tests/Command Integration Tests/Command.Main.Redirection Tests.swift	
++++ b/Tests/Command Integration Tests/Command.Main.Redirection Tests.swift	
+@@ -200,6 +200,22 @@ extension `Command.Main.Redirection Tests` {
+             #expect(HelperProcess.stdoutText(output).contains("phrase"))
+         }
+ 
++        @Test
++        func `Command.Error.exit thrown from run keeps its exit code and message`() throws {
++            let output = try #require(HelperProcess.run(["exit-3"]), "\(HelperProcess.notFoundMessage)")
++            #expect(output.status == .exited(code: 3))
++            let text = HelperProcess.stdoutText(output)
++            #expect(text.contains("HELPER-EXIT-3"))
++            #expect(!text.contains("HELPER-BEGIN"))
++        }
++
++        @Test
++        func `Command.Error thrown from run exits with its diagnostic exit code`() throws {
++            let output = try #require(HelperProcess.run(["invalid"]), "\(HelperProcess.notFoundMessage)")
++            #expect(output.status == .exited(code: 64))
++            #expect(HelperProcess.stdoutText(output).contains("Error: HELPER-INVALID"))
++        }
++
+         @Test
+         func `Every exit path writes a non-empty stdout when redirected`() throws {
+ 
+diff --git a/Tests/Support/Runner Helper/Command.Runner.Helper.swift b/Tests/Support/Runner Helper/Command.Runner.Helper.swift
+index 644c339..e7685d8 100644
+--- a/Tests/Support/Runner Helper/Command.Runner.Helper.swift	
++++ b/Tests/Support/Runner Helper/Command.Runner.Helper.swift	
+@@ -23,6 +23,12 @@ extension Helper {
+     }
+ 
+     mutating func run() async throws(Command.Error) {
++        if phrase == "exit-3" {
++            throw .exit(code: 3, message: "HELPER-EXIT-3")
++        }
++        if phrase == "invalid" {
++            throw .validationFailed(reason: "HELPER-INVALID")
++        }
+         print("HELPER-BEGIN \(phrase) HELPER-END")
+     }
+ }
+-- 
+2.43.0
+

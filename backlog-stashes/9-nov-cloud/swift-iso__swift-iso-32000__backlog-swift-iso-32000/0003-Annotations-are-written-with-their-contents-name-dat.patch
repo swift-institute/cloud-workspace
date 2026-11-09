@@ -1,0 +1,353 @@
+From df36364e97e0bd97121cc7bafab46054e5e83ae3 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:43:59 +0000
+Subject: [PATCH 3/3] Annotations are written with their contents, name, date,
+ flags, colour, border dash array, structure parent, opacities, blend mode,
+ language, appearance streams and state, and a link's highlight mode and quad
+ points; a non-link annotation the writer cannot serialize throws
+ Writer.Error.unsupportedAnnotation instead of losing its entries
+ (swift-iso/swift-iso-32000#14)
+
+---
+ Package.swift                                 |   1 +
+ Sources/ISO 32000 7 Syntax/7.3 Objects.swift  |  15 ++
+ Sources/ISO 32000/ISO_32000.Writer.swift      | 167 +++++++++++++++++-
+ .../ISO_32000.Writer Structure Tests.swift    |  69 ++++++++
+ 4 files changed, 249 insertions(+), 3 deletions(-)
+
+diff --git a/Package.swift b/Package.swift
+index 2d3fefb..2c883ef 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -234,6 +234,7 @@ let package = Package(
+                 .product(name: "ASCII", package: "swift-ascii"),
+                 .product(name: "RFC 3986", package: "swift-rfc-3986"),
+                 .product(name: "RFC 4648", package: "swift-rfc-4648"),
++                .product(name: "RFC 5646", package: "swift-rfc-5646"),
+                 .product(name: "Witness", package: "swift-witness"),
+                 .product(name: "Linear", package: "swift-linear"),
+                 .product(name: "Scale", package: "swift-scale"),
+diff --git a/Sources/ISO 32000 7 Syntax/7.3 Objects.swift b/Sources/ISO 32000 7 Syntax/7.3 Objects.swift
+index 94ee3e0..b7ec0ba 100644
+--- a/Sources/ISO 32000 7 Syntax/7.3 Objects.swift	
++++ b/Sources/ISO 32000 7 Syntax/7.3 Objects.swift	
+@@ -484,6 +484,21 @@ extension ISO_32000.`7`.`3`.`5`.Name {
+     public static let isMap = Self(__unchecked: (), rawValue: "IsMap")
+     public static let c = Self(__unchecked: (), rawValue: "C")
+     public static let f = Self(__unchecked: (), rawValue: "F")
++    public static let nm = Self(__unchecked: (), rawValue: "NM")
++    public static let m = Self(__unchecked: (), rawValue: "M")
++    public static let structParent = Self(__unchecked: (), rawValue: "StructParent")
++    public static let strokingAlpha = Self(__unchecked: (), rawValue: "CA")
++    public static let nonStrokingAlpha = Self(__unchecked: (), rawValue: "ca")
++    public static let bm = Self(__unchecked: (), rawValue: "BM")
++    public static let lang = Self(__unchecked: (), rawValue: "Lang")
++    public static let ap = Self(__unchecked: (), rawValue: "AP")
++    public static let appearanceState = Self(__unchecked: (), rawValue: "AS")
++    public static let r = Self(__unchecked: (), rawValue: "R")
++    public static let d = Self(__unchecked: (), rawValue: "D")
++    public static let h = Self(__unchecked: (), rawValue: "H")
++    public static let quadPoints = Self(__unchecked: (), rawValue: "QuadPoints")
++    public static let bBox = Self(__unchecked: (), rawValue: "BBox")
++    public static let form = Self(__unchecked: (), rawValue: "Form")
+ }
+ 
+ extension ISO_32000.`7`.`3` {
+diff --git a/Sources/ISO 32000/ISO_32000.Writer.swift b/Sources/ISO 32000/ISO_32000.Writer.swift
+index 56eb961..338bc71 100644
+--- a/Sources/ISO 32000/ISO_32000.Writer.swift	
++++ b/Sources/ISO 32000/ISO_32000.Writer.swift	
+@@ -1,9 +1,11 @@
+ import Byte
++import Geometry
+ import IEC_61966
+ import ISO_32000_9_Text
+ import Ownership
+ import RFC_3986
+ import RFC_4648
++import RFC_5646
+ import Standard_Library_Extensions
+ public import Witness
+ 
+@@ -178,12 +180,59 @@ extension ISO_32000.Writer {
+                 annotDict[.subtype] = .name(annotation.subtype.name)
+                 annotDict[.rect] = ISO_32000.COS.Object(annotation.rect)
+ 
++                if let contents = annotation.contents {
++                    annotDict[.contents] = .string(ISO_32000.COS.StringValue(contents))
++                }
++                if let name = annotation.name {
++                    annotDict[.nm] = .string(ISO_32000.COS.StringValue(name))
++                }
++                if let modificationDate = annotation.modificationDate {
++                    annotDict[.m] = .string(ISO_32000.COS.StringValue(modificationDate))
++                }
++                if !annotation.flags.isEmpty {
++                    annotDict[.f] = .integer(Int64(annotation.flags.rawValue))
++                }
++
+                 if let border = annotation.border {
+-                    annotDict[.border] = .array([
++                    var entries: [ISO_32000.COS.Object] = [
+                         .real(border.horizontalRadius),
+                         .real(border.verticalRadius),
+                         .real(border.width),
+-                    ])
++                    ]
++                    if let dashArray = border.dashArray {
++                        entries.append(.array(dashArray.map { .real($0) }))
++                    }
++                    annotDict[.border] = .array(entries)
++                }
++
++                if let color = annotation.color {
++                    annotDict[.c] = Self.object(color)
++                }
++                if let structParent = annotation.structParent {
++                    annotDict[.structParent] = .integer(Int64(structParent))
++                }
++                if let strokeOpacity = annotation.strokeOpacity {
++                    annotDict[.strokingAlpha] = .real(strokeOpacity)
++                }
++                if let fillOpacity = annotation.fillOpacity {
++                    annotDict[.nonStrokingAlpha] = .real(fillOpacity)
++                }
++                if let blendMode = annotation.blendMode {
++                    annotDict[.bm] = .name(Self.name(blendMode.rawValue))
++                }
++                if let language = annotation.language {
++                    annotDict[.lang] = .string(ISO_32000.COS.StringValue(language.value))
++                }
++                if let appearance = annotation.appearance {
++                    annotDict[.ap] = try writeAppearance(
++                        appearance,
++                        rect: annotation.rect,
++                        state: &state,
++                        into: &buffer
++                    )
++                }
++                if let appearanceState = annotation.appearanceState {
++                    annotDict[.appearanceState] = try .name(Self.name(given: appearanceState))
+                 }
+ 
+                 switch annotation.content {
+@@ -201,9 +250,22 @@ extension ISO_32000.Writer {
+                         annotDict[.dest] = try serializeDestination(dest, pageRefs: pageRefs)
+                     }
+ 
++                    if link.highlightMode != .invert {
++                        annotDict[.h] = .name(Self.name(link.highlightMode.rawValue))
++                    }
++                    if let quadPoints = link.quadPoints {
++                        annotDict[.quadPoints] = .array(
++                            quadPoints.flatMap { quadrilateral in
++                                quadrilateral.vertexArray.flatMap { point -> [ISO_32000.COS.Object] in
++                                    [.real(point[0]), .real(point[1])]
++                                }
++                            }
++                        )
++                    }
++
+                 default:
+ 
+-                    break
++                    throw .unsupportedAnnotation(annotation.subtype)
+                 }
+ 
+                 state.objectOffsets[objNum] = buffer.count - state.origin
+@@ -676,6 +738,99 @@ extension ISO_32000.Writer {
+         return pageRefs[index]
+     }
+ 
++    private static func name(given rawValue: String) throws(Error) -> ISO_32000.COS.Name {
++        do throws(ISO_32000.COS.Name.Error) {
++            return try ISO_32000.COS.Name(rawValue)
++        } catch {
++            throw .invalidName(rawValue)
++        }
++    }
++
++    private static func object(_ color: ISO_32000.Annotation.Color) -> ISO_32000.COS.Object {
++        switch color {
++        case .transparent:
++            return .array([])
++
++        case .gray(let gray):
++            return .array([.real(gray)])
++
++        case .rgb(let red, let green, let blue):
++            return .array([.real(red), .real(green), .real(blue)])
++
++        case .cmyk(let cyan, let magenta, let yellow, let black):
++            return .array([.real(cyan), .real(magenta), .real(yellow), .real(black)])
++        }
++    }
++
++    private func writeAppearance<Buffer: RangeReplaceableCollection>(
++        _ appearance: ISO_32000.`12`.`5`.Appearance,
++        rect: ISO_32000.UserSpace.Rectangle,
++        state: inout State,
++        into buffer: inout Buffer
++    ) throws(Error) -> ISO_32000.COS.Object where Buffer.Element == Byte {
++        var dictionary = ISO_32000.COS.Dictionary()
++        dictionary[.n] = try writeAppearance(appearance.normal, rect: rect, state: &state, into: &buffer)
++        if let rollover = appearance.rollover {
++            dictionary[.r] = try writeAppearance(rollover, rect: rect, state: &state, into: &buffer)
++        }
++        if let down = appearance.down {
++            dictionary[.d] = try writeAppearance(down, rect: rect, state: &state, into: &buffer)
++        }
++        return .dictionary(dictionary)
++    }
++
++    private func writeAppearance<Buffer: RangeReplaceableCollection>(
++        _ entry: ISO_32000.`12`.`5`.Appearance.Entry,
++        rect: ISO_32000.UserSpace.Rectangle,
++        state: inout State,
++        into buffer: inout Buffer
++    ) throws(Error) -> ISO_32000.COS.Object where Buffer.Element == Byte {
++        switch entry {
++        case .stream(let content):
++            return writeAppearanceStream(content, rect: rect, state: &state, into: &buffer)
++
++        case .subdictionary(let streams):
++            var dictionary = ISO_32000.COS.Dictionary()
++            for (key, content) in streams.sorted(by: { $0.key < $1.key }) {
++                let name = try Self.name(given: key)
++                dictionary[name] = writeAppearanceStream(
++                    content,
++                    rect: rect,
++                    state: &state,
++                    into: &buffer
++                )
++            }
++            return .dictionary(dictionary)
++        }
++    }
++
++    private func writeAppearanceStream<Buffer: RangeReplaceableCollection>(
++        _ content: String,
++        rect: ISO_32000.UserSpace.Rectangle,
++        state: inout State,
++        into buffer: inout Buffer
++    ) -> ISO_32000.COS.Object where Buffer.Element == Byte {
++        let objectNumber = state.nextObjectNumber()
++
++        var dictionary = ISO_32000.COS.Dictionary()
++        dictionary[.type] = .name(.xObject)
++        dictionary[.subtype] = .name(.form)
++        dictionary[.bBox] = .array([
++            .real(0),
++            .real(0),
++            .real(rect.urx.underlying - rect.llx.underlying),
++            .real(rect.ury.underlying - rect.lly.underlying),
++        ])
++
++        let stream = ISO_32000.COS.Stream(
++            dictionary: dictionary,
++            data: Array(content.utf8).map(Byte.init(bitPattern:))
++        )
++        state.objectOffsets[objectNumber] = buffer.count - state.origin
++        writeIndirectObject(objectNumber, object: .stream(stream), into: &buffer)
++        return .reference(ISO_32000.COS.IndirectReference(objectNumber: objectNumber))
++    }
++
+     private static func name(_ rawValue: String) -> ISO_32000.COS.Name {
+         do {
+             return try ISO_32000.COS.Name(rawValue)
+@@ -979,6 +1134,12 @@ extension ISO_32000.Writer {
+     public enum Error: Swift::Error, Sendable, Hashable {
+ 
+         case pageOutOfRange(index: Int, pageCount: Int)
++
++        /// The writer serializes link annotations only; any other content would lose its entries.
++        case unsupportedAnnotation(ISO_32000.Annotation.Subtype)
++
++        /// A caller-supplied name, such as an appearance state, that is not a valid PDF name.
++        case invalidName(String)
+     }
+ }
+ 
+diff --git a/Tests/ISO 32000 Tests/ISO_32000.Writer Structure Tests.swift b/Tests/ISO 32000 Tests/ISO_32000.Writer Structure Tests.swift
+index 86a8214..320d8ac 100644
+--- a/Tests/ISO 32000 Tests/ISO_32000.Writer Structure Tests.swift	
++++ b/Tests/ISO 32000 Tests/ISO_32000.Writer Structure Tests.swift	
+@@ -85,6 +85,75 @@ struct `ISO_32000.Writer Structure Tests` {
+         }
+     }
+ 
++    @Test
++    func `a link annotation writes its common entries and its link entries`() throws {
++        let link = ISO_32000.Annotation(
++            rect: .letter,
++            content: .link(
++                ISO_32000.Annotation.Link(uri: try RFC_3986.URI("https://example.com"), highlightMode: .outline)
++            ),
++            contents: "Example",
++            name: "link-1",
++            modificationDate: "D:20260101000000Z",
++            flags: [.print],
++            border: ISO_32000.`12`.`5`.Border(width: 2, dashArray: [3, 2]),
++            color: .rgb(1, 0, 0),
++            structParent: 7,
++            fillOpacity: 0.5,
++            strokeOpacity: 0.25,
++            blendMode: .multiply,
++            appearance: ISO_32000.`12`.`5`.Appearance(
++                normal: .subdictionary(["Off": "", "On": "0 0 m 10 10 l S"])
++            ),
++            appearanceState: "On"
++        )
++        let str = try Self.text(
++            ISO_32000.Document(pages: [ISO_32000.Page(mediaBox: .letter, annotations: [link])])
++        )
++
++        #expect(str.contains("/Contents (Example)"))
++        #expect(str.contains("/NM (link-1)"))
++        #expect(str.contains("/M (D:20260101000000Z)"))
++        #expect(str.contains("/F 4"))
++        #expect(str.contains("/H /O"))
++        #expect(str.contains("/StructParent 7"))
++        #expect(str.contains("/BM /Multiply"))
++        #expect(str.contains("/CA "))
++        #expect(str.contains("/ca "))
++        #expect(str.contains("/C ["))
++        #expect(str.contains("/AS /On"))
++        #expect(str.contains("/AP <<"))
++        #expect(str.contains("/Off "))
++        #expect(str.ranges(of: "/Subtype /Form").count == 2)
++        #expect(str.contains("0 0 m 10 10 l S"))
++
++        let border = try #require(str.range(of: "/Border ["))
++        let entries = str[border.upperBound...].prefix { $0 != "/" && $0 != ">" }
++        #expect(entries.filter { $0 == "[" }.count == 1)
++    }
++
++    @Test
++    func `a non-link annotation is reported instead of written without its entries`() throws {
++        let note = ISO_32000.Annotation(rect: .letter, content: .text(ISO_32000.Annotation.Text()))
++        let document = ISO_32000.Document(pages: [ISO_32000.Page(mediaBox: .letter, annotations: [note])])
++        #expect(throws: ISO_32000.Writer.Error.unsupportedAnnotation(.text)) {
++            try Self.text(document)
++        }
++    }
++
++    @Test
++    func `an appearance state that is not a PDF name is reported`() throws {
++        let link = ISO_32000.Annotation(
++            rect: .letter,
++            content: .link(ISO_32000.Annotation.Link(destination: .fit(page: 0))),
++            appearanceState: "On Off"
++        )
++        let document = ISO_32000.Document(pages: [ISO_32000.Page(mediaBox: .letter, annotations: [link])])
++        #expect(throws: ISO_32000.Writer.Error.invalidName("On Off")) {
++            try Self.text(document)
++        }
++    }
++
+     @Test
+     func `a closed outline item counts its would-be-visible descendants negatively`() throws {
+         let closed = ISO_32000.Outline.Item(
+-- 
+2.43.0
+

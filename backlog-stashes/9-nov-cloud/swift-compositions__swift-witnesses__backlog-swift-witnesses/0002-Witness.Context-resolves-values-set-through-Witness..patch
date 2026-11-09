@@ -1,0 +1,80 @@
+From f0d3eb572120742c98ca67040b0c7128dffb8036 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:42:42 +0000
+Subject: [PATCH 2/3] Witness.Context resolves values set through
+ Witness.Preparation (prepareDependencies) inside the preparation's operation
+ (swift-compositions/swift-witnesses#6)
+
+---
+ Sources/Witnesses/Witness.Context.swift       |  3 ++
+ .../Witness.Context Tests.swift               | 40 +++++++++++++++++++
+ 2 files changed, 43 insertions(+)
+
+diff --git a/Sources/Witnesses/Witness.Context.swift b/Sources/Witnesses/Witness.Context.swift
+index 522b01d..cf32c0c 100644
+--- a/Sources/Witnesses/Witness.Context.swift
++++ b/Sources/Witnesses/Witness.Context.swift
+@@ -25,6 +25,9 @@ extension Witness.Context {
+     private static var _current: Witness.Context {
+         var context = Dependency.Scope.current[_ContextKey.self]
+         context.values._mode = context.mode
++        if let store = Witness.Preparation.store {
++            context.values._preparedRef = store
++        }
+         return context
+     }
+ }
+diff --git a/Tests/Witnesses Tests/Witness.Context Tests.swift b/Tests/Witnesses Tests/Witness.Context Tests.swift
+index 49f4ad9..97dacd4 100644
+--- a/Tests/Witnesses Tests/Witness.Context Tests.swift	
++++ b/Tests/Witnesses Tests/Witness.Context Tests.swift	
+@@ -186,6 +186,46 @@ extension `Witness.Context Tests`.Test.Unit {
+             #expect(result == "Test result for 1")
+         }
+     }
++
++    @Test
++    func `A prepared value resolves through the context`() async throws {
++        let prepared = TestAPI(
++            fetch: { id in "Prepared result for \(id)" },
++            update: { _, _ in }
++        )
++
++        try await Witness.Preparation.with({ store in
++            store.set(TestAPI.self, value: prepared)
++        }) {
++            let subscripted = try await Witness.Context[TestAPI.self].fetch(id: 1)
++            #expect(subscripted == "Prepared result for 1")
++
++            let current = try await Witness.Context.current[TestAPI.self].fetch(id: 2)
++            #expect(current == "Prepared result for 2")
++        }
++    }
++
++    @Test
++    func `A scoped override wins over a prepared value`() async throws {
++        let prepared = TestAPI(
++            fetch: { _ in "Prepared" },
++            update: { _, _ in }
++        )
++
++        try await Witness.Preparation.with({ store in
++            store.set(TestAPI.self, value: prepared)
++        }) {
++            try await Witness.Context.with { values in
++                values[TestAPI.self] = TestAPI(
++                    fetch: { _ in "Scoped" },
++                    update: { _, _ in }
++                )
++            } operation: {
++                let result = try await Witness.Context[TestAPI.self].fetch(id: 1)
++                #expect(result == "Scoped")
++            }
++        }
++    }
+ }
+ 
+ extension `Witness.Context Tests`.Test.Integration {
+-- 
+2.43.0
+

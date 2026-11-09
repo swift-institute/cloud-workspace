@@ -1,0 +1,210 @@
+From 790e54c58bf3fe77eef2927976386bad78ac0e19 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:04 +0000
+Subject: [PATCH 2/4] IO.Uring.next() returns nil when every ring slot holds an
+ unsubmitted entry instead of overwriting one, and close(_:) throws the close
+ error instead of discarding it
+ (swift-linux-foundation/swift-linux-standard#18)
+
+---
+ .../Linux.Kernel.IO.Uring.swift               |  24 ++--
+ .../Linux.Kernel.IO.Uring Tests.swift         | 105 ++++++++++++++++--
+ 2 files changed, 110 insertions(+), 19 deletions(-)
+
+diff --git a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.swift b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.swift
+index 499ec91..b22c6de 100644
+--- a/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.swift	
++++ b/Sources/Linux Kernel IO Uring Standard/Linux.Kernel.IO.Uring.swift	
+@@ -109,7 +109,7 @@
+             entries: Submission.Count,
+             params: inout Params
+         ) throws(ISO_9945.Kernel.IO.Uring.Error) -> ISO_9945.Kernel.Descriptor {
+-            var cParams = params.cValue
++            var cParams = try params.cValue
+             let fd = unsafe swift_io_uring_setup(UInt32(entries.underlying.rawValue), &cParams)
+             guard fd >= 0 else {
+                 throw .setup(.posix(errno))
+@@ -159,12 +159,10 @@
+             }
+         }
+ 
+-        public static func close(_ fd: consuming ISO_9945.Kernel.Descriptor) {
+-            do throws(ISO_9945.Kernel.Close.Error) {
+-                try ISO_9945.Kernel.Close.close(consume fd)
+-            } catch {
+-
+-            }
++        public static func close(
++            _ fd: consuming ISO_9945.Kernel.Descriptor
++        ) throws(ISO_9945.Kernel.Close.Error) {
++            try ISO_9945.Kernel.Close.close(consume fd)
+         }
+     }
+ 
+@@ -339,12 +337,14 @@
+ 
+     extension ISO_9945.Kernel.IO.Uring {
+ 
+-        public var next: Slot {
+-            mutating _read {
+-                let slot = sqMask.slot(for: sqeTail)
+-                let ptr = unsafe sqes.advanced(by: slot)
+-                yield unsafe Slot(ptr)
++        @_lifetime(&self)
++        public mutating func next() -> Slot? {
++            guard hasCapacity else {
++                return nil
+             }
++            let slot = sqMask.slot(for: sqeTail)
++            let ptr = unsafe sqes.advanced(by: slot)
++            return unsafe _overrideLifetime(Slot(ptr), mutating: &self)
+         }
+ 
+         public var hasCapacity: Bool {
+diff --git a/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring Tests.swift b/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring Tests.swift
+index 74cd213..0749b00 100644
+--- a/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring Tests.swift	
++++ b/Tests/Linux Kernel Standard Tests/Linux.Kernel.IO.Uring Tests.swift	
+@@ -75,7 +75,7 @@
+ 
+             let nopData: Kernel.IO.Uring.Operation.Data = 0xCAFE_BABE
+ 
+-            ring.next.entry.nop(data: nopData)
++            ring.next()?.entry.nop(data: nopData)
+             ring.advance()
+ 
+             let flushed = ring.flush()
+@@ -114,7 +114,7 @@
+             let count = 4
+             (0..<count).forEach { i in
+                 let data = Kernel.IO.Uring.Operation.Data(_unchecked: UInt64(0x100 + i))
+-                ring.next.entry.nop(data: data)
++                ring.next()?.entry.nop(data: data)
+                 ring.advance()
+             }
+ 
+@@ -150,9 +150,9 @@
+             let firstData: Kernel.IO.Uring.Operation.Data = 0xAAAA
+             let secondData: Kernel.IO.Uring.Operation.Data = 0xBBBB
+ 
+-            ring.next.entry.nop(data: firstData)
++            ring.next()?.entry.nop(data: firstData)
+ 
+-            ring.next.entry.nop(data: secondData)
++            ring.next()?.entry.nop(data: secondData)
+             ring.advance()
+ 
+             let flushed = ring.flush()
+@@ -182,10 +182,10 @@
+             var ring = try Kernel.IO.Uring(descriptor: consume fd, params: params)
+ 
+             let data: Kernel.IO.Uring.Operation.Data = 0xDEAD_BEEF
+-            ring.next.entry.nop(data: data)
++            ring.next()?.entry.nop(data: data)
+ 
+-            #expect(ring.next.entry.opcode == .nop)
+-            #expect(ring.next.entry.data == data)
++            #expect(ring.next()?.entry.opcode == .nop)
++            #expect(ring.next()?.entry.data == data)
+ 
+             ring.advance()
+             let flushed = ring.flush()
+@@ -205,4 +205,95 @@
+         }
+     }
+ 
++    extension Kernel.IO.Uring.Test.Integration {
++
++        @Test
++        func `next is unavailable once every slot holds an unsubmitted entry`() throws {
++            var params = Kernel.IO.Uring.Params()
++            let fd = try Kernel.IO.Uring.setup(
++                entries: Kernel.IO.Uring.Submission.Count(_unchecked: Cardinal(4)),
++                params: &params
++            )
++            var ring = try Kernel.IO.Uring(descriptor: consume fd, params: params)
++
++            let capacity = params.sqEntries.underlying.rawValue
++            for index in 0..<capacity {
++                let hasCapacity = ring.hasCapacity
++                #expect(hasCapacity)
++                ring.next()?.entry.nop(data: Kernel.IO.Uring.Operation.Data(_unchecked: UInt64(index)))
++                ring.advance()
++            }
++
++            let hasCapacity = ring.hasCapacity
++            let isFull = ring.next()?.entry.opcode == nil
++            #expect(!hasCapacity)
++            #expect(isFull)
++            #expect(ring.pending.underlying.rawValue == capacity)
++        }
++
++        @Test
++        func `drain stops at its limit and leaves the rest available`() throws {
++            var params = Kernel.IO.Uring.Params()
++            let fd = try Kernel.IO.Uring.setup(
++                entries: Kernel.IO.Uring.Submission.Count(_unchecked: Cardinal(4)),
++                params: &params
++            )
++            var ring = try Kernel.IO.Uring(descriptor: consume fd, params: params)
++
++            for index in 0..<4 {
++                ring.next()?.entry.nop(data: Kernel.IO.Uring.Operation.Data(_unchecked: UInt64(index)))
++                ring.advance()
++            }
++            _ = try ring.enter(toSubmit: ring.flush(), minComplete: 4, flags: .getEvents)
++
++            var visited = 0
++            let drained = ring.drain(limit: 2) { _ in visited += 1 }
++
++            #expect(drained.underlying.rawValue == 2)
++            #expect(visited == 2)
++            #expect(ring.completionsAvailable.underlying.rawValue == 2)
++        }
++
++        #if canImport(Glibc)
++            @Test
++            func `enter interrupted by a signal reports interrupted`() throws {
++                var params = Kernel.IO.Uring.Params()
++                let fd = try Kernel.IO.Uring.setup(
++                    entries: Kernel.IO.Uring.Submission.Count(_unchecked: Cardinal(1)),
++                    params: &params
++                )
++                let ring = try Kernel.IO.Uring(descriptor: consume fd, params: params)
++
++                var action = sigaction()
++                unsafe action.__sigaction_handler.sa_handler = { _ in }
++                action.sa_flags = 0
++                _ = unsafe sigemptyset(&action.sa_mask)
++                _ = unsafe sigaction(SIGUSR1, &action, nil)
++
++                var interrupter = pthread_t()
++                let target = unsafe UnsafeMutableRawPointer(bitPattern: UInt(pthread_self()))
++                let created = unsafe pthread_create(
++                    &interrupter,
++                    nil,
++                    { argument in
++                        let target = pthread_t(UInt(bitPattern: argument))
++                        for _ in 0..<10 {
++                            _ = usleep(20_000)
++                            _ = pthread_kill(target, SIGUSR1)
++                        }
++                        return nil
++                    },
++                    target
++                )
++                #expect(created == 0)
++
++                #expect(throws: Kernel.IO.Uring.Error.interrupted) {
++                    _ = try ring.enter(toSubmit: 0, minComplete: 1, flags: .getEvents)
++                }
++
++                _ = pthread_join(interrupter, nil)
++            }
++        #endif
++    }
++
+ #endif
+-- 
+2.43.0
+

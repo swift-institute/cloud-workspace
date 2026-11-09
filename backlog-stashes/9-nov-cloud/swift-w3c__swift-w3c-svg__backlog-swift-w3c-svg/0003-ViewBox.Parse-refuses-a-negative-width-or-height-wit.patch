@@ -1,0 +1,118 @@
+From 20b7cd911f033850bde92567510379743f06ab2a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:50 +0000
+Subject: [PATCH 3/5] ViewBox.Parse refuses a negative width or height with
+ negativeSize and throws expectedFourNumbers when the input ends early
+ (swift-w3c/swift-w3c-svg#11)
+
+---
+ .../W3C_SVG2.Types.ViewBox.Parse.swift        |  6 +++
+ .../__W3C_SVG2TypesViewBoxParseError.swift    |  2 +
+ .../W3C_SVG2.Types.ViewBox.Parse Tests.swift  | 39 +++++++++++++++++++
+ 3 files changed, 47 insertions(+)
+ create mode 100644 Tests/W3C SVG Tests/W3C_SVG2.Types.ViewBox.Parse Tests.swift
+
+diff --git a/Sources/W3C SVG/W3C_SVG2.Types.ViewBox.Parse.swift b/Sources/W3C SVG/W3C_SVG2.Types.ViewBox.Parse.swift
+index 0215814..926618d 100644
+--- a/Sources/W3C SVG/W3C_SVG2.Types.ViewBox.Parse.swift	
++++ b/Sources/W3C SVG/W3C_SVG2.Types.ViewBox.Parse.swift	
+@@ -22,6 +22,7 @@ extension W3C_SVG2.Types.ViewBox.Parse: Parsing {
+     public func parse(_ input: inout Input) throws(Failure) -> Output {
+         Self._skipWhitespaceAndComma(&input)
+ 
++        guard input.startIndex < input.endIndex else { throw .expectedFourNumbers }
+         let minX: Double
+         do throws(W3C_SVG2.Parse.Number<Input>.Failure) {
+             minX = try W3C_SVG2.Parse.Number<Input>().parse(&input)
+@@ -30,6 +31,7 @@ extension W3C_SVG2.Types.ViewBox.Parse: Parsing {
+         }
+         Self._skipWhitespaceAndComma(&input)
+ 
++        guard input.startIndex < input.endIndex else { throw .expectedFourNumbers }
+         let minY: Double
+         do throws(W3C_SVG2.Parse.Number<Input>.Failure) {
+             minY = try W3C_SVG2.Parse.Number<Input>().parse(&input)
+@@ -38,6 +40,7 @@ extension W3C_SVG2.Types.ViewBox.Parse: Parsing {
+         }
+         Self._skipWhitespaceAndComma(&input)
+ 
++        guard input.startIndex < input.endIndex else { throw .expectedFourNumbers }
+         let width: Double
+         do throws(W3C_SVG2.Parse.Number<Input>.Failure) {
+             width = try W3C_SVG2.Parse.Number<Input>().parse(&input)
+@@ -46,6 +49,7 @@ extension W3C_SVG2.Types.ViewBox.Parse: Parsing {
+         }
+         Self._skipWhitespaceAndComma(&input)
+ 
++        guard input.startIndex < input.endIndex else { throw .expectedFourNumbers }
+         let height: Double
+         do throws(W3C_SVG2.Parse.Number<Input>.Failure) {
+             height = try W3C_SVG2.Parse.Number<Input>().parse(&input)
+@@ -53,6 +57,8 @@ extension W3C_SVG2.Types.ViewBox.Parse: Parsing {
+             throw .numberError(error)
+         }
+ 
++        guard width >= 0, height >= 0 else { throw .negativeSize }
++
+         return Output(minX: minX, minY: minY, width: width, height: height)
+     }
+ 
+diff --git a/Sources/W3C SVG/__W3C_SVG2TypesViewBoxParseError.swift b/Sources/W3C SVG/__W3C_SVG2TypesViewBoxParseError.swift
+index 698d64b..352d938 100644
+--- a/Sources/W3C SVG/__W3C_SVG2TypesViewBoxParseError.swift	
++++ b/Sources/W3C SVG/__W3C_SVG2TypesViewBoxParseError.swift	
+@@ -3,4 +3,6 @@ import Parser
+ public enum __W3C_SVG2TypesViewBoxParseError: Swift::Error, Sendable, Equatable {
+     case numberError(__W3C_SVG2ParseNumberError)
+     case expectedFourNumbers
++    /// The width or height is negative, which SVG 2 makes an error.
++    case negativeSize
+ }
+diff --git a/Tests/W3C SVG Tests/W3C_SVG2.Types.ViewBox.Parse Tests.swift b/Tests/W3C SVG Tests/W3C_SVG2.Types.ViewBox.Parse Tests.swift
+new file mode 100644
+index 0000000..1c2ffbe
+--- /dev/null
++++ b/Tests/W3C SVG Tests/W3C_SVG2.Types.ViewBox.Parse Tests.swift	
+@@ -0,0 +1,39 @@
++import Testing
++
++@testable import W3C_SVG
++
++enum `W3C_SVG2.Types.ViewBox.Parse Tests` {}
++
++extension `W3C_SVG2.Types.ViewBox.Parse Tests` {
++    @Suite
++    struct `View box values` {
++        private static func parse(
++            _ text: String
++        ) throws(W3C_SVG2.Types.ViewBox.Parse<ByteSlice>.Failure) -> W3C_SVG2.Types.ViewBox.Parse<ByteSlice>.Output {
++            var input = ByteSlice(text)
++            return try W3C_SVG2.Types.ViewBox.Parse<ByteSlice>().parse(&input)
++        }
++
++        @Test
++        func `four numbers parse with a negative origin`() throws {
++            #expect(try Self.parse("-10, -20 100 50") == .init(minX: -10, minY: -20, width: 100, height: 50))
++        }
++
++        @Test
++        func `a negative width or height is refused`() {
++            #expect(throws: W3C_SVG2.Types.ViewBox.Parse<ByteSlice>.Error.negativeSize) {
++                try Self.parse("0 0 -100 50")
++            }
++            #expect(throws: W3C_SVG2.Types.ViewBox.Parse<ByteSlice>.Error.negativeSize) {
++                try Self.parse("0 0 100 -50")
++            }
++        }
++
++        @Test
++        func `fewer than four numbers is refused`() {
++            #expect(throws: W3C_SVG2.Types.ViewBox.Parse<ByteSlice>.Error.expectedFourNumbers) {
++                try Self.parse("0 0 100")
++            }
++        }
++    }
++}
+-- 
+2.43.0
+

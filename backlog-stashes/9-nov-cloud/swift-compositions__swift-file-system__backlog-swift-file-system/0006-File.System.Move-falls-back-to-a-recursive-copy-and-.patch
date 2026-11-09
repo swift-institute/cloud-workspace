@@ -1,0 +1,151 @@
+From 0eff976a7caf7021c89e05a6a7b9aae4ba075ef9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:40:21 +0000
+Subject: [PATCH 6/7] File.System.Move falls back to a recursive copy and
+ delete when a directory moves across volumes, instead of failing on the
+ file-only copy (swift-compositions/swift-file-system#22)
+
+---
+ .../File System Core/File.System.Move.swift   | 40 +++++++++++++++++--
+ .../File.System.Move Tests.swift              | 37 +++++++++++++++++
+ 2 files changed, 74 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/File System Core/File.System.Move.swift b/Sources/File System Core/File.System.Move.swift
+index 342384e..85c92f0 100644
+--- a/Sources/File System Core/File.System.Move.swift	
++++ b/Sources/File System Core/File.System.Move.swift	
+@@ -28,6 +28,8 @@ extension File.System.Move {
+         case copy(File.System.Copy.Error)
+ 
+         case cleanup(Kernel.File.Delete.Error)
++
++        case cleanupDirectory(File.System.Delete.Error)
+     }
+ }
+ 
+@@ -45,7 +47,7 @@ extension File.System.Move.Error {
+             if case .sourceNotFound = e { return true }
+             return false
+ 
+-        case .cleanup:
++        case .cleanup, .cleanupDirectory:
+             return false
+         }
+     }
+@@ -62,7 +64,7 @@ extension File.System.Move.Error {
+             if case .destinationExists = e { return true }
+             return false
+ 
+-        case .cleanup:
++        case .cleanup, .cleanupDirectory:
+             return false
+         }
+     }
+@@ -82,6 +84,9 @@ extension File.System.Move.Error {
+         case .cleanup(let e):
+             if case .permission = e { return true }
+             return false
++
++        case .cleanupDirectory(let e):
++            return e.isPermissionDenied
+         }
+     }
+ 
+@@ -138,12 +143,38 @@ extension File.System.Move {
+         }
+     }
+ 
+-    private static func copyAndDelete(
++    internal static func copyAndDelete(
+         from source: File.Path,
+         to destination: File.Path,
+         options: Options
+     ) throws(Self.Error) {
+ 
++        let isDirectory: Bool
++        do throws(Kernel.File.Stats.Error) {
++            isDirectory = try Kernel.File.Stats.lget(path: source.view).type == .directory
++        } catch {
++            isDirectory = false
++        }
++
++        if isDirectory {
++            let directoryOptions = File.System.Copy.Options(
++                overwrite: options.overwrite,
++                copyAttributes: true,
++                followSymlinks: false
++            )
++            do throws(File.System.Copy.Error) {
++                try File.System.Copy.recursive(from: source, to: destination, options: directoryOptions)
++            } catch {
++                throw .copy(error)
++            }
++            do throws(File.System.Delete.Error) {
++                try File.System.Delete.delete(at: source, recursive: true)
++            } catch {
++                throw .cleanupDirectory(error)
++            }
++            return
++        }
++
+         let copyOptions = File.System.Copy.Options(
+             overwrite: options.overwrite,
+             copyAttributes: true,
+@@ -179,6 +210,9 @@ extension File.System.Move.Error: CustomStringConvertible {
+ 
+         case .cleanup(let error):
+             return "Source cleanup failed after copy: \(error)"
++
++        case .cleanupDirectory(let error):
++            return "Source directory cleanup failed after copy: \(error)"
+         }
+     }
+ }
+diff --git a/Tests/File System Core Tests/File.System.Move Tests.swift b/Tests/File System Core Tests/File.System.Move Tests.swift
+index 49f7eb6..4955b2c 100644
+--- a/Tests/File System Core Tests/File.System.Move Tests.swift	
++++ b/Tests/File System Core Tests/File.System.Move Tests.swift	
+@@ -271,3 +271,40 @@ extension `File.System.Move Tests`.Test.Unit {
+         }
+     }
+ #endif
++
++extension `File.System.Move Tests`.Test.Integration {
++
++    @Test
++    func `Cross-volume fallback moves a directory with its contents`() throws {
++        try File.Directory.temporary { dir in
++            let sourcePath = dir.path / "source"
++            let destPath = dir.path / "dest"
++            try File.System.Create.Directory.create(at: sourcePath / "nested", createIntermediates: true)
++            let fileBytes = ([1, 2, 3] as [UInt8]).map(Byte.init(bitPattern:))
++            try File.System.Write.Atomic.write(fileBytes.span, to: sourcePath / "nested" / "file.bin")
++
++            try File.System.Move.copyAndDelete(from: sourcePath, to: destPath, options: .init())
++
++            #expect(!File.System.Stat.exists(at: sourcePath))
++            let movedData = try File.System.Read.Full.read(from: destPath / "nested" / "file.bin") {
++                $0.withUnsafeBytes { unsafe $0.map(Byte.init(bitPattern:)) }
++            }
++            #expect(movedData == fileBytes)
++        }
++    }
++
++    @Test
++    func `Cross-volume fallback refuses an existing directory destination without overwrite`() throws {
++        try File.Directory.temporary { dir in
++            let sourcePath = dir.path / "source"
++            let destPath = dir.path / "dest"
++            try File.System.Create.Directory.create(at: sourcePath)
++            try File.System.Create.Directory.create(at: destPath)
++
++            #expect(throws: File.System.Move.Error.self) {
++                try File.System.Move.copyAndDelete(from: sourcePath, to: destPath, options: .init())
++            }
++            #expect(File.System.Stat.exists(at: sourcePath))
++        }
++    }
++}
+-- 
+2.43.0
+

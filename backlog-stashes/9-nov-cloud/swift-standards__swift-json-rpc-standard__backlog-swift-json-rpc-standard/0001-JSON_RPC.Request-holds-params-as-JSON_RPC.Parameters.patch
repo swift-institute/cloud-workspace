@@ -1,0 +1,145 @@
+From 1dfea0bed1f236c48bff7eac76f97c383bfa9e5d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:30 +0000
+Subject: [PATCH] JSON_RPC.Request holds params as JSON_RPC.Parameters, an
+ array by position or an object by name, so every request it builds encodes to
+ one that decodes (swift-standards/swift-json-rpc-standard#1)
+
+---
+ README.md                                     |  2 +-
+ .../JSON_RPC.Parameters.swift                 | 27 +++++++++++++++++++
+ .../JSON RPC Standard/JSON_RPC.Request.swift  | 15 ++++++-----
+ .../JSON_RPC Tests.swift                      | 20 ++++++++++++--
+ 4 files changed, 55 insertions(+), 9 deletions(-)
+ create mode 100644 Sources/JSON RPC Standard/JSON_RPC.Parameters.swift
+
+diff --git a/README.md b/README.md
+index 5e4f8b0..b36629d 100644
+--- a/README.md
++++ b/README.md
+@@ -8,5 +8,5 @@ Use this package when you need to read a JSON-RPC 2.0 request or build a JSON-RP
+ - `JSON_RPC.Request.init(_:)` requires an object whose `jsonrpc` is exactly `2.0` and whose `method` is a string. `params`, if present, must be an array or an object, and `id`, if present, must be a string, a number or null. Any other shape throws a `JSON_RPC.Error` with `JSON_RPC.Error.Code.invalidRequest` and the message `Invalid Request`. Other members are ignored.
+ - A request without an `id` member is a notification. A request whose `id` is null is not: its id is `JSON_RPC.ID.null`.
+ - Encoding writes members in a fixed order: `jsonrpc`, `method`, `params`, `id` for a request, `jsonrpc`, `id`, then `result` or `error` for a response, and `code`, `message`, `data` for an error. A missing `params`, `id` or `data` is left out. A response always has an `id`, which is null for `JSON_RPC.ID.null`.
+-- A request decoded from its own value is equal to the original, as long as its `params` is an array, an object or absent. `JSON_RPC.Request.init(method:params:id:)` accepts any value, so a request built with other `params` encodes to a value that fails to decode.
++- A request decoded from its own value is equal to the original. Its `params` is a `JSON_RPC.Parameters`, which holds only an array (`byPosition`) or an object (`byName`).
+ - `JSON_RPC.Error.Code.isServerError` is true for the codes from -32099 to -32000, the range JSON-RPC leaves to the implementation. The predefined codes are outside it.
+diff --git a/Sources/JSON RPC Standard/JSON_RPC.Parameters.swift b/Sources/JSON RPC Standard/JSON_RPC.Parameters.swift
+new file mode 100644
+index 0000000..fad7205
+--- /dev/null
++++ b/Sources/JSON RPC Standard/JSON_RPC.Parameters.swift	
+@@ -0,0 +1,27 @@
++public import RFC_8259
++
++extension JSON_RPC {
++    /// The `params` of a request: an array of values by position, or an object of values by name.
++    public enum Parameters: Sendable, Hashable {
++        case byPosition(RFC_8259.Array)
++        case byName(RFC_8259.Object)
++    }
++}
++
++extension JSON_RPC.Parameters {
++    /// Fails unless `value` is an array or an object.
++    public init?(_ value: RFC_8259.Value) {
++        switch value {
++        case .array(let array): self = .byPosition(array)
++        case .object(let object): self = .byName(object)
++        default: return nil
++        }
++    }
++
++    public var value: RFC_8259.Value {
++        switch self {
++        case .byPosition(let array): .array(array)
++        case .byName(let object): .object(object)
++        }
++    }
++}
+diff --git a/Sources/JSON RPC Standard/JSON_RPC.Request.swift b/Sources/JSON RPC Standard/JSON_RPC.Request.swift
+index 7a2c639..36995ee 100644
+--- a/Sources/JSON RPC Standard/JSON_RPC.Request.swift	
++++ b/Sources/JSON RPC Standard/JSON_RPC.Request.swift	
+@@ -3,10 +3,10 @@ public import RFC_8259
+ extension JSON_RPC {
+     public struct Request: Sendable, Hashable {
+         public var method: String
+-        public var params: RFC_8259.Value?
++        public var params: JSON_RPC.Parameters?
+         public var id: JSON_RPC.ID?
+ 
+-        public init(method: String, params: RFC_8259.Value? = nil, id: JSON_RPC.ID?) {
++        public init(method: String, params: JSON_RPC.Parameters? = nil, id: JSON_RPC.ID?) {
+             self.method = method
+             self.params = params
+             self.id = id
+@@ -20,9 +20,12 @@ extension JSON_RPC.Request {
+             object["jsonrpc"]?.string == JSON_RPC.version,
+             let method = object["method"]?.string
+         else { throw JSON_RPC.Error(code: .invalidRequest, message: "Invalid Request") }
+-        let params = object["params"]
+-        if let params, params.array == nil, params.object == nil {
+-            throw JSON_RPC.Error(code: .invalidRequest, message: "Invalid Request")
++        var params: JSON_RPC.Parameters?
++        if let member = object["params"] {
++            guard let parsed = JSON_RPC.Parameters(member) else {
++                throw JSON_RPC.Error(code: .invalidRequest, message: "Invalid Request")
++            }
++            params = parsed
+         }
+         var id: JSON_RPC.ID?
+         if let member = object["id"] {
+@@ -40,7 +43,7 @@ extension JSON_RPC.Request {
+         var members: [(key: String, value: RFC_8259.Value)] = [
+             ("jsonrpc", .string(JSON_RPC.version)), ("method", .string(method)),
+         ]
+-        if let params { members.append(("params", params)) }
++        if let params { members.append(("params", params.value)) }
+         if let id { members.append(("id", id.value)) }
+         return .object(RFC_8259.Object(members))
+     }
+diff --git a/Tests/JSON RPC Standard Tests/JSON_RPC Tests.swift b/Tests/JSON RPC Standard Tests/JSON_RPC Tests.swift
+index a4a35d9..9966594 100644
+--- a/Tests/JSON RPC Standard Tests/JSON_RPC Tests.swift	
++++ b/Tests/JSON RPC Standard Tests/JSON_RPC Tests.swift	
+@@ -11,7 +11,7 @@ struct `JSON_RPC Tests` {
+             "jsonrpc": "2.0", "id": 1, "method": "subtract", "params": [42, 23],
+         ])
+         #expect(request.method == "subtract")
+-        #expect(request.params == [42, 23])
++        #expect(request.params == .byPosition(RFC_8259.Array([42, 23])))
+         #expect(request.id == .number(RFC_8259.Number(1)))
+         #expect(!request.isNotification)
+     }
+@@ -40,10 +40,26 @@ struct `JSON_RPC Tests` {
+ 
+     @Test
+     func `a request round-trips through its value`() throws {
+-        let request = JSON_RPC.Request(method: "sum", params: ["a": 1], id: .string("x"))
++        let request = JSON_RPC.Request(method: "sum", params: .byName(["a": 1]), id: .string("x"))
+         #expect(try JSON_RPC.Request(request.value) == request)
+     }
+ 
++    @Test
++    func `a request with positional params round-trips through its value`() throws {
++        let request = JSON_RPC.Request(
++            method: "subtract",
++            params: .byPosition(RFC_8259.Array([42, 23])),
++            id: .number(RFC_8259.Number(1))
++        )
++        #expect(request.value == ["jsonrpc": "2.0", "method": "subtract", "params": [42, 23], "id": 1])
++        #expect(try JSON_RPC.Request(request.value) == request)
++    }
++
++    @Test(arguments: [RFC_8259.Value.null, "bar", 1, true])
++    func `params that are neither an array nor an object are not parameters`(value: RFC_8259.Value) {
++        #expect(JSON_RPC.Parameters(value) == nil)
++    }
++
+     @Test
+     func `a success response carries the result`() {
+         let response = JSON_RPC.Response(id: .string("x"), result: .success(19))
+-- 
+2.43.0
+

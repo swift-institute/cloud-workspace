@@ -1,0 +1,94 @@
+From 5056727c4667b001a74b980c69d4edd5e8b64732 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:43 +0000
+Subject: [PATCH] POSIX.Kernel.File.Flush.directory(path:) reports each path
+ resolution error with its own errno instead of rewriting every one to ENOENT
+ (swift-compositions/swift-posix#18)
+
+---
+ .../POSIX.Kernel.File.Flush.swift             | 14 +++++-
+ .../POSIX.Kernel.File.Flush Tests.swift       | 47 +++++++++++++++++++
+ 2 files changed, 60 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/POSIX Kernel Tests/POSIX.Kernel.File.Flush Tests.swift
+
+diff --git a/Sources/POSIX Kernel File/POSIX.Kernel.File.Flush.swift b/Sources/POSIX Kernel File/POSIX.Kernel.File.Flush.swift
+index aad01fe..63f0f5e 100644
+--- a/Sources/POSIX Kernel File/POSIX.Kernel.File.Flush.swift	
++++ b/Sources/POSIX Kernel File/POSIX.Kernel.File.Flush.swift	
+@@ -41,7 +41,19 @@ extension POSIX.Kernel.File.Flush {
+ 
+             switch error {
+             case .handle(let e): throw .handle(e)
+-            case .path: throw .platform(Error::Error(code: .ENOENT))
++            case .path(let e):
++                let code: Error::Error.Code
++                switch e {
++                case .notFound: code = .ENOENT
++                case .exists: code = .EEXIST
++                case .isDirectory: code = .EISDIR
++                case .notDirectory: code = .ENOTDIR
++                case .notEmpty: code = .ENOTEMPTY
++                case .loop: code = .ELOOP
++                case .crossDevice: code = .EXDEV
++                case .nameTooLong: code = .ENAMETOOLONG
++                }
++                throw .platform(Error::Error(code: code))
+             case .platform(let e): throw .platform(e)
+             }
+         }
+diff --git a/Tests/POSIX Kernel Tests/POSIX.Kernel.File.Flush Tests.swift b/Tests/POSIX Kernel Tests/POSIX.Kernel.File.Flush Tests.swift
+new file mode 100644
+index 0000000..c879424
+--- /dev/null
++++ b/Tests/POSIX Kernel Tests/POSIX.Kernel.File.Flush Tests.swift	
+@@ -0,0 +1,47 @@
++#if !os(Windows)
++
++    import Testing
++
++    import POSIX_Test_Support
++    @testable import POSIX_Kernel
++
++    #if canImport(Darwin)
++        import Darwin
++    #elseif canImport(Glibc)
++        import Glibc
++    #endif
++
++    extension POSIX.Kernel.File.Flush {
++        enum Test {
++            @Suite struct `Edge Case` {}
++        }
++    }
++
++    extension POSIX.Kernel.File.Flush.Test.`Edge Case` {
++        @Test
++        func `directory flush below a regular file reports ENOTDIR instead of ENOENT`() throws {
++            var templateBytes = Array("/tmp/flush-test-XXXXXX".utf8CString)
++            let fd = mkstemp(&templateBytes)
++            try #require(fd >= 0)
++            close(fd)
++            let file = Swift.String(cString: templateBytes)
++            defer { unlink(file) }
++
++            let path = makePath(file + "/child")
++            let error = #expect(throws: POSIX.Kernel.File.Flush.Error.self) {
++                try POSIX.Kernel.File.Flush.directory(path: path.view)
++            }
++            #expect(error?.code == .ENOTDIR)
++        }
++
++        @Test
++        func `directory flush of a missing path reports ENOENT`() throws {
++            let path = makePath("/tmp/flush-test-missing-\(getpid())/child")
++            let error = #expect(throws: POSIX.Kernel.File.Flush.Error.self) {
++                try POSIX.Kernel.File.Flush.directory(path: path.view)
++            }
++            #expect(error?.code == .ENOENT)
++        }
++    }
++
++#endif
+-- 
+2.43.0
+

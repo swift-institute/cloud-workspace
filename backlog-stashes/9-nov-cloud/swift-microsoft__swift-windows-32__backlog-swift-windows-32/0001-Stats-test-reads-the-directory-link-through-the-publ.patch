@@ -1,0 +1,56 @@
+From 01bbafab8396776857d53c5c3cd088445c211f03 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:23 +0000
+Subject: [PATCH 1/2] Stats test reads the directory link through the public
+ lget and get on a borrowed path instead of the internal _get
+ (swift-microsoft/swift-windows-32#30)
+
+---
+ .../Windows.Kernel.File.Stats Tests.swift     | 21 ++++++++-----------
+ 1 file changed, 9 insertions(+), 12 deletions(-)
+
+diff --git a/Tests/Windows 32 Kernel Tests/Windows.Kernel.File.Stats Tests.swift b/Tests/Windows 32 Kernel Tests/Windows.Kernel.File.Stats Tests.swift
+index e8ddece..fd247b7 100644
+--- a/Tests/Windows 32 Kernel Tests/Windows.Kernel.File.Stats Tests.swift	
++++ b/Tests/Windows 32 Kernel Tests/Windows.Kernel.File.Stats Tests.swift	
+@@ -3,6 +3,7 @@
+     import Testing
+ 
+     @testable import Windows_32_Kernel
++    import Path
+ 
+     extension Windows.`32`.Kernel.File.Stats {
+         enum Test {
+@@ -41,21 +42,17 @@
+             }
+             defer { _ = link.withUnsafeBufferPointer { RemoveDirectoryW($0.baseAddress) } }
+ 
+-            let unfollowed = try link.withUnsafeBufferPointer { linkPointer in
+-                try Windows.`32`.Kernel.File.Stats._get(
+-                    unsafePath: linkPointer.baseAddress!,
+-                    followSymlinks: false
+-                )
++            let unfollowed = try link.withUnsafeBufferPointer { buffer in
++                let path = unsafe Path.Borrowed(buffer.baseAddress!, count: buffer.count - 1)
++                return try Windows.`32`.Kernel.File.Stats.lget(path: path)
+             }
+-            let followed = try link.withUnsafeBufferPointer { linkPointer in
+-                try Windows.`32`.Kernel.File.Stats._get(
+-                    unsafePath: linkPointer.baseAddress!,
+-                    followSymlinks: true
+-                )
++            let followed = try link.withUnsafeBufferPointer { buffer in
++                let path = unsafe Path.Borrowed(buffer.baseAddress!, count: buffer.count - 1)
++                return try Windows.`32`.Kernel.File.Stats.get(path: path)
+             }
+ 
+-            #expect(unfollowed.type == .link(.symbolic))
+-            #expect(followed.type == .directory)
++            #expect(unfollowed.type == Windows.`32`.Kernel.File.Stats.Kind.link(.symbolic))
++            #expect(followed.type == Windows.`32`.Kernel.File.Stats.Kind.directory)
+         }
+     }
+ 
+-- 
+2.43.0
+

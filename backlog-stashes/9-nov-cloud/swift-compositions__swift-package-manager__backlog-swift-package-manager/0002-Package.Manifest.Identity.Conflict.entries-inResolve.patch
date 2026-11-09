@@ -1,0 +1,115 @@
+From fd0d14552ad36c30277c3ecaa9a096a8bac46370 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:05 +0000
+Subject: [PATCH 2/4] 
+ Package.Manifest.Identity.Conflict.entries(inResolved:document:) throws for a
+ corrupt Package.resolved instead of reading it as conflict-free, and reads
+ the version 1 layout (swift-compositions/swift-package-manager#15)
+
+---
+ ...age.Manifest.Identity.Conflict.Error.swift |  9 +++++++
+ .../Package.Manifest.Identity.Conflict.swift  | 21 +++++++++++-----
+ ...age.Manifest.Identity.Conflict Tests.swift | 25 +++++++++++++++++--
+ 3 files changed, 47 insertions(+), 8 deletions(-)
+ create mode 100644 Sources/Package Manager/Package.Manifest.Identity.Conflict.Error.swift
+
+diff --git a/Sources/Package Manager/Package.Manifest.Identity.Conflict.Error.swift b/Sources/Package Manager/Package.Manifest.Identity.Conflict.Error.swift
+new file mode 100644
+index 0000000..d2bf02d
+--- /dev/null
++++ b/Sources/Package Manager/Package.Manifest.Identity.Conflict.Error.swift	
+@@ -0,0 +1,9 @@
++extension Package.Manifest.Identity.Conflict {
++
++    public enum Error: Swift.Error, Swift.Sendable, Swift.Equatable {
++
++        /// The resolved file is not JSON, or has no `pins` array in either
++        /// the version 1 (`object.pins`) or later (`pins`) layout.
++        case resolved(document: Swift.String)
++    }
++}
+diff --git a/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift b/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift
+index cca794e..3e25150 100644
+--- a/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift	
++++ b/Sources/Package Manager/Package.Manifest.Identity.Conflict.swift	
+@@ -71,18 +71,27 @@ extension Package.Manifest.Identity.Conflict {
+     public static func entries(
+         inResolved source: Swift.String,
+         document: Swift.String = "Package.resolved"
+-    ) -> [Entry] {
++    ) throws(Error) -> [Entry] {
+         let json: JSON
+         do throws(JSON.Error) {
+             json = try JSON.parse(source)
+         } catch {
+-            return []
++            throw .resolved(document: document)
++        }
++        if let pins = json["pins"].array {
++            return pins.compactMap { pin in
++                Package.Manifest.Dependency.Location(Swift.String(pin["location"])).map {
++                    Entry(url: $0, document: document, source: .pin)
++                }
++            }
+         }
+-        guard let pins = json["pins"].array else { return [] }
+-        return pins.compactMap { pin in
+-            Package.Manifest.Dependency.Location(Swift.String(pin["location"])).map {
+-                Entry(url: $0, document: document, source: .pin)
++        if let pins = json["object"]["pins"].array {
++            return pins.compactMap { pin in
++                Package.Manifest.Dependency.Location(Swift.String(pin["repositoryURL"])).map {
++                    Entry(url: $0, document: document, source: .pin)
++                }
+             }
+         }
++        throw .resolved(document: document)
+     }
+ }
+diff --git a/Tests/Package Manager Tests/Package.Manifest.Identity.Conflict Tests.swift b/Tests/Package Manager Tests/Package.Manifest.Identity.Conflict Tests.swift
+index 0603403..825c2c9 100644
+--- a/Tests/Package Manager Tests/Package.Manifest.Identity.Conflict Tests.swift	
++++ b/Tests/Package Manager Tests/Package.Manifest.Identity.Conflict Tests.swift	
+@@ -52,11 +52,11 @@ extension `Package.Manifest.Identity.Conflict Tests`.Test.Unit {
+     }
+ 
+     @Test
+-    func `resolved locations are extracted by the package manager owner`() {
++    func `resolved locations are extracted by the package manager owner`() throws {
+         let resolved =
+             #"{"pins":[{"identity":"swift-rfc-7578","location":"https://github.com/swift-standards/swift-rfc-7578.git","state":{"revision":"abc","version":"1.0.0"}}],"version":2}"#
+ 
+-        let entries = Package.Manifest.Identity.Conflict.entries(inResolved: resolved)
++        let entries = try Package.Manifest.Identity.Conflict.entries(inResolved: resolved)
+ 
+         #expect(entries.count == 1)
+         #expect(entries.first?.identity == "swift-rfc-7578")
+@@ -117,4 +117,25 @@ extension `Package.Manifest.Identity.Conflict Tests`.Test.`Edge Case` {
+         #expect(entries.count == 1)
+         #expect(Package.Manifest.Identity.Conflict.findings(in: entries).isEmpty)
+     }
++
++    @Test
++    func `a corrupt resolved file throws instead of reading as conflict-free`() {
++        #expect(throws: Package.Manifest.Identity.Conflict.Error.resolved(document: "Package.resolved")) {
++            try Package.Manifest.Identity.Conflict.entries(inResolved: #"{"pins":[{"#)
++        }
++        #expect(throws: Package.Manifest.Identity.Conflict.Error.resolved(document: "Package.resolved")) {
++            try Package.Manifest.Identity.Conflict.entries(inResolved: #"{"version":2}"#)
++        }
++    }
++
++    @Test
++    func `version 1 resolved locations are extracted`() throws {
++        let resolved =
++            #"{"object":{"pins":[{"package":"swift-rfc-7578","repositoryURL":"https://github.com/swift-standards/swift-rfc-7578.git","state":{"branch":null,"revision":"abc","version":"1.0.0"}}]},"version":1}"#
++
++        let entries = try Package.Manifest.Identity.Conflict.entries(inResolved: resolved)
++
++        #expect(entries.count == 1)
++        #expect(entries.first?.identity == "swift-rfc-7578")
++    }
+ }
+-- 
+2.43.0
+

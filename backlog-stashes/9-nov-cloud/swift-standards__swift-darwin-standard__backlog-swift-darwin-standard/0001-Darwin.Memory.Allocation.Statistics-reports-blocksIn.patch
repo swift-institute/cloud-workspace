@@ -1,0 +1,120 @@
+From 1b327727348a409351c63f6b1cc2e44aa5d2778c Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:14 +0000
+Subject: [PATCH] Darwin.Memory.Allocation.Statistics reports blocksInUse and
+ bytesInUse, the malloc zone snapshot it captures, instead of a deallocation
+ count that was always zero (swift-standards/swift-darwin-standard#10)
+
+---
+ Package.swift                                 |  7 ++++
+ .../Darwin.Memory.Allocation.Statistics.swift | 22 ++++++------
+ ...n.Memory.Allocation.Statistics Tests.swift | 35 +++++++++++++++++++
+ 3 files changed, 53 insertions(+), 11 deletions(-)
+ create mode 100644 Tests/Darwin Memory Standard Tests/Darwin.Memory.Allocation.Statistics Tests.swift
+
+diff --git a/Package.swift b/Package.swift
+index 6fc0d63..c4c4723 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -207,6 +207,13 @@ let package = Package(
+                 .product(name: "ISO 9945 Kernel System", package: "swift-iso-9945"),
+             ]
+         ),
++        .testTarget(
++            name: "Darwin Memory Standard Tests",
++            dependencies: [
++                .target(name: "Darwin Memory Standard"),
++                .target(name: "Darwin Standard Core"),
++            ]
++        ),
+         .testTarget(
+             name: "Darwin Metadata Standard Tests",
+             dependencies: [
+diff --git a/Sources/Darwin Memory Standard/Darwin.Memory.Allocation.Statistics.swift b/Sources/Darwin Memory Standard/Darwin.Memory.Allocation.Statistics.swift
+index ff24c1b..2002c1c 100644
+--- a/Sources/Darwin Memory Standard/Darwin.Memory.Allocation.Statistics.swift	
++++ b/Sources/Darwin Memory Standard/Darwin.Memory.Allocation.Statistics.swift	
+@@ -5,18 +5,19 @@
+ 
+     extension Darwin_Standard_Core::Darwin.Memory.Allocation {
+ 
++        /// A snapshot of the default malloc zone: what is in use at the moment of capture,
++        /// not running counts of allocations and deallocations.
+         public struct Statistics: Sendable, Equatable {
+ 
+-            public let allocations: Int
++            /// The number of heap blocks in use.
++            public let blocksInUse: Int
+ 
+-            public let deallocations: Int
++            /// The number of bytes in use by those blocks.
++            public let bytesInUse: Int
+ 
+-            public let bytesAllocated: Int
+-
+-            public init(allocations: Int = 0, deallocations: Int = 0, bytesAllocated: Int = 0) {
+-                self.allocations = allocations
+-                self.deallocations = deallocations
+-                self.bytesAllocated = bytesAllocated
++            public init(blocksInUse: Int = 0, bytesInUse: Int = 0) {
++                self.blocksInUse = blocksInUse
++                self.bytesInUse = bytesInUse
+             }
+         }
+     }
+@@ -28,9 +29,8 @@
+             unsafe darwin_malloc_zone_statistics(&stats)
+ 
+             return Self(
+-                allocations: Int(stats.blocks_in_use),
+-                deallocations: 0,
+-                bytesAllocated: Int(stats.size_in_use)
++                blocksInUse: Int(stats.blocks_in_use),
++                bytesInUse: Int(stats.size_in_use)
+             )
+         }
+     }
+diff --git a/Tests/Darwin Memory Standard Tests/Darwin.Memory.Allocation.Statistics Tests.swift b/Tests/Darwin Memory Standard Tests/Darwin.Memory.Allocation.Statistics Tests.swift
+new file mode 100644
+index 0000000..c963b88
+--- /dev/null
++++ b/Tests/Darwin Memory Standard Tests/Darwin.Memory.Allocation.Statistics Tests.swift	
+@@ -0,0 +1,35 @@
++#if canImport(Darwin)
++
++    import Darwin_Memory_Standard
++    import Darwin_Standard_Core
++    import Testing
++
++    enum `Darwin.Memory.Allocation.Statistics Tests` {}
++
++    extension `Darwin.Memory.Allocation.Statistics Tests` {
++        @Suite
++        struct Test {
++            @Suite struct Unit {}
++        }
++    }
++
++    extension `Darwin.Memory.Allocation.Statistics Tests`.Test.Unit {
++        @Test
++        func `capture reports the blocks and bytes in use`() {
++            let snapshot = Darwin.Memory.Allocation.Statistics.capture()
++            #expect(snapshot.blocksInUse > 0)
++            #expect(snapshot.bytesInUse >= snapshot.blocksInUse)
++        }
++
++        @Test
++        func `bytes in use grow while an allocation is held`() {
++            let before = Darwin.Memory.Allocation.Statistics.capture()
++            let held = [UInt8](repeating: 1, count: 1 << 20)
++            let during = Darwin.Memory.Allocation.Statistics.capture()
++            withExtendedLifetime(held) {
++                #expect(during.bytesInUse > before.bytesInUse)
++            }
++        }
++    }
++
++#endif
+-- 
+2.43.0
+

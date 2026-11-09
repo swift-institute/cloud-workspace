@@ -1,0 +1,143 @@
+From 0eb09909fe72aacec16ea1cfc7cf2a63dc67a026 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:55 +0000
+Subject: [PATCH 2/3] Kernel.Thread.Executor.Stealing workers keep jobs that do
+ not fit their 1024-slot deque in an overflow queue instead of dropping them
+ (swift-compositions/swift-executors#15)
+
+---
+ ...rnel.Thread.Executor.Stealing.Worker.swift | 14 +++---
+ ...ernel.Thread.Executor.Stealing Tests.swift | 43 +++++++++++++++++++
+ 2 files changed, 52 insertions(+), 5 deletions(-)
+
+diff --git a/Sources/Executors/Kernel.Thread.Executor.Stealing.Worker.swift b/Sources/Executors/Kernel.Thread.Executor.Stealing.Worker.swift
+index 5ac6d92..1555f2a 100644
+--- a/Sources/Executors/Kernel.Thread.Executor.Stealing.Worker.swift
++++ b/Sources/Executors/Kernel.Thread.Executor.Stealing.Worker.swift
+@@ -6,6 +6,7 @@ extension Kernel.Thread.Executor.Stealing {
+     package final class Worker: @unsafe @unchecked Sendable {
+         let id: Index<Kernel.Thread>
+         private var deque: Executor::Executor.Job.Deque
++        private var overflow: Executor::Executor.Job.Queue
+ 
+         internal let wait: Executor.Wait.Condvar
+ 
+@@ -17,6 +18,7 @@ extension Kernel.Thread.Executor.Stealing {
+         init(id: Index<Kernel.Thread>) {
+             self.id = id
+             self.deque = .init(capacity: 1024)
++            self.overflow = .init()
+             self.wait = .init()
+             self.loopExited = false
+ 
+@@ -58,7 +60,9 @@ extension Kernel.Thread.Executor.Stealing.Worker {
+     func enqueue(_ job: UnownedJob) -> Bool {
+         let accepted: Bool = wait.withLock {
+             guard !loopExited else { return false }
+-            _ = deque.push(job)
++            if !deque.push(job) {
++                overflow.enqueue(job)
++            }
+             return true
+         }
+         if accepted { wait.wake() }
+@@ -66,7 +70,7 @@ extension Kernel.Thread.Executor.Stealing.Worker {
+     }
+ 
+     fileprivate func trySteal() -> UnownedJob? {
+-        wait.withLock { deque.steal() }
++        wait.withLock { deque.steal() ?? overflow.dequeue() }
+     }
+ }
+ 
+@@ -74,7 +78,7 @@ extension Kernel.Thread.Executor.Stealing.Worker {
+     private func runLoop(pool: Kernel.Thread.Executor.Stealing) {
+         while !pool._shutdown.isSet {
+ 
+-            if let job = wait.withLock({ deque.take() }) {
++            if let job = wait.withLock({ deque.take() ?? overflow.dequeue() }) {
+                 unsafe Kernel.Thread.Executor.runJob(
+                     job,
+                     onTask: pool.asUnownedTaskExecutor(),
+@@ -110,7 +114,7 @@ extension Kernel.Thread.Executor.Stealing.Worker {
+             }
+ 
+             wait.withLock {
+-                if !pool._shutdown.isSet && deque.isEmpty {
++                if !pool._shutdown.isSet && deque.isEmpty && overflow.isEmpty {
+                     wait.wait()
+                 }
+             }
+@@ -118,7 +122,7 @@ extension Kernel.Thread.Executor.Stealing.Worker {
+ 
+         while true {
+             let job: UnownedJob? = wait.withLock {
+-                if let job = deque.take() { return job }
++                if let job = deque.take() ?? overflow.dequeue() { return job }
+                 loopExited = true
+                 return nil
+             }
+diff --git a/Tests/Executor Tests/Kernel.Thread.Executor.Stealing Tests.swift b/Tests/Executor Tests/Kernel.Thread.Executor.Stealing Tests.swift
+index b8bae3e..bfb833d 100644
+--- a/Tests/Executor Tests/Kernel.Thread.Executor.Stealing Tests.swift	
++++ b/Tests/Executor Tests/Kernel.Thread.Executor.Stealing Tests.swift	
+@@ -17,6 +17,12 @@ private final class OneShot: Sendable {
+     }
+ }
+ 
++private final class Backlog: Sendable {
++    let started = Atomic<Bool>(false)
++    let released = Atomic<Bool>(false)
++    let completed = Atomic<Int>(0)
++}
++
+ private func withDeadline<T: Sendable>(
+     _ deadline: Duration = .seconds(15),
+     _ operation: @escaping @Sendable () async -> T
+@@ -52,6 +58,43 @@ extension Kernel.Thread.Executor.Stealing.Test.Unit {
+         #expect(result == 42)
+     }
+ 
++    @Test(.timeLimit(.minutes(2)))
++    func `more jobs than a worker deque holds all run`() async {
++        let pool = Kernel.Thread.Executor.Stealing(.init(count: 1))
++        let backlog = Backlog()
++        let blocker = Task(executorPreference: pool) {
++            backlog.started.store(true, ordering: .releasing)
++            while !backlog.released.load(ordering: .acquiring) {}
++        }
++        while !backlog.started.load(ordering: .acquiring) {
++            await Task.yield()
++        }
++
++        let tasks = (0..<2048).map { _ in
++            Task(executorPreference: pool) {
++                _ = backlog.completed.add(1, ordering: .relaxed)
++            }
++        }
++        backlog.released.store(true, ordering: .releasing)
++
++        let completed = await withDeadline {
++            await blocker.value
++            for task in tasks {
++                await task.value
++            }
++            return backlog.completed.load(ordering: .relaxed)
++        }
++        #expect(completed == 2048)
++        pool.shutdown()
++    }
++
++    @Test
++    func `second shutdown does nothing`() {
++        let pool = Kernel.Thread.Executor.Stealing(.init(count: 2))
++        pool.shutdown()
++        pool.shutdown()
++    }
++
+     @Test
+     func `priorityTracking defaults to false`() {
+         let options = Kernel.Thread.Executor.Stealing.Options(count: 2)
+-- 
+2.43.0
+

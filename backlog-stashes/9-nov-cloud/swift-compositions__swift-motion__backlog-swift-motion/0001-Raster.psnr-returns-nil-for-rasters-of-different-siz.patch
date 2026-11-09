@@ -1,0 +1,129 @@
+From 75da7707c938d5eaba63689f1ff9b7c1cb5f9831 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:38:19 +0000
+Subject: [PATCH] Raster.psnr returns nil for rasters of different sizes
+ instead of trapping, and Render.check reports such a frame as resized
+ (swift-compositions/swift-motion#1)
+
+---
+ Sources/Motion/Raster.swift           |  7 ++++---
+ Sources/Motion/Render.Verdict.swift   |  2 ++
+ Sources/Motion/Render.swift           |  6 ++++--
+ Tests/Motion Tests/Raster Tests.swift | 12 ++++++++++--
+ Tests/Motion Tests/Render Tests.swift | 14 ++++++++++++--
+ 5 files changed, 32 insertions(+), 9 deletions(-)
+
+diff --git a/Sources/Motion/Raster.swift b/Sources/Motion/Raster.swift
+index 4bb6a05..8db19d0 100644
+--- a/Sources/Motion/Raster.swift
++++ b/Sources/Motion/Raster.swift
+@@ -66,9 +66,10 @@ extension Raster: Equatable {
+ }
+ 
+ extension Raster {
+-    /// Peak signal-to-noise ratio in dB over the colour channels, alpha aside; equal pictures give +∞.
+-    public static func psnr(_ a: Self, _ b: Self) -> Double {
+-        precondition(a.width == b.width && a.height == b.height, "PSNR compares pictures of one size")
++    /// Peak signal-to-noise ratio in dB over the colour channels, alpha aside; equal pictures give +∞,
++    /// and pictures of different sizes, which PSNR cannot compare, give `nil`.
++    public static func psnr(_ a: Self, _ b: Self) -> Double? {
++        guard a.width == b.width && a.height == b.height else { return nil }
+         var sum = 0.0
+         (0..<a.height).forEach { y in
+             for (k, (p, q)) in zip(a.row(y), b.row(y)).enumerated() where k % 4 != 3 {
+diff --git a/Sources/Motion/Render.Verdict.swift b/Sources/Motion/Render.Verdict.swift
+index a19bb11..e075f9f 100644
+--- a/Sources/Motion/Render.Verdict.swift
++++ b/Sources/Motion/Render.Verdict.swift
+@@ -2,5 +2,7 @@ extension Render {
+     public enum Verdict: Hashable, Sendable {
+         case deterministic
+         case varies(frame: Int, psnr: Double)
++        /// The frame rendered twice at different sizes, so no PSNR compares the two.
++        case resized(frame: Int)
+     }
+ }
+diff --git a/Sources/Motion/Render.swift b/Sources/Motion/Render.swift
+index 28d6584..0c8da72 100644
+--- a/Sources/Motion/Render.swift
++++ b/Sources/Motion/Render.swift
+@@ -2,11 +2,13 @@
+ public enum Render {}
+ 
+ extension Render {
+-    /// Renders each frame twice and reports the first that differs, with its PSNR.
++    /// Renders each frame twice and reports the first that differs, with its PSNR, or that its size changed.
+     public static func check(_ frames: some Swift.Sequence<Int>, render: (Int) -> Raster) -> Verdict {
+         for frame in frames {
+             let (first, second) = (render(frame), render(frame))
+-            if first != second { return .varies(frame: frame, psnr: Raster.psnr(first, second)) }
++            guard first != second else { continue }
++            guard let psnr = Raster.psnr(first, second) else { return .resized(frame: frame) }
++            return .varies(frame: frame, psnr: psnr)
+         }
+         return .deterministic
+     }
+diff --git a/Tests/Motion Tests/Raster Tests.swift b/Tests/Motion Tests/Raster Tests.swift
+index 500b949..8df2870 100644
+--- a/Tests/Motion Tests/Raster Tests.swift	
++++ b/Tests/Motion Tests/Raster Tests.swift	
+@@ -7,7 +7,7 @@ import Testing
+         let padded = try Raster(width: 1, height: 2, stride: 8, bytes: [10, 20, 30, 255, 9, 9, 9, 9, 0, 0, 0, 0, 7, 7, 7, 7])
+         #expect(tight == padded)
+         #expect(padded.packed == tight.bytes)
+-        #expect(Raster.psnr(tight, padded) == .infinity)
++        #expect(Raster.psnr(tight, padded) == Double.infinity)
+     }
+ 
+     @Test func `a raster refuses a colour brighter than its alpha, or the wrong size`() {
+@@ -30,6 +30,14 @@ import Testing
+         let a = try Raster(width: 1920, height: 1080, bytes: bytes)
+         bytes[0] = 254
+         let b = try Raster(width: 1920, height: 1080, bytes: bytes)
+-        #expect(abs(Raster.psnr(a, b) - 116.07) < 0.01, "\(Raster.psnr(a, b))")
++        let psnr = try #require(Raster.psnr(a, b))
++        #expect(abs(psnr - 116.07) < 0.01, "\(psnr)")
++    }
++
++    @Test func `PSNR of rasters of different sizes is nil, not a trap`() throws {
++        let one = try Raster(width: 1, height: 1, bytes: [0, 0, 0, 255])
++        let two = try Raster(width: 2, height: 1, bytes: [0, 0, 0, 255, 0, 0, 0, 255])
++        #expect(Raster.psnr(one, two) == nil)
++        #expect(Raster.psnr(one, one.top(0)) == nil)
+     }
+ }
+diff --git a/Tests/Motion Tests/Render Tests.swift b/Tests/Motion Tests/Render Tests.swift
+index 3cf61be..72aed0e 100644
+--- a/Tests/Motion Tests/Render Tests.swift	
++++ b/Tests/Motion Tests/Render Tests.swift	
+@@ -10,7 +10,7 @@ import Testing
+         try! Raster(width: 1, height: 1, bytes: [red, 0, 0, 255])
+     }
+ 
+-    @Test func `the render contract catches a renderer that remembers the previous frame`() {
++    @Test func `the render contract catches a renderer that remembers the previous frame`() throws {
+         let memory = Memory()
+         let honest = Render.check(0..<3) { frame in Self.pixel(UInt8(frame)) }
+         let remembering = Render.check(0..<3) { _ in
+@@ -18,7 +18,17 @@ import Testing
+             return Self.pixel(UInt8(memory.count))
+         }
+         #expect(honest == .deterministic)
+-        #expect(remembering == .varies(frame: 0, psnr: Raster.psnr(Self.pixel(1), Self.pixel(2))))
++        let psnr = try #require(Raster.psnr(Self.pixel(1), Self.pixel(2)))
++        #expect(remembering == .varies(frame: 0, psnr: psnr))
++    }
++
++    @Test func `the render contract reports a frame whose size changes between renders`() {
++        let memory = Memory()
++        let resizing = Render.check(0..<3) { _ in
++            memory.count += 1
++            return memory.count == 1 ? Self.pixel(0) : Self.pixel(0).top(0)
++        }
++        #expect(resizing == .resized(frame: 0))
+     }
+ 
+     @Test func `frames that finish out of order are delivered in order, each as soon as it can be`() {
+-- 
+2.43.0
+

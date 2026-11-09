@@ -1,0 +1,161 @@
+From de587df3fd0c642846fbf07637e98407469562d7 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:35 +0000
+Subject: [PATCH 2/2] Manifest.Resolver reports a parent directive with an
+ unsupported scheme or an unparseable URI as invalidParent instead of treating
+ it as no parent (swift-compositions/swift-manifests#11)
+
+---
+ .../Manifest.Resolver.Error.swift             |  3 ++
+ .../Manifest Resolver/Manifest.Resolver.swift | 31 ++++--------
+ .../Manifest.Resolver Tests.swift             | 50 +++++++++++++++++++
+ 3 files changed, 63 insertions(+), 21 deletions(-)
+
+diff --git a/Sources/Manifest Resolver/Manifest.Resolver.Error.swift b/Sources/Manifest Resolver/Manifest.Resolver.Error.swift
+index 6cef16a..d5bf15a 100644
+--- a/Sources/Manifest Resolver/Manifest.Resolver.Error.swift	
++++ b/Sources/Manifest Resolver/Manifest.Resolver.Error.swift	
+@@ -12,5 +12,8 @@ extension Manifest.Resolver {
+         case parentChainTooDeep(depth: Swift.Int)
+ 
+         case consumerLoadFailed(Manifest.Error)
++
++        /// A `// parent:` directive whose value has an unsupported scheme or does not parse as a URI.
++        case invalidParent(directive: Swift.String, reason: Swift.String)
+     }
+ }
+diff --git a/Sources/Manifest Resolver/Manifest.Resolver.swift b/Sources/Manifest Resolver/Manifest.Resolver.swift
+index d6e5d6c..4662af9 100644
+--- a/Sources/Manifest Resolver/Manifest.Resolver.swift	
++++ b/Sources/Manifest Resolver/Manifest.Resolver.swift	
+@@ -17,7 +17,7 @@ extension Manifest.Resolver {
+         filename: File.Path.Component,
+         dependencies: [Manifest.Dependency]
+     ) throws(Manifest.Resolver<M, C>.Error) -> [M] {
+-        guard let firstParentURI = parseParent(in: consumerSource) else {
++        guard let firstParentURI = try parseParent(in: consumerSource) else {
+             return []
+         }
+         return try walk(
+@@ -56,7 +56,7 @@ extension Manifest.Resolver {
+             throw .consumerLoadFailed(error)
+         }
+ 
+-        guard let firstParentURI = parseParent(in: consumerSource) else {
++        guard let firstParentURI = try parseParent(in: consumerSource) else {
+             return buildConfiguration(consumerManifest, nil)
+         }
+ 
+@@ -94,22 +94,24 @@ extension Manifest.Resolver {
+     }
+ 
+     @inline(__always)
+-    private static func parseParent(
++    internal static func parseParent(
+         in source: Swift.String
+-    ) -> URI? {
++    ) throws(Manifest.Resolver<M, C>.Error) -> URI? {
+         guard let urlBytes = Manifest.Parent.scan(in: source) else {
+             return nil
+         }
++        let urlString = Swift.String(decoding: urlBytes, as: UTF8.self)
+         guard
+             urlBytes.starts(with: schemePrefixHTTP)
+                 || urlBytes.starts(with: schemePrefixHTTPS)
+                 || urlBytes.starts(with: schemePrefixFile)
+-        else { return nil }
+-        let urlString = Swift.String(decoding: urlBytes, as: UTF8.self)
++        else {
++            throw .invalidParent(directive: urlString, reason: "only http://, https:// and file:// parents are supported")
++        }
+         do throws(RFC_3986.Error) {
+             return try URI(urlString)
+         } catch {
+-            return nil
++            throw .invalidParent(directive: urlString, reason: "\(error)")
+         }
+     }
+ 
+@@ -153,20 +155,7 @@ extension Manifest.Resolver {
+             )
+             chain.append(parentManifest)
+ 
+-            if let nextBytes = Manifest.Parent.scan(in: content),
+-                nextBytes.starts(with: schemePrefixHTTP)
+-                    || nextBytes.starts(with: schemePrefixHTTPS)
+-                    || nextBytes.starts(with: schemePrefixFile)
+-            {
+-                let urlString = Swift.String(decoding: nextBytes, as: UTF8.self)
+-                do throws(RFC_3986.Error) {
+-                    currentURI = try URI(urlString)
+-                } catch {
+-                    currentURI = nil
+-                }
+-            } else {
+-                currentURI = nil
+-            }
++            currentURI = try parseParent(in: content)
+         }
+ 
+         chain.reverse()
+diff --git a/Tests/Manifest Resolver Tests/Manifest.Resolver Tests.swift b/Tests/Manifest Resolver Tests/Manifest.Resolver Tests.swift
+index d5da6ad..478ca87 100644
+--- a/Tests/Manifest Resolver Tests/Manifest.Resolver Tests.swift	
++++ b/Tests/Manifest Resolver Tests/Manifest.Resolver Tests.swift	
+@@ -262,3 +262,53 @@ extension `Manifest.Resolver Tests`.Integration {
+         return nil
+     }
+ }
++
++extension `Manifest.Resolver Tests`.`Edge Case` {
++    @Test
++    func `parent directive with an unsupported scheme is reported`() {
++        #expect {
++            try Manifest.Resolver<Swift.Int, `Manifest.Resolver Tests`.Configuration>.parseParent(
++                in: "// parent: ftp://example.com/Lint.swift\nlet manifest: Int = 1\n"
++            )
++        } throws: { error in
++            guard
++                case Manifest.Resolver<Swift.Int, `Manifest.Resolver Tests`.Configuration>.Error
++                    .invalidParent(let directive, _) = error
++            else { return false }
++            return directive == "ftp://example.com/Lint.swift"
++        }
++    }
++
++    @Test
++    func `walkParents reports an unsupported parent scheme instead of ending the chain`() {
++        #expect {
++            try Manifest.Resolver<Swift.Int, `Manifest.Resolver Tests`.Configuration>.walkParents(
++                from: "// parent: git://example.com/Lint.swift\nlet manifest: Int = 1\n",
++                filename: "Lint.swift",
++                dependencies: []
++            )
++        } throws: { error in
++            guard
++                case Manifest.Resolver<Swift.Int, `Manifest.Resolver Tests`.Configuration>.Error
++                    .invalidParent = error
++            else { return false }
++            return true
++        }
++    }
++
++    @Test
++    func `source without a parent directive has no parent`() throws {
++        let parent = try Manifest.Resolver<Swift.Int, `Manifest.Resolver Tests`.Configuration>.parseParent(
++            in: "let manifest: Int = 1\n"
++        )
++        #expect(parent == nil)
++    }
++
++    @Test
++    func `https parent directive parses as a URI`() throws {
++        let parent = try Manifest.Resolver<Swift.Int, `Manifest.Resolver Tests`.Configuration>.parseParent(
++            in: "// parent: https://example.com/Lint.swift\nlet manifest: Int = 1\n"
++        )
++        #expect(parent != nil)
++    }
++}
+-- 
+2.43.0
+

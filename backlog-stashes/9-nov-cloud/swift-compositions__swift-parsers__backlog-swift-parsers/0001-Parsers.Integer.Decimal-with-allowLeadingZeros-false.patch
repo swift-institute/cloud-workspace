@@ -1,0 +1,91 @@
+From a5cb8d2f3c55952d5524d841c2e8e3f35e7b86eb Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:31:27 +0000
+Subject: [PATCH 1/3] Parsers.Integer.Decimal with allowLeadingZeros: false
+ throws leadingZero for a zero before another digit instead of skipping it
+ (swift-compositions/swift-parsers#9)
+
+---
+ Sources/Parsers/Parsers.Integer.Error.swift |  3 +++
+ Sources/Parsers/Parsers.Integer.swift       | 13 ++++-------
+ Tests/Parsers Tests/Integer Tests.swift     | 26 +++++++++++++++++++++
+ 3 files changed, 34 insertions(+), 8 deletions(-)
+
+diff --git a/Sources/Parsers/Parsers.Integer.Error.swift b/Sources/Parsers/Parsers.Integer.Error.swift
+index 3beea3d..7ed8ff2 100644
+--- a/Sources/Parsers/Parsers.Integer.Error.swift
++++ b/Sources/Parsers/Parsers.Integer.Error.swift
+@@ -3,6 +3,9 @@ extension Parsers.Integer {
+ 
+         case noDigits
+ 
++        /// A zero precedes another digit while leading zeros are disallowed.
++        case leadingZero
++
+         case overflow(String)
+ 
+         case invalidDigit(character: UInt8, base: Int)
+diff --git a/Sources/Parsers/Parsers.Integer.swift b/Sources/Parsers/Parsers.Integer.swift
+index aa13269..92b519f 100644
+--- a/Sources/Parsers/Parsers.Integer.swift
++++ b/Sources/Parsers/Parsers.Integer.swift
+@@ -33,14 +33,11 @@ extension Parsers.Integer.Decimal: Parsing {
+         var result: Output = 0
+         var digitString = ""
+ 
+-        if !allowLeadingZeros {
+-            while input.first == .ascii.0 {
+-                hasDigits = true
+-                input.removeFirst()
+-                if input.first.map({ $0 < .ascii.0 || $0 > .ascii.9 }) ?? true {
+-
+-                    return 0
+-                }
++        if !allowLeadingZeros, input.first == .ascii.0 {
++            var rest = input
++            rest.removeFirst()
++            if let next = rest.first, next >= .ascii.0, next <= .ascii.9 {
++                throw .leadingZero
+             }
+         }
+ 
+diff --git a/Tests/Parsers Tests/Integer Tests.swift b/Tests/Parsers Tests/Integer Tests.swift
+index 75fb89d..46aadfe 100644
+--- a/Tests/Parsers Tests/Integer Tests.swift	
++++ b/Tests/Parsers Tests/Integer Tests.swift	
+@@ -32,6 +32,32 @@ extension `Integer Tests` {
+             #expect(value == 789)
+         }
+ 
++        @Test
++        func `Decimal - leading zero rejected when disallowed`() {
++            let parser = Parsers.Integer<Int>.Decimal(allowLeadingZeros: false)
++            var input = "007"[...].utf8
++            #expect(throws: Parsers.Integer<Int>.Error.leadingZero) {
++                try parser.parse(&input)
++            }
++        }
++
++        @Test
++        func `Decimal - lone zero accepted when leading zeros disallowed`() throws {
++            let parser = Parsers.Integer<Int>.Decimal(allowLeadingZeros: false)
++            var input = "0,1"[...].utf8
++            let value = try parser.parse(&input)
++            #expect(value == 0)
++            #expect(input.first == UInt8(ascii: ","))
++        }
++
++        @Test
++        func `Decimal - leading zeros accepted by default`() throws {
++            let parser = Parsers.Integer<Int>.Decimal()
++            var input = "007"[...].utf8
++            let value = try parser.parse(&input)
++            #expect(value == 7)
++        }
++
+         @Test
+         func `Decimal - no sign when disabled`() throws {
+             let parser = Parsers.Integer<UInt>.Decimal(allowSign: false)
+-- 
+2.43.0
+

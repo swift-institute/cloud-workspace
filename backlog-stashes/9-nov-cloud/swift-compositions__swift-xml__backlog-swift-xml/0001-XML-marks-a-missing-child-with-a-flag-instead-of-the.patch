@@ -1,0 +1,90 @@
+From 5d437055ca8cc5ed6bb64991f3cf7bf2de3f4447 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:49 +0000
+Subject: [PATCH] XML marks a missing child with a flag instead of the element
+ name _null, so a real element named _null is no longer read as null
+ (swift-compositions/swift-xml#6)
+
+---
+ Sources/XML/XML.swift           | 20 +++++++++++++++++---
+ Tests/XML Tests/XML Tests.swift | 10 ++++++++++
+ 2 files changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/XML/XML.swift b/Sources/XML/XML.swift
+index 58b53f4..2092752 100644
+--- a/Sources/XML/XML.swift
++++ b/Sources/XML/XML.swift
+@@ -10,9 +10,23 @@ public struct XML: Sendable, Hashable {
+     @usableFromInline
+     internal var raw: W3C_XML::W3C_XML.Element
+ 
++    @usableFromInline
++    internal var placeholder: Bool
++
+     @inlinable
+     public init(_ raw: W3C_XML::W3C_XML.Element) {
+         self.raw = raw
++        self.placeholder = false
++    }
++}
++
++extension XML {
++
++    @usableFromInline
++    internal static var null: XML {
++        var xml = XML(W3C_XML::W3C_XML.Element(name: "_null"))
++        xml.placeholder = true
++        return xml
+     }
+ }
+ 
+@@ -83,14 +97,14 @@ extension XML {
+ 
+     @inlinable
+     public subscript(name: String) -> XML {
+-        raw.child(name).map(Self.init) ?? XML(W3C_XML::W3C_XML.Element(name: "_null"))
++        raw.child(name).map(Self.init) ?? .null
+     }
+ 
+     @inlinable
+     public subscript(index: Int) -> XML {
+         let allChildren = raw.children
+         guard index >= 0 && index < allChildren.count else {
+-            return XML(W3C_XML::W3C_XML.Element(name: "_null"))
++            return .null
+         }
+         return XML(allChildren[index])
+     }
+@@ -108,7 +122,7 @@ extension XML {
+ 
+     @inlinable
+     public var isNull: Bool {
+-        raw.name.local == "_null"
++        placeholder
+     }
+ 
+     @inlinable
+diff --git a/Tests/XML Tests/XML Tests.swift b/Tests/XML Tests/XML Tests.swift
+index b4ca2d9..5d6f1c4 100644
+--- a/Tests/XML Tests/XML Tests.swift	
++++ b/Tests/XML Tests/XML Tests.swift	
+@@ -84,6 +84,16 @@ extension XML {
+             #expect(doc.root[99].isNull)
+         }
+ 
++        @Test
++        func `A real element named _null is not the null placeholder`() throws {
++            let doc = try XML.parse("<root><_null>value</_null></root>")
++
++            #expect(!doc.root._null.isNull)
++            #expect(doc.root._null.optional != nil)
++            #expect(String(doc.root._null) == "value")
++            #expect(!doc.root[0].isNull)
++        }
++
+         @Test
+         func `Serialize accessor`() throws {
+             let doc = try XML.parse("<root><item>Hello</item></root>")
+-- 
+2.43.0
+

@@ -1,0 +1,136 @@
+From 61552eb29efe5eb6d36458c65e5d1fbd4c5edf04 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:33:59 +0000
+Subject: [PATCH] HTML.Layout.Grid.Lazy renders one grid-template-columns rule
+ per breakpoint, inside its media query, instead of only the first entry
+ (swift-compositions/swift-css-html-layout-render#5)
+
+---
+ .../HTML.Layout.Grid.Lazy.swift               | 44 ++++++++++-----
+ .../HTML.Layout.Grid.Lazy Tests.swift         | 53 +++++++++++++++++++
+ 2 files changed, 85 insertions(+), 12 deletions(-)
+ create mode 100644 Tests/CSS HTML Layout Rendering Tests/HTML.Layout.Grid.Lazy Tests.swift
+
+diff --git a/Sources/CSS HTML Layout Rendering/HTML.Layout.Grid.Lazy.swift b/Sources/CSS HTML Layout Rendering/HTML.Layout.Grid.Lazy.swift
+index 56f1188..63e5a80 100644
+--- a/Sources/CSS HTML Layout Rendering/HTML.Layout.Grid.Lazy.swift	
++++ b/Sources/CSS HTML Layout Rendering/HTML.Layout.Grid.Lazy.swift	
+@@ -62,24 +62,44 @@ extension HTML.Layout.Grid.Lazy {
+         >
+     >
+ 
++    /// One `grid-template-columns` rule per breakpoint: the entry without a
++    /// media query applies unconditionally (one column when there is none),
++    /// and each other entry applies inside its media query.
+     public var body: some HTML.View {
+-        let colValue: Columns =
+-            if !columns.isEmpty {
+-                columns.value(at: .zero)
++        var baseColumns: Columns = .count(1)
++        var responsiveColumns: [(media: CSS_Standard::Media, columns: Columns)] = []
++        columns.forEach { media, value in
++            if let media = copy media {
++                responsiveColumns.append((media, copy value))
+             } else {
+-                .count(1)
++                baseColumns = copy value
+             }
++        }
+         let columnGap = horizontalSpacing == .zero ? .zero : horizontalSpacing
+         let rowGap = verticalSpacing == .zero ? .zero : verticalSpacing
+-        let gridCols = colValue.cssGridTemplateColumns
+ 
+-        return HTML.ContentDivision.Element { content }
+-            .css
+-            .width(.percent(100))
+-            .display(.grid)
+-            .inlineStyle("grid-template-columns", gridCols)
+-            .columnGap(columnGap)
+-            .rowGap(rowGap)
++        var grid = HTML.AnyView(
++            HTML.ContentDivision.Element { content }
++                .css
++                .width(.percent(100))
++                .display(.grid)
++                .inlineStyle("grid-template-columns", baseColumns.cssGridTemplateColumns)
++                .columnGap(columnGap)
++                .rowGap(rowGap)
++        )
++        let context = HTML.Style.Rule.Context.current
++        for responsive in responsiveColumns {
++            grid = HTML.AnyView(
++                HTML.Styled(
++                    grid,
++                    StringProperty("grid-template-columns", responsive.columns.cssGridTemplateColumns),
++                    atRule: HTML.AtRule.Media(responsive.media),
++                    selector: context.selector,
++                    pseudo: context.pseudo
++                )
++            )
++        }
++        return grid
+     }
+ }
+ 
+diff --git a/Tests/CSS HTML Layout Rendering Tests/HTML.Layout.Grid.Lazy Tests.swift b/Tests/CSS HTML Layout Rendering Tests/HTML.Layout.Grid.Lazy Tests.swift
+new file mode 100644
+index 0000000..0f3de9f
+--- /dev/null
++++ b/Tests/CSS HTML Layout Rendering Tests/HTML.Layout.Grid.Lazy Tests.swift	
+@@ -0,0 +1,53 @@
++import CSS_HTML_Layout_Rendering
++import CSS_Standard
++import HTML_Rendering
++import Testing
++
++enum `HTML.Layout.Grid.Lazy Tests` {}
++
++extension `HTML.Layout.Grid.Lazy Tests` {
++    @Suite
++    struct `Responsive columns` {
++        private static func css(_ document: some HTML.View) throws -> String {
++            String(try String(HTML.Document { document }).filter { $0 != " " })
++        }
++
++        private static func grid<Content: HTML.View>(
++            @HTML.Builder _ content: () -> Content
++        ) -> HTML.Layout.Grid.Lazy<Content> {
++            var breakpoints = HTML.Layout.Grid.Lazy<Content>.Breakpoints()
++            breakpoints.set(
++                nil as CSS_Standard::Media?,
++                HTML.Layout.Grid.Lazy<Content>.Columns.count(1)
++            )
++            breakpoints.set(
++                CSS_Standard::Media.desktop as CSS_Standard::Media?,
++                HTML.Layout.Grid.Lazy<Content>.Columns.count(3)
++            )
++            return HTML.Layout.Grid.Lazy(columns: breakpoints, content: content)
++        }
++
++        private static func emptyGrid<Content: HTML.View>(
++            @HTML.Builder _ content: () -> Content
++        ) -> HTML.Layout.Grid.Lazy<Content> {
++            HTML.Layout.Grid.Lazy(
++                columns: HTML.Layout.Grid.Lazy<Content>.Breakpoints(),
++                content: content
++            )
++        }
++
++        @Test
++        func `every breakpoint renders its own column template`() throws {
++            let css = try Self.css(Self.grid { HTML.Layout.Spacer() })
++            #expect(css.contains("grid-template-columns:repeat(1,minmax(0,1fr))"), "\(css)")
++            #expect(css.contains("@mediaonlyscreenand(min-width:832px)"), "\(css)")
++            #expect(css.contains("grid-template-columns:repeat(3,minmax(0,1fr))"), "\(css)")
++        }
++
++        @Test
++        func `empty breakpoints render one column`() throws {
++            let css = try Self.css(Self.emptyGrid { HTML.Layout.Spacer() })
++            #expect(css.contains("grid-template-columns:repeat(1,minmax(0,1fr))"), "\(css)")
++        }
++    }
++}
+-- 
+2.43.0
+

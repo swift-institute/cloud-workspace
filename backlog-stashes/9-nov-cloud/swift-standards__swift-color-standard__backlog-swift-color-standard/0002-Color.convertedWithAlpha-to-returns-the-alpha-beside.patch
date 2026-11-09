@@ -1,0 +1,104 @@
+From cab5b1cccfd9c886ab9cd17c8cfc369c6e3bee1b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:14 +0000
+Subject: [PATCH 2/2] Color.convertedWithAlpha(to:) returns the alpha beside
+ the converted value, and converted(to:) documents that it drops alpha
+ (swift-standards/swift-color-standard#5)
+
+---
+ README.md                                     |  4 +--
+ Sources/Color Standard/Color.Protocol.swift   | 17 ++++++++++
+ .../Canonical Tests.swift                     | 31 +++++++++++++++++++
+ 3 files changed, 50 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index fde0859..0ff0697 100644
+--- a/README.md
++++ b/README.md
+@@ -6,8 +6,8 @@ Use this package when you need to convert a color between sRGB, linear sRGB, CIE
+ 
+ - Every conversion goes through `Color`, which holds CIE XYZ and an alpha. `converted(to:)` is `canonical()` followed by the target's `init(_:)`.
+ - LAB and LCH are relative to the D50 white point. sRGB, linear sRGB and Oklab are relative to D65. Converting between the two uses Bradford chromatic adaptation.
+-- Two `Color` values are equal only if they hold the same XYZ under the same white point and the same alpha. The same color reached from LAB and from sRGB is generally not equal.
+-- Alpha lives only on `Color`. A color made from any other space is opaque, and converting to another space drops the alpha. `Color.withAlpha(_:)` clamps to 0 through 1.
++- `Color` stores XYZ under D65: a color from LAB or LCH is adapted when it is made. Two `Color` values are equal when they hold the same D65 XYZ and the same alpha, compared exactly, so rounding in a conversion can still make them differ.
++- Alpha lives only on `Color`. A color made from any other space is opaque, and converting to another space drops the alpha. `Color.convertedWithAlpha(to:)` returns the alpha beside the converted value. `Color.withAlpha(_:)` clamps to 0 through 1.
+ - `Color.LAB` clamps lightness to 0 through 100 and `Color.Oklab` clamps it to 0 through 1. A NaN lightness becomes 0. The `a` and `b` axes are not bounded. `Color.LAB.Lightness.init(_:)` and `Color.Oklab.Lightness.init(_:)` throw outside that range instead.
+ - `Color.LCH` and `Color.Oklch` raise a negative chroma to 0 and wrap the hue into 0 up to 360 degrees.
+ - Terminal colors clamp each sRGB channel to 0 through 1 first, so out of gamut and non-finite colors never trap. `Color.sgr` truncates each channel to 0 through 255.
+diff --git a/Sources/Color Standard/Color.Protocol.swift b/Sources/Color Standard/Color.Protocol.swift
+index 094af0c..03c78db 100644
+--- a/Sources/Color Standard/Color.Protocol.swift	
++++ b/Sources/Color Standard/Color.Protocol.swift	
+@@ -12,6 +12,11 @@ extension Color {
+ 
+ extension _ColorProtocol {
+ 
++    /// This value in `targetType`'s space.
++    ///
++    /// Only `Color` holds an alpha. Converting a `Color` to any other space drops its alpha, and a
++    /// value from another space becomes an opaque `Color`. Use `Color.convertedWithAlpha(to:)` to
++    /// keep the alpha beside the converted value.
+     public func converted<Target: Color.`Protocol`>(to targetType: Target.Type) -> Target {
+         Target(self.canonical())
+     }
+@@ -27,3 +32,15 @@ extension Color: _ColorProtocol {
+         self = color
+     }
+ }
++
++extension Color {
++
++    /// This color in `targetType`'s space, with the alpha that space cannot hold returned beside it.
++    ///
++    /// `value.canonical().withAlpha(alpha)` gives the color back.
++    public func convertedWithAlpha<Target: Color.`Protocol`>(
++        to targetType: Target.Type
++    ) -> (value: Target, alpha: Double) {
++        (Target(self), alpha)
++    }
++}
+diff --git a/Tests/Color Standard Tests/Canonical Tests.swift b/Tests/Color Standard Tests/Canonical Tests.swift
+index 25810bd..414bc00 100644
+--- a/Tests/Color Standard Tests/Canonical Tests.swift	
++++ b/Tests/Color Standard Tests/Canonical Tests.swift	
+@@ -69,5 +69,36 @@ extension `Color Tests` {
+ 
+             #expect(original == roundTrip)
+         }
++
++        @Test
++        func `A color from LAB is stored under the D65 white point`() {
++            let color = Color.LAB(l: 50, a: 20, b: -30).canonical()
++            #expect(color._xyz.illuminant == .d65)
++        }
++
++        @Test
++        func `The same color under D50 and D65 compares equal`() {
++            let d50 = Color._XYZ(x: 0.3, y: 0.4, z: 0.2, illuminant: .d50)
++            let fromD50 = Color(_xyz: d50)
++            let fromD65 = Color(_xyz: d50.adapted(to: .d65))
++            #expect(fromD50 == fromD65)
++            #expect(fromD50.hashValue == fromD65.hashValue)
++        }
++
++        @Test
++        func `Converting to another space drops alpha, convertedWithAlpha keeps it`() {
++            let color = Color.white.withAlpha(0.5)
++            #expect(color.converted(to: Color.LAB.self).canonical().alpha == 1.0)
++
++            let split = color.convertedWithAlpha(to: Color.LAB.self)
++            #expect(split.alpha == 0.5)
++            #expect(split.value.canonical().withAlpha(split.alpha).alpha == 0.5)
++        }
++
++        @Test
++        func `Converting a color to Color keeps alpha`() {
++            let color = Color.black.withAlpha(0.25)
++            #expect(color.converted(to: Color.self) == color)
++        }
+     }
+ }
+-- 
+2.43.0
+

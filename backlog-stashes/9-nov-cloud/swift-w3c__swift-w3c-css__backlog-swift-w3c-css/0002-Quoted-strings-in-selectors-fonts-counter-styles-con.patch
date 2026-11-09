@@ -1,0 +1,1131 @@
+From 5a14d33d11c34cabd2c8e8e54c7f25ecf84606d9 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:20 +0000
+Subject: [PATCH 02/18] Quoted strings in selectors, fonts, counter styles,
+ content and grid areas are escaped through CSSString, and at-rules keep their
+ descriptors in order and read their body from init(rawValue:)
+ (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Animations/Keyframes.swift    |  46 +++--
+ Sources/W3C CSS Color/ColorProfile.swift      |   7 +-
+ Sources/W3C CSS Containment/Content.swift     |   6 +-
+ .../W3C CSS CounterStyles/CounterStyle.swift  |  21 ++-
+ Sources/W3C CSS Fonts/FontFace.swift          |  19 +-
+ Sources/W3C CSS Fonts/FontFamily.swift        |   4 +-
+ Sources/W3C CSS Fonts/FontFeatureValues.swift | 168 +++++++++---------
+ Sources/W3C CSS Fonts/FontPaletteValues.swift |   9 +-
+ Sources/W3C CSS Grid/GridTemplateAreas.swift  |   2 +-
+ Sources/W3C CSS Selectors/Attribute.swift     |   2 +-
+ Sources/W3C CSS Syntax/W3C_CSS.Block.swift    | 118 ++++++++++++
+ .../W3C CSS Syntax/W3C_CSS.Descriptors.swift  |  69 +++++++
+ .../Keyframes Tests.swift                     |  29 +++
+ .../Content Tests.swift                       |  19 ++
+ .../CounterStyle Tests.swift                  |  31 ++++
+ .../W3C CSS Fonts Tests/FontFace Tests.swift  |  26 +++
+ .../FontFamily Tests.swift                    |  16 ++
+ .../FontFeatureValues Tests.swift             |  31 ++++
+ .../FontPaletteValues Tests.swift             |  20 +++
+ .../GridTemplateAreas Tests.swift             |  14 ++
+ .../Selector Tests.swift                      |   2 +-
+ .../W3C_CSS.Descriptors Tests.swift           |  29 +++
+ 22 files changed, 537 insertions(+), 151 deletions(-)
+ create mode 100644 Sources/W3C CSS Syntax/W3C_CSS.Block.swift
+ create mode 100644 Sources/W3C CSS Syntax/W3C_CSS.Descriptors.swift
+ create mode 100644 Tests/W3C CSS Animations Tests/Keyframes Tests.swift
+ create mode 100644 Tests/W3C CSS Containment Tests/Content Tests.swift
+ create mode 100644 Tests/W3C CSS CounterStyles Tests/CounterStyle Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontFace Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontFamily Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontFeatureValues Tests.swift
+ create mode 100644 Tests/W3C CSS Fonts Tests/FontPaletteValues Tests.swift
+ create mode 100644 Tests/W3C CSS Grid Tests/GridTemplateAreas Tests.swift
+ create mode 100644 Tests/W3C CSS Syntax Tests/W3C_CSS.Descriptors Tests.swift
+
+diff --git a/Sources/W3C CSS Animations/Keyframes.swift b/Sources/W3C CSS Animations/Keyframes.swift
+index 53c25c7..dc019aa 100644
+--- a/Sources/W3C CSS Animations/Keyframes.swift	
++++ b/Sources/W3C CSS Animations/Keyframes.swift	
+@@ -24,6 +24,14 @@ public struct Keyframes: AtRule {
+         } else {
+             self.name = cleaned
+         }
++
++        for block in W3C_CSS.Block.parse(W3C_CSS.Block.parse(rawValue).first?.body ?? "") {
++            let selector = block.prelude
++                .split(separator: ",")
++                .map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
++                .joined(separator: ", ")
++            self.keyframes.append(Keyframe(selector: selector, styles: W3C_CSS.Descriptors(parsing: block.body)))
++        }
+     }
+ 
+     public init(_ name: String) {
+@@ -41,18 +49,8 @@ extension Keyframes {
+     private mutating func updateRawValue() {
+         var sections: [String] = []
+ 
+-        for frame in keyframes {
+-            var styleLines: [String] = []
+-
+-            for (property, value) in frame.styles {
+-                styleLines.append("    \(property): \(value);")
+-            }
+-
+-            if !styleLines.isEmpty {
+-                let selectorString = frame.selectors.map { $0.rawValue }.joined(separator: ", ")
+-                let stylesString = styleLines.joined(separator: "\n")
+-                sections.append("  \(selectorString) {\n\(stylesString)\n  }")
+-            }
++        for frame in keyframes where !frame.styles.isEmpty {
++            sections.append("  \(frame.selector) {\n\(frame.styles.lines(indent: "    "))\n  }")
+         }
+ 
+         let keyframesString = sections.joined(separator: "\n\n")
+@@ -71,18 +69,16 @@ extension Keyframes {
+ 
+     public func keyframe(_ selectors: [KeyframeSelector], _ styles: [String: String]) -> Keyframes {
+         var keyframes = self
+-        let frame = Keyframe(selectors: selectors, styles: styles)
+-
+-        if let index = keyframes.keyframes.firstIndex(where: { $0.selectors == frame.selectors }) {
+-
+-            var updatedFrame = keyframes.keyframes[index]
+-            for (key, value) in frame.styles {
+-                updatedFrame.styles[key] = value
+-            }
+-            keyframes.keyframes[index] = updatedFrame
+-        } else {
++        let selector = selectors.map { $0.rawValue }.joined(separator: ", ")
++        if !keyframes.keyframes.contains(where: { $0.selector == selector }) {
++            keyframes.keyframes.append(Keyframe(selector: selector, styles: W3C_CSS.Descriptors()))
++        }
++        guard let index = keyframes.keyframes.firstIndex(where: { $0.selector == selector }) else {
++            return keyframes
++        }
+ 
+-            keyframes.keyframes.append(frame)
++        for key in styles.keys.sorted() {
++            keyframes.keyframes[index].styles[key] = styles[key]
+         }
+ 
+         keyframes.updateRawValue()
+@@ -93,8 +89,8 @@ extension Keyframes {
+ extension Keyframes {
+ 
+     fileprivate struct Keyframe: Sendable, Hashable {
+-        var selectors: [KeyframeSelector]
+-        var styles: [String: String]
++        var selector: String
++        var styles: W3C_CSS.Descriptors
+     }
+ 
+     public enum KeyframeSelector: Sendable, Hashable {
+diff --git a/Sources/W3C CSS Color/ColorProfile.swift b/Sources/W3C CSS Color/ColorProfile.swift
+index a1fd170..b18e1cb 100644
+--- a/Sources/W3C CSS Color/ColorProfile.swift	
++++ b/Sources/W3C CSS Color/ColorProfile.swift	
+@@ -6,7 +6,7 @@ import W3C_CSS_Values
+ public struct ColorProfile: AtRule {
+     public var rawValue: String
+     private var name: String
+-    private var descriptors: [String: String] = [:]
++    private var descriptors = W3C_CSS.Descriptors()
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
+@@ -24,6 +24,7 @@ public struct ColorProfile: AtRule {
+         } else {
+             self.name = cleaned
+         }
++        self.descriptors = W3C_CSS.Descriptors(parsing: W3C_CSS.Block.parse(rawValue).first?.body ?? "")
+     }
+ 
+     public init(_ name: String) {
+@@ -53,9 +54,7 @@ extension ColorProfile {
+     }
+ 
+     fileprivate mutating func updateRawValue() {
+-        let descriptorString = descriptors.map { key, value in
+-            "  \(key): \(value);"
+-        }.joined(separator: "\n")
++        let descriptorString = descriptors.lines(indent: "  ")
+ 
+         rawValue =
+             if descriptorString.isEmpty {
+diff --git a/Sources/W3C CSS Containment/Content.swift b/Sources/W3C CSS Containment/Content.swift
+index 08d467e..c094b9d 100644
+--- a/Sources/W3C CSS Containment/Content.swift	
++++ b/Sources/W3C CSS Containment/Content.swift	
+@@ -57,10 +57,10 @@ extension Content {
+             return "counter(\(name), \(style.description))"
+ 
+         case .counters(let name, let separator, nil):
+-            return "counters(\(name), \"\(separator)\")"
++            return "counters(\(name), \(CSSString(separator)))"
+ 
+         case .counters(let name, let separator, let style?):
+-            return "counters(\(name), \"\(separator)\", \(style.description))"
++            return "counters(\(name), \(CSSString(separator)), \(style.description))"
+ 
+         case .attr(let name):
+             return "attr(\(name))"
+@@ -81,7 +81,7 @@ extension Content {
+             return items.map { $0.description }.joined(separator: " ")
+ 
+         case .imageWithAlt(let image, let alt):
+-            return "\(image) / \"\(alt.description)\""
++            return "\(image) / \(alt)"
+ 
+         case .global(let value):
+             return value.description
+diff --git a/Sources/W3C CSS CounterStyles/CounterStyle.swift b/Sources/W3C CSS CounterStyles/CounterStyle.swift
+index 1a3eefe..d679963 100644
+--- a/Sources/W3C CSS CounterStyles/CounterStyle.swift	
++++ b/Sources/W3C CSS CounterStyles/CounterStyle.swift	
+@@ -5,7 +5,7 @@ public import W3C_CSS_Syntax
+ public struct CounterStyle: AtRule {
+     public var rawValue: String
+     private var name: String
+-    private var descriptors: [String: String] = [:]
++    private var descriptors = W3C_CSS.Descriptors()
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
+@@ -23,6 +23,7 @@ public struct CounterStyle: AtRule {
+         } else {
+             self.name = cleaned
+         }
++        self.descriptors = W3C_CSS.Descriptors(parsing: W3C_CSS.Block.parse(rawValue).first?.body ?? "")
+     }
+ 
+     public init(_ name: String) {
+@@ -32,12 +33,10 @@ public struct CounterStyle: AtRule {
+ }
+ 
+ extension CounterStyle {
+-    public static let identifier: String = "container-style"
++    public static let identifier: String = "counter-style"
+ 
+     private mutating func updateRawValue() {
+-        let descriptorString = descriptors.map { key, value in
+-            "  \(key): \(value);"
+-        }.joined(separator: "\n")
++        let descriptorString = descriptors.lines(indent: "  ")
+ 
+         rawValue =
+             if descriptorString.isEmpty {
+@@ -65,8 +64,8 @@ extension CounterStyle {
+         var style = self
+         let symbolString =
+             symbols
+-            .map { "\(String($0.0)) \"\($0.1)\"" }
+-            .joined(separator: " ")
++            .map { "\(String($0.0)) \(CSSString($0.1))" }
++            .joined(separator: ", ")
+         style.descriptors["additive-symbols"] = symbolString
+         style.updateRawValue()
+         return style
+@@ -74,21 +73,21 @@ extension CounterStyle {
+ 
+     public func negative(prefix: String, suffix: String = "") -> CounterStyle {
+         var style = self
+-        style.descriptors["negative"] = "\"\(prefix)\" \"\(suffix)\""
++        style.descriptors["negative"] = "\(CSSString(prefix)) \(CSSString(suffix))"
+         style.updateRawValue()
+         return style
+     }
+ 
+     public func prefix(_ prefix: String) -> CounterStyle {
+         var style = self
+-        style.descriptors["prefix"] = "\"\(prefix)\""
++        style.descriptors["prefix"] = CSSString(prefix).description
+         style.updateRawValue()
+         return style
+     }
+ 
+     public func suffix(_ suffix: String) -> CounterStyle {
+         var style = self
+-        style.descriptors["suffix"] = "\"\(suffix)\""
++        style.descriptors["suffix"] = CSSString(suffix).description
+         style.updateRawValue()
+         return style
+     }
+@@ -102,7 +101,7 @@ extension CounterStyle {
+ 
+     public func pad(length: Int, symbol: String) -> CounterStyle {
+         var style = self
+-        style.descriptors["pad"] = "\(length) \"\(symbol)\""
++        style.descriptors["pad"] = "\(length) \(CSSString(symbol))"
+         style.updateRawValue()
+         return style
+     }
+diff --git a/Sources/W3C CSS Fonts/FontFace.swift b/Sources/W3C CSS Fonts/FontFace.swift
+index 5dbde43..40d21c6 100644
+--- a/Sources/W3C CSS Fonts/FontFace.swift	
++++ b/Sources/W3C CSS Fonts/FontFace.swift	
+@@ -4,10 +4,11 @@ public import W3C_CSS_Values
+ 
+ public struct FontFace: AtRule {
+     public var rawValue: String
+-    private var descriptors: [String: String] = [:]
++    private var descriptors = W3C_CSS.Descriptors()
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
++        self.descriptors = W3C_CSS.Descriptors(parsing: W3C_CSS.Block.parse(rawValue).first?.body ?? "")
+     }
+ 
+     public init() {
+@@ -19,9 +20,7 @@ extension FontFace {
+     public static let identifier: String = "font-face"
+ 
+     private mutating func updateRawValue() {
+-        let descriptorString = descriptors.map { key, value in
+-            "  \(key): \(value);"
+-        }.joined(separator: "\n")
++        let descriptorString = descriptors.lines(indent: "  ")
+ 
+         rawValue =
+             if descriptorString.isEmpty {
+@@ -33,7 +32,7 @@ extension FontFace {
+ 
+     public func fontFamily(_ name: String) -> FontFace {
+         var fontFace = self
+-        fontFace.descriptors["font-family"] = "\"\(name)\""
++        fontFace.descriptors["font-family"] = CSSString(name).description
+         fontFace.updateRawValue()
+         return fontFace
+     }
+@@ -82,7 +81,7 @@ extension FontFace {
+ 
+     public func fontFeatureSettings(_ settings: [(String, Int)]) -> FontFace {
+         var fontFace = self
+-        let settingsString = settings.map { "\"\($0.0)\" \($0.1)" }.joined(separator: ", ")
++        let settingsString = settings.map { "\(CSSString($0.0)) \($0.1)" }.joined(separator: ", ")
+         fontFace.descriptors["font-feature-settings"] = settingsString
+         fontFace.updateRawValue()
+         return fontFace
+@@ -90,7 +89,7 @@ extension FontFace {
+ 
+     public func fontVariationSettings(_ settings: [(String, Int)]) -> FontFace {
+         var fontFace = self
+-        let settingsString = settings.map { "\"\($0.0)\" \($0.1)" }.joined(separator: ", ")
++        let settingsString = settings.map { "\(CSSString($0.0)) \($0.1)" }.joined(separator: ", ")
+         fontFace.descriptors["font-variation-settings"] = settingsString
+         fontFace.updateRawValue()
+         return fontFace
+@@ -199,12 +198,12 @@ extension FontFace.Source {
+     public var description: String {
+         switch self {
+         case .local(let name):
+-            return "local(\"\(name)\")"
++            return "local(\(CSSString(name)))"
+ 
+         case .url(let url, let format, let tech):
+-            var result = "url(\"\(url)\")"
++            var result = "url(\(CSSString(url)))"
+             if let format {
+-                result += " format(\"\(format)\")"
++                result += " format(\(CSSString(format)))"
+             }
+             if let tech {
+                 result += " tech(\(tech))"
+diff --git a/Sources/W3C CSS Fonts/FontFamily.swift b/Sources/W3C CSS Fonts/FontFamily.swift
+index fb076db..3667ed6 100644
+--- a/Sources/W3C CSS Fonts/FontFamily.swift	
++++ b/Sources/W3C CSS Fonts/FontFamily.swift	
+@@ -59,8 +59,8 @@ extension FontFamily.Family {
+         switch self {
+         case .specific(let name):
+ 
+-            if name.contains(" ") || name.contains("-") || name.contains(".") {
+-                return "\"\(name)\""
++            if name.contains(" ") || name.contains("-") || name.contains(".") || Ident(name).description != name {
++                return CSSString(name).description
+             }
+             return name
+ 
+diff --git a/Sources/W3C CSS Fonts/FontFeatureValues.swift b/Sources/W3C CSS Fonts/FontFeatureValues.swift
+index e48b683..65a0e89 100644
+--- a/Sources/W3C CSS Fonts/FontFeatureValues.swift	
++++ b/Sources/W3C CSS Fonts/FontFeatureValues.swift	
+@@ -1,86 +1,90 @@
++import W3C_CSS_Shared
+ public import W3C_CSS_Syntax
+ 
+ public struct FontFeatureValues: AtRule {
+     public var rawValue: String
+     private var families: [String]
+-    private var blocks: [String: [String: String]] = [:]
++    private var blocks: [FeatureBlock] = []
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
+ 
+-        var cleaned = rawValue
++        var cleaned = Substring(rawValue)
+         if cleaned.hasPrefix("@font-feature-values") {
+-            cleaned = String(cleaned.dropFirst(21))
+-        }
+-
+-        while cleaned.first?.isWhitespace == true {
+-            cleaned = String(cleaned.dropFirst())
++            cleaned = cleaned.dropFirst(20)
+         }
+ 
+         if let braceIndex = cleaned.firstIndex(of: "{") {
+-            var familiesString = String(cleaned[..<braceIndex])
+-
+-            while familiesString.last?.isWhitespace == true {
+-                familiesString = String(familiesString.dropLast())
+-            }
+-
+-            let famBytes = Array(familiesString.utf8)
+-            var famResults: [String] = []
+-            var famStart = 0
+-            (0..<famBytes.count).forEach { idx in
+-                if famBytes[idx] == 0x2C {
+-                    famResults.append(String(decoding: famBytes[famStart..<idx], as: UTF8.self))
+-                    famStart = idx &+ 1
+-                }
+-            }
+-            famResults.append(String(decoding: famBytes[famStart..<famBytes.count], as: UTF8.self))
+-            self.families = famResults.map { family in
+-                var trimmed = family
+-                while trimmed.first?.isWhitespace == true {
+-                    trimmed = String(trimmed.dropFirst())
+-                }
+-                while trimmed.last?.isWhitespace == true {
+-                    trimmed = String(trimmed.dropLast())
+-                }
+-                return trimmed
+-            }
++            self.families = cleaned[..<braceIndex]
++                .split(separator: ",")
++                .map { Self.familyName($0) }
++                .filter { !$0.isEmpty }
+         } else {
+             self.families = []
+         }
++
++        for block in W3C_CSS.Block.parse(W3C_CSS.Block.parse(rawValue).first?.body ?? "")
++        where block.prelude.hasPrefix("@") {
++            self.blocks.append(
++                FeatureBlock(
++                    type: String(block.prelude.dropFirst()),
++                    features: W3C_CSS.Descriptors(parsing: block.body)
++                )
++            )
++        }
+     }
+ 
+     public init(_ family: String) {
+-        self.families = [family]
+-        self.rawValue = "@font-feature-values \(family) {}"
++        self.init([family])
+     }
+ 
+     public init(_ families: [String]) {
+         self.families = families
+-        let familiesString = families.map { "\"\($0)\"" }.joined(separator: ", ")
+-        self.rawValue = "@font-feature-values \(familiesString) {}"
++        self.rawValue = ""
++        updateRawValue()
+     }
+ }
+ 
+ extension FontFeatureValues {
+-    public static let identifier: String = "font-feature-values"
+ 
+-    private mutating func updateRawValue() {
+-        let familiesString = families.map { "\"\($0)\"" }.joined(separator: ", ")
+-
+-        var blockStrings: [String] = []
+-        for (blockType, features) in blocks {
+-            var featureStrings: [String] = []
+-            for (name, value) in features {
+-                featureStrings.append("    \(name): \(value);")
+-            }
++    fileprivate struct FeatureBlock: Sendable, Hashable {
++        var type: String
++        var features: W3C_CSS.Descriptors
++    }
+ 
+-            if !featureStrings.isEmpty {
+-                let featureString = featureStrings.joined(separator: "\n")
+-                blockStrings.append("  @\(blockType) {\n\(featureString)\n  }")
++    private static func familyName(_ text: Substring) -> String {
++        let trimmed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
++        guard let first = trimmed.first, first == "\"" || first == "'", trimmed.count >= 2, trimmed.last == first
++        else {
++            return trimmed
++        }
++        var name = ""
++        var escaped = false
++        for character in trimmed.dropFirst().dropLast() {
++            if escaped {
++                name.append(character)
++                escaped = false
++            } else if character == "\\" {
++                escaped = true
++            } else {
++                name.append(character)
+             }
+         }
++        return name
++    }
++}
+ 
+-        let blockString = blockStrings.joined(separator: "\n\n")
++extension FontFeatureValues {
++    public static let identifier: String = "font-feature-values"
++
++    private mutating func updateRawValue() {
++        let familiesString = families.map { CSSString($0).description }.joined(separator: ", ")
++
++        let blockString =
++            blocks
++            .filter { !$0.features.isEmpty }
++            .map { "  @\($0.type) {\n\($0.features.lines(indent: "    "))\n  }" }
++            .joined(separator: "\n\n")
+ 
+         rawValue =
+             if blockString.isEmpty {
+@@ -90,61 +94,49 @@ extension FontFeatureValues {
+             }
+     }
+ 
+-    public func styleset(_ features: [String: [Int]]) -> FontFeatureValues {
++    private func setting(_ type: String, _ features: [(String, String)]) -> FontFeatureValues {
+         var fontFeatureValues = self
+-        for (name, values) in features {
+-            fontFeatureValues.blocks["styleset", default: [:]][name] = values.map(String.init)
+-                .joined(
+-                    separator: " "
+-                )
++        if !fontFeatureValues.blocks.contains(where: { $0.type == type }) {
++            fontFeatureValues.blocks.append(FeatureBlock(type: type, features: W3C_CSS.Descriptors()))
++        }
++        if let index = fontFeatureValues.blocks.firstIndex(where: { $0.type == type }) {
++            for (name, value) in features {
++                fontFeatureValues.blocks[index].features[name] = value
++            }
+         }
+         fontFeatureValues.updateRawValue()
+         return fontFeatureValues
+     }
+ 
++    public func styleset(_ features: [String: [Int]]) -> FontFeatureValues {
++        setting(
++            "styleset",
++            features.sorted { $0.key < $1.key }.map { ($0.key, $0.value.map(String.init).joined(separator: " ")) }
++        )
++    }
++
+     public func stylistic(_ features: [String: Int]) -> FontFeatureValues {
+-        var fontFeatureValues = self
+-        for (name, value) in features {
+-            fontFeatureValues.blocks["stylistic", default: [:]][name] = String(value)
+-        }
+-        fontFeatureValues.updateRawValue()
+-        return fontFeatureValues
++        setting("stylistic", features.sorted { $0.key < $1.key }.map { ($0.key, String($0.value)) })
+     }
+ 
+     public func swash(_ features: [String: Int]) -> FontFeatureValues {
+-        var fontFeatureValues = self
+-        for (name, value) in features {
+-            fontFeatureValues.blocks["swash", default: [:]][name] = String(value)
+-        }
+-        fontFeatureValues.updateRawValue()
+-        return fontFeatureValues
++        setting("swash", features.sorted { $0.key < $1.key }.map { ($0.key, String($0.value)) })
+     }
+ 
+     public func annotation(_ features: [String: Int]) -> FontFeatureValues {
+-        var fontFeatureValues = self
+-        for (name, value) in features {
+-            fontFeatureValues.blocks["annotation", default: [:]][name] = String(value)
+-        }
+-        fontFeatureValues.updateRawValue()
+-        return fontFeatureValues
++        setting("annotation", features.sorted { $0.key < $1.key }.map { ($0.key, String($0.value)) })
+     }
+ 
+     public func ornaments(_ features: [String: Int]) -> FontFeatureValues {
+-        var fontFeatureValues = self
+-        for (name, value) in features {
+-            fontFeatureValues.blocks["ornaments", default: [:]][name] = String(value)
+-        }
+-        fontFeatureValues.updateRawValue()
+-        return fontFeatureValues
++        setting("ornaments", features.sorted { $0.key < $1.key }.map { ($0.key, String($0.value)) })
+     }
+ 
+     public func characterVariant(_ features: [String: (Int, Int?)]) -> FontFeatureValues {
+-        var fontFeatureValues = self
+-        for (name, values) in features {
+-            let valueString = values.1.map { "\(values.0) \($0)" } ?? String(values.0)
+-            fontFeatureValues.blocks["character-variant", default: [:]][name] = valueString
+-        }
+-        fontFeatureValues.updateRawValue()
+-        return fontFeatureValues
++        setting(
++            "character-variant",
++            features.sorted { $0.key < $1.key }.map { name, values in
++                (name, values.1.map { "\(values.0) \($0)" } ?? String(values.0))
++            }
++        )
+     }
+ }
+diff --git a/Sources/W3C CSS Fonts/FontPaletteValues.swift b/Sources/W3C CSS Fonts/FontPaletteValues.swift
+index 45914c1..4149c30 100644
+--- a/Sources/W3C CSS Fonts/FontPaletteValues.swift	
++++ b/Sources/W3C CSS Fonts/FontPaletteValues.swift	
+@@ -6,7 +6,7 @@ public import W3C_CSS_Values
+ public struct FontPaletteValues: AtRule {
+     public var rawValue: String
+     private var identifier: String
+-    private var descriptors: [String: String] = [:]
++    private var descriptors = W3C_CSS.Descriptors()
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
+@@ -24,6 +24,7 @@ public struct FontPaletteValues: AtRule {
+         } else {
+             self.identifier = cleaned
+         }
++        self.descriptors = W3C_CSS.Descriptors(parsing: W3C_CSS.Block.parse(rawValue).first?.body ?? "")
+     }
+ 
+     public init(_ identifier: String) {
+@@ -36,9 +37,7 @@ extension FontPaletteValues {
+     public static let identifier: String = "font-palette-values"
+ 
+     private mutating func updateRawValue() {
+-        let descriptorString = descriptors.map { key, value in
+-            "  \(key): \(value);"
+-        }.joined(separator: "\n")
++        let descriptorString = descriptors.lines(indent: "  ")
+ 
+         rawValue =
+             if descriptorString.isEmpty {
+@@ -50,7 +49,7 @@ extension FontPaletteValues {
+ 
+     public func fontFamily(_ family: String) -> FontPaletteValues {
+         var palette = self
+-        palette.descriptors["font-family"] = "\"\(family)\""
++        palette.descriptors["font-family"] = CSSString(family).description
+         palette.updateRawValue()
+         return palette
+     }
+diff --git a/Sources/W3C CSS Grid/GridTemplateAreas.swift b/Sources/W3C CSS Grid/GridTemplateAreas.swift
+index d1ba1d6..8a35d28 100644
+--- a/Sources/W3C CSS Grid/GridTemplateAreas.swift	
++++ b/Sources/W3C CSS Grid/GridTemplateAreas.swift	
+@@ -18,7 +18,7 @@ extension GridTemplateAreas {
+             return "none"
+ 
+         case .areas(let areas):
+-            return areas.map { "\"\($0)\"" }.joined(separator: " ")
++            return areas.map { CSSString($0).description }.joined(separator: " ")
+ 
+         case .global(let value):
+             return value.description
+diff --git a/Sources/W3C CSS Selectors/Attribute.swift b/Sources/W3C CSS Selectors/Attribute.swift
+index c450c37..929ebf9 100644
+--- a/Sources/W3C CSS Selectors/Attribute.swift	
++++ b/Sources/W3C CSS Selectors/Attribute.swift	
+@@ -52,6 +52,6 @@ extension AttributeSelector: CustomStringConvertible {
+         }
+ 
+         let caseFlag = caseInsensitive ? " i" : ""
+-        return "[\(attribute)\(op.rawValue)\"\(value)\"\(caseFlag)]"
++        return "[\(attribute)\(op.rawValue)\(CSSString(value))\(caseFlag)]"
+     }
+ }
+diff --git a/Sources/W3C CSS Syntax/W3C_CSS.Block.swift b/Sources/W3C CSS Syntax/W3C_CSS.Block.swift
+new file mode 100644
+index 0000000..f26b446
+--- /dev/null
++++ b/Sources/W3C CSS Syntax/W3C_CSS.Block.swift	
+@@ -0,0 +1,118 @@
++public import W3C_CSS_Shared
++
++extension W3C_CSS {
++
++    /// A `prelude { body }` block, as found in an at-rule or inside its body.
++    public struct Block: Sendable, Hashable {
++
++        public let prelude: String
++
++        public let body: String
++
++        public init(prelude: String, body: String) {
++            self.prelude = prelude
++            self.body = body
++        }
++    }
++}
++
++extension W3C_CSS.Block {
++
++    /// The top-level blocks of `text`, skipping quoted text and any `;`-terminated statement between them.
++    public static func parse(_ text: String) -> [W3C_CSS.Block] {
++        var blocks: [W3C_CSS.Block] = []
++        var prelude = ""
++        var body = ""
++        var depth = 0
++        var quote: Character?
++        var escaped = false
++
++        for character in text {
++            if let open = quote {
++                if escaped {
++                    escaped = false
++                } else if character == "\\" {
++                    escaped = true
++                } else if character == open {
++                    quote = nil
++                }
++                if depth == 0 { prelude.append(character) } else { body.append(character) }
++                continue
++            }
++
++            switch character {
++            case "{":
++                if depth > 0 { body.append(character) }
++                depth += 1
++
++            case "}":
++                guard depth > 0 else { continue }
++                depth -= 1
++                if depth == 0 {
++                    blocks.append(W3C_CSS.Block(prelude: trimmed(prelude[...]), body: body))
++                    prelude = ""
++                    body = ""
++                } else {
++                    body.append(character)
++                }
++
++            case ";" where depth == 0:
++                prelude = ""
++
++            default:
++                if character == "\"" || character == "'" { quote = character }
++                if depth == 0 { prelude.append(character) } else { body.append(character) }
++            }
++        }
++
++        return blocks
++    }
++
++    static func split(_ text: String, at separator: Character) -> [Substring] {
++        var parts: [Substring] = []
++        var start = text.startIndex
++        var depth = 0
++        var quote: Character?
++        var escaped = false
++
++        for index in text.indices {
++            let character = text[index]
++            if let open = quote {
++                if escaped {
++                    escaped = false
++                } else if character == "\\" {
++                    escaped = true
++                } else if character == open {
++                    quote = nil
++                }
++                continue
++            }
++            switch character {
++            case "\"", "'":
++                quote = character
++
++            case "(", "{", "[":
++                depth += 1
++
++            case ")", "}", "]":
++                depth = max(0, depth - 1)
++
++            case separator where depth == 0:
++                parts.append(text[start..<index])
++                start = text.index(after: index)
++
++            default:
++                break
++            }
++        }
++        parts.append(text[start...])
++        return parts
++    }
++
++    static func trimmed(_ text: Substring) -> String {
++        var result = text
++        while result.first?.isWhitespace == true { result.removeFirst() }
++        while result.last?.isWhitespace == true { result.removeLast() }
++        return String(result)
++    }
++}
+diff --git a/Sources/W3C CSS Syntax/W3C_CSS.Descriptors.swift b/Sources/W3C CSS Syntax/W3C_CSS.Descriptors.swift
+new file mode 100644
+index 0000000..63fe52c
+--- /dev/null
++++ b/Sources/W3C CSS Syntax/W3C_CSS.Descriptors.swift	
+@@ -0,0 +1,69 @@
++public import W3C_CSS_Shared
++
++extension W3C_CSS {
++
++    /// The `name: value` descriptors of an at-rule block, kept in the order they were first set.
++    public struct Descriptors: Sendable, Hashable {
++
++        public private(set) var entries: [Entry]
++
++        public init() {
++            self.entries = []
++        }
++
++        /// Reads the `name: value;` declarations of a block body, such as `system: cyclic; symbols: "*";`.
++        public init(parsing body: String) {
++            self.entries = []
++            for declaration in W3C_CSS.Block.split(body, at: ";") {
++                guard let colon = declaration.firstIndex(of: ":") else { continue }
++                let name = W3C_CSS.Block.trimmed(declaration[..<colon])
++                let value = W3C_CSS.Block.trimmed(declaration[declaration.index(after: colon)...])
++                guard !name.isEmpty, !value.isEmpty else { continue }
++                self[name] = value
++            }
++        }
++    }
++}
++
++extension W3C_CSS.Descriptors {
++
++    public struct Entry: Sendable, Hashable {
++
++        public let name: String
++
++        public let value: String
++
++        public init(name: String, value: String) {
++            self.name = name
++            self.value = value
++        }
++    }
++}
++
++extension W3C_CSS.Descriptors {
++
++    public var isEmpty: Bool { entries.isEmpty }
++
++    /// The value of the descriptor `name`; setting an existing one keeps its position, and `nil` removes it.
++    public subscript(name: String) -> String? {
++        get {
++            entries.first { $0.name == name }?.value
++        }
++        set {
++            if let index = entries.firstIndex(where: { $0.name == name }) {
++                if let newValue {
++                    entries[index] = Entry(name: name, value: newValue)
++                } else {
++                    entries.remove(at: index)
++                }
++            } else if let newValue {
++                entries.append(Entry(name: name, value: newValue))
++            }
++        }
++    }
++
++    /// One `name: value;` line per descriptor, each prefixed with `indent`.
++    public func lines(indent: String) -> String {
++        entries.map { "\(indent)\($0.name): \($0.value);" }.joined(separator: "\n")
++    }
++}
+diff --git a/Tests/W3C CSS Animations Tests/Keyframes Tests.swift b/Tests/W3C CSS Animations Tests/Keyframes Tests.swift
+new file mode 100644
+index 0000000..eacdca0
+--- /dev/null
++++ b/Tests/W3C CSS Animations Tests/Keyframes Tests.swift	
+@@ -0,0 +1,29 @@
++import Testing
++
++@testable import W3C_CSS_Animations
++
++enum `Keyframes Tests` {}
++
++extension `Keyframes Tests` {
++    @Suite
++    struct `Keyframes - Serialization` {
++        @Test func `styles print in a stable order`() {
++            let keyframes = Keyframes("fade")
++                .keyframe(.from, ["opacity": "0", "color": "red"])
++                .keyframe(.to, ["opacity": "1"])
++            #expect(
++                keyframes.rawValue
++                    == "@keyframes fade {\n  from {\n    color: red;\n    opacity: 0;\n  }\n\n  to {\n    opacity: 1;\n  }\n}"
++            )
++        }
++
++        @Test func `a rule read from text keeps its keyframes when a builder is called`() {
++            let keyframes = Keyframes(rawValue: "@keyframes fade { from { opacity: 0; } }")
++                .keyframe(.to, ["opacity": "1"])
++            #expect(
++                keyframes.rawValue
++                    == "@keyframes fade {\n  from {\n    opacity: 0;\n  }\n\n  to {\n    opacity: 1;\n  }\n}"
++            )
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Containment Tests/Content Tests.swift b/Tests/W3C CSS Containment Tests/Content Tests.swift
+new file mode 100644
+index 0000000..c846ec9
+--- /dev/null
++++ b/Tests/W3C CSS Containment Tests/Content Tests.swift	
+@@ -0,0 +1,19 @@
++import Testing
++import W3C_CSS_Shared
++
++@testable import W3C_CSS_Containment
++
++enum `Content Tests` {}
++
++extension `Content Tests` {
++    @Suite
++    struct `Content - Serialization` {
++        @Test func `a counters separator is escaped`() {
++            #expect(Content.counters(name: "c", separator: "\"").description == "counters(c, \"\\\"\")")
++        }
++
++        @Test func `alternative text is quoted once`() {
++            #expect(Content.imageWithAlt(image: Url("a.png"), alt: "Alt").description == "url(\"a.png\") / \"Alt\"")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS CounterStyles Tests/CounterStyle Tests.swift b/Tests/W3C CSS CounterStyles Tests/CounterStyle Tests.swift
+new file mode 100644
+index 0000000..5b1c82b
+--- /dev/null
++++ b/Tests/W3C CSS CounterStyles Tests/CounterStyle Tests.swift	
+@@ -0,0 +1,31 @@
++import Testing
++
++@testable import W3C_CSS_CounterStyles
++
++enum `CounterStyle Tests` {}
++
++extension `CounterStyle Tests` {
++    @Suite
++    struct `CounterStyle - Serialization` {
++        @Test func `the at-rule identifier is counter-style`() {
++            #expect(CounterStyle.identifier == "counter-style")
++        }
++
++        @Test func `strings are escaped and descriptors keep their order`() {
++            let style = CounterStyle("thumbs").system(.cyclic).symbols(["a", "b"]).suffix("\" ")
++            #expect(
++                style.rawValue == "@counter-style thumbs {\n  system: cyclic;\n  symbols: a b;\n  suffix: \"\\\" \";\n}"
++            )
++        }
++
++        @Test func `additive symbols are a comma separated list`() {
++            let style = CounterStyle("roman").additiveSymbols([(5, "V"), (1, "I")])
++            #expect(style.rawValue == "@counter-style roman {\n  additive-symbols: 5 \"V\", 1 \"I\";\n}")
++        }
++
++        @Test func `a rule read from text keeps its body when a builder is called`() {
++            let style = CounterStyle(rawValue: "@counter-style x { system: fixed; symbols: a b; }").suffix(".")
++            #expect(style.rawValue == "@counter-style x {\n  system: fixed;\n  symbols: a b;\n  suffix: \".\";\n}")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontFace Tests.swift b/Tests/W3C CSS Fonts Tests/FontFace Tests.swift
+new file mode 100644
+index 0000000..a4745b7
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontFace Tests.swift	
+@@ -0,0 +1,26 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontFace Tests` {}
++
++extension `FontFace Tests` {
++    @Suite
++    struct `FontFace - Serialization` {
++        @Test func `strings are escaped and descriptors keep their order`() {
++            let face = FontFace()
++                .fontFamily("My \"Font\"")
++                .fontDisplay(.swap)
++                .src([.local("A\\B"), .url("a.woff2", format: "woff2")])
++            #expect(
++                face.rawValue
++                    == "@font-face {\n  font-family: \"My \\\"Font\\\"\";\n  font-display: swap;\n  src: local(\"A\\\\B\"),\n    url(\"a.woff2\") format(\"woff2\");\n}"
++            )
++        }
++
++        @Test func `a rule read from text keeps its body when a builder is called`() {
++            let face = FontFace(rawValue: "@font-face { font-family: \"A\"; }").fontDisplay(.swap)
++            #expect(face.rawValue == "@font-face {\n  font-family: \"A\";\n  font-display: swap;\n}")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontFamily Tests.swift b/Tests/W3C CSS Fonts Tests/FontFamily Tests.swift
+new file mode 100644
+index 0000000..ea86035
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontFamily Tests.swift	
+@@ -0,0 +1,16 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontFamily Tests` {}
++
++extension `FontFamily Tests` {
++    @Suite
++    struct `FontFamily - Serialization` {
++        @Test func `a family name with a quote or backslash is quoted and escaped`() {
++            #expect(FontFamily.specific("A\"B").description == "\"A\\\"B\"")
++            #expect(FontFamily.specific("Open Sans").description == "\"Open Sans\"")
++            #expect(FontFamily.specific("Arial").description == "Arial")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontFeatureValues Tests.swift b/Tests/W3C CSS Fonts Tests/FontFeatureValues Tests.swift
+new file mode 100644
+index 0000000..b466a93
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontFeatureValues Tests.swift	
+@@ -0,0 +1,31 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontFeatureValues Tests` {}
++
++extension `FontFeatureValues Tests` {
++    @Suite
++    struct `FontFeatureValues - Serialization` {
++        @Test func `the family is quoted from the start`() {
++            #expect(FontFeatureValues("Font One").rawValue == "@font-feature-values \"Font One\" {}")
++        }
++
++        @Test func `features print in a stable order`() {
++            let values = FontFeatureValues("Font One").swash(["fancy": 1, "basic": 2, "middle": 3])
++            #expect(
++                values.rawValue
++                    == "@font-feature-values \"Font One\" {\n  @swash {\n    basic: 2;\n    fancy: 1;\n    middle: 3;\n  }\n}"
++            )
++        }
++
++        @Test func `a rule read from text keeps its blocks when a builder is called`() {
++            let values = FontFeatureValues(rawValue: "@font-feature-values \"Font One\" { @styleset { nice: 1 2; } }")
++                .swash(["fancy": 1])
++            #expect(
++                values.rawValue
++                    == "@font-feature-values \"Font One\" {\n  @styleset {\n    nice: 1 2;\n  }\n\n  @swash {\n    fancy: 1;\n  }\n}"
++            )
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Fonts Tests/FontPaletteValues Tests.swift b/Tests/W3C CSS Fonts Tests/FontPaletteValues Tests.swift
+new file mode 100644
+index 0000000..2385b8d
+--- /dev/null
++++ b/Tests/W3C CSS Fonts Tests/FontPaletteValues Tests.swift	
+@@ -0,0 +1,20 @@
++import Testing
++
++@testable import W3C_CSS_Fonts
++
++enum `FontPaletteValues Tests` {}
++
++extension `FontPaletteValues Tests` {
++    @Suite
++    struct `FontPaletteValues - Serialization` {
++        @Test func `descriptors keep their order and the family is escaped`() {
++            let palette = FontPaletteValues("--x").fontFamily("A\"B").basePalette(1)
++            #expect(palette.rawValue == "@font-palette-values --x {\n  font-family: \"A\\\"B\";\n  base-palette: 1;\n}")
++        }
++
++        @Test func `a rule read from text keeps its body when a builder is called`() {
++            let palette = FontPaletteValues(rawValue: "@font-palette-values --x { font-family: Bixa; }").basePalette(2)
++            #expect(palette.rawValue == "@font-palette-values --x {\n  font-family: Bixa;\n  base-palette: 2;\n}")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Grid Tests/GridTemplateAreas Tests.swift b/Tests/W3C CSS Grid Tests/GridTemplateAreas Tests.swift
+new file mode 100644
+index 0000000..7d21c28
+--- /dev/null
++++ b/Tests/W3C CSS Grid Tests/GridTemplateAreas Tests.swift	
+@@ -0,0 +1,14 @@
++import Testing
++
++@testable import W3C_CSS_Grid
++
++enum `GridTemplateAreas Tests` {}
++
++extension `GridTemplateAreas Tests` {
++    @Suite
++    struct `GridTemplateAreas - Serialization` {
++        @Test func `area rows are quoted and escaped`() {
++            #expect(GridTemplateAreas.areas(["a b", "c \"d"]).description == "\"a b\" \"c \\\"d\"")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Selectors Tests/Selector Tests.swift b/Tests/W3C CSS Selectors Tests/Selector Tests.swift
+index ee28ddf..71c2711 100644
+--- a/Tests/W3C CSS Selectors Tests/Selector Tests.swift	
++++ b/Tests/W3C CSS Selectors Tests/Selector Tests.swift	
+@@ -271,7 +271,7 @@ extension `Selector Tests` {
+                 value: "It's \"quoted\"",
+                 operator: .equal
+             )
+-            #expect(selector.description.contains("title"))
++            #expect(selector.description == "[title=\"It's \\\"quoted\\\"\"]")
+         }
+     }
+ }
+diff --git a/Tests/W3C CSS Syntax Tests/W3C_CSS.Descriptors Tests.swift b/Tests/W3C CSS Syntax Tests/W3C_CSS.Descriptors Tests.swift
+new file mode 100644
+index 0000000..dc26f21
+--- /dev/null
++++ b/Tests/W3C CSS Syntax Tests/W3C_CSS.Descriptors Tests.swift	
+@@ -0,0 +1,29 @@
++import Testing
++import W3C_CSS_Shared
++
++@testable import W3C_CSS_Syntax
++
++enum `W3C_CSS.Descriptors Tests` {}
++
++extension `W3C_CSS.Descriptors Tests` {
++    @Suite
++    struct `W3C_CSS.Descriptors - Parsing` {
++        @Test func `declarations are read in order, skipping separators inside strings`() {
++            let descriptors = W3C_CSS.Descriptors(parsing: " system: cyclic; symbols: \"a;}\" b; suffix: \" \"; ")
++            #expect(descriptors.lines(indent: "") == "system: cyclic;\nsymbols: \"a;}\" b;\nsuffix: \" \";")
++        }
++
++        @Test func `setting an existing descriptor keeps its position`() {
++            var descriptors = W3C_CSS.Descriptors(parsing: "a: 1; b: 2")
++            descriptors["a"] = "3"
++            descriptors["c"] = "4"
++            descriptors["b"] = nil
++            #expect(descriptors.lines(indent: "") == "a: 3;\nc: 4;")
++        }
++
++        @Test func `nested blocks are read with their preludes`() {
++            let blocks = W3C_CSS.Block.parse("from { opacity: 0; } 50%, 60% { opacity: .5 }")
++            #expect(blocks.map(\.prelude) == ["from", "50%, 60%"])
++        }
++    }
++}
+-- 
+2.43.0
+

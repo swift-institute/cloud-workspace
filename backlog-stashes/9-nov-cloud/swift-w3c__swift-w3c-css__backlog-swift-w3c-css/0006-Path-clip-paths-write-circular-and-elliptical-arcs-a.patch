@@ -1,0 +1,153 @@
+From 2905dea434c3c0ec247c31bd48fde112a391d811 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:38:29 +0000
+Subject: [PATCH 06/18] Path clip paths write circular and elliptical arcs as
+ SVG A commands instead of straight lines to their end points
+ (swift-w3c/swift-w3c-css#13)
+
+---
+ .../Geometry.Path.Context.swift               | 51 +++++++++++++++---
+ .../CSS.Context Tests.swift                   | 54 +++++++++++++++++++
+ 2 files changed, 99 insertions(+), 6 deletions(-)
+ create mode 100644 Tests/W3C CSS Shared Tests/CSS.Context Tests.swift
+
+diff --git a/Sources/W3C CSS Shared/Geometry.Path.Context.swift b/Sources/W3C CSS Shared/Geometry.Path.Context.swift
+index 3e4be8e..17a06fe 100644
+--- a/Sources/W3C CSS Shared/Geometry.Path.Context.swift	
++++ b/Sources/W3C CSS Shared/Geometry.Path.Context.swift	
+@@ -23,6 +23,7 @@ extension Geometry.Path.Context {
+             }
+             d +=
+                 " \(subpath.startPoint.x.formatted(Formatter.Number())) \(subpath.startPoint.y.formatted(Formatter.Number()))"
++            var current = subpath.startPoint
+ 
+             for segment in subpath.segments {
+                 switch segment {
+@@ -63,15 +64,30 @@ extension Geometry.Path.Context {
+                     }
+ 
+                 case .arc(let arc):
+-
+-                    let end = arc.endPoint
+-                    d += " L \(end.x.formatted(Formatter.Number())) \(end.y.formatted(Formatter.Number()))"
++                    let radius = arc.radius.formatted(Formatter.Number())
++                    d += Self.arc(
++                        from: current,
++                        start: arc.startPoint,
++                        radii: "\(radius) \(radius)",
++                        rotation: 0,
++                        sweep: arc.sweep.underlying,
++                        mid: arc.midPoint,
++                        end: arc.endPoint
++                    )
+ 
+                 case .ellipticalArc(let arc):
+-
+-                    let end = arc.endPoint
+-                    d += " L \(end.x.formatted(Formatter.Number())) \(end.y.formatted(Formatter.Number()))"
++                    d += Self.arc(
++                        from: current,
++                        start: arc.startPoint,
++                        radii:
++                            "\(arc.semiMajor.formatted(Formatter.Number())) \(arc.semiMinor.formatted(Formatter.Number()))",
++                        rotation: arc.rotation.underlying * 180 / Double.pi,
++                        sweep: arc.sweep.underlying,
++                        mid: arc.midPoint,
++                        end: arc.endPoint
++                    )
+                 }
++                current = segment.endPoint ?? current
+             }
+ 
+             if subpath.isClosed {
+@@ -81,4 +97,27 @@ extension Geometry.Path.Context {
+ 
+         return "path('\(d)')"
+     }
++
++    private static func arc(
++        from current: Geometry<Double, W3C_CSS.Space>.Point<2>,
++        start: Geometry<Double, W3C_CSS.Space>.Point<2>,
++        radii: String,
++        rotation: Double,
++        sweep: Double,
++        mid: Geometry<Double, W3C_CSS.Space>.Point<2>,
++        end: Geometry<Double, W3C_CSS.Space>.Point<2>
++    ) -> String {
++        func point(_ point: Geometry<Double, W3C_CSS.Space>.Point<2>) -> String {
++            "\(point.x.formatted(Formatter.Number())) \(point.y.formatted(Formatter.Number()))"
++        }
++
++        let lead = start == current ? "" : " L \(point(start))"
++        let flags = "\(rotation.formatted(Formatter.Number())) \(abs(sweep) > Double.pi ? 1 : 0) \(sweep > 0 ? 1 : 0)"
++
++        guard abs(sweep) < 2 * Double.pi else {
++            let half = "\(rotation.formatted(Formatter.Number())) 0 \(sweep > 0 ? 1 : 0)"
++            return "\(lead) A \(radii) \(half) \(point(mid)) A \(radii) \(half) \(point(end))"
++        }
++        return "\(lead) A \(radii) \(flags) \(point(end))"
++    }
+ }
+diff --git a/Tests/W3C CSS Shared Tests/CSS.Context Tests.swift b/Tests/W3C CSS Shared Tests/CSS.Context Tests.swift
+new file mode 100644
+index 0000000..422a5be
+--- /dev/null
++++ b/Tests/W3C CSS Shared Tests/CSS.Context Tests.swift	
+@@ -0,0 +1,54 @@
++import Testing
++
++@testable import W3C_CSS_Shared
++
++enum `CSS.Context Tests` {}
++
++extension `CSS.Context Tests` {
++    @Suite
++    struct `CSS.Context - Shapes` {
++        @Test func `a circle clips to a circle`() {
++            #expect(W3C_CSS.Circle(center: .zero, radius: 5).css.clipPath == "circle(5px at 0px 0px)")
++        }
++
++        @Test func `an ellipse clips to an ellipse`() {
++            #expect(
++                W3C_CSS.Ellipse(center: .zero, semiMajor: 5, semiMinor: 3).css.clipPath == "ellipse(5px 3px at 0px 0px)"
++            )
++        }
++    }
++}
++
++extension `CSS.Context Tests` {
++    @Suite
++    struct `CSS.Context - Path Arcs` {
++        @Test func `a circular arc is written as an arc command`() {
++            let arc = W3C_CSS.Arc.semicircle(center: .zero, radius: 5)
++            let path = W3C_CSS.Path(subpaths: [.init(startPoint: arc.startPoint, segments: [.arc(arc)])])
++            let clipPath = path.css.clipPath
++            #expect(clipPath.hasPrefix("path('M 5 0 A 5 5 0 0 1 -5 "))
++            #expect(!clipPath.contains(" L "))
++        }
++
++        @Test func `a full circle is written as two half arcs`() {
++            let arc = W3C_CSS.Arc.fullCircle(center: .zero, radius: 5)
++            let path = W3C_CSS.Path(subpaths: [.init(startPoint: arc.startPoint, segments: [.arc(arc)])])
++            let clipPath = path.css.clipPath
++            #expect(clipPath.hasPrefix("path('M 5 0 A 5 5 0 0 1 -5 "))
++            #expect(clipPath.contains(" A 5 5 0 0 1 5 "))
++        }
++
++        @Test func `an elliptical arc is written with both radii`() {
++            let arc = W3C_CSS.Ellipse.Arc(
++                center: .zero,
++                semiMajor: 5,
++                semiMinor: 3,
++                rotation: .zero,
++                startAngle: .zero,
++                endAngle: .pi.full
++            )
++            let path = W3C_CSS.Path(subpaths: [.init(startPoint: arc.startPoint, segments: [.ellipticalArc(arc)])])
++            #expect(path.css.clipPath.hasPrefix("path('M 5 0 A 5 3 0 0 1 -5 "))
++        }
++    }
++}
+-- 
+2.43.0
+

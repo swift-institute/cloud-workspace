@@ -1,0 +1,679 @@
+From abd7fb87d210e3e60fcfffbff4ea5c741615f13b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:44:14 +0000
+Subject: [PATCH 12/18] Image sources, masks and fills print a Url once and
+ take typed Gradient values, transition properties and try-fallbacks take
+ identifiers, and clip-path path data is quoted once
+ (swift-w3c/swift-w3c-css#13)
+
+---
+ Package.swift                                 |  2 +-
+ .../BorderImageSource.swift                   | 43 ++--------------
+ Sources/W3C CSS Images/Fill.swift             |  2 +-
+ Sources/W3C CSS Masking/ClipPath.swift        |  9 ++--
+ Sources/W3C CSS Masking/Mask.swift            | 51 +++----------------
+ Sources/W3C CSS Masking/MaskBorder.swift      | 32 ++----------
+ .../W3C CSS Masking/MaskBorderSource.swift    | 43 ++--------------
+ .../PositionTryFallbacks.FallbackOption.swift |  4 +-
+ .../PositionTryFallbacks.swift                |  4 +-
+ .../TransitionProperty.swift                  |  4 +-
+ Sources/W3C CSS UI/WebkitBoxReflect.swift     | 12 ++---
+ Sources/W3C CSS UI/WebkitMaskBoxImage.swift   | 12 ++---
+ .../BorderImageSource Tests.swift             | 20 ++++++++
+ Tests/W3C CSS Images Tests/Fill Tests.swift   | 15 ++++++
+ .../ClipPath Tests.swift                      | 18 +++++++
+ Tests/W3C CSS Masking Tests/Mask Tests.swift  | 20 ++++++++
+ .../MaskBorderSource Tests.swift              | 20 ++++++++
+ .../PositionTryFallbacks Tests.swift          | 19 +++++++
+ .../TransitionProperty Tests.swift            | 16 ++++++
+ .../WebkitBoxReflect Tests.swift              | 15 ++++++
+ 20 files changed, 185 insertions(+), 176 deletions(-)
+ create mode 100644 Tests/W3C CSS Backgrounds Tests/BorderImageSource Tests.swift
+ create mode 100644 Tests/W3C CSS Images Tests/Fill Tests.swift
+ create mode 100644 Tests/W3C CSS Masking Tests/ClipPath Tests.swift
+ create mode 100644 Tests/W3C CSS Masking Tests/Mask Tests.swift
+ create mode 100644 Tests/W3C CSS Masking Tests/MaskBorderSource Tests.swift
+ create mode 100644 Tests/W3C CSS Positioning Tests/PositionTryFallbacks Tests.swift
+ create mode 100644 Tests/W3C CSS Transitions Tests/TransitionProperty Tests.swift
+ create mode 100644 Tests/W3C CSS UI Tests/WebkitBoxReflect Tests.swift
+
+diff --git a/Package.swift b/Package.swift
+index ff460f2..338eb53 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -244,7 +244,7 @@ let package = Package(
+ 
+         .target(
+             name: "W3C CSS UI",
+-            dependencies: [.target(name: "W3C CSS Shared"), .target(name: "W3C CSS Values"), .target(name: "W3C CSS Color"), .target(name: "W3C CSS Backgrounds")]
++            dependencies: [.target(name: "W3C CSS Shared"), .target(name: "W3C CSS Values"), .target(name: "W3C CSS Color"), .target(name: "W3C CSS Backgrounds"), .target(name: "W3C CSS Images")]
+         ),
+ 
+         .target(
+diff --git a/Sources/W3C CSS Backgrounds/BorderImageSource.swift b/Sources/W3C CSS Backgrounds/BorderImageSource.swift
+index f86dcc9..c44880e 100644
+--- a/Sources/W3C CSS Backgrounds/BorderImageSource.swift	
++++ b/Sources/W3C CSS Backgrounds/BorderImageSource.swift	
+@@ -1,3 +1,4 @@
++public import W3C_CSS_Images
+ public import W3C_CSS_Shared
+ import W3C_CSS_Values
+ 
+@@ -7,17 +8,7 @@ public enum BorderImageSource: Property {
+ 
+     case url(Url)
+ 
+-    case linearGradient(CSSString)
+-
+-    case radialGradient(CSSString)
+-
+-    case conicGradient(CSSString)
+-
+-    case repeatingLinearGradient(CSSString)
+-
+-    case repeatingRadialGradient(CSSString)
+-
+-    case repeatingConicGradient(CSSString)
++    case gradient(Gradient)
+ 
+     case global(Global)
+ }
+@@ -39,34 +30,10 @@ extension BorderImageSource: CustomStringConvertible {
+             return "none"
+ 
+         case .url(let path):
++            return path.description
+ 
+-            if path.value.hasPrefix("url(") {
+-                return path.description
+-            }
+-
+-            if path.value.contains("\"") || path.value.contains("'") {
+-                return "url(\(path))"
+-            }
+-
+-            return "url(\"\(path)\")"
+-
+-        case .linearGradient(let value):
+-            return "linear-gradient(\(value))"
+-
+-        case .radialGradient(let value):
+-            return "radial-gradient(\(value))"
+-
+-        case .conicGradient(let value):
+-            return "conic-gradient(\(value))"
+-
+-        case .repeatingLinearGradient(let value):
+-            return "repeating-linear-gradient(\(value))"
+-
+-        case .repeatingRadialGradient(let value):
+-            return "repeating-radial-gradient(\(value))"
+-
+-        case .repeatingConicGradient(let value):
+-            return "repeating-conic-gradient(\(value))"
++        case .gradient(let gradient):
++            return gradient.description
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Images/Fill.swift b/Sources/W3C CSS Images/Fill.swift
+index 83bf5af..e6e915e 100644
+--- a/Sources/W3C CSS Images/Fill.swift	
++++ b/Sources/W3C CSS Images/Fill.swift	
+@@ -40,7 +40,7 @@ extension Fill {
+             return url.description
+ 
+         case .urlWithFallback(let url, let fallback):
+-            return "url(\(url)) \(fallback)"
++            return "\(url) \(fallback)"
+ 
+         case .global(let value):
+             return value.description
+diff --git a/Sources/W3C CSS Masking/ClipPath.swift b/Sources/W3C CSS Masking/ClipPath.swift
+index d20863d..a4b5556 100644
+--- a/Sources/W3C CSS Masking/ClipPath.swift	
++++ b/Sources/W3C CSS Masking/ClipPath.swift	
+@@ -17,11 +17,12 @@ public enum ClipPath: Property {
+ 
+     case path(CSSString)
+ 
+-    case custom(CSSString)
++    /// A clip-path value written as raw CSS.
++    case custom(String)
+ 
+     case global(Global)
+ 
+-    public init(_ value: CSSString) {
++    public init(_ value: String) {
+         self = .custom(value)
+     }
+ }
+@@ -87,10 +88,10 @@ extension ClipPath: CustomStringConvertible {
+             return shape.description
+ 
+         case .path(let path):
+-            return "path('\(path)')"
++            return "path(\(path))"
+ 
+         case .custom(let value):
+-            return value.description
++            return value
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Masking/Mask.swift b/Sources/W3C CSS Masking/Mask.swift
+index d0c47dd..541feb7 100644
+--- a/Sources/W3C CSS Masking/Mask.swift	
++++ b/Sources/W3C CSS Masking/Mask.swift	
+@@ -1,3 +1,4 @@
++public import W3C_CSS_Images
+ import W3C_CSS_Positioning
+ public import W3C_CSS_Shared
+ public import W3C_CSS_Values
+@@ -61,17 +62,7 @@ extension Mask {
+ 
+         case url(Url)
+ 
+-        case linearGradient(CSSString)
+-
+-        case radialGradient(CSSString)
+-
+-        case conicGradient(CSSString)
+-
+-        case repeatingLinearGradient(CSSString)
+-
+-        case repeatingRadialGradient(CSSString)
+-
+-        case repeatingConicGradient(CSSString)
++        case gradient(Gradient)
+     }
+ 
+     public enum Position: Sendable, Hashable {
+@@ -162,12 +153,8 @@ extension Mask {
+         return .configuration(Configuration(.url(url)))
+     }
+ 
+-    public static func linearGradient(_ gradient: CSSString) -> Mask {
+-        return .configuration(Configuration(.linearGradient(gradient)))
+-    }
+-
+-    public static func radialGradient(_ gradient: CSSString) -> Mask {
+-        return .configuration(Configuration(.radialGradient(gradient)))
++    public static func gradient(_ gradient: Gradient) -> Mask {
++        return .configuration(Configuration(.gradient(gradient)))
+     }
+ }
+ 
+@@ -361,34 +348,10 @@ extension Mask.MaskReference {
+             return "none"
+ 
+         case .url(let url):
++            return url.description
+ 
+-            if url.value.hasPrefix("url(") {
+-                return url.description
+-            }
+-
+-            if url.value.contains("\"") || url.value.contains("'") {
+-                return "url(\(url))"
+-            }
+-
+-            return "url(\"\(url)\")"
+-
+-        case .linearGradient(let value):
+-            return "linear-gradient(\(value))"
+-
+-        case .radialGradient(let value):
+-            return "radial-gradient(\(value))"
+-
+-        case .conicGradient(let value):
+-            return "conic-gradient(\(value))"
+-
+-        case .repeatingLinearGradient(let value):
+-            return "repeating-linear-gradient(\(value))"
+-
+-        case .repeatingRadialGradient(let value):
+-            return "repeating-radial-gradient(\(value))"
+-
+-        case .repeatingConicGradient(let value):
+-            return "repeating-conic-gradient(\(value))"
++        case .gradient(let gradient):
++            return gradient.description
+         }
+     }
+ }
+diff --git a/Sources/W3C CSS Masking/MaskBorder.swift b/Sources/W3C CSS Masking/MaskBorder.swift
+index 2d7e5df..73b64a1 100644
+--- a/Sources/W3C CSS Masking/MaskBorder.swift	
++++ b/Sources/W3C CSS Masking/MaskBorder.swift	
+@@ -1,3 +1,4 @@
++public import W3C_CSS_Images
+ public import W3C_CSS_Shared
+ public import W3C_CSS_Values
+ 
+@@ -86,17 +87,7 @@ extension MaskBorder {
+ 
+         case url(Url)
+ 
+-        case linearGradient(CSSString)
+-
+-        case radialGradient(CSSString)
+-
+-        case conicGradient(CSSString)
+-
+-        case repeatingLinearGradient(CSSString)
+-
+-        case repeatingRadialGradient(CSSString)
+-
+-        case repeatingConicGradient(CSSString)
++        case gradient(Gradient)
+     }
+ 
+     public struct Slice: Sendable, Hashable {
+@@ -254,23 +245,8 @@ extension MaskBorder.Configuration {
+         case .url(let url):
+             return url.description
+ 
+-        case .linearGradient(let value):
+-            return "linear-gradient(\(value))"
+-
+-        case .radialGradient(let value):
+-            return "radial-gradient(\(value))"
+-
+-        case .conicGradient(let value):
+-            return "conic-gradient(\(value))"
+-
+-        case .repeatingLinearGradient(let value):
+-            return "repeating-linear-gradient(\(value))"
+-
+-        case .repeatingRadialGradient(let value):
+-            return "repeating-radial-gradient(\(value))"
+-
+-        case .repeatingConicGradient(let value):
+-            return "repeating-conic-gradient(\(value))"
++        case .gradient(let gradient):
++            return gradient.description
+         }
+     }
+ 
+diff --git a/Sources/W3C CSS Masking/MaskBorderSource.swift b/Sources/W3C CSS Masking/MaskBorderSource.swift
+index 789adf1..a67578c 100644
+--- a/Sources/W3C CSS Masking/MaskBorderSource.swift	
++++ b/Sources/W3C CSS Masking/MaskBorderSource.swift	
+@@ -1,3 +1,4 @@
++public import W3C_CSS_Images
+ public import W3C_CSS_Shared
+ import W3C_CSS_Values
+ 
+@@ -7,17 +8,7 @@ public enum MaskBorderSource: Property {
+ 
+     case url(Url)
+ 
+-    case linearGradient(CSSString)
+-
+-    case radialGradient(CSSString)
+-
+-    case conicGradient(CSSString)
+-
+-    case repeatingLinearGradient(CSSString)
+-
+-    case repeatingRadialGradient(CSSString)
+-
+-    case repeatingConicGradient(CSSString)
++    case gradient(Gradient)
+ 
+     case global(Global)
+ }
+@@ -36,34 +27,10 @@ extension MaskBorderSource: CustomStringConvertible {
+             return "none"
+ 
+         case .url(let path):
++            return path.description
+ 
+-            if path.value.hasPrefix("url(") {
+-                return path.description
+-            }
+-
+-            if path.value.contains("\"") || path.value.contains("'") {
+-                return "url(\(path))"
+-            }
+-
+-            return "url(\"\(path)\")"
+-
+-        case .linearGradient(let value):
+-            return "linear-gradient(\(value))"
+-
+-        case .radialGradient(let value):
+-            return "radial-gradient(\(value))"
+-
+-        case .conicGradient(let value):
+-            return "conic-gradient(\(value))"
+-
+-        case .repeatingLinearGradient(let value):
+-            return "repeating-linear-gradient(\(value))"
+-
+-        case .repeatingRadialGradient(let value):
+-            return "repeating-radial-gradient(\(value))"
+-
+-        case .repeatingConicGradient(let value):
+-            return "repeating-conic-gradient(\(value))"
++        case .gradient(let gradient):
++            return gradient.description
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS Positioning/PositionTryFallbacks.FallbackOption.swift b/Sources/W3C CSS Positioning/PositionTryFallbacks.FallbackOption.swift
+index 9c25d87..33e8d87 100644
+--- a/Sources/W3C CSS Positioning/PositionTryFallbacks.FallbackOption.swift	
++++ b/Sources/W3C CSS Positioning/PositionTryFallbacks.FallbackOption.swift	
+@@ -6,8 +6,8 @@ extension PositionTryFallbacks {
+ 
+         case tactic(TryTactic)
+ 
+-        case positionArea(CSSString)
++        case positionArea(PositionArea)
+ 
+-        case customOption(CSSString)
++        case customOption(DashedIdent)
+     }
+ }
+diff --git a/Sources/W3C CSS Positioning/PositionTryFallbacks.swift b/Sources/W3C CSS Positioning/PositionTryFallbacks.swift
+index 2d358d1..c4b2939 100644
+--- a/Sources/W3C CSS Positioning/PositionTryFallbacks.swift	
++++ b/Sources/W3C CSS Positioning/PositionTryFallbacks.swift	
+@@ -9,9 +9,9 @@ public enum PositionTryFallbacks: Property {
+ 
+     case tactics([TryTactic])
+ 
+-    case positionArea(CSSString)
++    case positionArea(PositionArea)
+ 
+-    case customOption(CSSString)
++    case customOption(DashedIdent)
+ 
+     case combined([FallbackOption])
+ 
+diff --git a/Sources/W3C CSS Transitions/TransitionProperty.swift b/Sources/W3C CSS Transitions/TransitionProperty.swift
+index 390ad10..2d1fab2 100644
+--- a/Sources/W3C CSS Transitions/TransitionProperty.swift	
++++ b/Sources/W3C CSS Transitions/TransitionProperty.swift	
+@@ -7,7 +7,7 @@ public enum TransitionProperty: Property {
+ 
+     case none
+ 
+-    case custom(CSSString)
++    case custom(Ident)
+ 
+     case list([String])
+ 
+@@ -44,7 +44,7 @@ extension TransitionProperty {
+             return property.description
+ 
+         case .list(let properties):
+-            return properties.joined(separator: ", ")
++            return properties.map { Ident($0).description }.joined(separator: ", ")
+ 
+         case .global(let global):
+             return global.description
+diff --git a/Sources/W3C CSS UI/WebkitBoxReflect.swift b/Sources/W3C CSS UI/WebkitBoxReflect.swift
+index 348a42b..a7d1223 100644
+--- a/Sources/W3C CSS UI/WebkitBoxReflect.swift	
++++ b/Sources/W3C CSS UI/WebkitBoxReflect.swift	
+@@ -1,3 +1,4 @@
++public import W3C_CSS_Images
+ public import W3C_CSS_Shared
+ public import W3C_CSS_Values
+ 
+@@ -21,9 +22,7 @@ extension WebkitBoxReflect {
+ 
+     public enum ReflectionMask: Sendable, Hashable {
+ 
+-        case linearGradient(CSSString)
+-
+-        case radialGradient(CSSString)
++        case gradient(Gradient)
+ 
+         case url(Url)
+     }
+@@ -70,11 +69,8 @@ extension WebkitBoxReflect {
+ 
+     private func maskDescription(_ mask: ReflectionMask) -> String {
+         switch mask {
+-        case .linearGradient(let value):
+-            return "linear-gradient(\(value))"
+-
+-        case .radialGradient(let value):
+-            return "radial-gradient(\(value))"
++        case .gradient(let gradient):
++            return gradient.description
+ 
+         case .url(let url):
+             return url.description
+diff --git a/Sources/W3C CSS UI/WebkitMaskBoxImage.swift b/Sources/W3C CSS UI/WebkitMaskBoxImage.swift
+index 47bffbd..07f11ac 100644
+--- a/Sources/W3C CSS UI/WebkitMaskBoxImage.swift	
++++ b/Sources/W3C CSS UI/WebkitMaskBoxImage.swift	
+@@ -1,3 +1,4 @@
++public import W3C_CSS_Images
+ public import W3C_CSS_Shared
+ public import W3C_CSS_Values
+ 
+@@ -17,9 +18,7 @@ extension WebkitMaskBoxImage {
+ 
+         case url(Url)
+ 
+-        case linearGradient(CSSString)
+-
+-        case radialGradient(CSSString)
++        case gradient(Gradient)
+     }
+ 
+     public struct EdgeOffset: Sendable, Hashable {
+@@ -97,11 +96,8 @@ extension WebkitMaskBoxImage {
+         case .url(let url):
+             return url.description
+ 
+-        case .linearGradient(let value):
+-            return "linear-gradient(\(value))"
+-
+-        case .radialGradient(let value):
+-            return "radial-gradient(\(value))"
++        case .gradient(let gradient):
++            return gradient.description
+         }
+     }
+ 
+diff --git a/Tests/W3C CSS Backgrounds Tests/BorderImageSource Tests.swift b/Tests/W3C CSS Backgrounds Tests/BorderImageSource Tests.swift
+new file mode 100644
+index 0000000..cfafeb7
+--- /dev/null
++++ b/Tests/W3C CSS Backgrounds Tests/BorderImageSource Tests.swift	
+@@ -0,0 +1,20 @@
++import Testing
++import W3C_CSS_Shared
++
++@testable import W3C_CSS_Backgrounds
++
++enum `BorderImageSource Tests` {}
++
++extension `BorderImageSource Tests` {
++    @Suite
++    struct `BorderImageSource - Serialization` {
++        @Test func `a url is written once`() {
++            #expect(BorderImageSource.url(Url("a.png")).description == "url(\"a.png\")")
++        }
++
++        @Test func `a gradient is written as a gradient function`() {
++            let source = BorderImageSource.gradient(.linearGradient(to: .right, colors: [.named(.red), .named(.blue)]))
++            #expect(source.description == "linear-gradient(to right, red, blue)")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Images Tests/Fill Tests.swift b/Tests/W3C CSS Images Tests/Fill Tests.swift
+new file mode 100644
+index 0000000..7715f5c
+--- /dev/null
++++ b/Tests/W3C CSS Images Tests/Fill Tests.swift	
+@@ -0,0 +1,15 @@
++import Testing
++import W3C_CSS_Shared
++
++@testable import W3C_CSS_Images
++
++enum `Fill Tests` {}
++
++extension `Fill Tests` {
++    @Suite
++    struct `Fill - Serialization` {
++        @Test func `a url with a fallback is written once`() {
++            #expect(Fill.urlWithFallback(url: Url("#paint"), fallback: .none).description == "url(\"#paint\") none")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Masking Tests/ClipPath Tests.swift b/Tests/W3C CSS Masking Tests/ClipPath Tests.swift
+new file mode 100644
+index 0000000..9d80e92
+--- /dev/null
++++ b/Tests/W3C CSS Masking Tests/ClipPath Tests.swift	
+@@ -0,0 +1,18 @@
++import Testing
++
++@testable import W3C_CSS_Masking
++
++enum `ClipPath Tests` {}
++
++extension `ClipPath Tests` {
++    @Suite
++    struct `ClipPath - Serialization` {
++        @Test func `path data is quoted once`() {
++            #expect(ClipPath.path("M 0 0 L 1 1").description == "path(\"M 0 0 L 1 1\")")
++        }
++
++        @Test func `a custom value is written as given`() {
++            #expect(ClipPath.custom("circle(50%)").description == "circle(50%)")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Masking Tests/Mask Tests.swift b/Tests/W3C CSS Masking Tests/Mask Tests.swift
+new file mode 100644
+index 0000000..a86fdc1
+--- /dev/null
++++ b/Tests/W3C CSS Masking Tests/Mask Tests.swift	
+@@ -0,0 +1,20 @@
++import Testing
++import W3C_CSS_Shared
++
++@testable import W3C_CSS_Masking
++
++enum `Mask Tests` {}
++
++extension `Mask Tests` {
++    @Suite
++    struct `Mask - Serialization` {
++        @Test func `a mask reference url is written once`() {
++            #expect(Mask.MaskReference.url(Url("a.svg")).description == "url(\"a.svg\")")
++        }
++
++        @Test func `a mask reference gradient is written as a gradient function`() {
++            let reference = Mask.MaskReference.gradient(.linearGradient(to: .bottom, colors: [.named(.black)]))
++            #expect(reference.description == "linear-gradient(to bottom, black)")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Masking Tests/MaskBorderSource Tests.swift b/Tests/W3C CSS Masking Tests/MaskBorderSource Tests.swift
+new file mode 100644
+index 0000000..982be73
+--- /dev/null
++++ b/Tests/W3C CSS Masking Tests/MaskBorderSource Tests.swift	
+@@ -0,0 +1,20 @@
++import Testing
++import W3C_CSS_Shared
++
++@testable import W3C_CSS_Masking
++
++enum `MaskBorderSource Tests` {}
++
++extension `MaskBorderSource Tests` {
++    @Suite
++    struct `MaskBorderSource - Serialization` {
++        @Test func `a url is written once`() {
++            #expect(MaskBorderSource.url(Url("a.png")).description == "url(\"a.png\")")
++        }
++
++        @Test func `a gradient is written as a gradient function`() {
++            let source = MaskBorderSource.gradient(.radialGradient(colors: [.named(.red), .named(.blue)]))
++            #expect(source.description == "radial-gradient(red, blue)")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Positioning Tests/PositionTryFallbacks Tests.swift b/Tests/W3C CSS Positioning Tests/PositionTryFallbacks Tests.swift
+new file mode 100644
+index 0000000..e12c0ef
+--- /dev/null
++++ b/Tests/W3C CSS Positioning Tests/PositionTryFallbacks Tests.swift	
+@@ -0,0 +1,19 @@
++import Testing
++
++@testable import W3C_CSS_Positioning
++
++enum `PositionTryFallbacks Tests` {}
++
++extension `PositionTryFallbacks Tests` {
++    @Suite
++    struct `PositionTryFallbacks - Serialization` {
++        @Test func `fallbacks are written as identifiers and keywords`() {
++            #expect(PositionTryFallbacks.customOption("--above").description == "--above")
++            #expect(PositionTryFallbacks.positionArea(.physical(.top, .center)).description == "top center")
++            #expect(
++                PositionTryFallbacks.combine(.customOption("--above"), .tactic(.flipBlock)).description
++                    == "--above, flip-block"
++            )
++        }
++    }
++}
+diff --git a/Tests/W3C CSS Transitions Tests/TransitionProperty Tests.swift b/Tests/W3C CSS Transitions Tests/TransitionProperty Tests.swift
+new file mode 100644
+index 0000000..b4a6cab
+--- /dev/null
++++ b/Tests/W3C CSS Transitions Tests/TransitionProperty Tests.swift	
+@@ -0,0 +1,16 @@
++import Testing
++
++@testable import W3C_CSS_Transitions
++
++enum `TransitionProperty Tests` {}
++
++extension `TransitionProperty Tests` {
++    @Suite
++    struct `TransitionProperty - Serialization` {
++        @Test func `a custom property is written as an identifier`() {
++            #expect(TransitionProperty("opacity").description == "opacity")
++            #expect(TransitionProperty.custom("1st").description == "\\31 st")
++            #expect(Transition.custom("opacity", duration: .s(1)).description == "opacity 1s ease")
++        }
++    }
++}
+diff --git a/Tests/W3C CSS UI Tests/WebkitBoxReflect Tests.swift b/Tests/W3C CSS UI Tests/WebkitBoxReflect Tests.swift
+new file mode 100644
+index 0000000..f8c7eef
+--- /dev/null
++++ b/Tests/W3C CSS UI Tests/WebkitBoxReflect Tests.swift	
+@@ -0,0 +1,15 @@
++import Testing
++
++@testable import W3C_CSS_UI
++
++enum `WebkitBoxReflect Tests` {}
++
++extension `WebkitBoxReflect Tests` {
++    @Suite
++    struct `WebkitBoxReflect - Serialization` {
++        @Test func `a gradient mask is written as a gradient function`() {
++            let reflect = WebkitBoxReflect.below(mask: .gradient(.linearGradient(to: .bottom, colors: [.named(.white)])))
++            #expect(reflect.description == "below linear-gradient(to bottom, white)")
++        }
++    }
++}
+-- 
+2.43.0
+

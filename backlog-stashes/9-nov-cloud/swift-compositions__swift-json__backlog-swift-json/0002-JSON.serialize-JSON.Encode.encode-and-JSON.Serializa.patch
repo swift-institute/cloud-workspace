@@ -1,0 +1,597 @@
+From 5de34afd41656719278dd6091026f05c1957d15b Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:16 +0000
+Subject: [PATCH 2/3] JSON.serialize, JSON.Encode.encode and
+ JSON.Serializable.jsonString/jsonBytes throw JSON.Encode.Error.depthExceeded
+ instead of trapping beyond maxDepth (swift-compositions/swift-json#15)
+
+---
+ Sources/JSON/JSON.Encode.swift            |  26 ++---
+ Sources/JSON/JSON.Serializable.swift      |  11 ++-
+ Sources/JSON/JSON.swift                   |  46 +++++----
+ Tests/JSON Tests/Encoder Tests.swift      | 111 ++++++++++++++--------
+ Tests/JSON Tests/JSON Tests.swift         |  29 +++++-
+ Tests/JSON Tests/JSON.Encoder Tests.swift |   2 +-
+ Tests/JSON Tests/Round-Trip Tests.swift   |  18 ++--
+ 7 files changed, 151 insertions(+), 92 deletions(-)
+
+diff --git a/Sources/JSON/JSON.Encode.swift b/Sources/JSON/JSON.Encode.swift
+index 8edb6ce..b47be7f 100644
+--- a/Sources/JSON/JSON.Encode.swift
++++ b/Sources/JSON/JSON.Encode.swift
+@@ -19,36 +19,30 @@ extension JSON.Encode.Error: CustomStringConvertible {
+ 
+ extension JSON.Encode {
+ 
++    /// `value` encoded as JSON text.
++    ///
++    /// Throws ``JSON/Encode/Error/depthExceeded(maxDepth:)`` when `value` nests deeper than `options.maxDepth`.
+     @inlinable
+     public static func encode(
+         _ value: RFC_8259.Value,
+         options: JSON.Encode.Options = JSON.Encode.Options()
+-    ) -> [UInt8] {
++    ) throws(JSON.Encode.Error) -> [UInt8] {
+         var buffer: [UInt8] = []
+         var encoder = Encoder(options: options)
+-        do throws(JSON.Encode.Error) {
+-            try encoder.encode(value, into: &buffer)
+-        } catch {
+-            preconditionFailure(
+-                "JSON encoding exceeded maximum depth despite non-throwing contract: \(error)"
+-            )
+-        }
++        try encoder.encode(value, into: &buffer)
+         return buffer
+     }
+ 
++    /// Appends `value` encoded as JSON text to `buffer`.
++    ///
++    /// Throws ``JSON/Encode/Error/depthExceeded(maxDepth:)`` when `value` nests deeper than `options.maxDepth`.
+     @inlinable
+     public static func encode<Buffer: Swift.RangeReplaceableCollection>(
+         _ value: RFC_8259.Value,
+         into buffer: inout Buffer,
+         options: JSON.Encode.Options = JSON.Encode.Options()
+-    ) where Buffer.Element == UInt8 {
++    ) throws(JSON.Encode.Error) where Buffer.Element == UInt8 {
+         var encoder = Encoder(options: options)
+-        do throws(JSON.Encode.Error) {
+-            try encoder.encode(value, into: &buffer)
+-        } catch {
+-            preconditionFailure(
+-                "JSON encoding exceeded maximum depth despite non-throwing contract: \(error)"
+-            )
+-        }
++        try encoder.encode(value, into: &buffer)
+     }
+ }
+diff --git a/Sources/JSON/JSON.Serializable.swift b/Sources/JSON/JSON.Serializable.swift
+index 5213489..c3e8871 100644
+--- a/Sources/JSON/JSON.Serializable.swift
++++ b/Sources/JSON/JSON.Serializable.swift
+@@ -88,14 +88,17 @@ extension JSON.Serializable {
+         throw .unknown
+     }
+ 
++    /// This value as JSON text; throws when it nests deeper than the default ``JSON/Encode/Options/maxDepth``.
+     @inlinable
+-    public func jsonString(pretty: Bool = false, sortKeys: Bool = false) -> String {
+-        json.serialize(pretty: pretty, sortKeys: sortKeys)
++    public func jsonString(pretty: Bool = false, sortKeys: Bool = false) throws(JSON.Encode.Error) -> String {
++        try json.serialize(pretty: pretty, sortKeys: sortKeys)
+     }
+ 
++    /// This value as JSON text in UTF-8 bytes; throws when it nests deeper than the default
++    /// ``JSON/Encode/Options/maxDepth``.
+     @inlinable
+-    public func jsonBytes(pretty: Bool = false, sortKeys: Bool = false) -> [UInt8] {
+-        json.serialize(pretty: pretty, sortKeys: sortKeys, as: [UInt8].self)
++    public func jsonBytes(pretty: Bool = false, sortKeys: Bool = false) throws(JSON.Encode.Error) -> [UInt8] {
++        try json.serialize(pretty: pretty, sortKeys: sortKeys, as: [UInt8].self)
+     }
+ }
+ 
+diff --git a/Sources/JSON/JSON.swift b/Sources/JSON/JSON.swift
+index cd5e925..9173022 100644
+--- a/Sources/JSON/JSON.swift
++++ b/Sources/JSON/JSON.swift
+@@ -162,33 +162,33 @@ extension JSON {
+ 
+ extension JSON {
+ 
++    /// This value as JSON text.
++    ///
++    /// Throws ``JSON/Encode/Error/depthExceeded(maxDepth:)`` when the value nests deeper than the default
++    /// ``JSON/Encode/Options/maxDepth``.
+     @inlinable
+-    public func serialize(pretty: Bool = false, sortKeys: Bool = false) -> String {
++    public func serialize(pretty: Bool = false, sortKeys: Bool = false) throws(JSON.Encode.Error) -> String {
+         let options = JSON.Encode.Options(prettyPrint: pretty, sortKeys: sortKeys)
+         var bytes: [UInt8] = []
+         var encoder = JSON.Encode.Encoder(options: options)
+-        do throws(JSON.Encode.Error) {
+-            try encoder.encode(raw, into: &bytes)
+-        } catch {
+-            preconditionFailure(
+-                "JSON encoding exceeded maximum depth despite non-throwing contract: \(error)"
+-            )
+-        }
++        try encoder.encode(raw, into: &bytes)
+         return String(decoding: bytes, as: UTF8.self)
+     }
+ 
++    /// This value as JSON text, in UTF-8 bytes.
++    ///
++    /// Throws ``JSON/Encode/Error/depthExceeded(maxDepth:)`` when the value nests deeper than the default
++    /// ``JSON/Encode/Options/maxDepth``.
+     @inlinable
+-    public func serialize(pretty: Bool = false, sortKeys: Bool = false, as: [UInt8].Type) -> [UInt8] {
++    public func serialize(
++        pretty: Bool = false,
++        sortKeys: Bool = false,
++        as: [UInt8].Type
++    ) throws(JSON.Encode.Error) -> [UInt8] {
+         let options = JSON.Encode.Options(prettyPrint: pretty, sortKeys: sortKeys)
+         var bytes: [UInt8] = []
+         var encoder = JSON.Encode.Encoder(options: options)
+-        do throws(JSON.Encode.Error) {
+-            try encoder.encode(raw, into: &bytes)
+-        } catch {
+-            preconditionFailure(
+-                "JSON encoding exceeded maximum depth despite non-throwing contract: \(error)"
+-            )
+-        }
++        try encoder.encode(raw, into: &bytes)
+         return bytes
+     }
+ }
+@@ -221,7 +221,19 @@ extension JSON {
+         _ value: T,
+         options: JSON.Encode.Options = JSON.Encode.Options()
+     ) throws(Swift.EncodingError) -> [Byte] {
+-        JSON.Encode.encode(RFC_8259.Value(try JSON(encoding: value)), options: options).map { Byte($0) }
++        let tree = RFC_8259.Value(try JSON(encoding: value))
++        do throws(JSON.Encode.Error) {
++            return try JSON.Encode.encode(tree, options: options).map { Byte($0) }
++        } catch {
++            throw .invalidValue(
++                value,
++                EncodingError.Context(
++                    codingPath: [],
++                    debugDescription: error.description,
++                    underlyingError: error
++                )
++            )
++        }
+     }
+ }
+ 
+diff --git a/Tests/JSON Tests/Encoder Tests.swift b/Tests/JSON Tests/Encoder Tests.swift
+index 052cbad..93376e1 100644
+--- a/Tests/JSON Tests/Encoder Tests.swift	
++++ b/Tests/JSON Tests/Encoder Tests.swift	
+@@ -9,130 +9,130 @@ extension `JSON.Encode Tests` {
+     struct Test {
+ 
+         @Test
+-        func `Encode null`() {
++        func `Encode null`() throws {
+             let value: RFC_8259.Value = nil
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "null")
+         }
+ 
+         @Test
+-        func `Encode true`() {
++        func `Encode true`() throws {
+             let value: RFC_8259.Value = true
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "true")
+         }
+ 
+         @Test
+-        func `Encode false`() {
++        func `Encode false`() throws {
+             let value: RFC_8259.Value = false
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "false")
+         }
+ 
+         @Test
+         func `Encode integer`() throws {
+             let value = try JSON.Decode.parse("42")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "42")
+         }
+ 
+         @Test
+         func `Encode negative`() throws {
+             let value = try JSON.Decode.parse("-123")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "-123")
+         }
+ 
+         @Test
+         func `Encode floating point`() throws {
+             let value = try JSON.Decode.parse("3.14")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "3.14")
+         }
+ 
+         @Test
+         func `Encode scientific notation preserves original`() throws {
+             let value = try JSON.Decode.parse("1.5e10")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "1.5e10")
+         }
+ 
+         @Test
+         func `Encode simple string`() throws {
+             let value: RFC_8259.Value = "hello"
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "\"hello\"")
+         }
+ 
+         @Test
+-        func `Encode empty string`() {
++        func `Encode empty string`() throws {
+             let value: RFC_8259.Value = ""
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "\"\"")
+         }
+ 
+         @Test
+-        func `Encode string with escapes`() {
++        func `Encode string with escapes`() throws {
+             let value: RFC_8259.Value = .string("hello\nworld")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "\"hello\\nworld\"")
+         }
+ 
+         @Test
+-        func `Encode string with all escape sequences`() {
++        func `Encode string with all escape sequences`() throws {
+             let value: RFC_8259.Value = .string("\"\\\u{08}\u{0C}\n\r\t")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "\"\\\"\\\\\\b\\f\\n\\r\\t\"")
+         }
+ 
+         @Test
+-        func `Encode string with control character`() {
++        func `Encode string with control character`() throws {
+             let value: RFC_8259.Value = .string("\u{01}")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "\"\\u0001\"")
+         }
+ 
+         @Test
+-        func `Encode empty array`() {
++        func `Encode empty array`() throws {
+             let value: RFC_8259.Value = []
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "[]")
+         }
+ 
+         @Test
+         func `Encode array with values`() throws {
+             let value = try JSON.Decode.parse("[1, 2, 3]")
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "[1,2,3]")
+         }
+ 
+         @Test
+-        func `Encode empty object`() {
++        func `Encode empty object`() throws {
+             let value: RFC_8259.Value = [:]
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "{}")
+         }
+ 
+         @Test
+         func `Encode object`() throws {
+             let value: RFC_8259.Value = ["name": "John"]
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "{\"name\":\"John\"}")
+         }
+ 
+         @Test
+-        func `Encode with sorted keys`() {
++        func `Encode with sorted keys`() throws {
+             let value: RFC_8259.Value = ["b": 2, "a": 1]
+             let options = JSON.Encode.Options(sortKeys: true)
+-            let bytes = JSON.Encode.encode(value, options: options)
++            let bytes = try JSON.Encode.encode(value, options: options)
+             #expect(String(decoding: bytes, as: UTF8.self) == "{\"a\":1,\"b\":2}")
+         }
+ 
+         @Test
+-        func `Encode with escaped slashes`() {
++        func `Encode with escaped slashes`() throws {
+             let value: RFC_8259.Value = "http://example.com"
+             let options = JSON.Encode.Options(escapeSlashes: true)
+-            let bytes = JSON.Encode.encode(value, options: options)
++            let bytes = try JSON.Encode.encode(value, options: options)
+             #expect(String(decoding: bytes, as: UTF8.self) == "\"http:\\/\\/example.com\"")
+         }
+ 
+@@ -140,7 +140,7 @@ extension `JSON.Encode Tests` {
+         func `Encode pretty printed array`() throws {
+             let value = try JSON.Decode.parse("[1, 2]")
+             let options = JSON.Encode.Options(prettyPrint: true)
+-            let bytes = JSON.Encode.encode(value, options: options)
++            let bytes = try JSON.Encode.encode(value, options: options)
+             let expected = """
+                 [
+                   1,
+@@ -151,10 +151,10 @@ extension `JSON.Encode Tests` {
+         }
+ 
+         @Test
+-        func `Encode pretty printed object`() {
++        func `Encode pretty printed object`() throws {
+             let value: RFC_8259.Value = ["key": "value"]
+             let options = JSON.Encode.Options(prettyPrint: true)
+-            let bytes = JSON.Encode.encode(value, options: options)
++            let bytes = try JSON.Encode.encode(value, options: options)
+             let expected = """
+                 {
+                   "key": "value"
+@@ -164,49 +164,76 @@ extension `JSON.Encode Tests` {
+         }
+ 
+         @Test
+-        func `JSON.Encode.encode returns bytes`() {
++        func `JSON.Encode.encode returns bytes`() throws {
+             let value: RFC_8259.Value = ["name": "test"]
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             #expect(String(decoding: bytes, as: UTF8.self) == "{\"name\":\"test\"}")
+         }
+ 
+         @Test
+-        func `JSON.Encode.encode appends into buffer`() {
++        func `JSON.Encode.encode appends into buffer`() throws {
+             var buffer: [UInt8] = []
+             let value: RFC_8259.Value = 42
+-            JSON.Encode.encode(value, into: &buffer)
++            try JSON.Encode.encode(value, into: &buffer)
+             #expect(String(decoding: buffer, as: UTF8.self) == "42")
+         }
+ 
+         @Test
+-        func `Sort keys by UTF-8 bytes, not Unicode collation`() {
++        func `Sort keys by UTF-8 bytes, not Unicode collation`() throws {
+ 
+             let value: RFC_8259.Value = ["é": 1, "e": 2, "f": 3]
+             let options = JSON.Encode.Options(sortKeys: true)
+-            let bytes = JSON.Encode.encode(value, options: options)
++            let bytes = try JSON.Encode.encode(value, options: options)
+             let result = String(decoding: bytes, as: UTF8.self)
+ 
+             #expect(result == "{\"e\":2,\"f\":3,\"é\":1}")
+         }
+ 
+         @Test
+-        func `Sort keys with emoji by UTF-8 bytes`() {
++        func `Sort keys with emoji by UTF-8 bytes`() throws {
+ 
+             let value: RFC_8259.Value = ["a": 1, "😀": 2, "z": 3]
+             let options = JSON.Encode.Options(sortKeys: true)
+-            let bytes = JSON.Encode.encode(value, options: options)
++            let bytes = try JSON.Encode.encode(value, options: options)
+             let result = String(decoding: bytes, as: UTF8.self)
+ 
+             #expect(result == "{\"a\":1,\"z\":3,\"😀\":2}")
+         }
+ 
+         @Test
+-        func `Encode string with multi-byte UTF-8`() {
++        func `Encode string with multi-byte UTF-8`() throws {
+ 
+             let value: RFC_8259.Value = "aéñ中😀"
+-            let bytes = JSON.Encode.encode(value)
++            let bytes = try JSON.Encode.encode(value)
+             let result = String(decoding: bytes, as: UTF8.self)
+             #expect(result == "\"aéñ中😀\"")
+         }
++
++        @Test
++        func `Encode throws depthExceeded beyond maxDepth`() {
++            let value: RFC_8259.Value = [[[1]]]
++            let options = JSON.Encode.Options(maxDepth: 2)
++            #expect(throws: JSON.Encode.Error.depthExceeded(maxDepth: 2)) {
++                try JSON.Encode.encode(value, options: options)
++            }
++        }
++
++        @Test
++        func `Encode into buffer throws depthExceeded beyond maxDepth`() {
++            var buffer: [UInt8] = []
++            let value: RFC_8259.Value = ["a": ["b": ["c": 1]]]
++            let options = JSON.Encode.Options(maxDepth: 2)
++            #expect(throws: JSON.Encode.Error.depthExceeded(maxDepth: 2)) {
++                try JSON.Encode.encode(value, into: &buffer, options: options)
++            }
++        }
++
++        @Test
++        func `Encode accepts nesting exactly at maxDepth`() throws {
++            let value: RFC_8259.Value = [[1]]
++            let options = JSON.Encode.Options(maxDepth: 2)
++            let bytes = try JSON.Encode.encode(value, options: options)
++            #expect(String(decoding: bytes, as: UTF8.self) == "[[1]]")
++        }
+     }
+ }
+diff --git a/Tests/JSON Tests/JSON Tests.swift b/Tests/JSON Tests/JSON Tests.swift
+index 0339f79..50a9a30 100644
+--- a/Tests/JSON Tests/JSON Tests.swift	
++++ b/Tests/JSON Tests/JSON Tests.swift	
+@@ -97,9 +97,9 @@ extension `JSON Tests` {
+         }
+ 
+         @Test
+-        func `Serialize to string`() {
++        func `Serialize to string`() throws {
+             let json: JSON = ["name": "John"]
+-            let string = json.serialize()
++            let string = try json.serialize()
+             #expect(string.contains("name"))
+             #expect(string.contains("John"))
+         }
+@@ -112,7 +112,7 @@ extension `JSON Tests` {
+                 "verified": true,
+                 "tags": ["swift", "json"],
+             ]
+-            let string = original.serialize()
++            let string = try original.serialize()
+             let parsed = try JSON.parse(string)
+             #expect(String(parsed.name) == "John")
+             #expect(Int(parsed.age) == 30)
+@@ -174,5 +174,28 @@ extension `JSON Tests` {
+             #expect(decodedSome == 42)
+             #expect(decodedNone == nil)
+         }
++
++        @Test
++        func `Serialize throws depthExceeded beyond the default depth of 512`() {
++            var value: RFC_8259.Value = nil
++            for _ in 0..<513 {
++                value = [value]
++            }
++            let json = JSON(value)
++            #expect(throws: JSON.Encode.Error.depthExceeded(maxDepth: 512)) {
++                try json.serialize()
++            }
++            #expect(throws: JSON.Encode.Error.depthExceeded(maxDepth: 512)) {
++                try json.serialize(as: [UInt8].self)
++            }
++        }
++
++        @Test
++        func `Encode of an Encodable reports nesting beyond maxDepth as an EncodingError`() {
++            let options = JSON.Encode.Options(maxDepth: 1)
++            #expect(throws: EncodingError.self) {
++                try JSON.encode([[1]], options: options)
++            }
++        }
+     }
+ }
+diff --git a/Tests/JSON Tests/JSON.Encoder Tests.swift b/Tests/JSON Tests/JSON.Encoder Tests.swift
+index 97d08be..2f85fc6 100644
+--- a/Tests/JSON Tests/JSON.Encoder Tests.swift	
++++ b/Tests/JSON Tests/JSON.Encoder Tests.swift	
+@@ -201,7 +201,7 @@ extension `JSON.Encoder Tests`.Test {
+         @Test
+         func `round-trips through serialized text`() throws {
+             let value = Outer(name: "text", inner: Inner(value: -7), list: [])
+-            let bytes = JSON.Encode.encode(try JSON(encoding: value).raw)
++            let bytes = try JSON.Encode.encode(try JSON(encoding: value).raw)
+             #expect(try JSON.parse(bytes.map(Byte.init(bitPattern:))).decode(Outer.self) == value)
+         }
+     }
+diff --git a/Tests/JSON Tests/Round-Trip Tests.swift b/Tests/JSON Tests/Round-Trip Tests.swift
+index d7ec176..b1346eb 100644
+--- a/Tests/JSON Tests/Round-Trip Tests.swift	
++++ b/Tests/JSON Tests/Round-Trip Tests.swift	
+@@ -10,7 +10,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip simple values`() throws {
+             for json in ["null", "true", "false"] {
+                 let value = try JSON.Decode.parse(json)
+-                let encoded = JSON.Encode.encode(value)
++                let encoded = try JSON.Encode.encode(value)
+                 let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+                 #expect(value == reparsed)
+             }
+@@ -20,7 +20,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip integers`() throws {
+             for json in ["0", "1", "-1", "42", "-123", "999999999"] {
+                 let value = try JSON.Decode.parse(json)
+-                let encoded = JSON.Encode.encode(value)
++                let encoded = try JSON.Encode.encode(value)
+                 let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+                 #expect(value == reparsed)
+             }
+@@ -30,7 +30,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip floats`() throws {
+             for json in ["0.0", "3.14", "-2.5", "1.5e10", "1e-5"] {
+                 let value = try JSON.Decode.parse(json)
+-                let encoded = JSON.Encode.encode(value)
++                let encoded = try JSON.Encode.encode(value)
+                 let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+                 #expect(value == reparsed)
+             }
+@@ -40,7 +40,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip strings`() throws {
+             for json in ["\"\"", "\"hello\"", "\"hello\\nworld\"", "\"\\u0041\""] {
+                 let value = try JSON.Decode.parse(json)
+-                let encoded = JSON.Encode.encode(value)
++                let encoded = try JSON.Encode.encode(value)
+                 let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+                 #expect(value == reparsed)
+             }
+@@ -50,7 +50,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip arrays`() throws {
+             for json in ["[]", "[1]", "[1, 2, 3]", "[[1], [2]]"] {
+                 let value = try JSON.Decode.parse(json)
+-                let encoded = JSON.Encode.encode(value)
++                let encoded = try JSON.Encode.encode(value)
+                 let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+                 #expect(value == reparsed)
+             }
+@@ -60,7 +60,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip objects`() throws {
+             let json = "{\"name\":\"John\",\"age\":30}"
+             let value = try JSON.Decode.parse(json)
+-            let encoded = JSON.Encode.encode(value)
++            let encoded = try JSON.Encode.encode(value)
+             let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+             #expect(value == reparsed)
+         }
+@@ -69,7 +69,7 @@ extension `JSON.Coder Tests` {
+         func `Round-trip nested structure`() throws {
+             let json = "{\"users\":[{\"name\":\"Alice\",\"active\":true}]}"
+             let value = try JSON.Decode.parse(json)
+-            let encoded = JSON.Encode.encode(value)
++            let encoded = try JSON.Encode.encode(value)
+             let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+             #expect(value == reparsed)
+         }
+@@ -79,7 +79,7 @@ extension `JSON.Coder Tests` {
+ 
+             let json = "1.5e10"
+             let value = try JSON.Decode.parse(json)
+-            let encoded = JSON.Encode.encode(value)
++            let encoded = try JSON.Encode.encode(value)
+             #expect(String(decoding: encoded, as: UTF8.self) == json)
+         }
+ 
+@@ -89,7 +89,7 @@ extension `JSON.Coder Tests` {
+                 {"data":{"items":[{"id":1,"name":"first","tags":["a","b"]},{"id":2,"name":"second","tags":[]}],"count":2,"active":true}}
+                 """
+             let value = try JSON.Decode.parse(json)
+-            let encoded = JSON.Encode.encode(value)
++            let encoded = try JSON.Encode.encode(value)
+             let reparsed = try JSON.Decode.parse(encoded.map(Byte.init(bitPattern:)))
+             #expect(value == reparsed)
+         }
+-- 
+2.43.0
+

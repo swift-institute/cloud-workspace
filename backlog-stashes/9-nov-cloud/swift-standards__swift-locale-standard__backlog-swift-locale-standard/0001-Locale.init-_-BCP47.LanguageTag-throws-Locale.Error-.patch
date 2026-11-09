@@ -1,0 +1,159 @@
+From edab49b81c30e990f69e6434bcfc17077a2cecf2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:28:21 +0000
+Subject: [PATCH] Locale.init(_: BCP47.LanguageTag) throws Locale.Error for a
+ numeric region, variants, extensions or private use instead of dropping them
+ (swift-standards/swift-locale-standard#10)
+
+---
+ Sources/Locale Standard/Locale.Error.swift    | 27 ++++++++++
+ Sources/Locale Standard/Locale.swift          | 49 +++++++++++++------
+ .../Locale Boundary Tests.swift               | 25 ++++++++++
+ 3 files changed, 86 insertions(+), 15 deletions(-)
+ create mode 100644 Sources/Locale Standard/Locale.Error.swift
+
+diff --git a/Sources/Locale Standard/Locale.Error.swift b/Sources/Locale Standard/Locale.Error.swift
+new file mode 100644
+index 0000000..c3cebc7
+--- /dev/null
++++ b/Sources/Locale Standard/Locale.Error.swift	
+@@ -0,0 +1,27 @@
++import BCP_47
++import ISO_639
++
++extension Locale {
++
++    /// Why a BCP 47 language tag has no `Locale`.
++    ///
++    /// A `Locale` carries a language, an ISO 15924 script and an ISO 3166 alpha-2 region. A tag with
++    /// anything else is rejected instead of being shortened to a different locale.
++    public enum Error: Swift::Error, Sendable, Equatable {
++
++        /// The language subtag is not an ISO 639 code.
++        case language(ISO_639.Error)
++
++        /// The region is a UN M.49 numeric code, such as `419` in `es-419`.
++        case unsupportedRegion(String)
++
++        /// The tag has variant subtags, such as `1901` in `de-DE-1901`.
++        case unsupportedVariants([String])
++
++        /// The tag has extensions, such as `u-ca-gregory`.
++        case unsupportedExtensions([BCP47.LanguageTag.Extension])
++
++        /// The tag has private use subtags, such as `x-private`.
++        case unsupportedPrivateUse([String])
++    }
++}
+diff --git a/Sources/Locale Standard/Locale.swift b/Sources/Locale Standard/Locale.swift
+index 9eab319..58618b5 100644
+--- a/Sources/Locale Standard/Locale.swift	
++++ b/Sources/Locale Standard/Locale.swift	
+@@ -30,7 +30,11 @@ public struct Locale: Sendable, Equatable, Hashable {
+ 
+ extension Locale {
+ 
+-    public init(_ tag: BCP47.LanguageTag) throws(ISO_639.Error) {
++    /// Creates the locale a language tag names.
++    ///
++    /// Throws when the tag carries what a `Locale` cannot: a numeric region, variants, extensions or
++    /// private use subtags. Dropping them would name a different locale.
++    public init(_ tag: BCP47.LanguageTag) throws(Locale.Error) {
+ 
+         let language: Language
+         switch tag.language {
+@@ -38,26 +42,41 @@ extension Locale {
+             language = Language(code)
+ 
+         case .reserved(let code):
+-
+-            let languageCode = try ISO_639.LanguageCode(code)
+-            language = Language(languageCode)
++            do throws(ISO_639.Error) {
++                language = Language(try ISO_639.LanguageCode(code))
++            } catch {
++                throw .language(error)
++            }
+         }
+ 
+-        self.language = language
+-        self.script = tag.script
++        let region: ISO_3166.Alpha2?
++        switch tag.region {
++        case .none:
++            region = nil
+ 
+-        if let region = tag.region {
+-            switch region {
+-            case .alpha2(let alpha2):
+-                self.region = alpha2
++        case .alpha2(let alpha2):
++            region = alpha2
+ 
+-            case .numeric, .area:
++        case .numeric(let numeric):
++            throw .unsupportedRegion(numeric.value)
+ 
+-                self.region = nil
+-            }
+-        } else {
+-            self.region = nil
++        case .area(let area):
++            throw .unsupportedRegion(area.value)
++        }
++
++        guard tag.variants.isEmpty else {
++            throw .unsupportedVariants(tag.variants)
+         }
++        guard tag.extensions.isEmpty else {
++            throw .unsupportedExtensions(tag.extensions)
++        }
++        guard tag.privateUse.isEmpty else {
++            throw .unsupportedPrivateUse(tag.privateUse)
++        }
++
++        self.language = language
++        self.script = tag.script
++        self.region = region
+     }
+ 
+     public func languageTag() throws(BCP47.Error) -> BCP47.LanguageTag {
+diff --git a/Tests/Locale Standard Tests/Locale Boundary Tests.swift b/Tests/Locale Standard Tests/Locale Boundary Tests.swift
+index 1fd1962..31b24bb 100644
+--- a/Tests/Locale Standard Tests/Locale Boundary Tests.swift	
++++ b/Tests/Locale Standard Tests/Locale Boundary Tests.swift	
+@@ -35,6 +35,31 @@ extension `Locale Boundary Tests` {
+             #expect(try JSONDecoder().decode(Locale.self, from: data) == locale)
+         }
+ 
++        @Test
++        func `a numeric region is rejected instead of dropped`() throws {
++            let tag = try BCP47.LanguageTag("es-419")
++            #expect(throws: Locale.Error.unsupportedRegion("419")) { try Locale(tag) }
++        }
++
++        @Test
++        func `variants are rejected instead of dropped`() throws {
++            let tag = try BCP47.LanguageTag("de-DE-1901")
++            #expect(throws: Locale.Error.unsupportedVariants(["1901"])) { try Locale(tag) }
++        }
++
++        @Test(arguments: ["en-US-u-ca-gregory", "en-x-private"])
++        func `extensions and private use are rejected instead of dropped`(tag: String) throws {
++            let tag = try BCP47.LanguageTag(tag)
++            #expect(throws: Locale.Error.self) { try Locale(tag) }
++        }
++
++        @Test
++        func `decoding a tag with a numeric region throws`() {
++            #expect(throws: (any Swift.Error).self) {
++                try JSONDecoder().decode(Locale.self, from: Data(#""es-419""#.utf8))
++            }
++        }
++
+         @Test
+         func `decoding an invalid tag throws`() {
+             #expect(throws: (any Swift.Error).self) {
+-- 
+2.43.0
+

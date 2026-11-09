@@ -1,0 +1,149 @@
+From f621b79ff59d8d3560d3d7bd29d618b4e1ea2119 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 13:58:04 +0000
+Subject: [PATCH 3/3] io_uring submissions bind the slot from Uring.next(),
+ which is now nil when the ring is full; the Windows thread-local slot tries
+ Thread.Index's now-throwing init (follows swift-linux-standard#18 and
+ swift-windows-32 7d2001f, coenttb/work#242)
+
+---
+ .../Kernel.Completion+IOUring.swift           | 32 +++++++++----------
+ .../Kernel Thread/Kernel.Thread.Local.swift   |  2 +-
+ 2 files changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/Sources/Kernel Completion/Kernel.Completion+IOUring.swift b/Sources/Kernel Completion/Kernel.Completion+IOUring.swift
+index 1289f2d..847dce5 100644
+--- a/Sources/Kernel Completion/Kernel.Completion+IOUring.swift	
++++ b/Sources/Kernel Completion/Kernel.Completion+IOUring.swift	
+@@ -91,7 +91,7 @@
+             _ submission: Kernel.Completion.Submission,
+             target: borrowing Kernel.Descriptor
+         ) throws(Kernel.Completion.Error) {
+-            guard uring.hasCapacity else {
++            guard let slot = uring.next() else {
+                 throw .submissionQueueFull
+             }
+ 
+@@ -100,10 +100,10 @@
+ 
+             switch submission.opcode {
+             case .noOperation:
+-                uring.next.entry.nop(data: data)
++                slot.entry.nop(data: data)
+ 
+             case .read(let address, let length, let offset):
+-                unsafe uring.next.entry.read(
++                unsafe slot.entry.read(
+                     target: uringTarget,
+                     buffer: unsafe UnsafeMutableRawPointer(address),
+                     length: .init(length),
+@@ -112,7 +112,7 @@
+                 )
+ 
+             case .write(let address, let length, let offset):
+-                unsafe uring.next.entry.write(
++                unsafe slot.entry.write(
+                     target: uringTarget,
+                     buffer: unsafe UnsafeRawPointer(address),
+                     length: .init(length),
+@@ -121,10 +121,10 @@
+                 )
+ 
+             case .close:
+-                uring.next.entry.close(target: uringTarget, data: data)
++                slot.entry.close(target: uringTarget, data: data)
+ 
+             case .accept:
+-                uring.next.entry.accept(
++                slot.entry.accept(
+                     target: uringTarget,
+                     addr: nil,
+                     length: nil,
+@@ -133,20 +133,20 @@
+                 )
+ 
+             case .synchronize:
+-                uring.next.entry.fsync(
++                slot.entry.fsync(
+                     target: uringTarget,
+                     datasync: false,
+                     data: data
+                 )
+ 
+             case .cancel(let targetToken):
+-                uring.next.entry.cancel(
++                slot.entry.cancel(
+                     target: Kernel.IO.Uring.Operation.Data(targetToken),
+                     data: data
+                 )
+ 
+             case .send(let address, let length):
+-                unsafe uring.next.entry.send(
++                unsafe slot.entry.send(
+                     target: uringTarget,
+                     buffer: unsafe UnsafeRawPointer(address),
+                     length: .init(length),
+@@ -155,7 +155,7 @@
+                 )
+ 
+             case .receive(let address, let length):
+-                unsafe uring.next.entry.recv(
++                unsafe slot.entry.recv(
+                     target: uringTarget,
+                     buffer: unsafe UnsafeMutableRawPointer(address),
+                     length: .init(length),
+@@ -164,7 +164,7 @@
+                 )
+ 
+             case .connect(let address, let length):
+-                unsafe uring.next.entry.connect(
++                unsafe slot.entry.connect(
+                     target: uringTarget,
+                     address: UnsafePointer<Kernel.Socket.Address.Storage>(
+                         unsafe UnsafeMutableRawPointer(address).assumingMemoryBound(
+@@ -179,7 +179,7 @@
+ 
+             case .readiness(let events):
+ 
+-                uring.next.entry.poll(
++                slot.entry.poll(
+                     target: uringTarget,
+                     events: Linux.Kernel.Event.Poll.Events(
+                         interest: Linux.Kernel.Event.Interest(events)
+@@ -191,16 +191,16 @@
+             }
+ 
+             if submission.flags.contains(.linked) {
+-                uring.next.entry.flags.insert(.ioLink)
++                slot.entry.flags.insert(.ioLink)
+             }
+             if submission.flags.contains(.drain) {
+-                uring.next.entry.flags.insert(.ioDrain)
++                slot.entry.flags.insert(.ioDrain)
+             }
+             if submission.flags.contains(.fixedFile) {
+-                uring.next.entry.flags.insert(.fixedFile)
++                slot.entry.flags.insert(.fixedFile)
+             }
+             if submission.flags.contains(.bufferSelect) {
+-                uring.next.entry.flags.insert(.bufferSelect)
++                slot.entry.flags.insert(.bufferSelect)
+ 
+             }
+ 
+diff --git a/Sources/Kernel Thread/Kernel.Thread.Local.swift b/Sources/Kernel Thread/Kernel.Thread.Local.swift
+index 1698c1a..88a1089 100644
+--- a/Sources/Kernel Thread/Kernel.Thread.Local.swift	
++++ b/Sources/Kernel Thread/Kernel.Thread.Local.swift	
+@@ -10,7 +10,7 @@ extension Kernel.Thread {
+             #if canImport(Darwin) || canImport(Glibc) || canImport(Musl)
+                 _slot = try unsafe _PlatformSlot(destructor: _kernelThreadLocalRelease)
+             #elseif os(Windows)
+-                _slot = _PlatformSlot()
++                _slot = try unsafe _PlatformSlot()
+             #endif
+         }
+ 
+-- 
+2.43.0
+

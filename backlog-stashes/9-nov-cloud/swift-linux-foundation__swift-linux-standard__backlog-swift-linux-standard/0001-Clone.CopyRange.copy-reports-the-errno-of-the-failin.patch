@@ -1,0 +1,242 @@
+From 27a87184787e45f329b0adaeba7e6f22a5031aa2 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:58 +0000
+Subject: [PATCH 1/4] Clone.CopyRange.copy reports the errno of the failing
+ copy_file_range instead of rereading errno after the call, and
+ Capability.probe reports reflink only for Btrfs and XFS through
+ File.System.Kind (swift-linux-foundation/swift-linux-standard#18)
+
+---
+ .../Linux.Kernel.Copy.Range.swift             |  12 +-
+ .../Linux.Kernel.File.Clone.swift             |  41 ++++---
+ .../Linux.Kernel.File.Clone Tests.swift       | 110 ++++++++++++++++++
+ 3 files changed, 142 insertions(+), 21 deletions(-)
+ create mode 100644 Tests/Linux Kernel Standard Tests/Linux.Kernel.File.Clone Tests.swift
+
+diff --git a/Sources/Linux Kernel File Standard/Linux.Kernel.Copy.Range.swift b/Sources/Linux Kernel File Standard/Linux.Kernel.Copy.Range.swift
+index 06a7d95..06b775a 100644
+--- a/Sources/Linux Kernel File Standard/Linux.Kernel.Copy.Range.swift	
++++ b/Sources/Linux Kernel File Standard/Linux.Kernel.Copy.Range.swift	
+@@ -19,13 +19,14 @@
+ 
+     extension Linux.Kernel.Copy.Range {
+ 
+-        internal static func copy(
++        internal static func copy<Failure: Swift.Error>(
+             fromFd sourceFd: Int32,
+             sourceOffset: inout ISO_9945.Kernel.File.Offset,
+             toFd destinationFd: Int32,
+             destOffset: inout ISO_9945.Kernel.File.Offset,
+-            length: ISO_9945.Kernel.File.Size
+-        ) throws(Linux.Kernel.Copy.Error) -> ISO_9945.Kernel.File.Size {
++            length: ISO_9945.Kernel.File.Size,
++            failure: (Int32) -> Failure
++        ) throws(Failure) -> ISO_9945.Kernel.File.Size {
+             var srcOff = off_t(sourceOffset.underlying)
+             var dstOff = off_t(destOffset.underlying)
+ 
+@@ -41,7 +42,7 @@
+             )
+ 
+             guard result >= 0 else {
+-                throw Linux.Kernel.Copy.Error(posixErrno: errno)
++                throw failure(errno)
+             }
+ 
+             sourceOffset = ISO_9945.Kernel.File.Offset(Int64(srcOff))
+@@ -61,7 +62,8 @@
+                 sourceOffset: &sourceOffset,
+                 toFd: destination._rawValue,
+                 destOffset: &destOffset,
+-                length: length
++                length: length,
++                failure: Linux.Kernel.Copy.Error.init(posixErrno:)
+             )
+         }
+     }
+diff --git a/Sources/Linux Kernel File Standard/Linux.Kernel.File.Clone.swift b/Sources/Linux Kernel File Standard/Linux.Kernel.File.Clone.swift
+index 446fb2c..fe521fd 100644
+--- a/Sources/Linux Kernel File Standard/Linux.Kernel.File.Clone.swift	
++++ b/Sources/Linux Kernel File Standard/Linux.Kernel.File.Clone.swift	
+@@ -18,6 +18,18 @@ extension Linux.Kernel.File {
+         internal import Musl
+     #endif
+ 
++    extension Linux.Kernel.File.Clone.Capability {
++        internal init(kind: ISO_9945.Kernel.File.System.Kind) {
++            switch kind {
++            case .btrfs, .xfs:
++                self = .reflink
++
++            default:
++                self = .none
++            }
++        }
++    }
++
+     extension Linux.Kernel.File.Clone.Capability {
+         public static func probe(
+             at path: borrowing Path.Borrowed
+@@ -37,12 +49,9 @@ extension Linux.Kernel.File {
+                     )
+                 }
+ 
+-                let fsMagic = statfsBuf.f_type
+-                if fsMagic == 0x9123_683E || fsMagic == 0x5846_5342 {
+-                    return .reflink
+-                }
+-
+-                return .none
++                return Linux.Kernel.File.Clone.Capability(
++                    kind: ISO_9945.Kernel.File.System.Kind(UInt64(UInt(bitPattern: Int(statfsBuf.f_type))))
++                )
+             }
+         }
+     }
+@@ -123,17 +132,17 @@ extension Linux.Kernel.File {
+             var dstOffset = ISO_9945.Kernel.File.Offset(0)
+ 
+             while remaining > .zero {
+-                let copied: ISO_9945.Kernel.File.Size
+-                do {
+-                    copied = try Linux.Kernel.Copy.Range.copy(
+-                        fromFd: sourceFd,
+-                        sourceOffset: &srcOffset,
+-                        toFd: destinationFd,
+-                        destOffset: &dstOffset,
+-                        length: remaining
++                let copied = try Linux.Kernel.Copy.Range.copy(
++                    fromFd: sourceFd,
++                    sourceOffset: &srcOffset,
++                    toFd: destinationFd,
++                    destOffset: &dstOffset,
++                    length: remaining
++                ) { code in
++                    Linux.Kernel.File.Clone.Error.Syscall.platform(
++                        code: .posix(code),
++                        operation: .copyFileRange
+                     )
+-                } catch {
+-                    throw .platform(code: .posix(errno), operation: .copyFileRange)
+                 }
+ 
+                 if copied == .zero {
+diff --git a/Tests/Linux Kernel Standard Tests/Linux.Kernel.File.Clone Tests.swift b/Tests/Linux Kernel Standard Tests/Linux.Kernel.File.Clone Tests.swift
+new file mode 100644
+index 0000000..37a6224
+--- /dev/null
++++ b/Tests/Linux Kernel Standard Tests/Linux.Kernel.File.Clone Tests.swift	
+@@ -0,0 +1,110 @@
++#if os(Linux)
++    #if canImport(Glibc)
++        import Glibc
++    #elseif canImport(Musl)
++        import Musl
++    #endif
++    import Error
++    import Testing
++    import ISO_9945_Core
++
++    @testable import Linux_Kernel_File_Standard
++
++    private func temporaryFile(_ contents: [UInt8]) -> Int32 {
++        var template = Array("/dev/shm/linux-standard-clone-XXXXXX".utf8CString)
++        let fd = template.withUnsafeMutableBufferPointer { buffer in
++            unsafe mkstemp(buffer.baseAddress!)
++        }
++        precondition(fd >= 0)
++        template.withUnsafeBufferPointer { buffer in
++            _ = unsafe unlink(buffer.baseAddress!)
++        }
++        let written = contents.withUnsafeBytes { bytes in
++            unsafe write(fd, bytes.baseAddress, bytes.count)
++        }
++        precondition(written == contents.count)
++        return fd
++    }
++
++    private func contents(of fd: Int32) -> [UInt8] {
++        var buffer = [UInt8](repeating: 0, count: 64)
++        let count = buffer.withUnsafeMutableBytes { bytes in
++            unsafe pread(fd, bytes.baseAddress, bytes.count, 0)
++        }
++        return Array(buffer.prefix(max(count, 0)))
++    }
++
++    extension Linux.Kernel.File.Clone {
++        @Suite
++        struct Test {
++            @Suite struct Unit {}
++            @Suite struct Integration {}
++        }
++    }
++
++    extension Linux.Kernel.File.Clone.Test.Unit {
++        @Test
++        func `only Btrfs and XFS report reflink`() {
++            #expect(Linux.Kernel.File.Clone.Capability(kind: .btrfs) == .reflink)
++            #expect(Linux.Kernel.File.Clone.Capability(kind: .xfs) == .reflink)
++            #expect(Linux.Kernel.File.Clone.Capability(kind: .ext4) == .none)
++            #expect(Linux.Kernel.File.Clone.Capability(kind: .tmpfs) == .none)
++            #expect(Linux.Kernel.File.Clone.Capability(kind: .nfs) == .none)
++        }
++    }
++
++    extension Linux.Kernel.File.Clone.Test.Integration {
++        @Test
++        func `FICLONE on tmpfs reports no clone instead of failing`() throws {
++            let source = temporaryFile([1, 2, 3])
++            let destination = temporaryFile([])
++            defer {
++                _ = close(source)
++                _ = close(destination)
++            }
++
++            let cloned = try Linux.Kernel.File.Clone.Ficlone.attempt(
++                sourceFd: source,
++                destinationFd: destination
++            )
++            #expect(cloned == false)
++        }
++
++        @Test
++        func `copy range stops quietly at the end of the source`() throws {
++            let source = temporaryFile([1, 2, 3, 4])
++            let destination = temporaryFile([])
++            defer {
++                _ = close(source)
++                _ = close(destination)
++            }
++
++            try Linux.Kernel.File.Clone.CopyRange.copy(
++                sourceFd: source,
++                destinationFd: destination,
++                length: 32
++            )
++            #expect(contents(of: destination) == [1, 2, 3, 4])
++        }
++
++        @Test
++        func `copy range reports the errno of the failing copy`() {
++            let destination = temporaryFile([])
++            defer { _ = close(destination) }
++
++            #expect {
++                try Linux.Kernel.File.Clone.CopyRange.copy(
++                    sourceFd: -1,
++                    destinationFd: destination,
++                    length: 4
++                )
++            } throws: { error in
++                guard
++                    case Linux.Kernel.File.Clone.Error.Syscall.platform(let code, let operation) = error
++                else { return false }
++                return code == .posix(EBADF) && operation == .copyFileRange
++            }
++        }
++    }
++
++#endif
+-- 
+2.43.0
+

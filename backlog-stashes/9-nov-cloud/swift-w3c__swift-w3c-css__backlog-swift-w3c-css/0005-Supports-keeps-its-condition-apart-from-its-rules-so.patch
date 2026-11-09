@@ -1,0 +1,210 @@
+From edc2abbabaf99fdc98306ed4ef7b8d098bb3e2df Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:36:36 +0000
+Subject: [PATCH 05/18] Supports keeps its condition apart from its rules, so
+ not, and and or combine conditions with parentheses instead of slicing
+ rawValue (swift-w3c/swift-w3c-css#13)
+
+---
+ Sources/W3C CSS Cascade/Supports.swift        | 98 +++++++++++++------
+ .../Supports Tests.swift                      | 41 ++++++++
+ 2 files changed, 107 insertions(+), 32 deletions(-)
+ create mode 100644 Tests/W3C CSS Cascade Tests/Supports Tests.swift
+
+diff --git a/Sources/W3C CSS Cascade/Supports.swift b/Sources/W3C CSS Cascade/Supports.swift
+index 53ecc96..1554f24 100644
+--- a/Sources/W3C CSS Cascade/Supports.swift	
++++ b/Sources/W3C CSS Cascade/Supports.swift	
+@@ -2,10 +2,25 @@ import W3C_CSS_Shared
+ public import W3C_CSS_Syntax
+ 
+ public struct Supports: AtRule {
+-    public var rawValue: String
++    public var rawValue: String {
++        didSet {
++            (condition, rules) = Self.parse(rawValue)
++        }
++    }
++
++    private var condition: String
++
++    private var rules: [String]
+ 
+     public init(rawValue: String) {
+         self.rawValue = rawValue
++        (self.condition, self.rules) = Self.parse(rawValue)
++    }
++
++    private init(condition: String, rules: [String] = []) {
++        self.condition = condition
++        self.rules = rules
++        self.rawValue = "@supports \(condition) {\(rules.joined(separator: " "))}"
+     }
+ }
+ 
+@@ -13,65 +28,84 @@ extension Supports {
+     public static let identifier: String = "supports"
+ 
+     public static func property(_ property: String, _ value: String) -> Supports {
+-        Supports(rawValue: "@supports (\(property): \(value)) {}")
++        Supports(condition: "(\(property): \(value))")
+     }
+ 
+     public static func selector(_ selector: String) -> Supports {
+-        Supports(rawValue: "@supports selector(\(selector)) {}")
++        Supports(condition: "selector(\(selector))")
+     }
+ 
+     public static func fontTech(_ technology: FontTechnology) -> Supports {
+-        Supports(rawValue: "@supports font-tech(\(technology.rawValue)) {}")
++        Supports(condition: "font-tech(\(technology.rawValue))")
+     }
+ 
+     public static func fontFormat(_ format: FontFormat) -> Supports {
+-        Supports(rawValue: "@supports font-format(\(format.rawValue)) {}")
++        Supports(condition: "font-format(\(format.rawValue))")
+     }
+ 
+     public static func not(_ condition: Supports) -> Supports {
+-
+-        let start = condition.rawValue.index(condition.rawValue.startIndex, offsetBy: 10)
+-        let end = condition.rawValue.index(condition.rawValue.endIndex, offsetBy: -4)
+-        let conditionString = condition.rawValue[start..<end]
+-
+-        return Supports(rawValue: "@supports not \(conditionString) {}")
++        Supports(condition: "not \(inParens(condition.condition))", rules: condition.rules)
+     }
+ 
+     public func and(_ other: Supports) -> Supports {
+-        let thisCondition = extractCondition(from: self)
+-        let otherCondition = extractCondition(from: other)
+-
+-        return Supports(rawValue: "@supports \(thisCondition) and \(otherCondition) {}")
++        Supports(condition: "\(Self.inParens(condition)) and \(Self.inParens(other.condition))", rules: rules)
+     }
+ 
+     public func or(_ other: Supports) -> Supports {
+-        let thisCondition = extractCondition(from: self)
+-        let otherCondition = extractCondition(from: other)
++        Supports(condition: "\(Self.inParens(condition)) or \(Self.inParens(other.condition))", rules: rules)
++    }
+ 
+-        return Supports(rawValue: "@supports \(thisCondition) or \(otherCondition) {}")
++    public func style(_ selector: String, _ declarations: String) -> Supports {
++        Supports(condition: condition, rules: rules + ["\(selector) { \(declarations) }"])
+     }
++}
+ 
+-    private func extractCondition(from support: Supports) -> String {
++extension Supports {
+ 
+-        let start = support.rawValue.index(support.rawValue.startIndex, offsetBy: 10)
+-        let end = support.rawValue.index(support.rawValue.endIndex, offsetBy: -4)
+-        return String(support.rawValue[start..<end])
++    private static func parse(_ rawValue: String) -> (condition: String, rules: [String]) {
++        var text = Substring(rawValue)
++        if text.hasPrefix("@supports") {
++            text = text.dropFirst(9)
++        }
++        guard let block = W3C_CSS.Block.parse(String(text)).first else {
++            return (trimmed(text), [])
++        }
++        let body = trimmed(Substring(block.body))
++        return (block.prelude, body.isEmpty ? [] : [body])
+     }
+ 
+-    public func style(_ selector: String, _ declarations: String) -> Supports {
+-        let currentContent = rawValue
+-
+-        guard currentContent.hasSuffix("{}") else {
++    private static func trimmed(_ text: Substring) -> String {
++        var result = text
++        while result.first?.isWhitespace == true { result.removeFirst() }
++        while result.last?.isWhitespace == true { result.removeLast() }
++        return String(result)
++    }
+ 
+-            let newContent =
+-                currentContent.dropLast() + " " + selector + " { " + declarations + " }}"
+-            return Supports(rawValue: String(newContent))
++    private static func inParens(_ condition: String) -> String {
++        guard let open = condition.firstIndex(of: "("),
++            condition[..<open].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" })
++        else {
++            return "(\(condition))"
+         }
+ 
+-        let newContent = currentContent.dropLast() + selector + " { " + declarations + " }}"
+-        return Supports(rawValue: String(newContent))
++        var depth = 0
++        for index in condition[open...].indices {
++            switch condition[index] {
++            case "(":
++                depth += 1
++
++            case ")":
++                depth -= 1
++                if depth == 0 {
++                    return condition.index(after: index) == condition.endIndex ? condition : "(\(condition))"
++                }
++
++            default:
++                break
++            }
++        }
++        return "(\(condition))"
+     }
+-
+ }
+ 
+ extension Supports {
+diff --git a/Tests/W3C CSS Cascade Tests/Supports Tests.swift b/Tests/W3C CSS Cascade Tests/Supports Tests.swift
+new file mode 100644
+index 0000000..886386c
+--- /dev/null
++++ b/Tests/W3C CSS Cascade Tests/Supports Tests.swift	
+@@ -0,0 +1,41 @@
++import Testing
++
++@testable import W3C_CSS_Cascade
++
++enum `Supports Tests` {}
++
++extension `Supports Tests` {
++    @Suite
++    struct `Supports - Conditions` {
++        private static let grid = Supports.property("display", "grid")
++        private static let gap = Supports.property("gap", "1px")
++
++        @Test func `a single condition`() {
++            #expect(Self.grid.rawValue == "@supports (display: grid) {}")
++        }
++
++        @Test func `not negates a condition`() {
++            #expect(Supports.not(Self.grid).rawValue == "@supports not (display: grid) {}")
++            #expect(Supports.not(Self.grid.and(Self.gap)).rawValue == "@supports not ((display: grid) and (gap: 1px)) {}")
++        }
++
++        @Test func `and and or parenthesize compound operands`() {
++            #expect(Self.grid.and(Self.gap).rawValue == "@supports (display: grid) and (gap: 1px) {}")
++            #expect(
++                Self.grid.and(Self.gap).or(.selector(":has(a)")).rawValue
++                    == "@supports ((display: grid) and (gap: 1px)) or selector(:has(a)) {}"
++            )
++        }
++
++        @Test func `a condition with rules combines without losing them`() {
++            let styled = Self.grid.style(".a", "display: grid;")
++            #expect(styled.rawValue == "@supports (display: grid) {.a { display: grid; }}")
++            #expect(styled.and(Self.gap).rawValue == "@supports (display: grid) and (gap: 1px) {.a { display: grid; }}")
++        }
++
++        @Test func `a rule read from text combines by its condition`() {
++            let supports = Supports(rawValue: "@supports (display: grid) {}").and(Self.gap)
++            #expect(supports.rawValue == "@supports (display: grid) and (gap: 1px) {}")
++        }
++    }
++}
+-- 
+2.43.0
+

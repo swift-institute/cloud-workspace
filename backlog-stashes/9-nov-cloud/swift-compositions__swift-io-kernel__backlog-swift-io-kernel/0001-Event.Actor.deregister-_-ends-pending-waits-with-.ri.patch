@@ -1,0 +1,79 @@
+From 425c97aaec9c26b1a2fdb12a6ebc7d088f3f79f0 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:29:57 +0000
+Subject: [PATCH 1/2] Event.Actor.deregister(_:) ends pending waits with
+ .right(.deregistered) instead of .left(.shutdown)
+ (swift-compositions/swift-io-kernel#24)
+
+---
+ README.md                                     |  2 +-
+ Sources/IO Kernel Events/Event.Actor.swift    |  3 ++-
+ .../IO.Event.Actor.Lifecycle Tests.swift      | 25 +++++++++++++++++++
+ 3 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 2e572fc..f956dc5 100644
+--- a/README.md
++++ b/README.md
+@@ -11,7 +11,7 @@ Use this package to drive file-descriptor I/O asynchronously from the kernel's o
+ - `Kernel.Event.Actor.deregister(_:)` takes the ID derived from the descriptor (`Kernel.Event.ID(descriptor:)`), not the ID `register(_:)` returned. An unknown ID is ignored.
+ - `Kernel.Event.Actor.wait(for:interest:)` arms the interest and resumes on the next matching event. Each event resumes every waiter filed under that interest and then forgets them, so a waiter that wants the next event waits again. A wait whose interest contains read is filed under read even if it also contains write; one with neither is filed under priority.
+ - Cancelling a `Kernel.Event.Actor` wait fails it with `.left(.cancelled)` and removes only that waiter; other waiters on the same interest keep waiting. If arming fails, the waiter is removed before the error is thrown.
+-- `Kernel.Event.Actor.shutdown()` and `deregister(_:)` end every pending wait on the affected registrations with `.left(.shutdown)`. After shutdown, `register(_:)` and `wait(for:interest:)` fail with `.left(.shutdown)`. `shutdown()` may be called any number of times.
++- `Kernel.Event.Actor.shutdown()` ends every pending wait with `.left(.shutdown)`, and `deregister(_:)` ends the pending waits on its registration with `.right(.deregistered)`. After shutdown, `register(_:)` and `wait(for:interest:)` fail with `.left(.shutdown)`. `shutdown()` may be called any number of times.
+ - A `Kernel.Event.Actor` poll error of `EINTR` or `EAGAIN` retries, `ENOMEM` yields the thread and then retries, and any other error shuts the actor down as `shutdown()` does.
+ - A duplication failure in `Kernel.Event.Actor.register(_:)` becomes `invalidDescriptor` for a bad handle and `platform(.EMFILE)` when the process is out of descriptors. A source that does not support the platform reports `platform(.ENOTSUP)`. `EPIPE` on read or write becomes `readClosed` or `writeClosed`.
+ - Every `Kernel.Completion.Actor` submission, including the cancel submissions the actor sends itself, gets a fresh token; tokens start at 1 and increase.
+diff --git a/Sources/IO Kernel Events/Event.Actor.swift b/Sources/IO Kernel Events/Event.Actor.swift
+index 54f2365..cee8d22 100644
+--- a/Sources/IO Kernel Events/Event.Actor.swift	
++++ b/Sources/IO Kernel Events/Event.Actor.swift	
+@@ -228,7 +228,8 @@
+             }
+ 
+             guard received != nil else {
+-                throw Event.Failure.left(.shutdown)
++                throw state == .running
++                    ? Event.Failure.right(.deregistered) : Event.Failure.left(.shutdown)
+             }
+         }
+ 
+diff --git a/Tests/IO Kernel Events Tests/IO.Event.Actor.Lifecycle Tests.swift b/Tests/IO Kernel Events Tests/IO.Event.Actor.Lifecycle Tests.swift
+index cf88e4a..120d640 100644
+--- a/Tests/IO Kernel Events Tests/IO.Event.Actor.Lifecycle Tests.swift	
++++ b/Tests/IO Kernel Events Tests/IO.Event.Actor.Lifecycle Tests.swift	
+@@ -150,6 +150,31 @@
+                 await actor.shutdown()
+             }
+ 
++            @Test(.timeLimit(.minutes(1)))
++            func `deregister ends a pending wait with deregistered`() async throws {
++                let controller = Event.Fake.Controller()
++                let actor = Event.Actor(source: Event.Fake.make(controller: controller))
++                let pipe = try Kernel.Pipe.pipe()
++                let id = try await actor.register(pipe.read)
++                let waiter = Task { () async -> Event.Failure? in
++                    do throws(Event.Failure) {
++                        try await actor.wait(for: id, interest: .read)
++                        return nil
++                    } catch {
++                        return error
++                    }
++                }
++                while controller.armCount() < 1 {
++                    try await Task.sleep(for: .milliseconds(1))
++                }
++
++                await actor.deregister(Kernel.Event.ID(descriptor: pipe.read))
++                let failure = await waiter.value
++
++                #expect(failure == .right(.deregistered))
++                await actor.shutdown()
++            }
++
+             @Test(.timeLimit(.minutes(1)))
+             func `cancellation racing dispatch completes exactly once`() async throws {
+                 let controller = Event.Fake.Controller()
+-- 
+2.43.0
+

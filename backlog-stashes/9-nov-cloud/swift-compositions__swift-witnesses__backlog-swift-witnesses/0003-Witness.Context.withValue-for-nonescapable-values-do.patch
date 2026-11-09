@@ -1,0 +1,69 @@
+From bc630eb06fe3d442180ad425ffd95f625336f68d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:42:42 +0000
+Subject: [PATCH 3/3] Witness.Context.withValue for nonescapable values
+ documents that it reads only the mode's default, and a test pins that generic
+ callers miss scope overrides (swift-compositions/swift-witnesses#15)
+
+---
+ Sources/Witnesses/Witness.Context.swift       |  5 ++++
+ .../Witness.Context Tests.swift               | 25 +++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/Sources/Witnesses/Witness.Context.swift b/Sources/Witnesses/Witness.Context.swift
+index cf32c0c..bc87e38 100644
+--- a/Sources/Witnesses/Witness.Context.swift
++++ b/Sources/Witnesses/Witness.Context.swift
+@@ -83,6 +83,11 @@ extension Witness.Context {
+         _current.values.withValue(for: key, mode: _current.mode, body)
+     }
+ 
++    /// Resolves a key whose value may be nonescapable from the mode's default only.
++    ///
++    /// A scope cannot hold a nonescapable value, so scope overrides and prepared values are not
++    /// consulted. Code generic over `K.Value: ~Escapable` reaches this overload even when the
++    /// concrete value is escapable and overridden; constrain `K.Value: Escapable` to see overrides.
+     public static func withValue<K: Witness.Key, R>(
+         _ key: K.Type,
+         _ body: (borrowing K.Value) -> R
+diff --git a/Tests/Witnesses Tests/Witness.Context Tests.swift b/Tests/Witnesses Tests/Witness.Context Tests.swift
+index 97dacd4..0cc5ae0 100644
+--- a/Tests/Witnesses Tests/Witness.Context Tests.swift	
++++ b/Tests/Witnesses Tests/Witness.Context Tests.swift	
+@@ -226,8 +226,33 @@ extension `Witness.Context Tests`.Test.Unit {
+             }
+         }
+     }
++
++    @Test
++    func `The nonescapable withValue overload reads the default, not a scope override`() {
++        Witness.Context.with { values in
++            values.set(HandleProvider.self, UniqueHandle(id: 42))
++        } operation: {
++            let overridden = Witness.Context.withValue(HandleProvider.self) { $0.id }
++            let generic = `Witness.Context Tests`.identifier(of: HandleProvider.self)
++            #expect(overridden == 42)
++            #expect(generic == 1)
++        }
++    }
+ }
+ 
++extension `Witness.Context Tests` {
++    protocol Identified: ~Copyable, ~Escapable {
++        var id: Int { get }
++    }
++
++    static func identifier<K: Witness.Key>(of key: K.Type) -> Int
++    where K.Value: Identified & ~Copyable & ~Escapable {
++        Witness.Context.withValue(key) { $0.id }
++    }
++}
++
++extension UniqueHandle: `Witness.Context Tests`.Identified {}
++
+ extension `Witness.Context Tests`.Test.Integration {
+     @Test
+     func `Synchronous with operation works`() throws {
+-- 
+2.43.0
+

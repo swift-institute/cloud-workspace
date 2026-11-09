@@ -1,0 +1,153 @@
+From 1374af838822041ecd618294afb42dfb82210de1 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:06 +0000
+Subject: [PATCH 4/6] The encoder splits CDATA around ]]>, and separates -- in
+ comments and ?> in instruction data with a space, so its output stays
+ well-formed (swift-w3c/swift-w3c-xml#7)
+
+---
+ Sources/W3C XML/W3C_XML.Encode.swift          | 61 ++++++++++++++++---
+ ...3C_XML.Encoder Well-Formedness Tests.swift | 37 +++++++++++
+ 2 files changed, 91 insertions(+), 7 deletions(-)
+ create mode 100644 Tests/W3C XML Tests/W3C_XML.Encoder Well-Formedness Tests.swift
+
+diff --git a/Sources/W3C XML/W3C_XML.Encode.swift b/Sources/W3C XML/W3C_XML.Encode.swift
+index 994efb7..d819239 100644
+--- a/Sources/W3C XML/W3C_XML.Encode.swift	
++++ b/Sources/W3C XML/W3C_XML.Encode.swift	
+@@ -172,6 +172,8 @@ extension W3C_XML.Encoder {
+         buffer.append(ASCII.Code.greaterThanSign.byte.underlying)
+     }
+ 
++    /// Writes a processing instruction, separating each `?>` in its data with a space,
++    /// since the data cannot contain it and has no escape.
+     @inlinable
+     package mutating func encodeInstruction<Buffer: RangeReplaceableCollection>(
+         _ instruction: W3C_XML.Instruction,
+@@ -184,7 +186,16 @@ extension W3C_XML.Encoder {
+ 
+         if let data = instruction.data {
+             buffer.append(ASCII.Code.sp.byte.underlying)
+-            buffer.append(contentsOf: Swift::Array(data.utf8))
++            var previous: UInt8?
++            for byte in data.utf8 {
++                if byte == ASCII.Code.greaterThanSign.byte.underlying,
++                    previous == ASCII.Code.questionMark.byte.underlying
++                {
++                    buffer.append(ASCII.Code.sp.byte.underlying)
++                }
++                buffer.append(byte)
++                previous = byte
++            }
+         }
+ 
+         buffer.append(contentsOf: [
+@@ -274,20 +285,56 @@ extension W3C_XML.Encoder {
+             encodeText(text, into: &buffer)
+ 
+         case .cdata(let text):
+-            buffer.append(contentsOf: Swift::Array("<![CDATA[".utf8))
+-            buffer.append(contentsOf: Swift::Array(text.utf8))
+-            buffer.append(contentsOf: Swift::Array("]]>".utf8))
++            encodeCDATA(text, into: &buffer)
+ 
+         case .comment(let text):
+-            buffer.append(contentsOf: Swift::Array("<!--".utf8))
+-            buffer.append(contentsOf: Swift::Array(text.utf8))
+-            buffer.append(contentsOf: Swift::Array("-->".utf8))
++            encodeComment(text, into: &buffer)
+ 
+         case .instruction(let pi):
+             encodeInstruction(pi, into: &buffer)
+         }
+     }
+ 
++    /// Writes a CDATA section, splitting it around each `]]>` so the text never ends the section early.
++    @inlinable
++    package mutating func encodeCDATA<Buffer: RangeReplaceableCollection>(
++        _ text: String,
++        into buffer: inout Buffer
++    ) where Buffer.Element == UInt8 {
++        buffer.append(contentsOf: Swift::Array("<![CDATA[".utf8))
++        var brackets = 0
++        for byte in text.utf8 {
++            if byte == ASCII.Code.greaterThanSign.byte.underlying, brackets >= 2 {
++                buffer.append(contentsOf: Swift::Array("]]><![CDATA[".utf8))
++            }
++            buffer.append(byte)
++            brackets = byte == ASCII.Code.rightBracket.byte.underlying ? brackets + 1 : 0
++        }
++        buffer.append(contentsOf: Swift::Array("]]>".utf8))
++    }
++
++    /// Writes a comment, separating each `--` and a final `-` with a space,
++    /// since a comment cannot contain them and has no escape.
++    @inlinable
++    package mutating func encodeComment<Buffer: RangeReplaceableCollection>(
++        _ text: String,
++        into buffer: inout Buffer
++    ) where Buffer.Element == UInt8 {
++        buffer.append(contentsOf: Swift::Array("<!--".utf8))
++        var previous: UInt8?
++        for byte in text.utf8 {
++            if byte == ASCII.Code.hyphen.byte.underlying, previous == ASCII.Code.hyphen.byte.underlying {
++                buffer.append(ASCII.Code.sp.byte.underlying)
++            }
++            buffer.append(byte)
++            previous = byte
++        }
++        if previous == ASCII.Code.hyphen.byte.underlying {
++            buffer.append(ASCII.Code.sp.byte.underlying)
++        }
++        buffer.append(contentsOf: Swift::Array("-->".utf8))
++    }
++
+     @inlinable
+     package mutating func encodeText<Buffer: RangeReplaceableCollection>(
+         _ text: String,
+diff --git a/Tests/W3C XML Tests/W3C_XML.Encoder Well-Formedness Tests.swift b/Tests/W3C XML Tests/W3C_XML.Encoder Well-Formedness Tests.swift
+new file mode 100644
+index 0000000..f0ba0e3
+--- /dev/null
++++ b/Tests/W3C XML Tests/W3C_XML.Encoder Well-Formedness Tests.swift	
+@@ -0,0 +1,37 @@
++import Testing
++
++@testable import W3C_XML
++
++extension `W3C_XML.Encoder Tests` {
++    @Suite
++    struct `Well-formed output` {
++        @Test
++        func `CDATA containing the end marker is split`() throws {
++            let element = W3C_XML.Element(name: "root", content: [.cdata("a]]>b")])
++            let output = String(decoding: element.encode(), as: UTF8.self)
++            #expect(output == "<root><![CDATA[a]]]]><![CDATA[>b]]></root>")
++            let parsed = try W3C_XML.parse(output)
++            #expect(parsed.root.content == [.cdata("a]]"), .cdata(">b")])
++        }
++
++        @Test
++        func `a comment containing double hyphens stays a comment`() throws {
++            let element = W3C_XML.Element(name: "root", content: [.comment("a--b-")])
++            let output = String(decoding: element.encode(), as: UTF8.self)
++            #expect(output == "<root><!--a- -b- --></root>")
++            _ = try W3C_XML.parse(output)
++        }
++
++        @Test
++        func `instruction data containing the end marker stays one instruction`() throws {
++            let element = W3C_XML.Element(
++                name: "root",
++                content: [.instruction(W3C_XML.Instruction(target: "pi", data: "a?>b?"))]
++            )
++            let output = String(decoding: element.encode(), as: UTF8.self)
++            #expect(output == "<root><?pi a? >b??></root>")
++            let parsed = try W3C_XML.parse(output)
++            #expect(parsed.root.content == [.instruction(W3C_XML.Instruction(target: "pi", data: "a? >b?"))])
++        }
++    }
++}
+-- 
+2.43.0
+

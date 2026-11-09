@@ -1,0 +1,118 @@
+From 942a3cec765795c74e756481343ad0d150422ca4 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:06 +0000
+Subject: [PATCH 1/6] =?UTF-8?q?Attribute=20values=20and=20TextContent=20co?=
+ =?UTF-8?q?llect=20bytes=20and=20decode=20them=20as=20UTF-8,=20so=20a=20no?=
+ =?UTF-8?q?n-ASCII=20value=20such=20as=20=C3=A9=20is=20read=20as=20written?=
+ =?UTF-8?q?=20(swift-w3c/swift-w3c-xml#7)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ Sources/W3C XML/W3C_XML.Parse.Content.swift   |  8 ++---
+ Sources/W3C XML/W3C_XML.Parse.Element.swift   |  8 ++---
+ .../W3C_XML.Parse.Attribute Tests.swift       | 30 +++++++++++++++++++
+ 3 files changed, 38 insertions(+), 8 deletions(-)
+ create mode 100644 Tests/W3C XML Tests/W3C_XML.Parse.Attribute Tests.swift
+
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Content.swift b/Sources/W3C XML/W3C_XML.Parse.Content.swift
+index ff930c1..ec0fd3f 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.Content.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.Content.swift	
+@@ -61,7 +61,7 @@ extension W3C_XML.Parse {
+ 
+         @inlinable
+         public func parse(_ input: inout Input) throws(Failure) -> Output {
+-            var result = ""
++            var bytes: [Byte] = []
+ 
+             while let byte = input.xmlPeek() {
+                 if byte == ASCII.Code.lessThanSign.byte {
+@@ -69,14 +69,14 @@ extension W3C_XML.Parse {
+                 } else if byte == ASCII.Code.ampersand.byte {
+ 
+                     let resolved = try Reference<Input>().parse(&input)
+-                    result += resolved
++                    bytes.append(contentsOf: resolved.utf8.map(Byte.init(bitPattern:)))
+                 } else {
+ 
+-                    result.append(Character(UnicodeScalar(try input.xmlTake(expected: "character").bitPattern)))
++                    bytes.append(try input.xmlTake(expected: "character"))
+                 }
+             }
+ 
+-            return result
++            return String(decoding: bytes, as: UTF8.self)
+         }
+     }
+ }
+diff --git a/Sources/W3C XML/W3C_XML.Parse.Element.swift b/Sources/W3C XML/W3C_XML.Parse.Element.swift
+index 7872f30..07e1c9d 100644
+--- a/Sources/W3C XML/W3C_XML.Parse.Element.swift	
++++ b/Sources/W3C XML/W3C_XML.Parse.Element.swift	
+@@ -40,21 +40,21 @@ extension W3C_XML.Parse {
+             }
+             _ = input.next()
+ 
+-            var result = ""
++            var bytes: [Byte] = []
+ 
+             while let byte = input.xmlPeek() {
+                 if byte == quote {
+                     _ = input.next()
+-                    return result
++                    return String(decoding: bytes, as: UTF8.self)
+                 } else if byte == ASCII.Code.ampersand.byte {
+ 
+                     let resolved = try Reference<Input>().parse(&input)
+-                    result += resolved
++                    bytes.append(contentsOf: resolved.utf8.map(Byte.init(bitPattern:)))
+                 } else if byte == ASCII.Code.lessThanSign.byte {
+ 
+                     throw .expected("valid attribute character (not <)")
+                 } else {
+-                    result.append(Character(UnicodeScalar(try input.xmlTake(expected: "character").bitPattern)))
++                    bytes.append(try input.xmlTake(expected: "character"))
+                 }
+             }
+ 
+diff --git a/Tests/W3C XML Tests/W3C_XML.Parse.Attribute Tests.swift b/Tests/W3C XML Tests/W3C_XML.Parse.Attribute Tests.swift
+new file mode 100644
+index 0000000..51bf758
+--- /dev/null
++++ b/Tests/W3C XML Tests/W3C_XML.Parse.Attribute Tests.swift	
+@@ -0,0 +1,30 @@
++import Byte
++import Testing
++
++@testable import W3C_XML
++
++enum `W3C_XML.Parse.Attribute Tests` {}
++
++extension `W3C_XML.Parse.Attribute Tests` {
++    @Suite
++    struct `UTF-8 values` {
++        @Test
++        func `a non-ASCII attribute value decodes as UTF-8`() throws {
++            let doc = try W3C_XML.parse(#"<root name="café ✓ 𝄞"/>"#)
++            #expect(doc.root.attribute("name") == "café ✓ 𝄞")
++        }
++
++        @Test
++        func `a non-ASCII attribute value decodes as UTF-8 from bytes`() throws {
++            let doc = try W3C_XML.parse(Array(#"<root name="é&amp;é"/>"#.utf8))
++            #expect(doc.root.attribute("name") == "é&é")
++        }
++
++        @Test
++        func `text content decodes as UTF-8`() throws {
++            var input = [Byte](utf8: "é&lt;ü")[...]
++            let text = try W3C_XML.Parse.TextContent<ArraySlice<Byte>>().parse(&input)
++            #expect(text == "é<ü")
++        }
++    }
++}
+-- 
+2.43.0
+

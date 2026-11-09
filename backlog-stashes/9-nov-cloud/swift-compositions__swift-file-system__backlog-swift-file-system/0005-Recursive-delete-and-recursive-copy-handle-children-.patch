@@ -1,0 +1,164 @@
+From 46ebb90866122dd97911524615c2518f5de87e78 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:39:32 +0000
+Subject: [PATCH 5/7] Recursive delete and recursive copy handle children whose
+ names are not valid UTF-8 or hold control characters instead of silently
+ skipping them (swift-compositions/swift-file-system#22)
+
+---
+ .../File.Directory.Contents.swift              | 10 +---------
+ Sources/File System Core/File.Name.swift       |  9 +++++++++
+ .../File System Core/File.System.Copy.swift    | 15 +++------------
+ .../File System Core/File.System.Delete.swift  |  9 +--------
+ .../File.System.Copy.Recursive Tests.swift     | 18 ++++++++++++++++++
+ .../File.System.Delete Tests.swift             | 18 ++++++++++++++++++
+ 6 files changed, 50 insertions(+), 29 deletions(-)
+
+diff --git a/Sources/File System Core/File.Directory.Contents.swift b/Sources/File System Core/File.Directory.Contents.swift
+index ddc061b..4eb78c0 100644
+--- a/Sources/File System Core/File.Directory.Contents.swift	
++++ b/Sources/File System Core/File.Directory.Contents.swift	
+@@ -147,15 +147,7 @@ extension File.Directory.Contents {
+         name: File.Name,
+         parent: File.Path
+     ) -> File.Directory.Entry.Kind {
+-        guard
+-            let entryPath = File.Directory.Entry(
+-                name: name,
+-                parent: parent,
+-                type: .other
+-            ).pathIfValid
+-        else {
+-            return .other
+-        }
++        let entryPath = parent / name.entryComponent
+ 
+         do throws(Kernel.File.Stats.Error) {
+             let stats = try Kernel.File.Stats.lget(path: entryPath.view)
+diff --git a/Sources/File System Core/File.Name.swift b/Sources/File System Core/File.Name.swift
+index 607f068..1823ebe 100644
+--- a/Sources/File System Core/File.Name.swift	
++++ b/Sources/File System Core/File.Name.swift	
+@@ -100,6 +100,15 @@ extension File.Name {
+     }
+ }
+ 
++extension File.Name {
++
++    /// The name as a path component, whatever its encoding. A name read from a directory is never empty
++    /// and never holds a separator or NUL, so it always names a child of that directory.
++    internal var entryComponent: File.Path.Component {
++        File.Path.Component(unchecked: rawBytes.span)
++    }
++}
++
+ extension File.Name {
+ 
+     @inlinable
+diff --git a/Sources/File System Core/File.System.Copy.swift b/Sources/File System Core/File.System.Copy.swift
+index 9918b50..3e11e98 100644
+--- a/Sources/File System Core/File.System.Copy.swift	
++++ b/Sources/File System Core/File.System.Copy.swift	
+@@ -109,18 +109,9 @@ extension File.System.Copy {
+ 
+         for entry in entries {
+ 
+-            guard let sourcePath = entry.pathIfValid else {
+-
+-                continue
+-            }
+-
+-            let destPath: File.Path
+-            do throws(Path::Path.Component.Error) {
+-                destPath = destination / (try entry.name.asPathComponent())
+-            } catch {
+-
+-                continue
+-            }
++            let component = entry.name.entryComponent
++            let sourcePath = entry.parent / component
++            let destPath = destination / component
+ 
+             switch entry.type {
+             case .file:
+diff --git a/Sources/File System Core/File.System.Delete.swift b/Sources/File System Core/File.System.Delete.swift
+index b5ba460..6c09825 100644
+--- a/Sources/File System Core/File.System.Delete.swift	
++++ b/Sources/File System Core/File.System.Delete.swift	
+@@ -200,14 +200,7 @@ extension File.System.Delete {
+                     continue
+                 }
+ 
+-                let component: File.Path.Component
+-                do throws(Path::Path.Component.Error) {
+-                    component = try File.Name(from: entry).asPathComponent()
+-                } catch {
+-
+-                    continue
+-                }
+-                let childPath = path / component
++                let childPath = path / File.Name(from: entry).entryComponent
+ 
+                 if case .directory = entry.type {
+                     try deleteRecursive(at: childPath)
+diff --git a/Tests/File System Core Tests/File.System.Copy.Recursive Tests.swift b/Tests/File System Core Tests/File.System.Copy.Recursive Tests.swift
+index c8a87cf..13ec3d3 100644
+--- a/Tests/File System Core Tests/File.System.Copy.Recursive Tests.swift	
++++ b/Tests/File System Core Tests/File.System.Copy.Recursive Tests.swift	
+@@ -230,6 +230,24 @@ extension `File.System.Copy.Recursive Tests` {
+             }
+         }
+ 
++        #if os(Linux) || os(Android)
++            @Test
++            func `Copy includes a child directory whose name is not valid UTF-8`() throws {
++                try File.Directory.temporary { dir in
++                    let sourcePath = dir.path / "source"
++                    let destPath = dir.path / "dest"
++                    try File.System.Create.Directory.create(at: sourcePath)
++                    let bytes: [File.Path.Char] = [0xFF]
++                    let name = File.Path(bytes.span)
++                    try File.System.Create.Directory.create(at: sourcePath / name)
++
++                    try File.System.Copy.recursive(from: sourcePath, to: destPath)
++
++                    #expect((try? File.System.Stat.info(at: destPath / name))?.type == .directory)
++                }
++            }
++        #endif
++
+         @Test
+         func `Copy deeply nested directory structure`() throws {
+             try File.Directory.temporary { dir in
+diff --git a/Tests/File System Core Tests/File.System.Delete Tests.swift b/Tests/File System Core Tests/File.System.Delete Tests.swift
+index 609d41e..d942027 100644
+--- a/Tests/File System Core Tests/File.System.Delete Tests.swift	
++++ b/Tests/File System Core Tests/File.System.Delete Tests.swift	
+@@ -173,6 +173,24 @@ extension `File.System.Delete Tests`.Test.Unit {
+ 
+ extension `File.System.Delete Tests`.Test.`Edge Case` {
+ 
++    #if os(Linux) || os(Android)
++        @Test
++        func `Recursive delete removes a child whose name is not valid UTF-8`() throws {
++            try File.Directory.temporary { dir in
++                let parent = dir.path / "parent"
++                try File.System.Create.Directory.create(at: parent)
++                let bytes: [File.Path.Char] = [0xFF]
++                try File.System.Create.Directory.create(at: parent / File.Path(bytes.span))
++                let controlBytes: [File.Path.Char] = [0x61, 0x01]
++                try File.System.Create.Directory.create(at: parent / File.Path(controlBytes.span))
++
++                try File.System.Delete.delete(at: parent, recursive: true)
++
++                #expect(!File.System.Stat.exists(at: parent))
++            }
++        }
++    #endif
++
+     #if !os(Windows)
+         @Test
+         func `Delete symlink to directory leaves target contents intact`() throws {
+-- 
+2.43.0
+

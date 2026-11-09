@@ -1,0 +1,78 @@
+From 39a07be50c9b034e80f63819c3323d3efe3f8b02 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:30:47 +0000
+Subject: [PATCH 2/5] Memory.Allocation.Peak.Tracker.track samples after the
+ operation and no longer takes an unused sampleInterval
+ (swift-compositions/swift-memory-mapping#15)
+
+---
+ .../Memory.Allocation.Peak.Tracker.swift         | 12 ++++++++++--
+ .../Memory.Allocation.Peak.Tracker Tests.swift   | 16 ++++++++++++++++
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+ create mode 100644 Tests/Memory Mapping Tests/Memory.Allocation.Peak.Tracker Tests.swift
+
+diff --git a/Sources/Memory Mapping/Memory.Allocation.Peak.Tracker.swift b/Sources/Memory Mapping/Memory.Allocation.Peak.Tracker.swift
+index f61cd9f..d257c5c 100644
+--- a/Sources/Memory Mapping/Memory.Allocation.Peak.Tracker.swift	
++++ b/Sources/Memory Mapping/Memory.Allocation.Peak.Tracker.swift	
+@@ -81,12 +81,16 @@ extension Memory.Allocation.Peak.Tracker.Peak {
+ 
+ extension Memory.Allocation.Peak.Tracker {
+ 
++    /// Runs `operation` with a fresh tracker and reports the highest sample.
++    ///
++    /// The tracker samples once after `operation` returns, so the peak is never below the final delta;
++    /// call ``sample()`` inside `operation` to capture higher intermediate values.
+     public static func track<T, E: Swift.Error>(
+-        sampleInterval: Int = 1,
+         _ operation: (Memory.Allocation.Peak.Tracker) throws(E) -> T
+     ) throws(E) -> (result: T, peak: Memory.Allocation.Statistics) {
+         let tracker = Memory.Allocation.Peak.Tracker()
+         let result = try operation(tracker)
++        tracker.sample()
+ 
+         return (
+             result,
+@@ -98,12 +102,16 @@ extension Memory.Allocation.Peak.Tracker {
+         )
+     }
+ 
++    /// Runs `operation` with a fresh tracker and reports the highest sample.
++    ///
++    /// The tracker samples once after `operation` returns, so the peak is never below the final delta;
++    /// call ``sample()`` inside `operation` to capture higher intermediate values.
+     public static func track<T, E: Swift.Error>(
+-        sampleInterval: Int = 1,
+         _ operation: (Memory.Allocation.Peak.Tracker) async throws(E) -> T
+     ) async throws(E) -> (result: T, peak: Memory.Allocation.Statistics) {
+         let tracker = Memory.Allocation.Peak.Tracker()
+         let result = try await operation(tracker)
++        tracker.sample()
+ 
+         return (
+             result,
+diff --git a/Tests/Memory Mapping Tests/Memory.Allocation.Peak.Tracker Tests.swift b/Tests/Memory Mapping Tests/Memory.Allocation.Peak.Tracker Tests.swift
+new file mode 100644
+index 0000000..66a7c36
+--- /dev/null
++++ b/Tests/Memory Mapping Tests/Memory.Allocation.Peak.Tracker Tests.swift	
+@@ -0,0 +1,16 @@
++import Testing
++
++@testable import Memory_Mapping
++
++extension Memory.Test.Performance {
++    @Test func `peak tracker reports the final allocation when the operation never samples`() {
++        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS) || os(Linux)
++            let (storage, peak) = Memory.Allocation.Peak.Tracker.track { _ in
++                Array(repeating: UInt8(1), count: 1_048_576)
++            }
++            #expect(storage.count == 1_048_576)
++            #expect(peak.bytesAllocated > 0)
++            #expect(peak.allocations > 0)
++        #endif
++    }
++}
+-- 
+2.43.0
+

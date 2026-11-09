@@ -1,0 +1,95 @@
+From 2f3896af254c9d6da0e3ac487e6fa35a40956b3d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:35:23 +0000
+Subject: [PATCH 1/2] The UUID generator's test value is one incrementing
+ sequence per dependency root instead of one process-wide sequence shared by
+ every test (swift-compositions/swift-dependencies#12)
+
+---
+ ...ependency.Generator.UUID+Witness.Key.swift |  8 +++--
+ .../Dependency.Generator.UUID.Sequences.swift | 29 +++++++++++++++++++
+ .../Dependency.Generator.UUID Tests.swift     | 11 +++++++
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+ create mode 100644 Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID.Sequences.swift
+
+diff --git a/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID+Witness.Key.swift b/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID+Witness.Key.swift
+index 4ccf498..a1925d1 100644
+--- a/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID+Witness.Key.swift	
++++ b/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID+Witness.Key.swift	
+@@ -16,10 +16,14 @@
+             }
+         }
+ 
++        /// An incrementing generator starting at zero, one per dependency root.
++        ///
++        /// Each `.dependencies` test root starts its own sequence; reads outside
++        /// any such root share the default root's sequence.
+         public static var testValue: Self {
+-            shared
++            sequences.generator(for: __DependencyContext.root)
+         }
+ 
+-        private static let shared = Self.incrementing
++        private static let sequences = Sequences()
+     }
+ #endif
+diff --git a/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID.Sequences.swift b/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID.Sequences.swift
+new file mode 100644
+index 0000000..fa703b5
+--- /dev/null
++++ b/Sources/Dependencies RFC 4122 Integration/Dependency.Generator.UUID.Sequences.swift	
+@@ -0,0 +1,29 @@
++#if RFC4122
++    internal import Dependencies
++    internal import Synchronization
++
++    extension __DependencyGenerator.UUID {
++
++        internal final class Sequences: Sendable {
++
++            private struct Entry: Sendable {
++                weak let root: __DependencyContext.Root?
++                let generator: __DependencyGenerator.UUID
++            }
++
++            private let entries = Mutex<[Entry]>([])
++
++            internal func generator(for root: __DependencyContext.Root) -> __DependencyGenerator.UUID {
++                entries.withLock { entries in
++                    if let entry = entries.first(where: { $0.root === root }) {
++                        return entry.generator
++                    }
++                    entries.removeAll { $0.root == nil }
++                    let generator = __DependencyGenerator.UUID.incrementing
++                    entries.append(Entry(root: root, generator: generator))
++                    return generator
++                }
++            }
++        }
++    }
++#endif
+diff --git a/Tests/Dependencies RFC 4122 Integration Tests/Dependency.Generator.UUID Tests.swift b/Tests/Dependencies RFC 4122 Integration Tests/Dependency.Generator.UUID Tests.swift
+index a1376b2..cb487f8 100644
+--- a/Tests/Dependencies RFC 4122 Integration Tests/Dependency.Generator.UUID Tests.swift	
++++ b/Tests/Dependencies RFC 4122 Integration Tests/Dependency.Generator.UUID Tests.swift	
+@@ -43,6 +43,17 @@
+             #expect(second > first)
+         }
+ 
++        @Test
++        func `Each dependency root starts its own test sequence`() {
++            for root in [Dependency<Never>.Context.Root(), Dependency<Never>.Context.Root()] {
++                Dependency<Never>.Context.$root.withValue(root) {
++                    @Dependency(\.uuid) var uuid
++                    #expect(Self.counter(of: uuid()) == 0)
++                    #expect(Self.counter(of: uuid()) == 1)
++                }
++            }
++        }
++
+         @Test
+         func `A constant generator repeats its value`() {
+             let fixed = RFC_4122.UUID.dns
+-- 
+2.43.0
+

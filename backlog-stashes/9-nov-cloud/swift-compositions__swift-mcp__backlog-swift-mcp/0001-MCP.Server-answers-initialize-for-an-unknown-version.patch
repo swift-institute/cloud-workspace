@@ -1,0 +1,83 @@
+From 178f8e8b8d8f41d84bf72691354eac5cce664f8d Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Mon, 9 Nov 2026 11:37:37 +0000
+Subject: [PATCH 1/2] MCP.Server answers initialize for an unknown version with
+ the newest of its versions in any order, and with an internal error instead
+ of a trap when it has none (swift-compositions/swift-mcp#1)
+
+---
+ Sources/MCP Server/MCP.Server.swift           |  8 ++++-
+ Tests/MCP Server Tests/MCP.Server Tests.swift | 32 +++++++++++++++++++
+ 2 files changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/MCP Server/MCP.Server.swift b/Sources/MCP Server/MCP.Server.swift
+index c3f042c..5ab1a93 100644
+--- a/Sources/MCP Server/MCP.Server.swift	
++++ b/Sources/MCP Server/MCP.Server.swift	
+@@ -8,6 +8,9 @@ extension MCP {
+         public var info: MCP.Implementation
+         public var instructions: String?
+         public var tools: [MCP.Server.Tool]
++        /// The protocol versions this server speaks, in any order. On `initialize` a client asking for another
++        /// version gets the newest of these (MCP versions are `YYYY-MM-DD` dates, so the greatest is the newest);
++        /// an empty list answers `initialize` with an internal error.
+         public var versions: [MCP.Version]
+ 
+         public init(
+@@ -75,8 +78,11 @@ extension MCP.Server {
+         switch MCP.Method(rawValue: request.method) {
+         case .initialize:
+             let requested = try MCP.Initialize.Parameters(request.params).protocolVersion
++            guard let newest = versions.max(by: { $0.rawValue < $1.rawValue }) else {
++                throw JSON_RPC.Error(code: .internalError, message: "Server supports no protocol version")
++            }
+             return MCP.Initialize.Result(
+-                protocolVersion: versions.contains(requested) ? requested : versions[0],
++                protocolVersion: versions.contains(requested) ? requested : newest,
+                 capabilities: MCP.Capabilities(tools: MCP.Capabilities.Tools()),
+                 serverInfo: info,
+                 instructions: instructions
+diff --git a/Tests/MCP Server Tests/MCP.Server Tests.swift b/Tests/MCP Server Tests/MCP.Server Tests.swift
+index f68e918..4471732 100644
+--- a/Tests/MCP Server Tests/MCP.Server Tests.swift	
++++ b/Tests/MCP Server Tests/MCP.Server Tests.swift	
+@@ -126,4 +126,36 @@ struct `MCP.Server Tests` {
+         let response = try await Self.respond(#"{"jsonrpc":"2.0","id":8,"method":"ping"}"#)
+         #expect(response.result.object?.isEmpty == true)
+     }
++
++    @Test
++    func `an unknown version gets the newest one whatever the order of versions`() async throws {
++        let server = MCP.Server(
++            info: MCP.Implementation(name: "test", version: "1.0.0"),
++            tools: [],
++            versions: ["2024-11-05", "2025-06-18", "2025-03-26"]
++        )
++        let line = try #require(
++            await server.respond(
++                to: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#
++            )
++        )
++        let response = try JSON.parse(line)
++        #expect(String(response.result.protocolVersion) == "2025-06-18")
++    }
++
++    @Test
++    func `a server with no versions answers initialize with an internal error`() async throws {
++        let server = MCP.Server(
++            info: MCP.Implementation(name: "test", version: "1.0.0"),
++            tools: [],
++            versions: []
++        )
++        let line = try #require(
++            await server.respond(
++                to: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#
++            )
++        )
++        let response = try JSON.parse(line)
++        #expect(Int(response.error.code) == -32603)
++    }
+ }
+-- 
+2.43.0
+
