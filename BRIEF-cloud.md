@@ -9,8 +9,10 @@ decisions, record them on coenttb/work#242, and stop for him only where `BRIEF-e
 1. `CLAUDE.md` here: how the workspace builds, and the push rules.
 2. On coenttb/work#242, the two newest comments headed **Handover**: the last local push (SHAs, CI result, what was held
    back and why, open issue items) and the coordinator's list of what remains. They override this file.
-3. `BRIEF-execute.md` and `status-execute.md` (its `## Closing`) for the order of the #242 work, and
-   `retro/remaining.md` for the remaining findings by fix method.
+   The coordinator's is https://github.com/coenttb/work/issues/242#issuecomment-6736771243: #242's done criteria,
+   the CI risk to watch (the planner's anonymous `PIN-*` downloads), decisions taken and what's held back.
+3. `BRIEF-execute.md` for the evidence rules, and `retro/remaining.md` for the remaining findings by fix method.
+   `status-execute.md`'s `## Closing` is from 7 Nov and out of date: the Handover comment replaces it.
 
 ## Method
 
@@ -30,7 +32,9 @@ This is Linux only. Apple-only code is checked by `ci.yml` after the push; say s
 1. The CI reds from the last local push, from the Handover comment. Never leave a repository red that a push made red.
 2. The issue items the last fix run left open that don't need Coen. Fix them in the same batches, and close each issue
    with the fixing SHA after its push is green.
-3. #242 in the order of `status-execute.md`'s `## Closing`: rule fixes, structure, semantic pass, remaining lint.
+3. Close #242 by its two open done criteria: (4) one fleet CI read, green on macOS, Linux and Windows, with SHAs;
+   (5) a fresh fleet lint, and a new issue tracking the remaining findings by rule. Then work that issue: structure,
+   semantic pass, remaining lint.
 
 ## Done
 
