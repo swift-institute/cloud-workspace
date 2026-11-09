@@ -154,3 +154,32 @@ Root build loop capped at 2 more rounds (Coen); not green at the cap (last round
 - **Pushed: 379 repositories** to main, plain fast-forward pushes, none forced, none rejected (atoms 167, molecules 49, standards 102, compositions 61). Every pushed SHA is in `overnight/pushes-checkpoint.txt`. **Held: 22** (listed above). Next: read CI once, then `./ratchet.py`.
 - **CI, read once (10:05–10:15 UTC), 190 of the 379 pushed repositories** (`overnight/ci-checkpoint.txt`): 12 success, 156 failure, 22 still running. Opened swift-anamorphism's run 42463230253 (the pattern repeats in all chunks read: same window, attempt 2, previous commit green): every build and test job passed (Linux 6.4/release/traits off, macOS, Windows). The red comes from **Quality · source**, which failed before checking anything (`curl: (56) 504` fetching the published planner binary from swift-institute/institute-application's `ci-binaries` release), and **Extended · Embedded**, which fails compiling the swift-syntax dependency under the nightly toolchain (`ambiguous use of 'precondition'` in SwiftSyntax), not package code. `ci-ok` aggregates both. Neither is from this session's changes; I re-ran nothing. **To do:** re-run once the planner download is reachable (someone already re-ran once, in the outage window), then read again; check whether Embedded was green on these repositories before 8 Nov.
 - **Not done:** `./ratchet.py` regeneration (institute is held: its `comment in source` is over its limit on origin/main already).
+
+## Cloud session, 9 Nov (BRIEF-cloud.md): one owner for #242 and the backlog
+
+Linux x86_64, Swift 6.4.2, 4 cores. Every green here is Linux only; Apple and Windows code is checked by `ci.yml`.
+
+### 1. Combined build at the pushed SHAs (`backlog-pushed-2026-11-09.tsv`)
+- `./sync.sh`: 438 repositories; all 70 pushed repositories at exactly their pushed head.
+- `swift build --build-tests` over the whole ecosystem stops at the first failing module, so it ran in rounds. Dependents the 9 Nov push broke, fixed locally (pushed after the build is green):
+  - swift-iso-8825: UTF8String decoders need `try` (swift-iso-8824 d736ee7 made `init(contentBytes:)` throw). Also red in CI on all four build jobs.
+  - swift-ecma-376 tests: `ISO_21320.Archive.add` now throws (swift-iso-21320). Red in CI on Linux, macOS, Windows.
+  - swift-strings: `ISO_9899.String(adopting:count:)` renamed `init(allocated:count:)`.
+  - swift-standards/swift-email-standard: `RFC_5322.Message.ID(uniqueId:domain:)` now throws; new `Email.ConversionError.messageID`.
+  - swift-standards/swift-ipv6-standard tests: `ScopedAddress.Zone` is its own type (swift-rfc-4007).
+  - swift-compositions/swift-sql tests: `ISO_9075.Dialect.render` now throws.
+  - swift-compositions/swift-uuids: `v7(unixMilliseconds:fillRandom:)` is gone from swift-rfc-9562; now `v7(at: RFC_9562.Timestamp)`, which also fixes swift-uuids#2.
+  - swift-standards/swift-locale-standard: new `RFC_5646.LanguageTag.Region.area` case.
+  - swift-ietf/swift-rfc-2046: swift-rfc-5322 950f22c typed the header list subscript (`RFC_5322.Header.Value?`, not `String?`); this API change was not in `api_changes`.
+- Root-harness only: `swift-bifunctor|Bifunctor Macro Tests` added to `overnight/tests-fallback.txt` (macro attribute unknown when the test target is declared in the root package). Not caused by the push.
+
+### 2. CI read once, runs after 10:25Z (11:05Z): 14 green, 17 red, 34 still running, 5 without a run (Actions disabled: rfc-3596, 6455, 6891, 7301, 8200)
+- Red from the push, compile: swift-iso-8825, swift-ecma-376 (above); swift-windows-32 Windows tests (`Windows.Kernel.File.Stats Tests.swift`).
+- Red, Quality · source, swift-format: swift-source (also red before), swift-parser-machine, swift-iso-32000 (also red before). Fixed by swift-format with the source gate's configuration in these and 7 more pushed repositories that would fail it.
+- Red, Quality · source, ratchet over its limit: swift-slot-map (do throws for typed catch 19>0), swift-tensor (counter loop 1>0, raw value access 25>22), swift-tree (int public parameter 6>3), swift-rfc-791 (unchecked call site 49>48), swift-rfc-3986 (chained rawvalue access 10>8), swift-iso-21320 (counter loop 1>0), swift-ecma-376 (swift protocol qualification 1>0), swift-rfc-5322 (raw value access 11>10), swift-iso-8824 (string utf8 scanning 1>0), swift-x86-standard (raw value access 6>3, also red before), swift-iso-14496-22 (compound suite name 8>7), swift-iso-9075 (do throws for typed catch 1>0).
+- Red, Extended · Embedded (advisory): swift-source, swift-tree (`no such module 'Foundation'`), swift-parser-machine (Memory_Small not imported).
+- swift-slot-map: Windows release compiler crash (exception 29 in IRGen of SlotMap Tests.swift).
+- No infrastructure failures (no 503/504, no `PIN-*` read errors).
+
+### 3. Backlog
+- Fixes run in 12 groups, each repository on a local branch `backlog/<name>` in a worktree, merged into the checkouts only for a whole-ecosystem build before any push.
