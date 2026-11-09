@@ -28,6 +28,7 @@ of GitHub, so unpushed work is built too. Everything is in `mac/`:
 
     mac/sync.sh     # each clone = its checkout's HEAD plus uncommitted files; clones missing ones; localizes, generates
     mac/build.sh    # swift build --build-tests over everything; writes build.log and errors.txt
+    mac/test-sync.sh  # checks sync.sh in a throwaway folder
     mac/loop.sh     # build, apply the mechanical repairs in the real checkouts (mac/fix.sh), build again, until green
 
 While agents are editing checkouts, sync with `HEAD_ONLY=all mac/sync.sh` so only committed work is built, and don't run

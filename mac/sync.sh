@@ -18,7 +18,9 @@ for d in $list; do
   fi
   src=$(git -C "$r" remote get-url origin)
   git -C "$r" fetch -q origin HEAD || { echo "FETCH-FAILED $d"; continue; }
-  git -C "$r" reset -q --hard FETCH_HEAD
+  # localize.py marks the rewritten manifest skip-worktree; with the mark set, a reset to a commit that changed it fails.
+  git -C "$r" ls-files -v | sed -n 's/^S //p' | while IFS= read -r f; do git -C "$r" update-index --no-skip-worktree -- "$f"; done
+  git -C "$r" reset -q --hard FETCH_HEAD || { echo "RESET-FAILED $d"; continue; }
   git -C "$r" clean -qfd
   case "${HEAD_ONLY:-}" in all) echo "HEAD-ONLY $d"; continue;; esac
   case " ${HEAD_ONLY:-} " in *" $d "*) echo "HEAD-ONLY $d"; continue;; esac
