@@ -85,4 +85,16 @@ Post a comment on #242 headed **Overnight result**. Include:
 
 ## Measured
 
-(Filled in at preparation time, 9 Nov.)
+On 9 Nov at about 17:15Z, from origin/main of every Institute repository at about 16:45Z, macOS 27.2, Swift 6.4.2, 8 cores,
+24 GB, with other sessions running alongside:
+
+- **Cold whole-ecosystem build with tests:** 21 minutes. swift-build peaked at 6.5 GB resident; swap didn't grow. It
+  found one error: swift-tensor's tests call a `package`-scoped initializer, which the generated root package can't see.
+  That's a quirk of the combined build, not a break: CI is green on main, and cloud-workspace's
+  `overnight/tests-fallback.txt` already lists those tests.
+- **Warm rebuild:** green, 0 errors, 5.5 minutes. That's the baseline: **everything builds together at current main**,
+  so any error tonight comes from tonight's changes.
+- The build cache in `$E/.build` is warm. Keep the flags in `mac/build.sh` as they are: changing them rebuilds everything.
+- `$E/generate.py`, `$E/localize.py` and `$E/overnight/tests-fallback.txt` are links to this repository's files, so there's
+  one copy of each. A test target that only fails in the root package (`package` access, a trait the root doesn't
+  enable) goes on `overnight/tests-fallback.txt` here, with a commit saying why.
