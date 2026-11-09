@@ -183,3 +183,18 @@ Linux x86_64, Swift 6.4.2, 4 cores. Every green here is Linux only; Apple and Wi
 
 ### 3. Backlog
 - Fixes run in 12 groups, each repository on a local branch `backlog/<name>` in a worktree, merged into the checkouts only for a whole-ecosystem build before any push.
+
+### 4. Progress, 9 Nov afternoon
+- **Rule from Coen (9 Nov):** another session (on the Mac) also pushes repairs. Before fixing any package, pull it and check origin/main; fix it here only if it blocks this session. Already seen: swift-strings 0657448 (the same fix as this session's, so mine was dropped) and swift-sqlite 6e75537, both from the Mac around 12:30Z.
+- **Pushed repairs** (each built in the combined build first):
+  - swift-iso-8825 7ea8f78, swift-ecma-376 1157edc;
+  - swift-ietf/swift-rfc-2046 8a93126; swift-standards/swift-email-standard 2112b28, swift-ipv6-standard e618823, swift-locale-standard 92d64b3;
+  - swift-compositions/swift-sql db0daca, swift-uuids 51361e5;
+  - swift-format only: swift-source 7630c45 and 04a8998 (Package.swift), swift-parser-machine 41b5b36.
+- **Further breaks found, fixed locally, building now:**
+  - swift-iso-32000 36b296b removed `Document: Binary.Serializable` when the writer started throwing. New `[Byte](document) throws(ISO_32000.Writer.Error)`; swift-pdf, swift-pdf-render and swift-pdf-html-render tests take `try`.
+  - Ratchet overruns in 12 repositories (slot-map, tensor, tree, rfc-791, rfc-3986, iso-21320, ecma-376, rfc-5322, iso-8824, x86-standard, iso-14496-22, iso-9075), cleared without behaviour change.
+- **Root-harness only:** test targets behind non-default traits (swift-binary-parser ASCII Decimal Machine Tests; swift-translating Platform, Dependencies and Translated String Tests) and swift-tensor's Tensor Tests (package-access init) are in `overnight/tests-fallback.txt`. CI builds them.
+- **CI read 2 (about 12:30Z), 70 pushed repositories:** 27 green, 38 red, 5 queued (Actions disabled). Quality · source was already red before the push in about 20 of the red repositories.
+- **Issues ticked and closed: 26**, all in repositories green in CI read 2. Left open: swift-color-standard#5 (two items, fixed on the backlog branch) and swift-rfc-2822#10 (no checklist; checking 1fa28c9 against its acceptance text).
+- **Backlog:** 12 fix groups done on local branches: 170 items fixed, 17 left open, each with a reason. Not built yet. Integration comes after the push repairs are green.
