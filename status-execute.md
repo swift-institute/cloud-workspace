@@ -216,3 +216,20 @@ Linux x86_64, Swift 6.4.2, 4 cores. Every green here is Linux only; Apple and Wi
   - between pushes, build only the changed targets and their dependents; the whole ecosystem once, right before each push;
   - push about hourly, or say here why not.
 - **swift-slot-map's Windows release crash** is swift-institute/Issues#224 (IRGenDebugInfo "Incorrect reconstructed type"); the details are in a comment there. It reproduces on Linux with `-enable-round-trip-debug-types`. It's a toolchain bug, not worked around.
+
+### 6. Push at about 15:35Z: 36 repairs
+- **Pushed:** lint repairs (ratchet overruns new with the 9 Nov push) in 34 repositories, plus swift-rfc-6068 (swift-format) and swift-iso-32000 958ff92 (`[Byte](document) throws`). SHAs are on #242 (comment 6744089604).
+- **Proof (Linux):**
+  - `./build.sh` with the 47 test targets of these repositories is green.
+  - The last whole round got through 35,744 of 42,221 tasks with no compile error.
+  - Lint shows 0 over the limit; swift-format is clean.
+- **swift-pdf, swift-pdf-render and swift-pdf-html-render:** fixed and lint-clean, waiting for a whole build with the new linker flag. `-use-ld=lld` changes the compile flags, so the first run recompiles everything, and a `--target` build doesn't link the macro plugins it then needs.
+- **Their `Tests/Testing/` directories** (performance and snapshot tests) are in no manifest, so no build ever compiles them; only the source gate's lint reads them.
+- **Build settings** are in `build.sh` and CLAUDE.md (f5b84d8).
+- **Next:**
+  1. CI read 3 at about 16:15Z.
+  2. Push the PDF trio once the build is green.
+  3. Then the backlog in small groups, lowest layer first, each group with all its API callers fixed:
+     - layer 3, 26 repositories, rebased onto main in `/home/user/wt/<name>`;
+     - its 5 layer-4 dependents (kernel, file-system, loader, mcp, memory-mapping), already fixed in their worktrees;
+     - swift-json (#15) last, since it reaches about 44 call sites including institute.
