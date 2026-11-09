@@ -1,0 +1,295 @@
+diff --git a/README.md b/README.md
+index f49eab2..ebf5d06 100644
+--- a/README.md
++++ b/README.md
+@@ -16,10 +16,10 @@ Use this package when you need to make POSIX system calls from Swift on macOS or
+ - Waiting with a deadline polls with non-blocking attempts, sleeping 1 ms between them and doubling up to 100 ms. The deadline is measured on `Clock.Continuous`. A lock obtained after the deadline has passed is released again and reported as timed out.
+ - `Clock.Continuous` keeps counting while the machine sleeps: CLOCK_MONOTONIC_RAW on Darwin, CLOCK_BOOTTIME on Linux. `Clock.Suspending` stops: CLOCK_UPTIME_RAW on Darwin, CLOCK_MONOTONIC on Linux. The CPU clocks report zero if the clock can't be read.
+ - `Time.Zone.Rule.local` reads `TZ` again for every instant, so a change takes effect at once. If the local time can't be computed, it gives UTC. Its offsets are east of UTC, so `TZ=XXX-2` gives +2 hours.
+-- `ISO_9945.Kernel.Thread.Condition.wait(mutex:timeout:)` returns false only when the timeout passes. Any other wakeup, spurious ones included, returns true, so check your condition again. The timeout runs on the monotonic clock on Linux and on the wall clock on Darwin.
++- `ISO_9945.Kernel.Thread.Condition.wait(mutex:timeout:)` returns false only when the timeout passes. Any other wakeup, spurious ones included, returns true, so check your condition again. The timeout is measured as elapsed time on both platforms, so a wall clock change does not stretch or cut it.
+ - `ISO_9945.Kernel.Signal.Send.toGroup(_:pgid:)` refuses process group 1 with EINVAL, since that would signal every process. `ISO_9945.Kernel.Process.Wait.wait(_:options:)` returns nil only when you asked not to hang and no child has changed state.
+ - An `ISO_9945.Kernel.Signal.Action.Handler.customInfo` handler is always installed with SA_SIGINFO and an `ISO_9945.Kernel.Signal.Action.Handler.custom` handler never is, whatever flags you give `ISO_9945.Kernel.Signal.Action.Configuration`. `ISO_9945.Kernel.Signal.Information.sender` is nil unless the signal came from kill or sigqueue or is a SIGCHLD about a child. `ISO_9945.Kernel.Signal.Information.fault` is set only for SIGSEGV, SIGBUS, SIGILL and SIGFPE raised by a fault.
+-- Descriptor isolation for spawned processes differs by platform. On Linux, `ISO_9945.Kernel.Process.Spawn.Actions.isolate()` closes every descriptor from 3 up in the child, and spawning with `isolated: true` changes nothing. On Darwin, `isolated: true` passes the child only the descriptors the actions set up, resets every signal to its default and clears the signal mask, and `isolate()` adds standard input, output and error. With musl or glibc before 2.34, `isolate()` returns false.
++- Spawning with `isolated: true` resets every signal to its default and clears the signal mask on every platform. Descriptor isolation needs `ISO_9945.Kernel.Process.Spawn.Actions.isolate()` as well: together the child gets standard input, output and error and the descriptors the actions set up, and nothing else. On Darwin, `isolated: true` alone also withholds standard input, output and error; on Linux, `isolate()` alone closes every descriptor from 3 up. With musl or glibc before 2.34, `isolate()` returns false.
+ - `ISO_9945.Kernel.Environment.set(_:to:overwrite:)` and `ISO_9945.Kernel.Environment.unset(_:)` refuse an empty name or a name containing `=` before calling the C library. `ISO_9945.Kernel.Environment.entries()` skips entries that have no `=`.
+ - `ISO_9945.Kernel.User.Database` and `ISO_9945.Kernel.Group.Database` lookups return nil when there is no such entry and throw only when the lookup itself fails. `ISO_9945.Kernel.User.Login.name()` returns nil when the process has no controlling terminal.
+ - Reading a symbolic link's target starts with a 256-byte buffer and doubles it up to 64 KiB. A longer target fails as too long for the buffer. The working directory is read the same way, from 4 KiB up to 1 MiB.
+@@ -27,7 +27,7 @@ Use this package when you need to make POSIX system calls from Swift on macOS or
+ - Only `ISO_9945.Kernel.Socket.Connect.connect(_:address:)` reports `interrupted`, and the connection attempt then goes on in the background. Every other `ISO_9945.Kernel.Socket.Error` is a platform error, an interrupted send or receive included.
+ - `ISO_9945.Kernel.Termios.Attributes.withRaw()` turns off echo, canonical input, signal keys and output processing, sets 8-bit characters, and makes a read wait for at least one byte with no timeout.
+ - Paths follow the POSIX grammar. Path text may not be empty or contain NUL or control characters. Components skip empty segments, so `a//b` has two. Appending joins with exactly one separator, and appending an absolute path gives that path. The parent of `/a` is `/`, and the root and a single relative component have none. A path relative to itself is `.`, and relative to a base that is not its prefix it is nil. A prefix must match whole components and be absolute or relative like the path.
+-- `ISO_9945.Filename` is non-empty and has no `/`, NUL or control character (below 0x20, or 0x7F).
++- `ISO_9945.Filename` is non-empty and has no `/` or NUL. Built from text, it also has no control character (below 0x20, or 0x7F); built from code units with `init(platformNative:)`, as a directory entry hands it back, it keeps them. Only a literal makes a filename without throwing; interpolated text goes through the throwing `init(_:)`.
+ - `ISO_9945.Utility.Name` is 2 to 9 characters, each a lowercase ASCII letter or a digit. An option name is one ASCII letter or digit.
+ - `ISO_9945.Utility.Invocation.arguments` puts `--` before the operands only when the first operand starts with `-` and is longer than one character. A lone `-` is an operand.
+ - `ISO_9945.Utility.Invocation.Coder` expands a grouped run such as `-ab` into one option per character. An option that takes an argument ends the run and takes the rest of the word, or the next word if nothing is left. Options end at `--`, which is dropped, or at the first word that is not an option. Writing an invocation back puts every option argument in its own word.
+diff --git a/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift b/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift
+index 52e1540..adff71a 100644
+--- a/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift	
++++ b/Sources/ISO 9945 Kernel File/ISO_9945.Filename.swift	
+@@ -64,14 +64,17 @@ extension ISO_9945.Filename {
+         }
+     }
+ 
+-    /// The filename a directory entry names, from its code units. The units must be valid UTF-8 and
+-    /// hold to the rules for text.
++    /// The filename a directory entry names, from its code units. The units must be valid UTF-8,
++    /// non-empty and free of `/` and NUL; control characters are kept.
+     @inlinable
+     public init(platformNative codeUnits: [Path.Char]) throws(Error) {
+-        guard let string = Swift::String(validating: codeUnits, as: UTF8.self) else {
++        guard !codeUnits.isEmpty else { throw .empty }
++        if codeUnits.contains(0) { throw .containsInteriorNUL }
++        if codeUnits.contains(Self.separator) { throw .containsPathSeparator }
++        guard Swift::String(validating: codeUnits, as: UTF8.self) != nil else {
+             throw .invalidUTF8
+         }
+-        try self.init(string)
++        self.init(unchecked: codeUnits.span)
+     }
+ 
+     /// Code units already known to form a filename: non-empty, no `/`, no NUL.
+@@ -140,9 +143,6 @@ extension ISO_9945.Filename: ExpressibleByStringLiteral {
+     }
+ }
+ 
+-/// Interpolated text is a filename by the same rule as a plain literal.
+-extension ISO_9945.Filename: ExpressibleByStringInterpolation {}
+-
+ extension ISO_9945.Filename: Binary.Serializable {
+ 
+     /// The name's text, as UTF-8.
+diff --git a/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift b/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift
+index c1fc9a7..11fdb58 100644
+--- a/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift	
++++ b/Sources/ISO 9945 Kernel Thread/ISO_9945.Kernel.Thread.Condition.swift	
+@@ -39,31 +39,22 @@ extension ISO_9945.Kernel.Thread.Condition {
+ 
+     public func wait(mutex: ISO_9945.Kernel.Thread.Mutex, timeout: Duration) -> Bool {
+         unsafe mutex.withUnsafeMutablePointer { mutexPtr in
++            let (seconds, attoseconds) = timeout.components
+             var ts = timespec()
+-
+             #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+-
+-                var tv = timeval()
+-                unsafe gettimeofday(&tv, nil)
+-                let (seconds, attoseconds) = timeout.components
+-                ts.tv_sec = tv.tv_sec + Int(seconds)
+-                ts.tv_nsec = Int(tv.tv_usec) * 1000 + Int(attoseconds / 1_000_000_000)
+-                if ts.tv_nsec >= 1_000_000_000 {
+-                    ts.tv_sec += 1
+-                    ts.tv_nsec -= 1_000_000_000
+-                }
++                ts.tv_sec = Int(seconds)
++                ts.tv_nsec = Int(attoseconds / 1_000_000_000)
++                let result = unsafe pthread_cond_timedwait_relative_np(&cond, mutexPtr, &ts)
+             #else
+-
+                 clock_gettime(CLOCK_MONOTONIC, &ts)
+-                let (seconds, attoseconds) = timeout.components
+                 ts.tv_sec += Int(seconds)
+                 ts.tv_nsec += Int(attoseconds / 1_000_000_000)
+                 if ts.tv_nsec >= 1_000_000_000 {
+                     ts.tv_sec += 1
+                     ts.tv_nsec -= 1_000_000_000
+                 }
++                let result = unsafe pthread_cond_timedwait(&cond, mutexPtr, &ts)
+             #endif
+-            let result = unsafe pthread_cond_timedwait(&cond, mutexPtr, &ts)
+             return result == 0
+         }
+     }
+diff --git a/Sources/ISO 9945 Process Shims/include/shim.h b/Sources/ISO 9945 Process Shims/include/shim.h
+index 36443d6..fea48ee 100644
+--- a/Sources/ISO 9945 Process Shims/include/shim.h	
++++ b/Sources/ISO 9945 Process Shims/include/shim.h	
+@@ -265,7 +265,7 @@ static inline int swift_posix_spawn_isolated(
+     (void)argv;
+     (void)envp;
+     return ENOSYS;
+-#elif defined(__APPLE__)
++#else
+     posix_spawnattr_t attributes;
+     int rc = posix_spawnattr_init(&attributes);
+     if (rc != 0) {
+@@ -282,7 +282,11 @@ static inline int swift_posix_spawn_isolated(
+         rc = posix_spawnattr_setsigmask(&attributes, &mask);
+     }
+     if (rc == 0) {
++#if defined(__APPLE__)
+         rc = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
++#else
++        rc = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
++#endif
+     }
+     if (rc == 0) {
+         rc = posix_spawn(
+@@ -296,15 +300,6 @@ static inline int swift_posix_spawn_isolated(
+     }
+     int destroyed = posix_spawnattr_destroy(&attributes);
+     return rc != 0 ? rc : destroyed;
+-#else
+-    return posix_spawn(
+-        pid,
+-        path,
+-        (const posix_spawn_file_actions_t *)file_actions,
+-        NULL,
+-        (char *const *)argv,
+-        (char *const *)envp
+-    );
+ #endif
+ }
+ 
+diff --git a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift
+index bd6d274..39692b1 100644
+--- a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift	
++++ b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Process.Spawn.Actions Tests.swift	
+@@ -2,6 +2,12 @@
+ 
+     import Testing
+     import Path
++
++    #if canImport(Darwin)
++        import Darwin
++    #elseif canImport(Glibc)
++        import Glibc
++    #endif
+     @testable import ISO_9945_Kernel
+ 
+     @Suite
+@@ -144,6 +150,58 @@
+             let result = try ISO_9945.Kernel.Process.Wait.wait(.process(pid))
+             #expect(result?.status.exit.code == 0)
+         }
++
++        private func shellExitCode(
++            _ script: Swift::String,
++            actions: borrowing ISO_9945.Kernel.Process.Spawn.Actions,
++            isolated: Bool
++        ) throws -> Int32? {
++            let argv: [Swift::String] = ["/bin/sh", "-c", script]
++            let envp: [Swift::String] = []
++            let pid: ISO_9945.Kernel.Process.ID = try unsafe Path.scope.array(argv, envp) {
++                (
++                    argvPtr: UnsafePointer<UnsafePointer<Path.Char>?>,
++                    envpPtr: UnsafePointer<UnsafePointer<Path.Char>?>
++                ) throws(ISO_9945.Kernel.Process.Error) -> ISO_9945.Kernel.Process.ID in
++                try unsafe ISO_9945.Kernel.Process.Spawn.spawn(
++                    path: argvPtr[0]!,
++                    argv: argvPtr,
++                    envp: envpPtr,
++                    actions: actions,
++                    isolated: isolated
++                )
++            }
++            let result = try ISO_9945.Kernel.Process.Wait.wait(.process(pid))
++            return result?.status.exit.code
++        }
++
++        @Test
++        func `an isolated spawn keeps a stray descriptor from the child`() throws {
++            let pipe = try ISO_9945.Kernel.Pipe.pipe()
++            let script = "[ -e /dev/fd/\(pipe.read._raw) ]"
++
++            let plain = try ISO_9945.Kernel.Process.Spawn.Actions()
++            #expect(try shellExitCode(script, actions: plain, isolated: false) == 0)
++
++            var actions = try ISO_9945.Kernel.Process.Spawn.Actions()
++            guard try actions.isolate() else { return }
++            #expect(try shellExitCode(script, actions: actions, isolated: true) == 1)
++        }
++
++        @Test
++        func `an isolated spawn clears the signal mask`() throws {
++            var blocked = sigset_t()
++            var previous = sigset_t()
++            sigemptyset(&blocked)
++            sigaddset(&blocked, SIGUSR1)
++            pthread_sigmask(SIG_BLOCK, &blocked, &previous)
++            defer { pthread_sigmask(SIG_SETMASK, &previous, nil) }
++
++            let script = "kill -USR1 $$; exit 0"
++            let actions = try ISO_9945.Kernel.Process.Spawn.Actions()
++            #expect(try shellExitCode(script, actions: actions, isolated: false) == 0)
++            #expect(try shellExitCode(script, actions: actions, isolated: true) == nil)
++        }
+     }
+ 
+ #endif
+diff --git a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift
+index 00bcf3c..7171bdc 100644
+--- a/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift	
++++ b/Tests/ISO 9945 Kernel Tests/ISO 9945.Kernel.Thread.Condition Tests.swift	
+@@ -69,6 +69,26 @@ extension `ISO_9945.Kernel.Thread.Condition Tests`.Test.Unit {
+         )
+     }
+ 
++    @Test
++    func `timed wait lasts at least its timeout`() {
++        let mutex = ISO_9945.Kernel.Thread.Mutex()
++        let condition = ISO_9945.Kernel.Thread.Condition()
++        let clock = ContinuousClock()
++
++        mutex.lock()
++        var elapsed = Duration.zero
++        for _ in 0..<10 {
++            let start = clock.now
++            let wasSignaled = condition.wait(mutex: mutex, timeout: .milliseconds(50))
++            elapsed = clock.now - start
++            if !wasSignaled { break }
++        }
++        mutex.unlock()
++
++        #expect(elapsed >= .milliseconds(45))
++        #expect(elapsed < .seconds(5))
++    }
++
+     @Test
+     func `multiple conditions are independent`() {
+ 
+diff --git a/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift b/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift
+index c91962a..8bb7bdc 100644
+--- a/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift	
++++ b/Tests/ISO 9945 Kernel Tests/Path+POSIX Tests.swift	
+@@ -20,12 +20,15 @@ extension `Path+POSIX Tests` {
+         }
+ 
+         @Test
+-        func `an interpolated literal spells a path and a component`() {
++        func `an interpolated literal spells a path, and runtime text a component by throwing`() throws {
+             let name = "local"
+             let path: Path = "/usr/\(name)/bin"
+-            let component: Path.Component = "\(name).txt"
++            let component = try Path.Component("\(name).txt")
+             #expect(path == "/usr/local/bin")
+             #expect(component == "local.txt")
++            #expect(throws: ISO_9945.Filename.Error.containsPathSeparator) {
++                try Path.Component("\(name)/bin")
++            }
+         }
+ 
+         @Test
+@@ -113,5 +116,21 @@ extension `Path+POSIX Tests` {
+             #expect(name.count == 8)
+             #expect(Path.Component.self == ISO_9945.Filename.self)
+         }
++
++        @Test
++        func `a platform-native filename keeps control characters`() throws {
++            let name = try ISO_9945.Filename(platformNative: Array("a\nb".utf8))
++            #expect(name.string == "a\nb")
++            #expect(name.count == 3)
++            let units: [([Path.Char], ISO_9945.Filename.Error)] = [
++                ([], .empty),
++                (Array("a/b".utf8), .containsPathSeparator),
++                ([0x61, 0x00, 0x62], .containsInteriorNUL),
++                ([0x61, 0xFF], .invalidUTF8),
++            ]
++            for (codeUnits, error) in units {
++                #expect(throws: error) { _ = try ISO_9945.Filename(platformNative: codeUnits) }
++            }
++        }
+     }
+ }

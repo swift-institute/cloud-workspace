@@ -32,8 +32,11 @@ This is Linux only. Apple-only code is checked by `ci.yml` after the push; say s
 1. The last local push (9 Nov) went out without a final combined build: commits after interim build 3 were never
    built together. First run `./sync.sh` and the combined build with tests at the pushed SHAs, then read CI once, and
    fix every red the push caused. Never leave a repository red that a push made red.
-2. The issue items the last fix run left open that don't need Coen. Fix them in the same batches, and close each issue
-   with the fixing SHA after its push is green.
+2. The backlog in `backlog-remaining.json` (handover: https://github.com/coenttb/work/issues/242#issuecomment-6737804396).
+   Once CI is green, tick the items in `ticks` of the pushed repositories and close each issue with nothing left open.
+   Then fix the repositories with status `not-reached`, `cut-off` (half-done work in `backlog-stashes/`),
+   `open-after-earlier-wave` and `held-back-outside-ecosystem`, in the same batches. Leave swift-sqlite alone: its
+   Mac checkout holds someone else's uncommitted work.
 3. Close #242 by its two open done criteria: (4) one fleet CI read, green on macOS, Linux and Windows, with SHAs;
    (5) a fresh fleet lint, and a new issue tracking the remaining findings by rule. Then work that issue: structure,
    semantic pass, remaining lint.
