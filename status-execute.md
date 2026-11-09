@@ -233,3 +233,71 @@ Linux x86_64, Swift 6.4.2, 4 cores. Every green here is Linux only; Apple and Wi
      - layer 3, 26 repositories, rebased onto main in `/home/user/wt/<name>`;
      - its 5 layer-4 dependents (kernel, file-system, loader, mcp, memory-mapping), already fixed in their worktrees;
      - swift-json (#15) last, since it reaches about 44 call sites including institute.
+
+### 7. Wind-down, 9 Nov about 16:40Z
+
+### The whole-ecosystem build doesn't fit this machine
+- With debug info, the linked test libraries alone filled the disk allowance (15 GB).
+- Without debug info, ld.gold needed over 12 GB of memory to link the big test libraries.
+- With lld (`-Xswiftc -use-ld=lld`, plus `--disable-dead-strip` so macro plugins keep their metadata), swift-build itself still grows past 13.5 GB on a run that goes to the end, and the kernel kills it (rc 137) at about 36,000 of 42,000 tasks.
+- So **a whole `--build-tests` run cannot finish in 15 GB**. What works: `./build.sh <Target> ...`, a targeted build of the changed modules and their dependents (compiled, not linked). The settings and this note are in `build.sh` and CLAUDE.md.
+
+### Pushed by this session
+Repairs only, for reds the 9 Nov push caused. Each was built (whole rounds up to 35,744 tasks, then targeted) and linted (0 over the ratchet) before its push:
+- **10:5x–12:20Z, dependents broken by API changes:**
+  - swift-iso-8825 7ea8f78
+  - swift-ecma-376 1157edc
+  - swift-rfc-2046 8a93126
+  - swift-email-standard 2112b28
+  - swift-ipv6-standard e618823
+  - swift-locale-standard 92d64b3
+  - swift-sql db0daca
+  - swift-uuids 51361e5
+  - swift-source 7630c45 and 04a8998
+  - swift-parser-machine 41b5b36
+- **15:35Z:** 34 lint repairs, swift-rfc-6068 and swift-iso-32000 958ff92. The SHAs are in comment 6744089604.
+- **15:56Z:** swift-pdf-render fd541f6, swift-pdf-html-render cd7c242 and swift-pdf 7ca87f8.
+- **Issues:** 27 closed. 26 had every checklist item ticked with its SHA, in repositories green in CI. swift-rfc-2822#10 was checked by hand against its acceptance.
+- **The Mac session's pushes were pulled first:**
+  - swift-strings 0657448 is the same fix as mine, so mine was dropped;
+  - swift-sqlite 6e75537 is theirs;
+  - swift-w3c-xml 96399ce conflicted with the w3c-xml backlog branch, and the branch was adapted to it.
+
+### CI after the repairs
+CI read 3 (about 16:20Z), latest run of 48 repaired or depending repositories: **36 green** on Plan, macOS, Linux (release, 6.4, traits off) and Windows. Every red has been handled:
+- **swift-sql:** tests needing `try`. Fixed by 9cd1e15, pushed from elsewhere at 14:58Z; I kept that version.
+- **swift-rfc-2046:** `raw value access` 10>9 from my repair. Fixed in 31e91fa (lint 0 over; RFC 2046 and RFC 2387 test targets build).
+- **swift-rfc-2387:** its run was from before the swift-rfc-2046 fix. The failed jobs are re-queued (run 42600956943).
+- **swift-rfc-5280:** `Attribute` decoded its SET OF values with the SET reader, which since swift-iso-8825#14 refuses equal tags. Fixed in ad1e2f9: it now uses the SET OF reader. `swift test` passes 181 tests on Linux.
+- **swift-windows-32:** the Windows tests' use of the internal `_get`. Fixed in 8c61145, which is the backlog branch's 01bbafa plus a `count minus one` lint fix. Windows-only code, not compiled here.
+- **swift-slot-map, Windows:** the toolchain assertion swift-institute/Issues#224.
+- **swift-iso-32000:** Quality · source, already red before the push.
+- **Still running at 16:20Z:** swift-pdf and swift-pdf-html-render.
+- **No CI run at all** (Actions disabled; the open items need a repository setting): swift-rfc-6455, 6891, 7301, 3596 and 8200.
+
+### What's left, in order
+1. **Tick and close** the 55 issues in `backlog-stashes/9-nov-cloud/ticks-left.json` (item text and SHA per issue) once their repositories are green. Use `TICK-BRIEF`-style care: tick only matching `- [ ]` lines, and close an issue when none are left.
+2. **Backlog, 65 branches, never built** (`backlog-stashes/9-nov-cloud/`, one directory per branch with its base SHA and the issue items it fixes):
+   - Merge them a few at a time, lowest layer first. Fix every caller of each changed API in the same round (the API changes and their callers are in `fixes/<repo>.json`), build by target, lint, push.
+   - swift-windows-32's branch: its first patch, 01bbafa, is already on main (8c61145).
+   - Layer 3 (26 branches) was rebased onto main on 9 Nov afternoon. Its five layer-4 dependents (swift-kernel, swift-file-system, swift-loader, swift-mcp, swift-memory-mapping) already carry the fixes those API changes need.
+   - **swift-json#15** (`serialize`/`jsonString` now throw) reaches about 44 call sites, about 15 of them in institute. Give it its own round.
+   - **17 items left open, each with a reason**, mostly needing another repository or a decision:
+     - swift-kernel#23 and #29 need a public setter and an overflow counter in swift-linux-standard, and F_NOCACHE in swift-iso-9945;
+     - swift-glob#1 belongs in swift-posix;
+     - swift-storage#14 needs ledger ownership moved across three packages;
+     - swift-xml#5 needs located errors in swift-w3c-xml;
+     - swift-executors#14 needs the crash reproduced;
+     - swiftui-extensions#1 is Apple-only;
+     - swift-pdf-render#10: choose between throwing, reporting and embedding a font;
+     - swift-w3c-css#13: PageBreak;
+     - swift-iso-32000#14: the AFM width tables;
+     - swift-iso-9945#93: the Path part, in swift-path.
+3. **Not reached at all:** held-back-outside-ecosystem (7 coenttb and 3 swift-whatwg repositories) and open-after-earlier-wave swift-sample#10, swift-time#3 and swift-array#10 (Embedded/toolchain). coenttb/work#184 and #109 are personal dated items, not code.
+4. **Quality · source reds from before the push** are out of scope for now and go into the fresh-lint issue (done criterion 5):
+   - swift-source, swift-rfc-9557, swift-x86-standard and swift-iso-32000;
+   - patches for the last three are in `backlog-stashes/9-nov-cloud/`; swift-rfc-9557's doesn't compile.
+5. **swift-slot-map Windows release:** toolchain assertion swift-institute/Issues#224 (details in comment 6741514771). Not worked around.
+6. **#242 done criteria 4 (fleet CI read, green on all three platforms) and 5 (fresh fleet lint, new issue by rule)** are still open.
+
+This session stops here.
