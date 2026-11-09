@@ -198,3 +198,21 @@ Linux x86_64, Swift 6.4.2, 4 cores. Every green here is Linux only; Apple and Wi
 - **CI read 2 (about 12:30Z), 70 pushed repositories:** 27 green, 38 red, 5 queued (Actions disabled). Quality · source was already red before the push in about 20 of the red repositories.
 - **Issues ticked and closed: 26**, all in repositories green in CI read 2. Left open: swift-color-standard#5 (two items, fixed on the backlog branch) and swift-rfc-2822#10 (no checklist; checking 1fa28c9 against its acceptance text).
 - **Backlog:** 12 fix groups done on local branches: 170 items fixed, 17 left open, each with a reason. Not built yet. Integration comes after the push repairs are green.
+
+### 5. 14:45Z: why nothing was pushed since about 13:30Z
+- The whole-ecosystem build ran out of disk: each test target links into its own library, and with debug info they took 15 GB of this session's allowance.
+- Fix: the build now runs with `-Xswiftc -gnone -Xcc -g0` (7.5 GB in total). That needed one full rebuild from scratch (about 25 minutes).
+- That rebuild was then killed for memory while linking test libraries in parallel. It is resuming with `-j 2`.
+- Ready to push once it's green:
+  - the lint repairs in 24 repositories;
+  - swift-iso-32000 `[Byte](document)` with the swift-pdf, swift-pdf-render and swift-pdf-html-render tests;
+  - swift-format in rfc-5280, 6068, 6265, 6455, 6750, 6891 and 7301;
+  - swift-rfc-8259.
+- **Dropped:** the lint commits for swift-rfc-9557, swift-x86-standard and swift-iso-32000. Their Quality · source was red before the push, so they are out of scope for now.
+- **Mac conflict:** swift-w3c-xml 96399ce (`[Byte](bitPatterns:)`) conflicted with the w3c-xml backlog branch. The branch keeps its shared parser, with the Mac's conversion applied inside it.
+- **Coen, 9 Nov afternoon:**
+  - push what's proven at once;
+  - every red the push caused goes out before more backlog;
+  - between pushes, build only the changed targets and their dependents; the whole ecosystem once, right before each push;
+  - push about hourly, or say here why not.
+- **swift-slot-map's Windows release crash** is swift-institute/Issues#224 (IRGenDebugInfo "Incorrect reconstructed type"); the details are in a comment there. It reproduces on Linux with `-enable-round-trip-debug-types`. It's a toolchain bug, not worked around.
