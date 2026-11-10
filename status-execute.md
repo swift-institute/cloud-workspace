@@ -323,3 +323,22 @@ This session stops here.
 **Decision:** I lint with `/Applications/Xcode-27.2.0.app` (27B52), because the source policy pins its swift-format by hash. The selected Xcode-27.2.app is 27B48, and its swift-format is refused.
 
 **Next:** batches A3 and A4 (13 sets, applied, being linted), then tier B.
+
+## Overnight on the Mac: tier A batches 3 and 4 pushed (05:50Z), tier A done
+
+13 sets, plus one new commit in swift-model-context-protocol. The whole ecosystem built with tests before the push, 0 errors (macOS only).
+
+**Pushed:** swift-model-context-protocol 12b0bcd, swift-parsers b749401, swift-xml 0a66989, swift-mcp 84f814b, swift-plist 3a5278c, swift-linter-rules 6b389e6, swift-xcode 2b4ccf2, swift-json-feed-standard 0933409, swift-html-render 0349e5b, swift-pdf-render 343dfcf, swift-linter d6c2d74, swift-tests f1d4644, swift-pdf-html-render a3006da, swift-epub-render fbf7cca.
+
+**Fixed before pushing:**
+- swift-mcp `raw value access` (2 new): fixed at the source. `MCP.Version` is now `Comparable` in swift-model-context-protocol, with a test, and swift-mcp uses `versions.max()`.
+- swift-plist `file name nested path` (1 new): removing `located()` and `prepared()` left `Plist.Parse.Accessor.swift` declaring only `Plist.Parse`, so it is merged into `Plist.Parse.swift`.
+- swift-json-feed-standard `untyped throws` (1 new): the date helper takes the decoded string and throws `DecodingError`, a typed throw.
+
+**Held back:** swift-mcp's commit 56d6d68 ("passes the request's parameters as their JSON value"). It needs swift-json-rpc-standard#1's typed `Request.params`, which is tier B2, and didn't compile without it. It goes in with B2.
+
+**Not caused by tonight:** swift-linter-rules is over its ratchet on `comment in source`, `compound suite name` and `path name grammar`. Its pre-patch base lints the same, so this is a pre-9-Nov red, left for done criterion 5. swift-parsers' 5 `target import edge` findings are on files the set didn't touch.
+
+**Issues:** 15 closed: swift-parsers#9, swift-xml#6, swift-mcp#1, swift-plist#16 and #6, swift-linter-rules#12, swift-xcode#4, swift-json-feed-standard#9, swift-html-render#12, swift-pdf-render#11, swift-linter#64, swift-tests#19, swift-pdf-html-render#18, swift-epub-render#5.
+
+**Tier A total:** 32 sets pushed, 0 skipped, 33 issues closed. **Next:** tier B. B1 is applied, and none of its API changes has a caller to fix.
