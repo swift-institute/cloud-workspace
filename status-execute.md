@@ -381,3 +381,41 @@ This session stops here.
 **CI:** swift-loader is red on Linux release. Its type-metadata section test needs Linux section enumeration, which comes with swift-linux-standard's tier C set. It was already red on 8 Nov.
 
 **Next:** tier C, one set per round, lowest layer first.
+
+## Overnight result (10 Nov, 07:35Z, wound down at Coen's request)
+
+**Counts:**
+- 53 of 65 sets pushed: tier A 32, tier B 19, tier C 2 (swift-darwin-standard, swift-iso-9945).
+- 0 skipped. One commit held back: swift-w3c-epub's Viewport.
+- 12 tier C sets left: swift-windows-32, swift-color-standard, swift-domain-standard, swift-linux-standard, swift-w3c-css, swift-css-standard, swift-kernel, swift-witnesses, swift-executors, swift-io-kernel, swift-json (#15 last) and swift-file-system.
+- Caller and repair commits outside the sets: swift-model-context-protocol 12b0bcd, institute 675cf6b, swift-file-system 37b9597.
+
+**Issues:** 54 closed. Left open with a note:
+- swift-vat-standard#1: one bullet not in the set.
+- swift-process#6: awaits Windows CI for the re-enabled test.
+- swift-w3c-epub#8: the Viewport item.
+- swift-iso-32000#14: the AFM width tables.
+- swift-iso-9945#93: the Path part belongs in swift-path.
+
+The 55 issues in `ticks-left.json` are not ticked yet: that needs the fleet CI read.
+
+**Builds:** before every push, the whole ecosystem was built with tests: 438 packages, 0 errors (macOS 27.2, Swift 6.4.2). Linux and Windows come from `ci.yml` and haven't been read except for A1/A2. There, 10 repositories were green, 8 were still running, and swift-loader was red on Linux, as on 8 Nov: its section test needs swift-linux-standard's tier C set.
+
+**Decisions taken:**
+1. **Lint Xcode:** I lint with `/Applications/Xcode-27.2.0.app` (27B52), the build the source policy pins swift-format to. The selected Xcode-27.2.app is 27B48, and its swift-format is refused by hash.
+2. **Ratchet findings a set added are fixed at the source before pushing, never by raising a limit.** Findings that were already over the limit on main stay for done criterion 5: swift-linter-rules, swift-iso-32000, and `target import edge` in swift-parsers, swift-spm-standard, swift-manifests and swift-css.
+3. **Order changes:**
+   - swift-darwin-standard moved from tier C into B1, because swift-memory-mapping's last commit needs it.
+   - swift-mcp's `Request.params` commit moved from A3 to B2, because it needs swift-json-rpc-standard#1.
+4. **`MCP.Version` is `Comparable`:** done in swift-model-context-protocol, rather than swift-mcp comparing raw values.
+5. **`institute ci package` refuses a `Package.resolved` it can't read,** instead of passing it as having no pins.
+6. **swift-w3c-epub Viewport held back:** its `Int` sizes add `int public parameter` findings, and `disable:next` doesn't suppress that rule.
+7. **Root manifest regenerated:** the generated root `Package.swift` doesn't change when a package adds a test dependency, so I regenerated it (07:17Z). Whoever builds next should regenerate whenever a manifest changes: `rm Package.swift`, then `ALL_TRAITS=1 python3 -I generate.py`.
+
+**What remains, in order:**
+1. Read CI for tonight's pushes. Fix any red they caused, then tick the 55 issues in `ticks-left.json`.
+2. Tier C, one set per round: swift-windows-32 (`git am --skip` its first commit), swift-color-standard, swift-domain-standard, swift-linux-standard (turns swift-loader's Linux leg green), swift-w3c-css, swift-css-standard, swift-kernel, swift-witnesses, swift-executors, swift-io-kernel, swift-file-system, and swift-json last.
+3. swift-w3c-epub's Viewport: give it a type for a whole CSS pixel count, then re-apply `swift-w3c__swift-w3c-epub__backlog-swift-w3c-epub` patches 0002 and 0003.
+4. #242 done criteria 4 (fleet CI read on three platforms) and 5 (fresh fleet lint, and an issue by rule, including the pre-existing reds above and the three held-back lint sets).
+
+The Mac is idle and every checkout is clean at GitHub main. The only exception is swift-sqlite's untracked `.source/`, which isn't from tonight.
