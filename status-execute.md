@@ -301,3 +301,25 @@ CI read 3 (about 16:20Z), latest run of 48 repaired or depending repositories: *
 6. **#242 done criteria 4 (fleet CI read, green on all three platforms) and 5 (fresh fleet lint, new issue by rule)** are still open.
 
 This session stops here.
+
+
+## Overnight on the Mac, 10 Nov: tier A batches 1 and 2 pushed (05:37Z)
+
+19 sets applied onto main with `git am -3`; all applied cleanly. The whole ecosystem built with tests before the push: 438 packages, 0 errors (macOS 27.2, Swift 6.4.2, macOS only; Linux and Windows come from `ci.yml`).
+
+**Pushed** (repository and head SHA): swift-splat c8724be, swift-vat-standard cda1249, swift-w3c-cssom 3de5b05, swift-itu-r-bs-1770 70dbe59, swift-motion f36402f, swift-w3c-png f8df35a, swift-posix 4c26a88, swift-sql 06ed53c, swift-locale-standard 6723961, swift-loader 99971b4, swift-emailaddress-standard dc1bc7d, swift-email-standard ab91097, swift-process d38e8ed, swift-arguments bbc72d2, swift-git e791367, swift-stores 7deb582, swift-time-to-live 0aac61e, swift-yaml b01ccff, swift-byte-channel 7d97e82.
+
+**Fixed before pushing** (each amended into its set's commit):
+- swift-byte-channel: the new test failed to compile under MemberImportVisibility because the error enum's cases live in Async Channel. The test target now declares and imports Async Channel.
+- Six new ratchet findings from the sets, each brought back under its limit:
+  - swift-splat `count minus one`;
+  - swift-w3c-png: two `counter loop iteration`;
+  - swift-loader and swift-email-standard: one `compound suite name` each;
+  - swift-stores: one `existential parameter`, now a generic `isolated` actor parameter, and three `try optional`, now one helper with a REASON;
+  - swift-time-to-live: one `target import edge`, now a declared dependency.
+
+**Issues:** 18 closed (all items fixed). swift-vat-standard#1 has one bullet left. swift-process#6 stays open until Windows CI runs the re-enabled test.
+
+**Decision:** I lint with `/Applications/Xcode-27.2.0.app` (27B52), because the source policy pins its swift-format by hash. The selected Xcode-27.2.app is 27B48, and its swift-format is refused.
+
+**Next:** batches A3 and A4 (13 sets, applied, being linted), then tier B.
