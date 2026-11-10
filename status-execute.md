@@ -342,3 +342,42 @@ This session stops here.
 **Issues:** 15 closed: swift-parsers#9, swift-xml#6, swift-mcp#1, swift-plist#16 and #6, swift-linter-rules#12, swift-xcode#4, swift-json-feed-standard#9, swift-html-render#12, swift-pdf-render#11, swift-linter#64, swift-tests#19, swift-pdf-html-render#18, swift-epub-render#5.
 
 **Tier A total:** 32 sets pushed, 0 skipped, 33 issues closed. **Next:** tier B. B1 is applied, and none of its API changes has a caller to fix.
+
+## Overnight on the Mac: tier B done (07:22Z)
+
+19 sets in 5 batches. Each batch was built with the whole ecosystem and its tests before pushing: 0 errors, macOS only.
+
+**Pushed:**
+- **B1:** swift-git-standard 931a43d, swift-smpte-st-12 7080d9f, swift-w3c-svg b106b18, swift-memory-mapping e7f2fa0, and swift-darwin-standard 617962e, brought forward from tier C. Its only API caller is swift-memory-mapping's last commit, which doesn't compile without it.
+- **B2:** swift-json-rpc-standard 9cb5897, swift-dependencies 48b04ec, swift-svg 91cc519, swift-yaml-standard b176c41, and swift-mcp 320f846: the commit held back from A3, now that `Request.params` is typed.
+- **B3:** swift-translating 64735d5, swift-w3c-xml 2b33eaa, swift-iso-32000 faf77c2, swift-uri-standard d985eb9.
+- **B4:** swift-spm-standard 09284f5, swift-manifests a2bff63, swift-package-manager d60f344, swift-w3c-epub 10db98e, swift-institute/institute 675cf6b.
+- **B5:** swift-css-html-layout-render f9bc6b2, swift-css 631ebe2, swift-markdown-html-render aa1b9d1.
+
+**Breaks the sets brought, fixed at the source:**
+- **swift-yaml-standard:** the duplicate-key check named `Node` inside an extension of `Graph`, where it isn't visible.
+- **swift-translating:** `map` and `flatMap` passed `SinglePlural<A>.Variant` where `SinglePlural<B>.Variant` is needed.
+- **swift-dependencies:** about 50 test sites passed `Date ± DateComponents`, now optional, straight to `#require`, which reads `a + b` as a comparison.
+- **swift-css and swift-css-html-layout-render:** new tests used modules their test targets don't import or declare.
+- **institute caller:** `Conflict.entries(inResolved:)` now throws. `identityFindings` throws it on, and `institute ci package` refuses a `Package.resolved` it can't read, with a test.
+
+**New ratchet findings the sets brought, all brought back under their limits:**
+- **swift-w3c-svg:** the parser error's initializer is internal, so the public surface takes no `Int`.
+- **swift-w3c-xml:** entity names go through the existing Name parser, `Entity.Limits` has no `Int` initializer parameters, and two members moved out of type bodies.
+- **swift-yaml-standard:** declares its Tagged dependency.
+- **swift-package-manager:** a test helper no longer throws untyped.
+- **swift-w3c-epub:** `Version` keeps `init(major:minor:)` public.
+
+**Held back:** the swift-w3c-epub Viewport commit, with the README commit that describes it. Its `Int` sizes add two `int public parameter` findings over the limit, and `// swift-linter:disable:next` doesn't suppress that rule. swift-w3c-epub#8 stays open on that item.
+
+**Red before tonight, left for done criterion 5:**
+- swift-iso-32000 `raw value access`: 31 against a limit of 13; the set adds 3 of the same kind.
+- `target import edge` on unchanged import lines in swift-spm-standard, swift-manifests and swift-css.
+
+**Issues closed (19):** swift-git-standard#3, swift-smpte-st-12#1, swift-darwin-standard#10, swift-w3c-svg#11, swift-memory-mapping#14 and #15, swift-json-rpc-standard#1, swift-dependencies#12, swift-svg#7, swift-yaml-standard#3, swift-translating#11, swift-w3c-xml#6 and #7, swift-iso-32000#12, swift-uri-standard#7, swift-spm-standard#9, swift-manifests#11, swift-package-manager#15, swift-css-html-layout-render#5, swift-css#18, swift-markdown-html-render#12.
+
+**Build folder:** the generated root `Package.swift` doesn't change when a package adds a test dependency. I regenerated it at 07:17Z, and the whole build is green with it.
+
+**CI:** swift-loader is red on Linux release. Its type-metadata section test needs Linux section enumeration, which comes with swift-linux-standard's tier C set. It was already red on 8 Nov.
+
+**Next:** tier C, one set per round, lowest layer first.
