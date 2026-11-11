@@ -189,6 +189,18 @@ def appends(var, items):
 
 
 local = {os.path.basename(p).lower() for p, _, _, _ in dumped}
+# The traits each remote package is asked for, unconditionally, by the manifests that name it. An explicit empty list
+# counts: TCA26 is named with `traits: []`, and naming it here without traits turns its defaults on, which bring
+# Point-Free's swift-dependencies into a graph that holds the Institute's (same identity), so resolution never ends.
+remote_traits = {}
+for _, _, _, m in dumped:
+    for d in (m or {}).get("dependencies", []):
+        for v in d.get("sourceControl", []):
+            if v["identity"].lower() in local or v.get("traits") is None: continue
+            names = {t["name"] for t in v["traits"] if t["name"] != "default" and not t.get("condition")}
+            defaults = any(t["name"] == "default" for t in v["traits"])
+            have = remote_traits.setdefault(v["identity"], [set(), False])
+            have[0] |= names; have[1] = have[1] or defaults
 remote = {}
 for _, _, _, m in dumped:
     for d in (m or {}).get("dependencies", []):
@@ -200,7 +212,12 @@ for _, _, _, m in dumped:
             elif "branch" in r: req = f'branch: "{r["branch"][0]}"'
             elif "revision" in r: req = f'revision: "{r["revision"][0]}"'
             else: continue
-            remote[v["identity"]] = f'.package(url: "{url}", {req})'
+            traits = ""
+            if v["identity"] in remote_traits:
+                names, defaults = remote_traits[v["identity"]]
+                listed = ([".defaults"] if defaults else []) + [q(t) for t in sorted(names)]
+                traits = f", traits: [{', '.join(listed)}]"
+            remote[v["identity"]] = f'.package(url: "{url}", {req}{traits})'
 dep_lines = [dependency(p) for p, _, _, _ in dumped] + list(remote.values())
 product_lines = products.split("\n")
 test_lines = (tests_decl).split("\n")
