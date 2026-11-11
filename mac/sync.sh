@@ -4,12 +4,13 @@
 # GitHub gives an equally old clone, never a mix. Clones missing from repos/ are cloned from their checkout.
 # Package.swift is left to localize.py, which rewrites it for the build. A clone never holds work of its own: anything
 # changed in a clone is overwritten here, so fix in the checkouts.
-#   [HEAD_ONLY="owner/name ..."|HEAD_ONLY=all] mac/sync.sh [owner/name ...]   (default: every package in repos.txt)
+#   [HEAD_ONLY="owner/name ..."|HEAD_ONLY=all] mac/sync.sh [owner/name ...]
+# (default: every package in repos.txt, plus the git-ignored private-repos.txt in the ecosystem folder if present)
 # HEAD_ONLY names checkouts whose uncommitted files belong to someone else (or all of them, while agents are editing):
 # their clones get the committed HEAD only.
 W=${W:-$(cd "$(dirname "$0")/.." && pwd)}
 cd "$W" || exit 1
-if [ $# -gt 0 ]; then list="$*"; else list=$(grep -v '^$' repos.txt); fi
+if [ $# -gt 0 ]; then list="$*"; else list=$(cat repos.txt private-repos.txt 2>/dev/null | grep -v '^$'); fi
 for d in $list; do
   r="repos/$d"
   if [ ! -d "$r/.git" ]; then
