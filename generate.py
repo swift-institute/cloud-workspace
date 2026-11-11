@@ -8,7 +8,7 @@ os.chdir(here)
 packages = sorted(p for p in glob.glob("repos/*/*") if os.path.exists(p + "/Package.swift"))
 # Traits a package's own manifest asks of another, unconditionally. The root's path dependency must ask for them too:
 # otherwise resolution follows the root's (default traits only), leaves out what the trait needs, and fails, as it did
-# for footprint's swift-sqlite with GRDB ("exhausted attempts to resolve ... 'grdb.swift'").
+# for a private app's swift-sqlite with GRDB ("exhausted attempts to resolve ... 'grdb.swift'").
 requested = {}
 
 

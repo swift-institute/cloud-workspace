@@ -86,7 +86,7 @@ Follow-up: coenttb/work#241 (runner publish carrying 79d10ad, 0b70b0b, 003bf06; 
 | Package | Tests | Change |
 |---|---|---|
 | swift-licensing | 33 pass, License.Email's included | bce5c16: License Keychain only where Security exists |
-| footprint | 21 pass | 75873d9: FoundationNetworking where it exists |
+| a private app | 21 pass | 75873d9: FoundationNetworking where it exists |
 | swift-app-launch | 42 pass | b6c9cad: FoundationNetworking/FoundationXML |
 | swift-agent-sessions | 9 pass | none |
 | swift-impact | 27 pass | none |

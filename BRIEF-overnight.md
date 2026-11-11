@@ -62,7 +62,7 @@ For each batch in `ORDER.md`, in order:
 - **Out of scope tonight:** the three held-back lint sets (`ORDER.md`, "Not applied"), and Quality · source reds that
   were red before 9 Nov.
 - Pushing to Institute and coenttb repositories is a standing yes. Never force-push. Never push to pointfreeco/TCA26.
-  Work on main only. Never touch `~/Library/Application Support/Laurie`.
+  Work on main only. Never touch Coen's personal data folder under `~/Library/Application Support`.
 - Every green you report says what it covers: the Mac build is macOS only; Linux and Windows come from `ci.yml`.
 
 ## When the list is done
