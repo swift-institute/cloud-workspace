@@ -49,10 +49,17 @@ with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
 declared = {p: [t["name"] for t in (m or {}).get("traits") or [] if t["name"] != "default"] for p, _, _, m in dumped}
 
 
+# EXCEPT_TRAITS="package:Trait ..." leaves those declared traits out of ALL_TRAITS, for a trait that cannot share one
+# graph with another package (swift-sql:CasePaths needs a swift-case-paths release that the TCA26 bridge's branch pin
+# excludes); the package's own CI still covers it with every trait on.
+EXCEPT = {tuple(x.split(":", 1)) for x in os.environ.get("EXCEPT_TRAITS", "").split() if ":" in x}
+
+
 def dependency(p):
     # ALL_TRAITS=1 enables every trait each package declares, as CI's `--enable-all-traits` does for each package.
     if os.environ.get("ALL_TRAITS"):
-        traits = sorted(set(declared.get(p, [])) | requested.get(os.path.basename(p).lower(), set()))
+        own = {t for t in declared.get(p, []) if (os.path.basename(p), t) not in EXCEPT}
+        traits = sorted(own | requested.get(os.path.basename(p).lower(), set()))
     else:
         traits = sorted(requested.get(os.path.basename(p).lower(), ()))
     if not traits:
