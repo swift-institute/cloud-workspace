@@ -76,7 +76,27 @@ The strict institute lint of the change adds no finding: 1698 findings before an
 - At `e4cc3be` (run 43199482081), Linux release, Linux 6.4, Linux traits off and macOS are green. Two jobs are red for reasons that predate the change, the same as at `b5e810c`:
   - **Quality · source:** 51 swift-format "unindent by 4 spaces" errors, all on the limits table. `1b5e430` fixes them, and `ratchet.py` now writes that indentation.
   - **Windows release:** fails compiling the dependency swift-process (`switch must be exhaustive` in `Process.Spawn.Capture.Windows.swift:109` and `Process.Spawn.Capture.swift:39`). That is outside institute, and I didn't touch it.
-- At `1b5e430`: RESULT_PENDING
+- At `1b5e430` (run 43203631570), Linux release, Linux 6.4, Linux traits off and macOS are green, and the table's format errors are gone. Two jobs are still red:
+  - **Quality · source** now shows the overruns the format errors had hidden: institute's own limits for minimal type body (690/687), test function naming (48/45), compound identifier (212/211) and int public parameter (21/20), plus three swift-format nits.
+  - **Windows** is still red from swift-process.
+
+  Not fixed here, on Coen's go-ahead to push through: see Red lines crossed in ci-timeout-660.md.
+
+## swift-institute/Issues#273 (institute `60e45e4`)
+
+- **Cause:** `bool public parameter` declared no suppression policy, and `Lint.Rule`'s default is `.none`, so every directive for it was ignored without a word.
+- **Fix:** it sanctions `disable:next` with a `REASON:` line.
+- **Tests:** three suppression tests; "disable next with a reason is sanctioned" failed first.
+- **Other rules affected:** yes. 121 of the 126 institute rules take the `.none` default and silently ignore any directive. Only fatal error outside tests, try, do throws for typed catch and untyped throws (`.next`) and raw concept (`.both`) sanction one.
+- **Recommended follow-up:** the linter reports a directive its rule doesn't sanction as a finding, instead of ignoring it.
+
+## swift-institute/Issues#272 (institute `60e45e4`)
+
+- **Fix:** `Ratchet.counts` leaves out note-severity findings. Severity is the typed fact behind "non-counting review prompt".
+- This covers namespace adoption typealias and typealiased namespace bridge, and also lifecycle typealias review, the third note rule. Its prompt ("Confirm the primitive…") is the same kind; that choice is mine.
+- **Limits:** the three rules' 159 rows leave the table, so no limit rises.
+- **Tests:** two; both failed before the change. swift-html-render is untouched.
+- **Not yet done:** `ratchet.py` still counts notes when it regenerates the table. Follow-up: skip note-severity items there.
 
 ## Clones measured (main, 12 Nov 2026)
 
