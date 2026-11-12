@@ -1,0 +1,292 @@
+From 87bdafe3ccdf076da6b42e2a609e28077698091a Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Thu, 12 Nov 2026 09:13:45 +0000
+Subject: [PATCH] swift-ci binds the plan's time limit on every build and test
+ job, streams test output on Linux and macOS, and names a job the limit
+ stopped (swift-institute/.github#660). The pin moves to planner
+ b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6 (publish run 43186494497), whose
+ plan emits timeout-minutes: 40, or the value of timeout-minutes: in the
+ repository's .github/metadata.yaml (1 to 360; anything else refuses the
+ plan). Thirteen jobs bind it: every leg that builds, tests or measures; Plan,
+ Advisory results and ci-ok keep their own limits. 40 rather than 20:
+ swift-sqlite's healthy iOS simulator tests take 15.1 to 25.2 minutes in its
+ last four green runs, the largest repositories' longest jobs take 10 to 14
+ minutes (Windows release in swift-w3c-css runs 43178596687 and 43136398474,
+ swift-iso-32000 runs 42345206029 and 42274624607).
+
+Test output was buffered because swift test passes the test process's output on with print() (SwiftPM Sources/Commands/SwiftTestCommand.swift at dbcaa9b, line 935) and C stdio holds what print() writes until its buffer fills or the process exits when stdout is a pipe, as on a runner. The test process alone streams. Linux release runs swift test under stdbuf -oL; macOS runs it on a pseudo-terminal through script, with TERM=dumb and NO_COLOR=1. Windows stays buffered: Git Bash has neither, and only a flush in SwiftPM fixes it there; its Test step says so.
+
+ci-ok gains a step that reads the run's jobs and, for a cancelled job that ran to the limit, writes an error saying it was stopped by the N-minute time limit and how a repository raises it. It only explains (continue-on-error); the verdict stays Aggregate's. ci-ok gets actions: read for it, which the generated caller grants.
+
+Proven before this commit, not with it: a throwaway workflow on a cloud-workspace session branch (runs 43186766916 and 43187400177) showed swift test as run today putting 30 seconds of test lines under one timestamp on macos-26 (Swift 6.3.3) and windows-latest (Swift 6.2.4), and the two changes giving each line its own time 10 seconds apart on macos-26 and in the swift:6.2 container, with a failing test still exiting 1. The published assets hash to these rows; the published Linux planner's plan emits 40 with no key and 75 for timeout-minutes: 75, and refuses 0 and 20m. actionlint finds nothing new.
+---
+ .github/workflows/swift-ci.yml | 85 +++++++++++++++++++++++++++-------
+ .institute-ci-pin              |  2 +-
+ .institute-ci-planner          |  2 +
+ 3 files changed, 72 insertions(+), 17 deletions(-)
+
+diff --git a/.github/workflows/swift-ci.yml b/.github/workflows/swift-ci.yml
+index 365ab05..6ffb7e5 100644
+--- a/.github/workflows/swift-ci.yml
++++ b/.github/workflows/swift-ci.yml
+@@ -39,6 +39,11 @@ env:
+ # a package without traits. The one exception is the advisory
+ # `linux-traits-off` job, which builds what a consumer asking for no traits
+ # gets.
++#
++# Every build and test job binds the plan's `timeout-minutes`: 40 minutes,
++# or what the repository's .github/metadata.yaml sets (Institute.CI.Timeout
++# in institute; swift-institute/.github#660). ci-ok names a job the limit
++# stopped.
+ jobs:
+ # Top-level job names are intentionally static. GitHub may render
+ # unresolved input or matrix expressions literally when a job is skipped
+@@ -70,6 +75,7 @@ jobs:
+       linux-image: ${{ steps.classify.outputs.linux-image }}
+       lint-bundle: ${{ steps.classify.outputs.lint-bundle }}
+       embedded-target: ${{ steps.classify.outputs.embedded-target }}
++      timeout-minutes: ${{ steps.classify.outputs.timeout-minutes }}
+       subject-repository: ${{ steps.subject.outputs.repository }}
+       subject-sha: ${{ steps.subject.outputs.sha }}
+       workflow-sha: ${{ steps.workflow.outputs.sha }}
+@@ -219,13 +225,14 @@ jobs:
+             --nightly-main-upstream-issue "$SWIFT_MAIN_NIGHTLY_UPSTREAM_ISSUE" \
+             --nightly-main-recheck "$SWIFT_MAIN_NIGHTLY_RECHECK" \
+             --today "$(date -u +%F)")"
+-          for key in tier legs gating linux-image lint-bundle embedded-target descheduled package-content-changed; do
++          for key in tier legs gating linux-image lint-bundle embedded-target timeout-minutes descheduled package-content-changed; do
+             echo "$key=$(jq -r --arg k "$key" '.[$k]' <<< "$PLAN")" >> "$GITHUB_OUTPUT"
+           done
+           {
+             echo "## Tier \`$(jq -r .tier <<< "$PLAN")\`"
+             echo "Legs: \`$(jq -r .legs <<< "$PLAN")\`"
+             echo "Gating: \`$(jq -r .gating <<< "$PLAN")\`"
++            echo "Time limit per build and test job: $(jq -r '.["timeout-minutes"]' <<< "$PLAN") minutes"
+             D="$(jq -r .descheduled <<< "$PLAN")"
+             # An `if`, not `[ -n "$D" ] && …`: the test is the last command in
+             # this group, so on the ordinary empty case the && chain returns 1,
+@@ -243,7 +250,7 @@ jobs:
+     if: ${{ !github.event.repository.private && !cancelled() && contains(format(',{0},', needs.plan.outputs.legs), ',linux-release,') }}
+     runs-on: ubuntu-latest
+     container: ${{ needs.plan.outputs.linux-image }}
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -261,8 +268,14 @@ jobs:
+         run: |
+           swift --version
+           if [ "$CI_TIER" = "build" ]; then swift build -c release --enable-all-traits; exit 0; fi
++          # swift test passes the test process's output on with print(), and
++          # C stdio holds what print() writes until its buffer fills or the
++          # process ends when stdout is a pipe, as it is here: a hung test
++          # left no line naming it (swift-institute/.github#660). stdbuf
++          # makes that stdout line-buffered, so each line reaches the log
++          # as it is written.
+           test_package() {
+-            swift test -c release --enable-all-traits
++            stdbuf -oL swift test -c release --enable-all-traits
+           }
+           # A package may declare no root test targets (nested-layout or
+           # content-only repositories). Root `swift test` exits nonzero on
+@@ -281,7 +294,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: ${{ needs.plan.outputs.linux-image }}
+     continue-on-error: true
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -309,7 +322,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: ${{ needs.plan.outputs.linux-image }}
+     continue-on-error: true
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -336,7 +349,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: swiftlang/swift@sha256:f577f95edfb85cf3bdc45eb0badaab09239de5c86c69b3b6d594cc62916c0a7d
+     continue-on-error: true
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -357,7 +370,7 @@ jobs:
+     needs: plan
+     if: ${{ !github.event.repository.private && !cancelled() && contains(format(',{0},', needs.plan.outputs.legs), ',windows-release,') }}
+     runs-on: windows-latest
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -401,6 +414,11 @@ jobs:
+             fi
+             return "$status"
+           }
++          # Test output here still arrives when swift test's stdout buffer
++          # fills or it exits, not line by line: Git Bash has neither stdbuf
++          # nor a pseudo-terminal, and the cause is SwiftPM's print() without
++          # a flush (swift-institute/.github#660). The time limit still ends
++          # a hung run; the hung test's name waits for that SwiftPM fix.
+           # [swift-institute/.github#498] Swift Build expands every linked module
+           # into a separate response-file argument and can exceed Windows'
+           # process command-length boundary.
+@@ -419,7 +437,7 @@ jobs:
+     needs: plan
+     if: ${{ !github.event.repository.private && !cancelled() && contains(format(',{0},', needs.plan.outputs.legs), ',macos-release,') }}
+     runs-on: xcode-27
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -437,8 +455,17 @@ jobs:
+       - name: Test
+         run: |
+           swift --version
++          # swift test passes the test process's output on with print(), which
++          # C stdio holds until its buffer fills or the process ends when
++          # stdout is a pipe: a hung test left no line naming it
++          # (swift-institute/.github#660). macOS has no stdbuf, and the
++          # system swift is a protected shim that drops DYLD variables, so
++          # swift test runs on a pseudo-terminal, where stdout is
++          # line-buffered. script returns swift test's exit status.
++          # TERM=dumb keeps SwiftPM's progress and the test output plain
++          # lines, NO_COLOR keeps colour codes out of the log.
+           test_package() {
+-            swift test -c debug --enable-all-traits
++            TERM=dumb NO_COLOR=1 script -q /dev/null swift test -c debug --enable-all-traits < /dev/null
+           }
+           # Same zero-root-test-targets guard as the Linux legs.
+           if grep -q 'testTarget' Package.swift; then
+@@ -457,7 +484,7 @@ jobs:
+     needs: plan
+     if: ${{ !github.event.repository.private && !cancelled() && contains(fromJSON('["swift-compositions/swift-sqlite"]'), needs.plan.outputs.subject-repository) }}
+     runs-on: xcode-27
+-    timeout-minutes: 60
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -501,7 +528,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: swiftlang/swift@sha256:f577f95edfb85cf3bdc45eb0badaab09239de5c86c69b3b6d594cc62916c0a7d
+     continue-on-error: true
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -534,7 +561,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: ${{ needs.plan.outputs.linux-image }}
+     continue-on-error: true
+-    timeout-minutes: 30
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -559,7 +586,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: ${{ needs.plan.outputs.linux-image }}
+     continue-on-error: true
+-    timeout-minutes: 30
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -584,7 +611,7 @@ jobs:
+     runs-on: ubuntu-latest
+     container: ${{ needs.plan.outputs.linux-image }}
+     continue-on-error: true
+-    timeout-minutes: 30
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -613,7 +640,7 @@ jobs:
+     if: ${{ !github.event.repository.private && !cancelled() && contains(format(',{0},', needs.plan.outputs.legs), ',apple-simulator-build,') }}
+     runs-on: xcode-27
+     continue-on-error: true
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     strategy:
+@@ -639,7 +666,7 @@ jobs:
+     needs: plan
+     if: ${{ !github.event.repository.private && !cancelled() && contains(format(',{0},', needs.plan.outputs.legs), ',source,') }}
+     runs-on: xcode-27
+-    timeout-minutes: 45
++    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+     steps:
+@@ -750,7 +777,10 @@ jobs:
+     if: ${{ always() && !github.event.repository.private }}
+     runs-on: ubuntu-latest
+     timeout-minutes: 60
++    # actions: read for the run's job list, which says how long a cancelled
++    # job ran (the generated caller grants it).
+     permissions:
++      actions: read
+       contents: read
+     steps:
+       - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+@@ -808,6 +838,29 @@ jobs:
+             success|skipped) ;;
+             *) echo "::error::iOS simulator tests: $RESULT"; exit 1 ;;
+           esac
++      # GitHub ends a job at its timeout-minutes and reports it as
++      # `cancelled`, the same word as a run someone cancelled, so the
++      # verdict below cannot tell the two apart. A cancelled job that ran
++      # to the plan's limit was ended by it; say so in plain words.
++      - name: Jobs ended by the time limit
++        if: ${{ always() && needs.plan.outputs.timeout-minutes != '' }}
++        # Only explains; the verdict is Aggregate's, which must still run.
++        continue-on-error: true
++        shell: bash
++        env:
++          GH_TOKEN: ${{ github.token }}
++          LIMIT: ${{ needs.plan.outputs.timeout-minutes }}
++        run: |
++          set -euo pipefail
++          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
++            --jq '.jobs[] | select(.conclusion == "cancelled" and .started_at != null and .completed_at != null)
++                  | [.name, ((.completed_at | fromdate) - (.started_at | fromdate))] | @tsv' \
++          | while IFS=$'\t' read -r name seconds; do
++              [ "$seconds" -ge $(( LIMIT * 60 - 30 )) ] || continue
++              message="$name was stopped after $(( seconds / 60 )) minutes by the $LIMIT-minute time limit. It did not finish, so it neither passed nor failed: the last line of its log is where it was when it was stopped. A repository whose healthy jobs need longer sets timeout-minutes: in its .github/metadata.yaml."
++              echo "::error title=Time limit::$message"
++              echo "- $message" >> "$GITHUB_STEP_SUMMARY"
++            done
+       # Runs on always(), so it must reach a verdict when plan itself
+       # failed — which is exactly when its outputs are empty.
+       - name: Aggregate
+diff --git a/.institute-ci-pin b/.institute-ci-pin
+index 6939ee4..10e1eea 100644
+--- a/.institute-ci-pin
++++ b/.institute-ci-pin
+@@ -1 +1 @@
+-b57a0c60add54bfba7f78f89edd2216597ee354e
++b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6
+diff --git a/.institute-ci-planner b/.institute-ci-planner
+index 204e2dc..bece79a 100644
+--- a/.institute-ci-planner
++++ b/.institute-ci-planner
+@@ -86,3 +86,5 @@ b8089cc63badf6e30d89753ec7d1a9105bd49ac3 macos-arm64 26842f6b2ad738006a8b44f574d
+ 2b1f741528889fff1e77736bb378cd4a418c8ba7 macos-arm64 6603379806394c8cc9da1392cbcf9f152c8dcbf56da5d1fa552c6c173ae98047 45d3fc28cb304d591e4e8fbdcc2bda848554a4d0ae1821f8dbf1daaaf0246ee5
+ b57a0c60add54bfba7f78f89edd2216597ee354e linux-x86_64 46e343b80775939ada33cd979b5255fc255f7bb38fc177f0744250a37edceb46 45d3fc28cb304d591e4e8fbdcc2bda848554a4d0ae1821f8dbf1daaaf0246ee5
+ b57a0c60add54bfba7f78f89edd2216597ee354e macos-arm64 6603379806394c8cc9da1392cbcf9f152c8dcbf56da5d1fa552c6c173ae98047 45d3fc28cb304d591e4e8fbdcc2bda848554a4d0ae1821f8dbf1daaaf0246ee5
++b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6 linux-x86_64 5968bc967f81112c8e1d0115c957cb86eba69fa0ea5773cac00509b5938036ce e79aa84b3ba7a28e89afaa5323b0fb5fd8d7612f2a16399c8cddd38c7bfff430
++b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6 macos-arm64 ea03e711da08068d8007d2da5211ee9005a2f24f467595f29f0009471aab1fe4 e79aa84b3ba7a28e89afaa5323b0fb5fd8d7612f2a16399c8cddd38c7bfff430
+-- 
+2.43.0
+
