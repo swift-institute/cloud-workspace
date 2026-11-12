@@ -1,5 +1,27 @@
 # Shared CI: job time limit and streamed test output (swift-institute/.github#660)
 
+**Status, 12 Nov ~11:00 UTC.**
+
+- The change is ready but not on main. The only blocker is access: a cloud session can't reach swift-institute/.github at all, because the platform refuses repository names that start with a dot, and Coen's admin permission doesn't change that.
+- The shortest path is two commands on Coen's Mac, in a checkout of swift-institute/.github on main, shown below.
+- The patch doesn't depend on unpublished work: planner b5e810c is already published. If the pin move is unwanted, drop `.institute-ci-pin` and `.institute-ci-planner` from the commit and replace each `${{ fromJSON(needs.plan.outputs.timeout-minutes) }}` with `40`. The stdbuf and `script` lines need no planner.
+
+```bash
+git am <cloud-workspace>/ci-timeout-660.patch
+```
+
+```bash
+git push origin main
+```
+
+## Red lines crossed
+
+- **verify-planner-pins.sh not run on the new pin.** It needs GraphQL, which cloud sessions block. Its checks were done by hand over REST. Follow-up: make the script use the REST asset list.
+- **Streaming is a workaround.** It goes around SwiftPM's missing flush with stdbuf and a pty instead of fixing it at the source. Follow-up: an upstream SwiftPM patch, a flush after `print` in `SwiftTestCommand.swift`, after which the wrappers go.
+- **The probe ran on a session branch of cloud-workspace**, not in a fleet repository. Follow-up: none; the probe workflow is already deleted from that branch.
+- **No dispatched run of the patched workflow exists yet.** Follow-up: dispatch on swift-w3c-css, swift-iso-32000 and swift-sqlite once the patch is on main.
+- **institute's own Quality · source is red at its pushed heads** (e4cc3be, 1b5e430, 60e45e4). It ran over its own limits for minimal type body (690/687), test function naming (48/45), compound identifier (212/211) and int public parameter (21/20), plus three swift-format nits, one of them mine: the import order in the Ratchet test. Windows release is red too, from swift-process failing to compile (`switch must be exhaustive`). The planner was still published from b5e810c, as from earlier red heads. Follow-up: fix those findings in institute, and swift-process on Windows.
+
 Cloud session, 12 Nov 2026. Takes over from the Mac session stopped on 12 Nov. This file is the record because swift-institute/.github can't be attached to a cloud session: the platform refuses any repository whose name starts with a dot. From here, issue #660 can't be read or commented on, and nothing can be pushed to swift-institute/.github (git proxy: "not in this session's authorized repository set"). Copy this file to #660 as a comment.
 
 ## State
