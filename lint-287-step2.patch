@@ -1,0 +1,90 @@
+From c46f273d1c71d5be860174fd80ab95ae423b0473 Mon Sep 17 00:00:00 2001
+From: coenttb <coen@coenttb.com>
+Date: Thu, 12 Nov 2026 22:42:45 +0000
+Subject: [PATCH] =?UTF-8?q?Quality=20=C2=B7=20source=20runs=20on=20ubuntu-?=
+ =?UTF-8?q?24.04=20instead=20of=20xcode-27=20(swift-institute/institute#28?=
+ =?UTF-8?q?7,=20step=202),=20and=20the=20planner=20pin=20moves=20to=20the?=
+ =?UTF-8?q?=20first=20planner=20that=20can=20lint=20there.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The lint reads source text and nothing in it depends on the platform. Since institute d1f2ca2 its three tools are pinned by digest for linux-x86_64 as they are for macOS: swift-format from swift.org's swift-6.4.2-RELEASE toolchain for ubuntu24.04, SwiftLint 0.65.1's Linux build, and the Linux build of the pinned linter runner. So the job needs no macOS runner, and the same command runs wherever the code is written.
+
+The job names the image and the Swift release exactly. The pinned swift-format is the one in the ubuntu24.04 toolchain of 6.4.2; ubuntu-latest or the 6.4 line would one day install another build, and the planner refuses a swift-format that does not hash to its pin. institute-ci installs the toolchain first on PATH, where the planner looks for it, and puts its runtime on the loader path. --xcode-application goes: it is accepted on macOS only. Every rule, limit and digest check is unchanged.
+
+The pin moves with the workflow in one commit: the planner at the old pin has no Linux tools and requires --xcode-application, and the new one refuses that option on Linux.
+---
+ .github/workflows/swift-ci.yml | 17 ++++++++++++++---
+ .institute-ci-pin              |  2 +-
+ .institute-ci-planner          |  2 ++
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/.github/workflows/swift-ci.yml b/.github/workflows/swift-ci.yml
+index 6ffb7e5..b218e04 100644
+--- a/.github/workflows/swift-ci.yml
++++ b/.github/workflows/swift-ci.yml
+@@ -665,7 +665,13 @@ jobs:
+     name: Quality · source
+     needs: plan
+     if: ${{ !github.event.repository.private && !cancelled() && contains(format(',{0},', needs.plan.outputs.legs), ',source,') }}
+-    runs-on: xcode-27
++    # Linux, since swift-institute/institute#287: the lint reads source text
++    # and its three tools are pinned by digest for linux-x86_64 as they are
++    # for macOS, so it needs no macOS runner. The image is named exactly,
++    # not ubuntu-latest: Institute.Source.Policy pins the swift-format of
++    # swift.org's ubuntu24.04 toolchain, and another image would install
++    # another build of it, which the planner refuses.
++    runs-on: ubuntu-24.04
+     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout-minutes) }}
+     permissions:
+       contents: read
+@@ -677,13 +683,19 @@ jobs:
+         with:
+           repository: ${{ needs.plan.outputs.subject-repository }}
+           sha: ${{ needs.plan.outputs.subject-sha }}
++      # The exact release, not the 6.4 line: this toolchain's swift-format is
++      # the lint's engine, pinned by digest in Institute.Source.Policy. The
++      # action puts the toolchain first on PATH, where the planner looks for
++      # swift-format, and its runtime on the loader path. When the policy's
++      # pin moves to another release, this line moves with it.
+       - id: institute-ci
+         uses: swift-institute/.github/.github/actions/institute-ci@255dd9b55d9eef5b8cc1c9c2058e347fec0dd57f
++        with:
++          swift-version: '6.4.2'
+       - name: Measure source
+         shell: bash
+         env:
+           BINARY: ${{ steps.institute-ci.outputs.binary }}
+-          DYLD_LIBRARY_PATH: ${{ steps.institute-ci.outputs.runtime-library-path }}
+         # The JSON report on stdout is also kept as the `quality-report`
+         # artifact: the log copy is subject to GitHub's secret masking, which
+         # rewrites substrings to `***` and leaves the JSON unparsable.
+@@ -695,7 +707,6 @@ jobs:
+             --repository "${{ needs.plan.outputs.subject-repository }}" \
+             --revision "${{ needs.plan.outputs.subject-sha }}" \
+             --root "$GITHUB_WORKSPACE" \
+-            --xcode-application "/Applications/Xcode_${XCODE_VERSION}.app" \
+             | tee "$RUNNER_TEMP/quality/report.json"
+       - name: Keep the Quality report
+         if: always()
+diff --git a/.institute-ci-pin b/.institute-ci-pin
+index 10e1eea..4f1c13c 100644
+--- a/.institute-ci-pin
++++ b/.institute-ci-pin
+@@ -1 +1 @@
+-b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6
++daf4229f3a402663c37290635034b88d082c6910
+diff --git a/.institute-ci-planner b/.institute-ci-planner
+index bece79a..3bdf1e4 100644
+--- a/.institute-ci-planner
++++ b/.institute-ci-planner
+@@ -88,3 +88,5 @@ b57a0c60add54bfba7f78f89edd2216597ee354e linux-x86_64 46e343b80775939ada33cd979b
+ b57a0c60add54bfba7f78f89edd2216597ee354e macos-arm64 6603379806394c8cc9da1392cbcf9f152c8dcbf56da5d1fa552c6c173ae98047 45d3fc28cb304d591e4e8fbdcc2bda848554a4d0ae1821f8dbf1daaaf0246ee5
+ b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6 linux-x86_64 5968bc967f81112c8e1d0115c957cb86eba69fa0ea5773cac00509b5938036ce e79aa84b3ba7a28e89afaa5323b0fb5fd8d7612f2a16399c8cddd38c7bfff430
+ b5e810cfa5748cb2d5b27dbfe521c52eb43be9e6 macos-arm64 ea03e711da08068d8007d2da5211ee9005a2f24f467595f29f0009471aab1fe4 e79aa84b3ba7a28e89afaa5323b0fb5fd8d7612f2a16399c8cddd38c7bfff430
++daf4229f3a402663c37290635034b88d082c6910 linux-x86_64 dad43198eb75a00573a23549abd89624d16fc72a7b1c315e00882b814bad5a2f 11513fe3b3debca415477d488d169c1467f2c70da308be2d946d1d8d05efc66e
++daf4229f3a402663c37290635034b88d082c6910 macos-arm64 c2bdfd29057fa638c8a7c8dc131b0d3b64369a6094690a357559ab618219c58b 11513fe3b3debca415477d488d169c1467f2c70da308be2d946d1d8d05efc66e
+-- 
+2.43.0
+
