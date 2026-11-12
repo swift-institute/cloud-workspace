@@ -1,0 +1,67 @@
+# Throwaway probe on a session branch (swift-institute/.github#660): does
+# swift test stream its output when run under a pty, and does the pty
+# wrapper keep swift test's exit status? Not for main.
+name: stream-probe
+on:
+  push:
+    branches: [coenttb/charming-volta-ftybc4]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: SwiftyLab/setup-swift@38f54a76b70d989321de9dc7c840618c08cf56e9 # v1.14.0
+        if: runner.os != 'macOS'
+        with:
+          swift-version: '6.2'
+          cache-snapshot: false
+      - name: Write probe package
+        shell: bash
+        run: |
+          mkdir -p probe/Sources/P probe/Tests/PTests
+          cd probe
+          printf '%s\n' '// swift-tools-version: 6.0' 'import PackageDescription' \
+            'let package = Package(name: "P", targets: [.target(name: "P"), .testTarget(name: "PTests", dependencies: ["P"])])' > Package.swift
+          echo 'public let p = 1' > Sources/P/P.swift
+          cat > Tests/PTests/T.swift <<'SWIFT'
+          import Testing
+          import Foundation
+          @Suite(.serialized) struct Slow {
+            @Test func a() { Thread.sleep(forTimeInterval: 10) }
+            @Test func b() { Thread.sleep(forTimeInterval: 10) }
+            @Test func c() { Thread.sleep(forTimeInterval: 10) }
+            @Test func fails() { #expect(ProcessInfo.processInfo.environment["PROBE_FAIL"] == nil) }
+          }
+          SWIFT
+          swift --version
+          swift build --build-tests
+      - name: Plain (as swift-ci.yml runs it today)
+        shell: bash
+        working-directory: probe
+        run: swift test
+      - name: macOS under a pty
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: probe
+        run: |
+          set -u
+          streamed() {
+            status_file="$(mktemp)"
+            TERM=dumb NO_COLOR=1 script -q /dev/null /bin/sh -c '"$@"; echo "$?" > "$0"' "$status_file" "$@" < /dev/null
+            status="$(cat "$status_file")"; rm -f "$status_file"
+            return "${status:-1}"
+          }
+          echo "script itself, direct status of a failing command:"; script -q /dev/null /bin/sh -c 'exit 7' < /dev/null; echo "script rc=$?"
+          streamed swift test; echo "streamed pass rc=$?"
+          PROBE_FAIL=1 streamed swift test --filter fails; echo "streamed fail rc=$?"
+      - name: Linux line-buffered
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: probe
+        run: |
+          stdbuf -oL swift test; echo "rc=$?"
+          PROBE_FAIL=1 stdbuf -oL swift test --filter fails; echo "fail rc=$?"
