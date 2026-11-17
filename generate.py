@@ -57,7 +57,7 @@ declared = {p: [t["name"] for t in (m or {}).get("traits") or [] if t["name"] !=
 
 
 # EXCEPT_TRAITS="package:Trait ..." leaves those declared traits out of ALL_TRAITS, for a trait that cannot share one
-# graph with another package (swift-sql:CasePaths needs a swift-case-paths release that the TCA26 bridge's branch pin
+# graph with another package (swift-sql:CasePaths needs a swift-case-paths release that another package's branch pin
 # excludes); the package's own CI still covers it with every trait on.
 EXCEPT = {tuple(x.split(":", 1)) for x in os.environ.get("EXCEPT_TRAITS", "").split() if ":" in x}
 
@@ -204,7 +204,7 @@ def appends(var, items):
 
 local = {os.path.basename(p).lower() for p, _, _, _ in dumped}
 # The traits each remote package is asked for, unconditionally, by the manifests that name it. An explicit empty list
-# counts: TCA26 is named with `traits: []`, and naming it here without traits turns its defaults on, which bring
+# counts: a package named with `traits: []` stays that way, because naming it here without traits turns its defaults on, which bring
 # Point-Free's swift-dependencies into a graph that holds the Institute's (same identity), so resolution never ends.
 remote_traits = {}
 for _, _, _, m in dumped:
