@@ -49,11 +49,14 @@ same point, with no error. Until that changes, the build before a push is `./bui
 test target in groups of 90, compiled and not linked. It does not link or run tests, so run the tests of the packages
 you changed with `swift test --package-path repos/<owner>/<name>` and `build.sh`'s flags.
 
-`generate.py` keeps four packages out of the root graph (`APART`): swift-sql, swift-sqlite and swift-postgresql reach
-pointfreeco's swift-issue-reporting through its test helpers, the Institute has a package of the same name, and
-SwiftPM's graph loading does not finish with both (swift-compositions/swift-issue-reporting#1). GRDB.swift is only
-needed by swift-sqlite. Build those four on their own. A build that prints nothing for minutes after its last
-"Working copy" line is in that state: look for a package reached at two addresses.
+swift-sql, swift-sqlite, swift-postgresql and the GRDB fork are in the root graph since 17 Nov. Their test targets use
+package-access declarations, so the root skips them: run each package's own tests, with `--enable-all-traits`.
+swift-postgresql's live suites need a PostgreSQL server (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DB`); the machine has PostgreSQL 16 under `/usr/lib/postgresql/16/bin`, and the
+package's `ci.yml` shows the TLS leg.
+
+A build that prints nothing for minutes after its last "Working copy" line may be loading a graph that holds one
+package identity at two addresses, which SwiftPM does not finish: look for a package reached at two addresses.
 
 ## Lint
 
