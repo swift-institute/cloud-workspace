@@ -28,7 +28,8 @@ and after pulling.
 Edit in `repos/<owner>/<name>`, then from this folder:
 
     ./build.sh <Target> ...   # those targets and what they need, on the local copies, without linking
-    ./build.sh                # the whole ecosystem with tests: once, right before each push
+    ./build.sh                # the whole ecosystem with tests, linked
+    ./build-parts.sh          # the same in parts, compiled and not linked: once, right before each push
 
 Each run costs about a minute before it compiles anything, so name every changed module and its dependents in one
 command. Give long commands a long timeout. `--target` and `--build-tests` can't be combined: a test target named
@@ -42,6 +43,17 @@ with `--target` is compiled, not linked.
 - `-j 3`.
 
 A whole run can still grow swift-build itself until it is killed for memory (exit 137). Run it again: it resumes.
+
+Since 17 Nov a whole run with tests no longer ends on a machine with 15 GB: three runs in a row were killed at about the
+same point, with no error. Until that changes, the build before a push is `./build-parts.sh`: every library, then every
+test target in groups of 90, compiled and not linked. It does not link or run tests, so run the tests of the packages
+you changed with `swift test --package-path repos/<owner>/<name>` and `build.sh`'s flags.
+
+`generate.py` keeps four packages out of the root graph (`APART`): swift-sql, swift-sqlite and swift-postgresql reach
+pointfreeco's swift-issue-reporting through its test helpers, the Institute has a package of the same name, and
+SwiftPM's graph loading does not finish with both (swift-compositions/swift-issue-reporting#1). GRDB.swift is only
+needed by swift-sqlite. Build those four on their own. A build that prints nothing for minutes after its last
+"Working copy" line is in that state: look for a package reached at two addresses.
 
 ## Lint
 
