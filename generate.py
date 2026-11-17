@@ -5,7 +5,14 @@ import concurrent.futures, glob, json, os, re, subprocess, sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 os.chdir(here)
-packages = sorted(p for p in glob.glob("repos/*/*") if os.path.exists(p + "/Package.swift"))
+# Packages kept out of the root graph, each built on its own with `swift build --package-path`. The three database
+# packages reach pointfreeco's swift-issue-reporting through swift-custom-dump; swift-tests and swift-interface use
+# swift-compositions/swift-issue-reporting. SwiftPM knows a package by the last part of its address, so the two are one
+# identity, and with both in one graph its loading does not finish. GRDB.swift is needed by swift-sqlite only.
+APART = {"swift-sql", "swift-sqlite", "swift-postgresql", "GRDB.swift"}
+packages = sorted(
+    p for p in glob.glob("repos/*/*") if os.path.exists(p + "/Package.swift") and os.path.basename(p) not in APART
+)
 # Traits a package's own manifest asks of another, unconditionally. The root's path dependency must ask for them too:
 # otherwise resolution follows the root's (default traits only), leaves out what the trait needs, and fails, as it did
 # for a private app's swift-sqlite with GRDB ("exhausted attempts to resolve ... 'grdb.swift'").
