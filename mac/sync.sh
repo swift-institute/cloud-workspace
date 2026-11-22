@@ -33,4 +33,8 @@ for d in $list; do
   done
 done
 python3 -I localize.py > /dev/null && echo "manifests localized"
+# An Institute package still reached by URL is reached by URL and by path, and graph loading never finishes: stop here.
+missing=$(grep -ho 'url: *"https://github.com/swift-[^"]*"' repos/*/*/Package.swift | sed -E 's#.*github.com/##; s#(\.git)?"$##' |
+  sort -u | while IFS= read -r d; do [ -d "repos/$d" ] || echo "$d"; done)
+[ -z "$missing" ] || { echo "MISSING from repos.txt (add them, then sync):"; echo "$missing"; exit 1; }
 [ -f Package.swift ] || { ALL_TRAITS=1 python3 -I generate.py > gen.log 2>&1 && echo "Package.swift generated"; }
