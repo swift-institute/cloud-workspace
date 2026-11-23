@@ -15,8 +15,8 @@
 # linux-x86_64 in its .institute-ci-planner. Exit status: 0 CI would pass, 1 it would fail, 2 the
 # lint could not be completed.
 set -euo pipefail
-REVISION=22cdf26a7c7159a91ad8aaf242bb66c3bfa55f92
-DIGEST=623ad449c4da2419c853f18e2d27efd2a1cfc32ed404c66f6a347044296c68a6
+REVISION=f0b13da998a5b85eddf7142cc1bc16272c9e8a77
+DIGEST=013c3a9ebb3f9d99852d45348a53faeb3d7319ea4a2edf6542fe4296ddf49523
 
 [ "$(uname -s)-$(uname -m)" = "Linux-x86_64" ] || { echo "lint.sh: Linux x86_64 only; on macOS run \`institute lint\`" >&2; exit 2; }
 command -v swift >/dev/null || { echo "lint.sh: no swift on PATH" >&2; exit 2; }
