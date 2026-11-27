@@ -14,7 +14,7 @@ over the tools' paths and digests, is left out. Everything else is kept: each
 section's SHA-256, and every finding in full, so a difference can be named.
 
 `compare` exits 0 when the two are equal, 1 when they differ.
-Swift Institute, swift-institute/institute#287.
+Swift Institute.
 """
 import hashlib
 import json

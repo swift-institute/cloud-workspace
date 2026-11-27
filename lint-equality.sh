@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compares each Linux lint report in lint-equality/ with the macOS `quality-report` artifact that
-# CI's `Quality · source` job kept for the same commit (swift-institute/institute#287).
+# CI's `Quality · source` job kept for the same commit.
 #
 #   ./lint-equality.sh          # needs `gh`, signed in; run where GitHub's artifact storage is reachable
 #
