@@ -3,13 +3,16 @@
 # A cloud session cannot attach a repository whose name begins with a dot, so this runs where `gh` is signed in.
 # Not run yet: written in a cloud session without `gh` access. Run it without --write first.
 #
-#   ./state-layer.sh            # print what would change, change nothing
-#   ./state-layer.sh --write    # commit the line to each repository's default branch
+#   ./state-layer.sh                        # print what would change, change nothing
+#   ./state-layer.sh --write swift-riscv    # commit the line for one organization
+#   ./state-layer.sh --write                # commit the line for every organization
 #
 # It is safe to run twice: an organization that already states a layer is left alone.
 set -euo pipefail
 write="${1:-}"
+only="${2:-}"
 while read -r layer organization; do
+  [ -z "$only" ] || [ "$only" = "$organization" ] || continue
   file=$(gh api "repos/$organization/.github/contents/.github/metadata.yaml" 2>/dev/null) || { echo "$organization: no .github/metadata.yaml, skipped"; continue; }
   sha=$(jq -r .sha <<<"$file")
   text=$(jq -r .content <<<"$file" | base64 --decode)
