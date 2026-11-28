@@ -49,7 +49,7 @@ same point, with no error. Until that changes, the build before a push is `./bui
 test target in groups of 90, compiled and not linked. It does not link or run tests, so run the tests of the packages
 you changed with `swift test --package-path repos/<owner>/<name>` and `build.sh`'s flags.
 
-swift-sql, swift-sqlite, swift-postgresql and the GRDB fork are in the root graph since 17 Nov. Their test targets use
+swift-sql, swift-sqlite and swift-postgresql are in the root graph since 17 Nov. Their test targets use
 package-access declarations, so the root skips them: run each package's own tests, with `--enable-all-traits`.
 swift-postgresql's live suites need a PostgreSQL server (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB`); the machine has PostgreSQL 16 under `/usr/lib/postgresql/16/bin`, and the

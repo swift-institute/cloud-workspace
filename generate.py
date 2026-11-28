@@ -10,7 +10,7 @@ packages = sorted(
 )
 # Traits a package's own manifest asks of another, unconditionally. The root's path dependency must ask for them too:
 # otherwise resolution follows the root's (default traits only), leaves out what the trait needs, and fails, as it did
-# for a private app's swift-sqlite with GRDB ("exhausted attempts to resolve ... 'grdb.swift'").
+# for swift-sqlite with its former GRDB trait ("exhausted attempts to resolve ... 'grdb.swift'").
 requested = {}
 
 
